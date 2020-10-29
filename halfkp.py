@@ -21,4 +21,4 @@ def get_halfkp_indices(board: chess.Board):
         continue
       indices[halfkp_idx(turn, orient(turn, board.king(turn)), sq, p)] = 1.0
     return indices
-  return (piece_indices(board.turn), piece_indices(not board.turn))
+  return (piece_indices(chess.WHITE), piece_indices(chess.BLACK))
