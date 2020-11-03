@@ -122,3 +122,10 @@ class NNUEBinData(torch.utils.data.Dataset):
   def __getitem__(self, idx):
     item = self.get_raw(idx)
     return self.transform(item)
+
+  # Allows this class to be pickled (otherwise you will get file handle errors).
+  def __getstate__(self):
+    state = self.__dict__.copy()
+    del state['file']
+    del state['bytes']
+    return state

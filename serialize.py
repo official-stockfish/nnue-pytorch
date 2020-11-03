@@ -79,8 +79,6 @@ class NNUEReader():
 
 def main():
   nnue = M.NNUE.load_from_checkpoint('last.ckpt')
-  data = nnue_bin_dataset.NNUEBinData('d8_100000.bin')
-
   writer = NNUEWriter(nnue)
   with open('quantized.nnue', 'wb') as f:
     f.write(writer.buf)
