@@ -3,6 +3,7 @@ import halfkp
 import torch
 from torch import nn
 from torch.quantization import QuantStub, DeQuantStub
+from torch.nn.quantized import FloatFunctional
 import torch.nn.functional as F
 import pytorch_lightning as pl
 
@@ -25,17 +26,18 @@ class NNUE(pl.LightningModule):
     self.output = nn.Linear(L3, 1)
     self.quant = QuantStub()
     self.dequant = DeQuantStub()
+    self.input_mul = FloatFunctional()
+    self.input_add = FloatFunctional()
 
-  def forward(self, turn, w_in, b_in):
-    turn = self.quant(turn)
+  def forward(self, us, them, w_in, b_in):
+    us = self.quant(us)
+    them = self.quant(them)
     w_in = self.quant(w_in)
     b_in = self.quant(b_in)
     w = self.input(w_in)
     b = self.input(b_in)
-    if turn.data[0] == 1:
-      l0_ = torch.cat([w, b], dim=1)
-    else:
-      l0_ = torch.cat([b, w], dim=1)
+    l0_ = self.input_add.add(self.input_mul.mul(us, torch.cat([w, b], dim=1)),
+                             self.input_mul.mul(them, torch.cat([b, w], dim=1)))
     l0_ = self.input_act(l0_)
     l1_ = self.l1_act(self.l1(l0_))
     l2_ = self.l2_act(self.l2(l1_))
@@ -44,8 +46,8 @@ class NNUE(pl.LightningModule):
     return x
 
   def step_(self, batch, batch_idx, loss_type):
-    turn, white, black, outcome, score = batch
-    output = self(turn, white, black)
+    us, them, white, black, outcome, score = batch
+    output = self(us, them, white, black)
     loss = F.mse_loss(output, cp_conversion(score))
     self.log(loss_type, loss)
     return loss

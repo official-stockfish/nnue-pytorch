@@ -46,11 +46,12 @@ def is_quiet(board, from_, to_):
 class ToTensor(object):
   def __call__(self, sample):
     bd, _, outcome, score = sample
-    pov = torch.tensor([bd.turn])
+    us = torch.tensor([bd.turn])
+    them = torch.tensor([not bd.turn])
     outcome = torch.tensor([outcome])
     score = torch.tensor([score])
     white, black = halfkp.get_halfkp_indices(bd)
-    return pov.float(), white.float(), black.float(), outcome.float(), score.float()
+    return us.float(), them.float(), white.float(), black.float(), outcome.float(), score.float()
 
 class RandomFlip(object):
   def __call__(self, sample):
@@ -126,6 +127,6 @@ class NNUEBinData(torch.utils.data.Dataset):
   # Allows this class to be pickled (otherwise you will get file handle errors).
   def __getstate__(self):
     state = self.__dict__.copy()
-    del state['file']
-    del state['bytes']
+    state['file'] = None
+    state.pop('bytes', None)
     return state

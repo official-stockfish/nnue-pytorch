@@ -13,7 +13,7 @@ def compute_mse(nnue, data):
     cp =  M.cp_conversion(torch.tensor([score])).item()
     x = data[i]
     x = [v.reshape((1,-1)) for v in x]
-    ev = nnue(x[0], x[1], x[2]).item()
+    ev = nnue(x[0], x[1], x[2], x[3]).item()
     #print('dataset cp:', score / 100.0, 'score:', cp, 'net:', ev)
     errors.append((ev - cp)**2)
   print('MSE:', sum(errors) / len(errors))
