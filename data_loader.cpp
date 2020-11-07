@@ -1,5 +1,8 @@
 #include <iostream>
 
+#include "nnue_data_binpack_format.h"
+#include "training_data_stream.h"
+
 #if defined (_MSC_VER)
 #define EXPORT __declspec(dllexport)
 #define CDECL __cdecl
