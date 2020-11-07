@@ -15,4 +15,21 @@ extern "C" {
         std::cout<< "test successful\n";
     }
 
+    struct TestDataCollection
+    {
+        int size;
+        int* data;
+    };
+
+    EXPORT TestDataCollection* CDECL create_data_collection()
+    {
+        return new TestDataCollection{ 10, new int[10]{} };
+    }
+
+    EXPORT void CDECL destroy_data_collection(TestDataCollection* ptr)
+    {
+        delete ptr->data;
+        delete ptr;
+    }
+
 }
