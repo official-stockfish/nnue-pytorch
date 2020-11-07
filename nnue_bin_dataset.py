@@ -62,13 +62,39 @@ class RandomFlip(object):
       bd = bd.mirror()
     return bd, move, outcome, score
 
-class NNUEExternalData(torch.utils.data.IterableDataset):
+class NNUEExternalDataDense(torch.utils.data.IterableDataset):
   def __init__(self, filename):
-    super(NNUEExternalData).__init__()
+    super(NNUEExternalDataDense).__init__()
     self.filename = filename
 
   def __iter__(self):
     return external_nnue_data.NNUEExternalDataDenseIterator(self.filename)
+
+class NNUEExternalDataDenseBatch(torch.utils.data.IterableDataset):
+  def __init__(self, filename, batch_size):
+    super(NNUEExternalDataDenseBatch).__init__()
+    self.filename = filename
+    self.batch_size = batch_size
+
+  def __iter__(self):
+    return external_nnue_data.NNUEExternalDataDenseBatchIterator(self.filename, self.batch_size)
+
+class NNUEExternalDataSparse(torch.utils.data.IterableDataset):
+  def __init__(self, filename):
+    super(NNUEExternalDataSparse).__init__()
+    self.filename = filename
+
+  def __iter__(self):
+    return external_nnue_data.NNUEExternalDataSparseIterator(self.filename)
+
+class NNUEExternalDataSparseBatch(torch.utils.data.IterableDataset):
+  def __init__(self, filename, batch_size):
+    super(NNUEExternalDataSparseBatch).__init__()
+    self.filename = filename
+    self.batch_size = batch_size
+
+  def __iter__(self):
+    return external_nnue_data.NNUEExternalDataSparseBatchIterator(self.filename, self.batch_size)
 
 class NNUEBinData(torch.utils.data.Dataset):
   def __init__(self, filename, transform=ToTensor()):

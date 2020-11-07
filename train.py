@@ -16,9 +16,11 @@ def main():
   # It's also possible (and quite easy to do) to prepare the data on the C++ side
   # in a dedicated thread and then when calling get_next_entry_halfkp_dense
   # it would return already prepared entries/batches
-  train_data = DataLoader(nnue_bin_dataset.NNUEExternalData('d8_100000.bin'), batch_size=128, num_workers=1)
-  val_data = DataLoader(nnue_bin_dataset.NNUEBinData('d10_10000.bin'), batch_size=32)
-
+  #train_data = DataLoader(nnue_bin_dataset.NNUEExternalDataDense('d8_100000.bin'), batch_size=128, num_workers=1)
+  #train_data = DataLoader(nnue_bin_dataset.NNUEExternalDataDenseBatch('d8_100000.bin', 128), batch_size=None, batch_sampler=None, num_workers=1)
+  train_data = DataLoader(nnue_bin_dataset.NNUEExternalDataSparseBatch('d8_100000.bin', 256), batch_size=None, batch_sampler=None)
+  #val_data = DataLoader(nnue_bin_dataset.NNUEBinData('d10_10000.bin'), batch_size=32)
+  val_data = DataLoader(nnue_bin_dataset.NNUEExternalDataSparseBatch('d10_10000.bin', 32), batch_size=None, batch_sampler=None)
   tb_logger = pl_loggers.TensorBoardLogger('logs/')
   trainer = pl.Trainer(logger=tb_logger, gpus=1)
   trainer.fit(nnue, train_data, val_data)

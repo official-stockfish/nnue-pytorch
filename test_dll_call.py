@@ -109,8 +109,95 @@ print(stream)
 start_time = time.time()
 for i in range(10000):
     e = get_next_entry_halfkp_dense(stream)
-    e.contents.get_tensors()
+    #e.contents.get_tensors()
     destroy_entry_halfkp_dense(e)
+end_time = time.time()
+
+print('{:6.3f} seconds'.format(end_time-start_time))
+destroy_stream(stream)
+
+
+class TrainingEntryHalfKPDenseBatch(ctypes.Structure):
+    _fields_ = [
+        ('size', ctypes.c_int),
+        ('us', ctypes.POINTER(ctypes.c_float)),
+        ('outcome', ctypes.POINTER(ctypes.c_float)),
+        ('score', ctypes.POINTER(ctypes.c_float)),
+        ('white', ctypes.POINTER(ctypes.c_float)),
+        ('black', ctypes.POINTER(ctypes.c_float))
+    ]
+
+    def get_tensors(self):
+        us = torch.from_numpy(np.ctypeslib.as_array(self.us, shape=(self.size, 1)))
+        them = 1.0 - us
+        outcome = torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1)))
+        score = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1)))
+        white = torch.from_numpy(np.ctypeslib.as_array(self.white, shape=(self.size, 41024)))
+        black = torch.from_numpy(np.ctypeslib.as_array(self.black, shape=(self.size, 41024)))
+        return us, them, white, black, outcome, score
+
+TrainingEntryHalfKPDenseBatchPtr = ctypes.POINTER(TrainingEntryHalfKPDenseBatch)
+
+get_next_entry_halfkp_dense_batch = dll.get_next_entry_halfkp_dense_batch
+get_next_entry_halfkp_dense_batch.restype = TrainingEntryHalfKPDenseBatchPtr
+destroy_entry_halfkp_dense_batch = dll.destroy_entry_halfkp_dense_batch
+
+stream = create_stream(b'd8_100000.bin')
+print(stream)
+
+start_time = time.time()
+# batch size > 6 doesn't fit in cache
+batch_size = 6
+for i in range(10000 // batch_size):
+    e = get_next_entry_halfkp_dense_batch(stream, batch_size)
+    e.contents.get_tensors()
+    destroy_entry_halfkp_dense_batch(e)
+end_time = time.time()
+
+print('{:6.3f} seconds'.format(end_time-start_time))
+destroy_stream(stream)
+
+
+class TrainingEntryHalfKPSparseBatch(ctypes.Structure):
+    _fields_ = [
+        ('size', ctypes.c_int),
+        ('us', ctypes.POINTER(ctypes.c_float)),
+        ('outcome', ctypes.POINTER(ctypes.c_float)),
+        ('score', ctypes.POINTER(ctypes.c_float)),
+        ('num_active_white_features', ctypes.c_int),
+        ('num_active_black_features', ctypes.c_int),
+        ('white', ctypes.POINTER(ctypes.c_int)),
+        ('black', ctypes.POINTER(ctypes.c_int))
+    ]
+
+    def get_tensors(self):
+        us = torch.from_numpy(np.ctypeslib.as_array(self.us, shape=(self.size, 1))).clone()
+        them = 1.0 - us
+        outcome = torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))).clone()
+        score = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))).clone()
+        iw = torch.from_numpy(np.ctypeslib.as_array(self.white, shape=(self.num_active_white_features, 2))).clone()
+        ib = torch.from_numpy(np.ctypeslib.as_array(self.black, shape=(self.num_active_white_features, 2))).clone()
+        white = torch.sparse.FloatTensor(iw.unsqueeze(0).long(), torch.ones((self.num_active_white_features), dtype=torch.float32), (self.size, 41024))
+        black = torch.sparse.FloatTensor(ib.unsqueeze(0).long(), torch.ones((self.num_active_black_features), dtype=torch.float32), (self.size, 41024))
+        white.coalesce()
+        black.coalesce()
+        return us, them, white, black, outcome, score
+
+TrainingEntryHalfKPSparseBatchPtr = ctypes.POINTER(TrainingEntryHalfKPSparseBatch)
+
+get_next_entry_halfkp_sparse_batch = dll.get_next_entry_halfkp_sparse_batch
+get_next_entry_halfkp_sparse_batch.restype = TrainingEntryHalfKPSparseBatchPtr
+destroy_entry_halfkp_sparse_batch = dll.destroy_entry_halfkp_sparse_batch
+
+stream = create_stream(b'd8_100000.bin')
+print(stream)
+
+start_time = time.time()
+batch_size = 256
+for i in range(100000 // batch_size):
+    e = get_next_entry_halfkp_sparse_batch(stream, batch_size)
+    #e.contents.get_tensors()
+    destroy_entry_halfkp_sparse_batch(e)
 end_time = time.time()
 
 print('{:6.3f} seconds'.format(end_time-start_time))
