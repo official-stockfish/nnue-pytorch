@@ -1,5 +1,6 @@
 import ctypes
 import numpy as np
+import time
 
 dll = ctypes.CDLL('./data_loader.dll')
 print(dll)
@@ -61,8 +62,8 @@ class TrainingEntryHalfKPDense(ctypes.Structure):
         them = torch.tensor([1.0 - self.us])
         outcome = torch.tensor([self.outcome])
         score = torch.tensor([self.score])
-        white = torch.tensor(np.ctypeslib.as_array(self.white))
-        black = torch.tensor(np.ctypeslib.as_array(self.black))
+        white = torch.from_numpy(np.ctypeslib.as_array(self.white))
+        black = torch.from_numpy(np.ctypeslib.as_array(self.black))
         return us, them, white, black, outcome, score
 
 class TrainingEntryHalfKPSparse(ctypes.Structure):
@@ -102,11 +103,15 @@ get_next_entry_halfkp_sparse = dll.get_next_entry_halfkp_sparse
 get_next_entry_halfkp_sparse.restype = TrainingEntryHalfKPSparsePtr
 destroy_entry_halfkp_sparse = dll.destroy_entry_halfkp_sparse
 
-stream = create_stream(b'd10_10000.bin')
+stream = create_stream(b'd8_100000.bin')
 print(stream)
-for i in range(100):
-    e = get_next_entry_halfkp_sparse(stream)
-    e.contents.get_tensors()
-    destroy_entry_halfkp_sparse(e)
 
+start_time = time.time()
+for i in range(10000):
+    e = get_next_entry_halfkp_dense(stream)
+    e.contents.get_tensors()
+    destroy_entry_halfkp_dense(e)
+end_time = time.time()
+
+print('{:6.3f} seconds'.format(end_time-start_time))
 destroy_stream(stream)

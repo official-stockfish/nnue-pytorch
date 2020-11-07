@@ -20,8 +20,8 @@ class TrainingEntryHalfKPDense(ctypes.Structure):
         them = torch.tensor([1.0 - self.us])
         outcome = torch.tensor([self.outcome])
         score = torch.tensor([self.score])
-        white = torch.tensor(np.ctypeslib.as_array(self.white))
-        black = torch.tensor(np.ctypeslib.as_array(self.black))
+        white = torch.from_numpy(np.ctypeslib.as_array(self.white))
+        black = torch.from_numpy(np.ctypeslib.as_array(self.black))
         return us, them, white, black, outcome, score
 
 class TrainingEntryHalfKPSparse(ctypes.Structure):
