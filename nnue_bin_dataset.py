@@ -1,5 +1,6 @@
 import chess
 import halfkp
+import external_nnue_data
 import mmap
 import random
 import os
@@ -60,6 +61,14 @@ class RandomFlip(object):
     if mirror:
       bd = bd.mirror()
     return bd, move, outcome, score
+
+class NNUEExternalData(torch.utils.data.IterableDataset):
+  def __init__(self, filename):
+    super(NNUEExternalData).__init__()
+    self.filename = filename
+
+  def __iter__(self):
+    return external_nnue_data.NNUEExternalDataDenseIterator(self.filename)
 
 class NNUEBinData(torch.utils.data.Dataset):
   def __init__(self, filename, transform=ToTensor()):
