@@ -49,7 +49,7 @@ class NNUE(pl.LightningModule):
     us, them, white, black, outcome, score = batch
     output = self(us, them, white, black)
     loss = F.mse_loss(output, cp_conversion(score))
-    self.log(loss_type, loss)
+    #self.log(loss_type, loss)
     return loss
 
   def training_step(self, batch, batch_idx):
