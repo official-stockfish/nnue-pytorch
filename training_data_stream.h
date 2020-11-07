@@ -48,9 +48,11 @@ namespace training_data {
         static constexpr auto openmode = std::ios::in | std::ios::binary;
         static inline const std::string extension = "bin";
 
-        BinSfenInputStream(std::string filename) :
+        BinSfenInputStream(std::string filename, bool cyclic) :
             m_stream(filename, openmode),
-            m_eof(!m_stream)
+            m_filename(filename),
+            m_eof(!m_stream),
+            m_cyclic(cyclic)
         {
         }
 
@@ -63,6 +65,14 @@ namespace training_data {
             }
             else
             {
+                if (m_cyclic)
+                {
+                    m_stream = std::fstream(m_filename, openmode);
+                    if (!m_stream)
+                        return std::nullopt;
+                    return next();
+                }
+
                 m_eof = true;
                 return std::nullopt;
             }
@@ -77,7 +87,9 @@ namespace training_data {
 
     private:
         std::fstream m_stream;
+        std::string m_filename;
         bool m_eof;
+        bool m_cyclic;
     };
 
     struct BinpackSfenInputStream : BasicSfenInputStream
@@ -85,21 +97,31 @@ namespace training_data {
         static constexpr auto openmode = std::ios::in | std::ios::binary;
         static inline const std::string extension = "binpack";
 
-        BinpackSfenInputStream(std::string filename) :
-            m_stream(filename, openmode),
-            m_eof(!m_stream.hasNext())
+        BinpackSfenInputStream(std::string filename, bool cyclic) :
+            m_stream(std::make_unique<binpack::CompressedTrainingDataEntryReader>(filename, openmode)),
+            m_filename(filename),
+            m_eof(!m_stream->hasNext()),
+            m_cyclic(cyclic)
         {
         }
 
         std::optional<TrainingDataEntry> next() override
         {
-            if (!m_stream.hasNext())
+            if (!m_stream->hasNext())
             {
+                if (m_cyclic)
+                {
+                    m_stream = std::make_unique<binpack::CompressedTrainingDataEntryReader>(m_filename, openmode);
+                    if (!m_stream->hasNext())
+                        return std::nullopt;
+                    return next();
+                }
+
                 m_eof = true;
                 return std::nullopt;
             }
 
-            return m_stream.next();
+            return m_stream->next();
         }
 
         bool eof() const override
@@ -110,16 +132,18 @@ namespace training_data {
         ~BinpackSfenInputStream() override {}
 
     private:
-        binpack::CompressedTrainingDataEntryReader m_stream;
+        std::unique_ptr<binpack::CompressedTrainingDataEntryReader> m_stream;
+        std::string m_filename;
         bool m_eof;
+        bool m_cyclic;
     };
 
-    inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file(const std::string& filename)
+    inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file(const std::string& filename, bool cyclic)
     {
         if (has_extension(filename, BinSfenInputStream::extension))
-            return std::make_unique<BinSfenInputStream>(filename);
+            return std::make_unique<BinSfenInputStream>(filename, cyclic);
         else if (has_extension(filename, BinpackSfenInputStream::extension))
-            return std::make_unique<BinpackSfenInputStream>(filename);
+            return std::make_unique<BinpackSfenInputStream>(filename, cyclic);
 
         return nullptr;
     }

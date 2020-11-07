@@ -367,9 +367,9 @@ extern "C" {
         delete ptr;
     }
 
-    EXPORT InputStreamHandle* CDECL create_stream(const char* filename)
+    EXPORT InputStreamHandle* CDECL create_stream(const char* filename, bool cyclic)
     {
-        auto stream = training_data::open_sfen_input_file(filename);
+        auto stream = training_data::open_sfen_input_file(filename, cyclic);
         return new InputStreamHandle{std::move(stream)};
     }
 
