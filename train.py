@@ -18,7 +18,7 @@ def main():
   # it would return already prepared entries/batches
   #train_data = DataLoader(nnue_bin_dataset.NNUEExternalDataDense('d8_100000.bin'), batch_size=128, num_workers=1)
   #train_data = DataLoader(nnue_bin_dataset.NNUEExternalDataDenseBatch('d8_100000.bin', 128), batch_size=None, batch_sampler=None, num_workers=1)
-  train_data = DataLoader(nnue_bin_dataset.NNUEExternalDataSparseBatch('d8_100000.bin', 256), batch_size=None, batch_sampler=None)
+  train_data = DataLoader(nnue_bin_dataset.NNUEExternalDataSparseBatch('d8_100000.bin', 8192), batch_size=None, batch_sampler=None)
   #val_data = DataLoader(nnue_bin_dataset.NNUEBinData('d10_10000.bin'), batch_size=32)
   val_data = DataLoader(nnue_bin_dataset.NNUEExternalDataSparseBatch('d10_10000.bin', 32), batch_size=None, batch_sampler=None)
   tb_logger = pl_loggers.TensorBoardLogger('logs/')
