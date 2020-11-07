@@ -3,6 +3,7 @@
 #include <string>
 #include <algorithm>
 #include <iterator>
+#include <future>
 
 #include "nnue_data_binpack_format.h"
 #include "training_data_stream.h"
@@ -346,6 +347,8 @@ private:
     }
 };
 
+static std::future<TrainingEntryHalfKPSparseBatch*> s_next;
+
 extern "C" {
 
     EXPORT void CDECL test()
@@ -456,24 +459,41 @@ extern "C" {
 
     EXPORT TrainingEntryHalfKPSparseBatch* CDECL get_next_entry_halfkp_sparse_batch(InputStreamHandle* stream_handle, int max_batch_size)
     {
-        std::vector<TrainingDataEntry> entries;
-        entries.reserve(max_batch_size);
-        auto& stream = *(stream_handle->stream);
-
-        for(int i = 0; i < max_batch_size; ++i)
+        for(;;)
         {
-            auto value = stream.next();
-            if (value.has_value())
+            auto cur = std::move(s_next);
+            if (cur.valid())
             {
-                entries.emplace_back(*value);
+                // we have to wait for this to complete before scheduling the next one
+                cur.wait();
             }
-            else
+
+            s_next = std::async(std::launch::async, [stream_handle, max_batch_size]() {
+                std::vector<TrainingDataEntry> entries;
+                entries.reserve(max_batch_size);
+                auto& stream = *(stream_handle->stream);
+
+                for(int i = 0; i < max_batch_size; ++i)
+                {
+                    auto value = stream.next();
+                    if (value.has_value())
+                    {
+                        entries.emplace_back(*value);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                return new TrainingEntryHalfKPSparseBatch(entries);
+            });
+
+            if (cur.valid())
             {
-                break;
+                return cur.get();
             }
         }
-
-        return new TrainingEntryHalfKPSparseBatch(entries);
     }
 
     EXPORT void CDECL destroy_entry_halfkp_sparse_batch(TrainingEntryHalfKPSparseBatch* e)
