@@ -40,12 +40,10 @@ class TrainingEntryHalfKPSparse(ctypes.Structure):
         them = torch.tensor([1.0 - self.us])
         outcome = torch.tensor([self.outcome])
         score = torch.tensor([self.score])
-        white = torch.empty(41024, layout=torch.sparse_coo)
-        black = torch.empty(41024, layout=torch.sparse_coo)
-        for i in range(self.num_active_white_features):
-            white[self.white[i]] = 1.0
-        for i in range(self.num_active_black_features):
-            black[self.black[i]] = 1.0
+        iw = torch.from_numpy(np.ctypeslib.as_array(self.white)[:self.num_active_white_features])
+        ib = torch.from_numpy(np.ctypeslib.as_array(self.black)[:self.num_active_black_features])
+        white = torch.sparse.FloatTensor(iw.unsqueeze(0).long(), torch.ones([self.num_active_white_features], dtype=torch.float32), (41024,))
+        black = torch.sparse.FloatTensor(ib.unsqueeze(0).long(), torch.ones([self.num_active_black_features], dtype=torch.float32), (41024,))
         white.coalesce()
         black.coalesce()
         return us, them, white, black, outcome, score
