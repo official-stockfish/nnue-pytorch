@@ -1,5 +1,4 @@
 import chess
-import halfkp
 import torch
 from torch import nn
 from torch.quantization import QuantStub, DeQuantStub
@@ -15,9 +14,9 @@ def cp_conversion(x, alpha=0.0016):
   return (x * alpha).sigmoid()
 
 class NNUE(pl.LightningModule):
-  def __init__(self):
+  def __init__(self, feature_set):
     super(NNUE, self).__init__()
-    self.input = nn.Linear(halfkp.INPUTS, L1)
+    self.input = nn.Linear(feature_set.INPUTS, L1)
     self.input_act = nn.ReLU()
     self.l1 = nn.Linear(2 * L1, L2)
     self.l1_act = nn.ReLU()
