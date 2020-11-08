@@ -47,7 +47,7 @@ class NNUEWriter():
     # FC layers are stored as int8 weights, and int32 biases
     kWeightScaleBits = 6
     kActivationScale = 127.0
-    if is_output:
+    if not is_output:
       kBiasScale = (1 << kWeightScaleBits) * kActivationScale # = 8128
     else:
       kBiasScale = 9600.0 # kPonanzaConstant * FV_SCALE = 600 * 16 = 9600
@@ -57,6 +57,7 @@ class NNUEWriter():
     # int32 bias = round(x * kBiasScale)
     # int8 weight = round(x * kWeightScale)
     bias = layer.bias.data
+    print(numpy.histogram(bias.numpy()))
     bias = bias.mul(kBiasScale).round().to(torch.int32)
     print(numpy.histogram(bias.numpy()))
     self.buf.extend(bias.flatten().numpy().tobytes())
