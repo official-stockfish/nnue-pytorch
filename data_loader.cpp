@@ -25,11 +25,6 @@ struct TestDataCollection
     int* data;
 };
 
-struct InputStreamHandle
-{
-    std::unique_ptr<training_data::BasicSfenInputStream> stream;
-};
-
 struct TrainingEntryHalfKPDense
 {
     static constexpr int NUM_SQ = 64;
@@ -347,7 +342,11 @@ private:
     }
 };
 
-static std::future<TrainingEntryHalfKPSparseBatch*> s_next;
+struct InputStreamHandle
+{
+    std::unique_ptr<training_data::BasicSfenInputStream> stream;
+    std::future<TrainingEntryHalfKPSparseBatch*> next_sparse_batch;
+};
 
 extern "C" {
 
@@ -375,6 +374,11 @@ extern "C" {
 
     EXPORT void CDECL destroy_stream(InputStreamHandle* stream_handle)
     {
+        if(stream_handle->next_sparse_batch.valid())
+        {
+            delete stream_handle->next_sparse_batch.get();
+        }
+
         delete stream_handle;
     }
 
@@ -461,14 +465,14 @@ extern "C" {
     {
         for(;;)
         {
-            auto cur = std::move(s_next);
+            auto cur = std::move(stream_handle->next_sparse_batch);
             if (cur.valid())
             {
                 // we have to wait for this to complete before scheduling the next one
                 cur.wait();
             }
 
-            s_next = std::async(std::launch::async, [stream_handle, max_batch_size]() {
+            stream_handle->next_sparse_batch = std::async(std::launch::async, [stream_handle, max_batch_size]() {
                 std::vector<TrainingDataEntry> entries;
                 entries.reserve(max_batch_size);
                 auto& stream = *(stream_handle->stream);
