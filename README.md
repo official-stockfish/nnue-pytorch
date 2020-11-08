@@ -7,6 +7,18 @@ pip install python-chess
 pip install tensorboard
 ```
 
+# Build the fast DataLoader
+This requires a C++17 compiler.
+Windows:
+```
+./compile_data_loader.bat
+```
+
+Linux/Mac:
+```
+sh compile_data_loader.bat
+```
+
 # Run
 
 ```
@@ -22,6 +34,7 @@ tensorboard --logdir=logs
 
 # Thanks
 
+* Sopel - for the amazing fast sparse data loader
 * syzygy - http://www.talkchess.com/forum3/viewtopic.php?f=7&t=75506
 * https://github.com/connormcmonigle/seer-nnue
 * https://github.com/DanielUranga/TensorFlowNNUE

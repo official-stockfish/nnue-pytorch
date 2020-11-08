@@ -19,4 +19,7 @@ find_package(Threads REQUIRED)
 
 target_link_libraries(training_data_loader Threads::Threads)
 
-install(TARGETS training_data_loader RUNTIME DESTINATION .)
+install(
+  TARGETS training_data_loader
+  RUNTIME DESTINATION .
+  LIBRARY DESTINATION .)

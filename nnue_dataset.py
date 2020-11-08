@@ -5,7 +5,7 @@ import os
 import sys
 import glob
 
-local_dllpath = [n for n in glob.glob('./*training_data_loader.*') if n.endswith('.so') or n.endswith('.dll')]
+local_dllpath = [n for n in glob.glob('./*training_data_loader.*') if n.endswith('.so') or n.endswith('.dll') or n.endswith('.dylib')]
 if not local_dllpath:
     print('Cannot find data_loader shared library.')
     sys.exit(1)
