@@ -350,8 +350,10 @@ protected:
 template <typename StorageT>
 struct AsyncStream : Stream<StorageT>
 {
+    using BaseType = Stream<StorageT>;
+
     AsyncStream(const char* filename, bool cyclic) :
-        Stream(filename, cyclic)
+        BaseType(filename, cyclic)
     {
     }
 
@@ -373,15 +375,16 @@ struct FeaturedEntryStream : Stream<StorageT>
     static_assert(!StorageT::IS_BATCH);
 
     using FeatureSet = FeatureSetT;
+    using BaseType = Stream<StorageT>;
 
     FeaturedEntryStream(const char* filename, bool cyclic) :
-        Stream(filename, cyclic)
+        BaseType(filename, cyclic)
     {
     }
 
     StorageT* next() override
     {
-        auto value = m_stream->next();
+        auto value = BaseType::m_stream->next();
         if (value.has_value())
         {
             return new StorageT(FeatureSet{}, *value);
@@ -399,9 +402,10 @@ struct FeaturedBatchStream : AsyncStream<StorageT>
     static_assert(StorageT::IS_BATCH);
 
     using FeatureSet = FeatureSetT;
+    using BaseType = AsyncStream<StorageT>;
 
     FeaturedBatchStream(const char* filename, int batch_size, bool cyclic) :
-        AsyncStream(filename, cyclic),
+        BaseType(filename, cyclic),
         m_batch_size(batch_size)
     {
 
@@ -411,20 +415,20 @@ struct FeaturedBatchStream : AsyncStream<StorageT>
     {
         for(;;)
         {
-            auto cur = std::move(m_next);
+            auto cur = std::move(BaseType::m_next);
             if (cur.valid())
             {
                 // we have to wait for this to complete before scheduling the next one
                 cur.wait();
             }
 
-            m_next = std::async(std::launch::async, [this]() {
+            BaseType::m_next = std::async(std::launch::async, [this]() {
                 std::vector<TrainingDataEntry> entries;
                 entries.reserve(m_batch_size);
 
                 for(int i = 0; i < m_batch_size; ++i)
                 {
-                    auto value = m_stream->next();
+                    auto value = BaseType::m_stream->next();
                     if (value.has_value())
                     {
                         entries.emplace_back(*value);
