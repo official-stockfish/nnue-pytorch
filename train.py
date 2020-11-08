@@ -6,7 +6,7 @@ from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader
 
 def main():
-  nnue = M.NNUE()
+  nnue = M.NNUE(halfkp)
 
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
