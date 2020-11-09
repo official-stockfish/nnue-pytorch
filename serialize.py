@@ -1,3 +1,4 @@
+import halfkp
 import model as M
 import numpy
 import nnue_bin_dataset

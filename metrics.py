@@ -10,12 +10,12 @@ def compute_mse(nnue, data):
   for i in range(0, len(data), 1000):
     raw = data.get_raw(i)
     board, move, turn, score = raw
-    cp =  M.cp_conversion(torch.tensor([score])).item()
+    #cp =  M.cp_conversion(torch.tensor([score])).item()
     x = data[i]
     x = [v.reshape((1,-1)) for v in x]
     ev = nnue(x[0], x[1], x[2], x[3]).item()
     #print('dataset cp:', score / 100.0, 'score:', cp, 'net:', ev)
-    errors.append((ev - cp)**2)
+    errors.append((ev - score)**2)
   return sum(errors) / len(errors)
 
 def main():

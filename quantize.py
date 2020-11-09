@@ -1,4 +1,4 @@
-import model as M
+import qmodel as M
 import nnue_bin_dataset
 import numpy
 import pytorch_lightning as pl
@@ -79,8 +79,8 @@ def main():
   nnue_int8 = torch.quantization.convert(nnue_prep)
   #trainer.test(nnue_int8, train_loader)
 
-  #print('Baseline MSE:', compute_mse(nnue, train))
-  #print('Quantized MSE:', compute_mse(nnue_int8, train))
+  print('Baseline MSE:', compute_mse(nnue, train))
+  print('Quantized MSE:', compute_mse(nnue_int8, train))
 
   writer = NNUEQuantizedWriter(nnue_int8)
   with open('quantized.nnue', 'wb') as f:
