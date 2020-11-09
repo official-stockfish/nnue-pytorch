@@ -35,7 +35,10 @@ struct HalfKP {
         }
         else
         {
-            return sq.flippedVertically();
+            // IMPORTANT: for now we use rotate180 instead of rank flip
+            //            for compatibility with the stockfish master branch.
+            //            Note that this is inconsistent with nodchip/master.
+            return sq.flippedVertically().flippedHorizontally();
         }
     }
 
