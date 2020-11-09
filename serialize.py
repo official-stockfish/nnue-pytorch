@@ -23,7 +23,7 @@ class NNUEWriter():
     self.write_fc_layer(model.output, is_output=True)
 
   def write_header(self):
-    self.int32(0x7AF32F17) # version
+    self.int32(0x7AF32F16) # version
     self.int32(0x3e5aa6ee) # halfkp network hash
     description = b"Features=HalfKP(Friend)[41024->256x2],"
     description += b"Network=AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
