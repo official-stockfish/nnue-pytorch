@@ -9,9 +9,10 @@ pip install tensorboard
 
 # Build the fast DataLoader
 This requires a C++17 compiler.
+
 Windows:
 ```
-./compile_data_loader.bat
+compile_data_loader.bat
 ```
 
 Linux/Mac:
@@ -19,18 +20,29 @@ Linux/Mac:
 sh compile_data_loader.bat
 ```
 
-# Run
+# Train a network
 
+Filenames are hardcoded right now, edit train.py first, then:
 ```
 source env/bin/activate
-python3 train.py
+python train.py
 ```
+
+# Export the network
+
+Put the checkpoint you want to export in `last.ckpt`, then:
+```
+python serialize.py
+```
+It will write out `serialized.nnue`, which you can directly
+load in Stockfish.
 
 # Logging
 
 ```
 tensorboard --logdir=logs
 ```
+Then, go to http://localhost:6006/
 
 # Thanks
 
