@@ -2,9 +2,7 @@
 ```
 python3 -m venv env
 source env/bin/activate
-pip install pytorch-lightning
-pip install python-chess
-pip install tensorboard
+pip install python-chess==0.31.4 pytorch-lightning torch
 ```
 
 # Build the fast DataLoader
@@ -47,6 +45,7 @@ python serialize.py nn.nnue converted.pt
 # Logging
 
 ```
+pip install tensorboard
 tensorboard --logdir=logs
 ```
 Then, go to http://localhost:6006/
