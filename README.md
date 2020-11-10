@@ -28,14 +28,21 @@ source env/bin/activate
 python train.py
 ```
 
-# Export the network
+# Export a network
 
-Put the checkpoint you want to export in `last.ckpt`, then:
+Using either a checkpoint (`.ckpt`) or serialized model (`.pt`),
+you can export to SF NNUE format.  This will convert `last.ckpt`
+to `nn.nnue`, which you can load directly in SF.
 ```
-python serialize.py
+python serialize.py last.ckpt nn.nnue
 ```
-It will write out `serialized.nnue`, which you can directly
-load in Stockfish.
+
+# Import a network
+
+Import an existing SF NNUE network to the pytorch network format.
+```
+python serialize.py nn.nnue converted.pt
+```
 
 # Logging
 
