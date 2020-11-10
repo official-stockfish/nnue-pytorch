@@ -120,7 +120,7 @@ struct DenseEntry
     DenseEntry(FeatureSet<Ts...>, const TrainingDataEntry& e)
     {
         num_inputs = FeatureSet<Ts...>::INPUTS;
-        us = static_cast<float>(e.pos.sideToMove());
+        is_white = static_cast<float>(e.pos.sideToMove() == Color::White);
         outcome = (e.result + 1.0f) / 2.0f;
         score = e.score;
         white = new float[FeatureSet<Ts...>::INPUTS];
@@ -133,7 +133,7 @@ struct DenseEntry
     }
 
     int num_inputs;
-    float us;
+    float is_white;
     float outcome;
     float score;
     float* white;
@@ -164,7 +164,7 @@ struct DenseBatch
     {
         num_inputs = FeatureSet<Ts...>::INPUTS;
         size = entries.size();
-        us = new float[size];
+        is_white = new float[size];
         outcome = new float[size];
         score = new float[size];
         white = new float[size * FeatureSet<Ts...>::INPUTS];
@@ -182,7 +182,7 @@ struct DenseBatch
     int num_inputs;
     int size;
 
-    float* us;
+    float* is_white;
     float* outcome;
     float* score;
     float* white;
@@ -190,7 +190,7 @@ struct DenseBatch
 
     ~DenseBatch()
     {
-        delete[] us;
+        delete[] is_white;
         delete[] outcome;
         delete[] score;
         delete[] white;
@@ -202,7 +202,7 @@ private:
     template <typename... Ts>
     void fill_entry(FeatureSet<Ts...>, int i, const TrainingDataEntry& e)
     {
-        us[i] = static_cast<float>(e.pos.sideToMove());
+        is_white[i] = static_cast<float>(e.pos.sideToMove() == Color::White);
         outcome[i] = (e.result + 1.0f) / 2.0f;
         score[i] = e.score;
         fill_features(FeatureSet<Ts...>{}, i, e);
@@ -224,7 +224,7 @@ struct SparseEntry
     SparseEntry(FeatureSet<Ts...>, const TrainingDataEntry& e)
     {
         num_inputs = FeatureSet<Ts...>::INPUTS;
-        us = static_cast<float>(e.pos.sideToMove());
+        is_white = static_cast<float>(e.pos.sideToMove() == Color::White);
         outcome = (e.result + 1.0f) / 2.0f;
         score = e.score;
         num_active_white_features = 0;
@@ -245,7 +245,7 @@ struct SparseEntry
     }
 
     int num_inputs;
-    float us;
+    float is_white;
     float outcome;
     float score;
     int num_active_white_features;
@@ -272,7 +272,7 @@ struct SparseBatch
     {
         num_inputs = FeatureSet<Ts...>::INPUTS;
         size = entries.size();
-        us = new float[size];
+        is_white = new float[size];
         outcome = new float[size];
         score = new float[size];
         white = new int[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES * 2];
@@ -293,7 +293,7 @@ struct SparseBatch
     int num_inputs;
     int size;
 
-    float* us;
+    float* is_white;
     float* outcome;
     float* score;
     int num_active_white_features;
@@ -303,7 +303,7 @@ struct SparseBatch
 
     ~SparseBatch()
     {
-        delete[] us;
+        delete[] is_white;
         delete[] outcome;
         delete[] score;
         delete[] white;
@@ -315,7 +315,7 @@ private:
     template <typename... Ts>
     void fill_entry(FeatureSet<Ts...>, int i, const TrainingDataEntry& e)
     {
-        us[i] = static_cast<float>(e.pos.sideToMove());
+        is_white[i] = static_cast<float>(e.pos.sideToMove() == Color::White);
         outcome[i] = (e.result + 1.0f) / 2.0f;
         score[i] = e.score;
         fill_features(FeatureSet<Ts...>{}, i, e);

@@ -15,7 +15,7 @@ dll = ctypes.cdll.LoadLibrary(dllpath)
 class DenseEntry(ctypes.Structure):
     _fields_ = [
         ('num_inputs', ctypes.c_int),
-        ('us', ctypes.c_float),
+        ('is_white', ctypes.c_float),
         ('outcome', ctypes.c_float),
         ('score', ctypes.c_float),
         ('white', ctypes.POINTER(ctypes.c_float)),
@@ -23,8 +23,8 @@ class DenseEntry(ctypes.Structure):
     ]
 
     def get_tensors(self):
-        us = torch.tensor([self.us])
-        them = torch.tensor([1.0 - self.us])
+        us = torch.tensor([self.is_white])
+        them = torch.tensor([1.0 - self.is_white])
         outcome = torch.tensor([self.outcome])
         score = torch.tensor([self.score])
         white = torch.from_numpy(np.ctypeslib.as_array(self.white, shape=(self.num_inputs, ))).clone()
@@ -34,7 +34,7 @@ class DenseEntry(ctypes.Structure):
 class SparseEntry(ctypes.Structure):
     _fields_ = [
         ('num_inputs', ctypes.c_int),
-        ('us', ctypes.c_float),
+        ('is_white', ctypes.c_float),
         ('outcome', ctypes.c_float),
         ('score', ctypes.c_float),
         ('num_active_white_features', ctypes.c_int),
@@ -44,8 +44,8 @@ class SparseEntry(ctypes.Structure):
     ]
 
     def get_tensors(self):
-        us = torch.tensor([self.us])
-        them = torch.tensor([1.0 - self.us])
+        us = torch.tensor([self.is_white])
+        them = torch.tensor([1.0 - self.is_white])
         outcome = torch.tensor([self.outcome])
         score = torch.tensor([self.score])
         iw = torch.from_numpy(np.ctypeslib.as_array(self.white, shape=(self.num_active_white_features,)))
@@ -60,7 +60,7 @@ class DenseBatch(ctypes.Structure):
     _fields_ = [
         ('num_inputs', ctypes.c_int),
         ('size', ctypes.c_int),
-        ('us', ctypes.POINTER(ctypes.c_float)),
+        ('is_white', ctypes.POINTER(ctypes.c_float)),
         ('outcome', ctypes.POINTER(ctypes.c_float)),
         ('score', ctypes.POINTER(ctypes.c_float)),
         ('white', ctypes.POINTER(ctypes.c_float)),
@@ -68,7 +68,7 @@ class DenseBatch(ctypes.Structure):
     ]
 
     def get_tensors(self):
-        us = torch.from_numpy(np.ctypeslib.as_array(self.us, shape=(self.size, 1))).clone()
+        us = torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))).clone()
         them = 1.0 - us
         outcome = torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))).clone()
         score = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))).clone()
@@ -80,7 +80,7 @@ class SparseBatch(ctypes.Structure):
     _fields_ = [
         ('num_inputs', ctypes.c_int),
         ('size', ctypes.c_int),
-        ('us', ctypes.POINTER(ctypes.c_float)),
+        ('is_white', ctypes.POINTER(ctypes.c_float)),
         ('outcome', ctypes.POINTER(ctypes.c_float)),
         ('score', ctypes.POINTER(ctypes.c_float)),
         ('num_active_white_features', ctypes.c_int),
@@ -90,7 +90,7 @@ class SparseBatch(ctypes.Structure):
     ]
 
     def get_tensors(self):
-        us = torch.from_numpy(np.ctypeslib.as_array(self.us, shape=(self.size, 1))).clone()
+        us = torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))).clone()
         them = 1.0 - us
         outcome = torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))).clone()
         score = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))).clone()
