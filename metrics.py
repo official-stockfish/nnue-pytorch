@@ -1,6 +1,7 @@
 import argparse
 import nnue_bin_dataset
 import torch
+import model as M
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader
@@ -27,7 +28,10 @@ def main():
   parser.add_argument("--dataset", default="d8_100000.bin", help="Dataset to evaluate on (.bin)")
   args = parser.parse_args()
 
-  nnue = torch.load(args.model, map_location=torch.device('cpu'))
+  if args.model.endswith(".pt"):
+    nnue = torch.load(args.model, map_location=torch.device('cpu'))
+  else:
+    nnue = M.NNUE.load_from_checkpoint(args.model)
   data = nnue_bin_dataset.NNUEBinData(args.dataset)
 
   print('MSE:', compute_mse(nnue, data))

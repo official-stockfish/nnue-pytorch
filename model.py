@@ -10,9 +10,6 @@ L1 = 256
 L2 = 32
 L3 = 32
 
-def cp_conversion(x, alpha=0.0016):
-  return (x * alpha).sigmoid()
-
 class NNUE(pl.LightningModule):
   """
   This model attempts to directly represent the nodchip Stockfish trainer methodology.
@@ -39,12 +36,29 @@ class NNUE(pl.LightningModule):
 
   def step_(self, batch, batch_idx, loss_type):
     us, them, white, black, outcome, score = batch
-    output = self(us, them, white, black)
-    # Scale by 600.0 here to avoid the final layer having to generate huge
-    # weights.  This constant must be adjusted when quantizing as well.
-    loss = F.mse_loss(output * 600.0, score)
+
+    # lambda = 0.0 - purely based on game results
+    # lambda = 1.0 - purely based on search scores
+    lambda_ = 1.0
+    q = self(us, them, white, black)
+    t = outcome
+    # Divide score by 600.0 to match the expected NNUE scaling factor
+    p = (score / 600.0).sigmoid()
+    epsilon = 1e-12
+    teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
+    outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
+    teacher_loss = -(p * F.logsigmoid(q) + (1.0 - p) * F.logsigmoid(-q))
+    outcome_loss = -(t * F.logsigmoid(q) + (1.0 - t) * F.logsigmoid(-q))
+    result  = lambda_ * teacher_loss    + (1.0 - lambda_) * outcome_loss
+    entropy = lambda_ * teacher_entropy + (1.0 - lambda_) * outcome_entropy
+    loss = result.mean() - entropy.mean()
     self.log(loss_type, loss)
     return loss
+
+    # MSE Loss function for debugging
+    # Scale score by 600.0 to match the expected NNUE scaling factor
+    # output = self(us, them, white, black) * 600.0
+    # loss = F.mse_loss(output, score)
 
   def training_step(self, batch, batch_idx):
     return self.step_(batch, batch_idx, 'train_loss')

@@ -53,6 +53,6 @@ Then, go to http://localhost:6006/
 
 * Sopel - for the amazing fast sparse data loader
 * syzygy - http://www.talkchess.com/forum3/viewtopic.php?f=7&t=75506
-* https://github.com/connormcmonigle/seer-nnue
+* connormcmonigle - https://github.com/connormcmonigle/seer-nnue, and loss function advice.
 * https://github.com/DanielUranga/TensorFlowNNUE
 * https://hxim.github.io/Stockfish-Evaluation-Guide/
