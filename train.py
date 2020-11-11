@@ -10,13 +10,13 @@ from torch.utils.data import DataLoader
 def data_loader_cc(train_filename, val_filename):
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
-  train = DataLoader(nnue_dataset.SparseBatchDataset(halfkp.NAME, 'd8_100000.bin', 8192), batch_size=None, batch_sampler=None)
-  val = DataLoader(nnue_dataset.SparseBatchDataset(halfkp.NAME, 'd10_10000.bin', 1024), batch_size=None, batch_sampler=None)
+  train = DataLoader(nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, 8192), batch_size=None, batch_sampler=None)
+  val = DataLoader(nnue_dataset.SparseBatchDataset(halfkp.NAME, val_filename, 1024), batch_size=None, batch_sampler=None)
   return train, val
 
 def data_loader_py(train_filename, val_filename):
-  train = DataLoader(nnue_bin_dataset.NNUEBinData('d8_100000.bin'), batch_size=128, shuffle=True, num_workers=4)
-  val = DataLoader(nnue_bin_dataset.NNUEBinData('d10_10000.bin'), batch_size=32)
+  train = DataLoader(nnue_bin_dataset.NNUEBinData(train_filename), batch_size=128, shuffle=True, num_workers=4)
+  val = DataLoader(nnue_bin_dataset.NNUEBinData(val_filename), batch_size=32)
   return train, val
 
 def main():

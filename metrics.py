@@ -1,4 +1,4 @@
-import model as M
+import argparse
 import nnue_bin_dataset
 import torch
 import pytorch_lightning as pl
@@ -22,8 +22,13 @@ def compute_mse(nnue, data):
   return sum(errors) / len(errors)
 
 def main():
-  nnue = torch.load('last.pt')
-  data = nnue_bin_dataset.NNUEBinData('d8_100000.bin')
+  parser = argparse.ArgumentParser(description="Runs evaluation for a model.")
+  parser.add_argument("model", help="Source file (can be .ckpt, .pt or .nnue)")
+  parser.add_argument("--dataset", default="d8_100000.bin", help="Dataset to evaluate on (.bin)")
+  args = parser.parse_args()
+
+  nnue = torch.load(args.model, map_location=torch.device('cpu'))
+  data = nnue_bin_dataset.NNUEBinData(args.dataset)
 
   print('MSE:', compute_mse(nnue, data))
 

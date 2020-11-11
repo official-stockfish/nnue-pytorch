@@ -20,10 +20,9 @@ sh compile_data_loader.bat
 
 # Train a network
 
-Filenames are hardcoded right now, edit train.py first, then:
 ```
 source env/bin/activate
-python train.py
+python train.py train_data.bin val_data.bin
 ```
 
 # Export a network
