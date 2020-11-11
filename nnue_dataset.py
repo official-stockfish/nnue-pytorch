@@ -148,31 +148,43 @@ class TrainingDataProvider:
         self.destroy_stream(self.stream)
 
 create_dense_entry_stream = dll.create_dense_entry_stream
+create_dense_entry_stream.restype = ctypes.c_void_p
 destroy_dense_entry_stream = dll.destroy_dense_entry_stream
+destroy_dense_entry_stream.argtypes = [ctypes.c_void_p]
 
 create_sparse_entry_stream = dll.create_sparse_entry_stream
+create_sparse_entry_stream.restype = ctypes.c_void_p
 destroy_sparse_entry_stream = dll.destroy_sparse_entry_stream
+destroy_sparse_entry_stream.argtypes = [ctypes.c_void_p]
 
 create_dense_batch_stream = dll.create_dense_batch_stream
+create_dense_batch_stream.restype = ctypes.c_void_p
 destroy_dense_batch_stream = dll.destroy_dense_batch_stream
+destroy_dense_batch_stream.argtypes = [ctypes.c_void_p]
 
 create_sparse_batch_stream = dll.create_sparse_batch_stream
+create_sparse_batch_stream.restype = ctypes.c_void_p
 destroy_sparse_batch_stream = dll.destroy_sparse_batch_stream
+destroy_sparse_batch_stream.argtypes = [ctypes.c_void_p]
 
 fetch_next_dense_entry = dll.fetch_next_dense_entry
 fetch_next_dense_entry.restype = DenseEntryPtr
+fetch_next_dense_entry.argtypes = [ctypes.c_void_p]
 destroy_dense_entry = dll.destroy_dense_entry
 
 fetch_next_sparse_entry = dll.fetch_next_sparse_entry
 fetch_next_sparse_entry.restype = SparseEntryPtr
+fetch_next_sparse_entry.argtypes = [ctypes.c_void_p]
 destroy_sparse_entry = dll.destroy_sparse_entry
 
 fetch_next_dense_batch = dll.fetch_next_dense_batch
 fetch_next_dense_batch.restype = DenseBatchPtr
+fetch_next_dense_batch.argtypes = [ctypes.c_void_p]
 destroy_dense_batch = dll.destroy_dense_batch
 
 fetch_next_sparse_batch = dll.fetch_next_sparse_batch
 fetch_next_sparse_batch.restype = SparseBatchPtr
+fetch_next_sparse_batch.argtypes = [ctypes.c_void_p]
 destroy_sparse_batch = dll.destroy_sparse_batch
 
 class DenseEntryProvider(TrainingDataProvider):
