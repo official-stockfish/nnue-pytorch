@@ -34,6 +34,8 @@ def main():
     nnue = M.NNUE.load_from_checkpoint(args.model)
   data = nnue_bin_dataset.NNUEBinData(args.dataset)
 
+  #trainer = pl.Trainer()
+  #trainer.test(nnue, DataLoader(data, batch_size=128))
   print('MSE:', compute_mse(nnue, data))
 
 if __name__ == '__main__':

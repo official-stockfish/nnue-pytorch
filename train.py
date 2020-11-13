@@ -5,13 +5,30 @@ import nnue_bin_dataset
 import pytorch_lightning as pl
 import halfkp
 from pytorch_lightning import loggers as pl_loggers
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+
+class FixedNumBatchesDataset(Dataset):
+  def __init__(self, dataset, num_batches):
+    super(FixedNumBatchesDataset, self).__init__()
+    self.dataset = dataset;
+    self.iter = iter(self.dataset)
+    self.num_batches = num_batches
+
+  def __len__(self):
+    return self.num_batches
+
+  def __getitem__(self, idx):
+    return next(self.iter)
 
 def data_loader_cc(train_filename, val_filename):
+  # Epoch size is set to dataset size manually for now.
+  epoch_size = 300000000
+  train_batch_size = 8192
+  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, train_batch_size)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
-  train = DataLoader(nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, 8192), batch_size=None, batch_sampler=None)
-  val = DataLoader(nnue_dataset.SparseBatchDataset(halfkp.NAME, val_filename, 1024), batch_size=None, batch_sampler=None)
+  train = DataLoader(FixedNumBatchesDataset(train_infinite, (epoch_size + train_batch_size - 1) // train_batch_size), batch_size=None, batch_sampler=None)
+  val = DataLoader(nnue_bin_dataset.NNUEBinData(val_filename), batch_size=32)
   return train, val
 
 def data_loader_py(train_filename, val_filename):
