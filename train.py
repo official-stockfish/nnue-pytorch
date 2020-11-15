@@ -40,7 +40,7 @@ def main():
   parser = argparse.ArgumentParser(description="Trains the network.")
   parser.add_argument("train", help="Training data (.bin or .binpack)")
   parser.add_argument("val", help="Validation data (.bin or .binpack)")
-  parser.add_argument("--gpus", help="Number of GPUs to train on (default=0 for CPU)", default=0)
+  parser = pl.Trainer.add_argparse_args(parser)
   parser.add_argument("--py-data", action="store_true", help="Use python data loader (default=False)")
   args = parser.parse_args()
 
