@@ -14,14 +14,18 @@ class NNUE(pl.LightningModule):
   """
   This model attempts to directly represent the nodchip Stockfish trainer methodology.
 
+  lambda_ = 0.0 - purely based on game results
+  lambda_ = 1.0 - purely based on search scores
+
   It is not ideal for training a Pytorch quantized model directly.
   """
-  def __init__(self, feature_set=halfkp):
+  def __init__(self, feature_set=halfkp, lambda_=1.0):
     super(NNUE, self).__init__()
     self.input = nn.Linear(feature_set.INPUTS, L1)
     self.l1 = nn.Linear(2 * L1, L2)
     self.l2 = nn.Linear(L2, L3)
     self.output = nn.Linear(L3, 1)
+    self.lambda_ = lambda_
 
   def forward(self, us, them, w_in, b_in):
     w = self.input(w_in)
@@ -37,9 +41,6 @@ class NNUE(pl.LightningModule):
   def step_(self, batch, batch_idx, loss_type):
     us, them, white, black, outcome, score = batch
 
-    # lambda = 0.0 - purely based on game results
-    # lambda = 1.0 - purely based on search scores
-    lambda_ = 1.0
     q = self(us, them, white, black)
     t = outcome
     # Divide score by 600.0 to match the expected NNUE scaling factor
@@ -49,8 +50,8 @@ class NNUE(pl.LightningModule):
     outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
     teacher_loss = -(p * F.logsigmoid(q) + (1.0 - p) * F.logsigmoid(-q))
     outcome_loss = -(t * F.logsigmoid(q) + (1.0 - t) * F.logsigmoid(-q))
-    result  = lambda_ * teacher_loss    + (1.0 - lambda_) * outcome_loss
-    entropy = lambda_ * teacher_entropy + (1.0 - lambda_) * outcome_entropy
+    result  = self.lambda_ * teacher_loss    + (1.0 - self.lambda_) * outcome_loss
+    entropy = self.lambda_ * teacher_entropy + (1.0 - self.lambda_) * outcome_entropy
     loss = result.mean() - entropy.mean()
     self.log(loss_type, loss)
     return loss
