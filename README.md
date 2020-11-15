@@ -25,6 +25,16 @@ source env/bin/activate
 python train.py train_data.bin val_data.bin
 ```
 
+## Resuming from a checkpoint
+```
+python train.py --resume_from_checkpoint <path> ...
+```
+
+## Training on GPU
+```
+python train.py --gpus 1 ...
+```
+
 # Export a network
 
 Using either a checkpoint (`.ckpt`) or serialized model (`.pt`),
