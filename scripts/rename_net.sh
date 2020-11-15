@@ -1,5 +1,6 @@
 #!/bin/bash
 
-name=nn-$(sha256sum quantized.nnue | cut -c1-12).nnue
+# Renames file to SF net format.
+name=nn-$(sha256sum $1 | cut -c1-12).nnue
 echo ${name}
-mv quantized.nnue ${name}
+mv $1 ${name}
