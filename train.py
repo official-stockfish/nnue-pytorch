@@ -54,7 +54,7 @@ def main():
     train, val = data_loader_cc(args.train, args.val)
 
   tb_logger = pl_loggers.TensorBoardLogger('logs/')
-  trainer = pl.Trainer(logger=tb_logger, gpus=args.gpus)
+  trainer = pl.Trainer.from_argparse_args(args, logger=tb_logger)
   trainer.fit(nnue, train, val)
 
 if __name__ == '__main__':
