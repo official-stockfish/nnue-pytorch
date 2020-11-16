@@ -19,13 +19,23 @@ class NNUE(pl.LightningModule):
 
   It is not ideal for training a Pytorch quantized model directly.
   """
-  def __init__(self, feature_set=halfkp, lambda_=1.0):
+  def __init__(self, feature_set=halfkp, lambda_=1.0, loss_type='entropy'):
     super(NNUE, self).__init__()
     self.input = nn.Linear(feature_set.INPUTS, L1)
     self.l1 = nn.Linear(2 * L1, L2)
     self.l2 = nn.Linear(L2, L3)
     self.output = nn.Linear(L3, 1)
     self.lambda_ = lambda_
+
+    if (loss_type == 'entropy'):
+      self.loss_func = self.entropy_loss
+    elif (loss_type == 'noob'):
+      assert lambda_ == 1.0
+      self.loss_func = self.noob_loss
+    elif (loss_type == 'mixed'):
+      self.loss_func = self.mixed_loss
+    else:
+      assert False
 
   def forward(self, us, them, w_in, b_in):
     w = self.input(w_in)
@@ -39,6 +49,16 @@ class NNUE(pl.LightningModule):
     return x
 
   def step_(self, batch, batch_idx, loss_type):
+    loss = self.loss_func(batch)
+    self.log(loss_type, loss)
+    return loss
+
+    # MSE Loss function for debugging
+    # Scale score by 600.0 to match the expected NNUE scaling factor
+    # output = self(us, them, white, black) * 600.0
+    # loss = F.mse_loss(output, score)
+
+  def entropy_loss(self, batch):
     us, them, white, black, outcome, score = batch
 
     q = self(us, them, white, black)
@@ -52,14 +72,38 @@ class NNUE(pl.LightningModule):
     outcome_loss = -(t * F.logsigmoid(q) + (1.0 - t) * F.logsigmoid(-q))
     result  = self.lambda_ * teacher_loss    + (1.0 - self.lambda_) * outcome_loss
     entropy = self.lambda_ * teacher_entropy + (1.0 - self.lambda_) * outcome_entropy
+
     loss = result.mean() - entropy.mean()
-    self.log(loss_type, loss)
+
     return loss
 
-    # MSE Loss function for debugging
-    # Scale score by 600.0 to match the expected NNUE scaling factor
-    # output = self(us, them, white, black) * 600.0
-    # loss = F.mse_loss(output, score)
+  def noob_loss(self, batch):
+    VALUE_KNOWN_WIN = 10000
+
+    us, them, white, black, outcome, score = batch
+
+    q = self(us, them, white, black) * 600.0
+
+    loss = (q.clamp(-VALUE_KNOWN_WIN, VALUE_KNOWN_WIN) - score.clamp(-VALUE_KNOWN_WIN, VALUE_KNOWN_WIN))**2 / 4800.0
+
+    return loss.mean()
+
+  def mixed_loss(self, batch):
+    VALUE_KNOWN_WIN = 10000
+
+    us, them, white, black, outcome, score = batch
+
+    q = self(us, them, white, black)
+    t = outcome
+    epsilon = 1e-12
+    outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
+    outcome_loss = -(t * F.logsigmoid(q) + (1.0 - t) * F.logsigmoid(-q))
+
+    loss_win = outcome_loss.mean() - outcome_entropy.mean()
+
+    loss_eval = ((q * 600.0).clamp(-VALUE_KNOWN_WIN, VALUE_KNOWN_WIN) - score.clamp(-VALUE_KNOWN_WIN, VALUE_KNOWN_WIN))**2 / 4800.0
+
+    return loss_eval.mean() * self.lambda_ + loss_win * (1.0 - self.lambda_)
 
   def training_step(self, batch, batch_idx):
     return self.step_(batch, batch_idx, 'train_loss')

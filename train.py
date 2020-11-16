@@ -45,9 +45,10 @@ def main():
   parser = pl.Trainer.add_argparse_args(parser)
   parser.add_argument("--py-data", action="store_true", help="Use python data loader (default=False)")
   parser.add_argument("--lambda", default=1.0, type=float, dest='lambda_', help="lambda=1.0 = train on evaluations, lambda=0.0 = train on game results, interpolates between (default=1.0).")
+  parser.add_argument("--loss-type", default='entropy', type=str, dest='loss_type', help="loss type to use. Either entropy, noob, or mixed. Noob only works with lambda 1.0")
   args = parser.parse_args()
 
-  nnue = M.NNUE(halfkp, lambda_=args.lambda_)
+  nnue = M.NNUE(halfkp, lambda_=args.lambda_, loss_type=args.loss_type)
 
   if args.py_data:
     print('Using python data loader')
