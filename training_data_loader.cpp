@@ -191,7 +191,7 @@ protected:
 };
 
 template <typename FeatureSetT, typename StorageT>
-struct FeaturedBatchStream : AsyncStream<StorageT>
+struct FeaturedBatchStream : Stream<StorageT>
 {
     static_assert(StorageT::IS_BATCH);
 
