@@ -21,14 +21,16 @@ class FixedNumBatchesDataset(Dataset):
     return next(self.iter)
 
 def data_loader_cc(train_filename, val_filename):
-  # Epoch size is set to dataset size manually for now.
-  epoch_size = 300000000
-  train_batch_size = 8192
-  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, train_batch_size)
+  # Epoch and validation sizes are arbitrary
+  epoch_size = 100000000
+  val_size = 1000000
+  batch_size = 8192
+  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, batch_size)
+  val_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, val_filename, batch_size)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
-  train = DataLoader(FixedNumBatchesDataset(train_infinite, (epoch_size + train_batch_size - 1) // train_batch_size), batch_size=None, batch_sampler=None)
-  val = DataLoader(nnue_bin_dataset.NNUEBinData(val_filename), batch_size=32)
+  train = DataLoader(FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
+  val = DataLoader(FixedNumBatchesDataset(val_infinite, (val_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
   return train, val
 
 def data_loader_py(train_filename, val_filename):
