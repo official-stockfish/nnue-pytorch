@@ -1,6 +1,7 @@
 import nnue_dataset
 import halfkp
 import time
+import torch
 import nnue_bin_dataset
 
 def test_stream(stream_type, batch_size=None):
@@ -17,21 +18,20 @@ def test_stream(stream_type, batch_size=None):
 
     del stream
 
-test_stream(nnue_dataset.DenseEntryProvider)
-test_stream(nnue_dataset.SparseEntryProvider)
-test_stream(nnue_dataset.DenseBatchProvider, 64)
 test_stream(nnue_dataset.SparseBatchProvider, 256)
 
 stream_py = nnue_bin_dataset.NNUEBinData('d8_100000.bin')
-stream_cpp = nnue_dataset.DenseEntryDataset(halfkp.NAME, 'd8_100000.bin')
+stream_cpp = nnue_dataset.SparseBatchDataset(halfkp.NAME, 'd8_100000.bin', 256)
 
 stream_py_iter = iter(stream_py)
 stream_cpp_iter = iter(stream_cpp)
 
 diff = 0.0
-for i in range(1000):
-    tensors_py = next(stream_py_iter)
+for i in range(10):
+    # Gather a batch
     tensors_cpp = next(stream_cpp_iter)
-    diff += sum((a - b).norm() for a, b in zip(tensors_py, tensors_cpp))
+    for j in range(256):
+        tensors_py = next(stream_py_iter)
+        diff += sum((a - b[j]).norm() for a, b in zip(tensors_py, tensors_cpp))
 print('Diff: {}'.format(diff))
 

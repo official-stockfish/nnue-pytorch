@@ -42,6 +42,8 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <limits>
 #include <climits>
 #include <optional>
+#include <thread>
+#include <mutex>
 
 #if (defined(_MSC_VER) || defined(__INTEL_COMPILER)) && !defined(__clang__)
 #include <intrin.h>
@@ -7479,6 +7481,221 @@ namespace binpack
                     m_isEnd = true;
                 }
             }
+        }
+    };
+
+    struct CompressedTrainingDataEntryParallelReader
+    {
+        static constexpr std::size_t chunkSize = suggestedChunkSize;
+
+        CompressedTrainingDataEntryParallelReader(int concurrency, std::string path, std::ios_base::openmode om = std::ios_base::app) :
+            m_concurrency(concurrency),
+            m_inputFile(path, om),
+            m_bufferOffset(0)
+        {
+            m_numRunningWorkers.store(0);
+            if (!m_inputFile.hasNextChunk())
+            {
+                return;
+            }
+
+            m_stopFlag.store(false);
+
+            auto worker = [this]()
+            {
+                std::vector<unsigned char> m_chunk{};
+                std::optional<PackedMoveScoreListReader> m_movelistReader(std::nullopt);
+                std::size_t m_offset(0);
+                std::vector<TrainingDataEntry> m_localBuffer;
+                m_localBuffer.reserve(threadBufferSize);
+
+                bool isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk);
+
+                while(!isEnd && !m_stopFlag.load())
+                {
+                    for (std::size_t i = 0; i < threadBufferSize; ++i)
+                    {
+                        if (m_movelistReader.has_value())
+                        {
+                            const auto e = m_movelistReader->nextEntry();
+
+                            if (!m_movelistReader->hasNext())
+                            {
+                                m_offset += m_movelistReader->numReadBytes();
+                                m_movelistReader.reset();
+
+                                isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk);
+                            }
+
+                            m_localBuffer.emplace_back(e);
+                        }
+                        else
+                        {
+                            PackedTrainingDataEntry packed;
+                            std::memcpy(&packed, m_chunk.data() + m_offset, sizeof(PackedTrainingDataEntry));
+                            m_offset += sizeof(PackedTrainingDataEntry);
+
+                            const std::uint16_t numPlies = (m_chunk[m_offset] << 8) | m_chunk[m_offset + 1];
+                            m_offset += 2;
+
+                            const auto e = unpackEntry(packed);
+
+                            if (numPlies > 0)
+                            {
+                                m_movelistReader.emplace(e, reinterpret_cast<unsigned char*>(m_chunk.data()) + m_offset, numPlies);
+                            }
+                            else
+                            {
+                                isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk);
+                            }
+
+                            m_localBuffer.emplace_back(e);
+                        }
+
+                        if (isEnd || m_stopFlag.load())
+                        {
+                            break;
+                        }
+                    }
+
+                    if (!m_localBuffer.empty())
+                    {
+                        std::unique_lock lock(m_waitingBufferMutex);
+                        m_waitingBufferEmpty.wait(lock, [this]() { return m_waitingBuffer.empty() || m_stopFlag.load(); });
+                        m_waitingBuffer.swap(m_localBuffer);
+
+                        lock.unlock();
+                        m_waitingBufferFull.notify_one();
+
+                        m_localBuffer.clear();
+                    }
+                }
+
+                m_numRunningWorkers.fetch_sub(1);
+
+                m_waitingBufferFull.notify_one();
+            };
+
+            for (int i = 0; i < concurrency; ++i)
+            {
+                m_workers.emplace_back(worker);
+
+                // This cannot be done in the thread worker. We need
+                // to have a guarantee that this is incremented, but if
+                // we did it in the worker there's no guarantee
+                // that it executed.
+                m_numRunningWorkers.fetch_add(1);
+            }
+        }
+
+        [[nodiscard]] std::optional<TrainingDataEntry> next()
+        {
+            if (m_bufferOffset >= m_buffer.size())
+            {
+                m_buffer.clear();
+
+                std::unique_lock lock(m_waitingBufferMutex);
+                m_waitingBufferFull.wait(lock, [this]() { return !m_waitingBuffer.empty() || !m_numRunningWorkers.load(); });
+                if (m_waitingBuffer.empty())
+                {
+                    return std::nullopt;
+                }
+
+                m_waitingBuffer.swap(m_buffer);
+                m_bufferOffset = 0;
+
+                lock.unlock();
+                m_waitingBufferEmpty.notify_one();
+            }
+
+            return m_buffer[m_bufferOffset++];
+        }
+
+        int fill(std::vector<TrainingDataEntry>& vec, std::size_t n)
+        {
+            if (m_bufferOffset >= m_buffer.size())
+            {
+                m_buffer.clear();
+
+                std::unique_lock lock(m_waitingBufferMutex);
+                m_waitingBufferFull.wait(lock, [this]() { return !m_waitingBuffer.empty() || !m_numRunningWorkers.load(); });
+                if (m_waitingBuffer.empty())
+                {
+                    return 0;
+                }
+
+                m_waitingBuffer.swap(m_buffer);
+                m_bufferOffset = 0;
+
+                lock.unlock();
+                m_waitingBufferEmpty.notify_one();
+            }
+
+            const std::size_t m = std::min(n, m_buffer.size() - m_bufferOffset);
+            vec.insert(vec.end(), m_buffer.begin() + m_bufferOffset, m_buffer.begin() + m_bufferOffset + m);
+
+            m_bufferOffset += m;
+
+            if (m != n)
+            {
+                return m + fill(vec, n - m);
+            }
+            else
+            {
+                return m;
+            }
+        }
+
+        ~CompressedTrainingDataEntryParallelReader()
+        {
+            m_stopFlag.store(true);
+            m_waitingBufferEmpty.notify_all();
+
+            for (auto& worker : m_workers)
+            {
+                if (worker.joinable())
+                {
+                    worker.join();
+                }
+            }
+        }
+
+    private:
+        int m_concurrency;
+        CompressedTrainingDataFile m_inputFile;
+        std::atomic_int m_numRunningWorkers;
+
+        static constexpr int threadBufferSize = 256 * 256 * 4;
+
+        std::atomic_bool m_stopFlag;
+        std::vector<TrainingDataEntry> m_waitingBuffer;
+        std::vector<TrainingDataEntry> m_buffer;
+        std::size_t m_bufferOffset;
+        std::mutex m_waitingBufferMutex;
+        std::mutex m_fileMutex;
+        std::condition_variable m_waitingBufferEmpty;
+        std::condition_variable m_waitingBufferFull;
+
+        std::vector<std::thread> m_workers;
+
+        bool fetchNextChunkIfNeeded(std::size_t& m_offset, std::vector<unsigned char>& m_chunk)
+        {
+            if (m_offset + sizeof(PackedTrainingDataEntry) + 2 > m_chunk.size())
+            {
+                std::unique_lock lock(m_fileMutex);
+
+                if (!m_inputFile.hasNextChunk())
+                {
+                    return true;
+                }
+                else
+                {
+                    m_chunk = m_inputFile.readNextChunk();
+                    m_offset = 0;
+                }
+            }
+
+            return false;
         }
     };
 

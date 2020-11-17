@@ -39,6 +39,19 @@ namespace training_data {
     struct BasicSfenInputStream
     {
         virtual std::optional<TrainingDataEntry> next() = 0;
+        virtual void fill(std::vector<TrainingDataEntry>& vec, std::size_t n)
+        {
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                auto v = this->next();
+                if (!v.has_value())
+                {
+                    break;
+                }
+                vec.emplace_back(*v);
+            }
+        }
+
         virtual bool eof() const = 0;
         virtual ~BasicSfenInputStream() {}
     };
@@ -138,12 +151,104 @@ namespace training_data {
         bool m_cyclic;
     };
 
+    struct BinpackSfenInputParallelStream : BasicSfenInputStream
+    {
+        static constexpr auto openmode = std::ios::in | std::ios::binary;
+        static inline const std::string extension = "binpack";
+
+        BinpackSfenInputParallelStream(int concurrency, std::string filename, bool cyclic) :
+            m_stream(std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(concurrency, filename, openmode)),
+            m_filename(filename),
+            m_concurrency(concurrency),
+            m_eof(false),
+            m_cyclic(cyclic)
+        {
+        }
+
+        std::optional<TrainingDataEntry> next() override
+        {
+            auto v = m_stream->next();
+            if (!v.has_value())
+            {
+                if (m_cyclic)
+                {
+                    m_stream = std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(m_concurrency, m_filename, openmode);
+                    return m_stream->next();
+                }
+
+                m_eof = true;
+                return std::nullopt;
+            }
+
+            return v;
+        }
+
+        void fill(std::vector<TrainingDataEntry>& v, std::size_t n)
+        {
+            auto k = m_stream->fill(v, n);
+            if (n != k)
+            {
+                if (m_cyclic)
+                {
+                    m_stream = std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(m_concurrency, m_filename, openmode);
+                    n -= k;
+                    k = m_stream->fill(v, n);
+                    if (k == 0)
+                    {
+                        // No data in the file
+                        m_eof = true;
+                        return;
+                    }
+                    else if (k == n)
+                    {
+                        // We're done
+                        return;
+                    }
+                    else
+                    {
+                        // We need to read again
+                        this->fill(v, n - k);
+                    }
+                }
+                else
+                {
+                    m_eof = true;
+                }
+            }
+        }
+
+        bool eof() const override
+        {
+            return m_eof;
+        }
+
+        ~BinpackSfenInputParallelStream() override {}
+
+    private:
+        std::unique_ptr<binpack::CompressedTrainingDataEntryParallelReader> m_stream;
+        std::string m_filename;
+        int m_concurrency;
+        bool m_eof;
+        bool m_cyclic;
+    };
+
     inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file(const std::string& filename, bool cyclic)
     {
         if (has_extension(filename, BinSfenInputStream::extension))
             return std::make_unique<BinSfenInputStream>(filename, cyclic);
         else if (has_extension(filename, BinpackSfenInputStream::extension))
             return std::make_unique<BinpackSfenInputStream>(filename, cyclic);
+
+        return nullptr;
+    }
+
+    inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file_parallel(int concurrency, const std::string& filename, bool cyclic)
+    {
+        // TODO (low priority): optimize and parallelize .bin reading.
+        if (has_extension(filename, BinSfenInputStream::extension))
+            return std::make_unique<BinSfenInputStream>(filename, cyclic);
+        else if (has_extension(filename, BinpackSfenInputParallelStream::extension))
+            return std::make_unique<BinpackSfenInputParallelStream>(concurrency, filename, cyclic);
 
         return nullptr;
     }
