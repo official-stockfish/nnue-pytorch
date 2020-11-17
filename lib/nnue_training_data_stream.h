@@ -183,7 +183,7 @@ namespace training_data {
             return v;
         }
 
-        void fill(std::vector<TrainingDataEntry>& v, std::size_t n)
+        void fill(std::vector<TrainingDataEntry>& v, std::size_t n) override
         {
             auto k = m_stream->fill(v, n);
             if (n != k)
