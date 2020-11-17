@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <iterator>
 #include <future>
+#include <mutex>
+#include <thread>
+#include <deque>
 
 #include "lib/nnue_training_data_formats.h"
 #include "lib/nnue_training_data_stream.h"
@@ -339,8 +342,8 @@ struct Stream : AnyStream
 {
     using StorageType = StorageT;
 
-    Stream(const char* filename, bool cyclic) :
-        m_stream(training_data::open_sfen_input_file(filename, cyclic))
+    Stream(int concurrency, const char* filename, bool cyclic) :
+        m_stream(training_data::open_sfen_input_file_parallel(concurrency, filename, cyclic))
     {
     }
 
@@ -355,8 +358,8 @@ struct AsyncStream : Stream<StorageT>
 {
     using BaseType = Stream<StorageT>;
 
-    AsyncStream(const char* filename, bool cyclic) :
-        BaseType(filename, cyclic)
+    AsyncStream(int concurrency, const char* filename, bool cyclic) :
+        BaseType(1, filename, cyclic)
     {
     }
 
@@ -380,8 +383,8 @@ struct FeaturedEntryStream : Stream<StorageT>
     using FeatureSet = FeatureSetT;
     using BaseType = Stream<StorageT>;
 
-    FeaturedEntryStream(const char* filename, bool cyclic) :
-        BaseType(filename, cyclic)
+    FeaturedEntryStream(int concurrency, const char* filename, bool cyclic) :
+        BaseType(1, filename, cyclic)
     {
     }
 
@@ -400,60 +403,130 @@ struct FeaturedEntryStream : Stream<StorageT>
 };
 
 template <typename FeatureSetT, typename StorageT>
-struct FeaturedBatchStream : AsyncStream<StorageT>
+struct FeaturedBatchStream : Stream<StorageT>
 {
     static_assert(StorageT::IS_BATCH);
 
     using FeatureSet = FeatureSetT;
-    using BaseType = AsyncStream<StorageT>;
+    using BaseType = Stream<StorageT>;
 
-    FeaturedBatchStream(const char* filename, int batch_size, bool cyclic) :
-        BaseType(filename, cyclic),
+    static constexpr int num_feature_threads_per_reading_thread = 2;
+
+    FeaturedBatchStream(int concurrency, const char* filename, int batch_size, bool cyclic) :
+        BaseType(
+            std::max(
+                1,
+                concurrency / num_feature_threads_per_reading_thread
+            ),
+            filename,
+            cyclic
+        ),
+        m_concurrency(concurrency),
         m_batch_size(batch_size)
     {
+        m_stop_flag.store(false);
 
-    }
-
-    StorageT* next() override
-    {
-        for(;;)
+        auto worker = [this]()
         {
-            auto cur = std::move(BaseType::m_next);
-            if (cur.valid())
+            std::vector<TrainingDataEntry> entries;
+            entries.reserve(m_batch_size);
+
+            while(!m_stop_flag.load())
             {
-                // we have to wait for this to complete before scheduling the next one
-                cur.wait();
-            }
+                entries.clear();
 
-            BaseType::m_next = std::async(std::launch::async, [this]() {
-                std::vector<TrainingDataEntry> entries;
-                entries.reserve(m_batch_size);
-
-                for(int i = 0; i < m_batch_size; ++i)
                 {
-                    auto value = BaseType::m_stream->next();
-                    if (value.has_value())
-                    {
-                        entries.emplace_back(*value);
-                    }
-                    else
+                    std::unique_lock lock(m_stream_mutex);
+                    BaseType::m_stream->fill(entries, m_batch_size);
+                    if (entries.empty())
                     {
                         break;
                     }
                 }
 
-                return new StorageT(FeatureSet{}, entries);
-            });
+                auto batch = new StorageT(FeatureSet{}, entries);
 
-            if (cur.valid())
-            {
-                return cur.get();
+                {
+                    std::unique_lock lock(m_batch_mutex);
+                    m_batches_not_full.wait(lock, [this]() { return m_batches.size() < m_concurrency + 1 || m_stop_flag.load(); });
+
+                    m_batches.emplace_back(batch);
+
+                    lock.unlock();
+                    m_batches_any.notify_one();
+                }
+
             }
+            m_num_workers.fetch_sub(1);
+            m_batches_any.notify_one();
+        };
+
+        const int num_feature_threads = std::max(
+            1,
+            concurrency - std::max(1, concurrency / num_feature_threads_per_reading_thread)
+        );
+
+        for (int i = 0; i < num_feature_threads; ++i)
+        {
+            m_workers.emplace_back(worker);
+
+            // This cannot be done in the thread worker. We need
+            // to have a guarantee that this is incremented, but if
+            // we did it in the worker there's no guarantee
+            // that it executed.
+            m_num_workers.fetch_add(1);
+        }
+    }
+
+    StorageT* next() override
+    {
+        std::unique_lock lock(m_batch_mutex);
+        m_batches_any.wait(lock, [this]() { return !m_batches.empty() || m_num_workers.load() == 0; });
+
+        if (!m_batches.empty())
+        {
+            auto batch = m_batches.front();
+            m_batches.pop_front();
+
+            lock.unlock();
+            m_batches_not_full.notify_one();
+
+            return batch;
+        }
+        return nullptr;
+    }
+
+    ~FeaturedBatchStream()
+    {
+        m_stop_flag.store(true);
+        m_batches_not_full.notify_all();
+
+        for (auto& worker : m_workers)
+        {
+            if (worker.joinable())
+            {
+                worker.join();
+            }
+        }
+
+        for (auto& batch : m_batches)
+        {
+            delete batch;
         }
     }
 
 private:
     int m_batch_size;
+    int m_concurrency;
+    std::deque<StorageT*> m_batches;
+    std::mutex m_batch_mutex;
+    std::mutex m_stream_mutex;
+    std::condition_variable m_batches_not_full;
+    std::condition_variable m_batches_any;
+    std::atomic_bool m_stop_flag;
+    std::atomic_int m_num_workers;
+
+    std::vector<std::thread> m_workers;
 };
 
 template <template <typename, typename> typename StreamT, typename StorageT, typename... ArgsTs>
@@ -471,24 +544,24 @@ StreamT<FeatureSet<HalfKP>, StorageT>* create_stream(std::string feature_set, Ar
 
 extern "C" {
 
-    EXPORT Stream<DenseEntry>* CDECL create_dense_entry_stream(const char* feature_set, const char* filename, bool cyclic)
+    EXPORT Stream<DenseEntry>* CDECL create_dense_entry_stream(const char* feature_set, int concurrency, const char* filename, bool cyclic)
     {
-        return create_stream<FeaturedEntryStream, DenseEntry>(feature_set, filename, cyclic);
+        return create_stream<FeaturedEntryStream, DenseEntry>(feature_set, concurrency, filename, cyclic);
     }
 
-    EXPORT Stream<SparseEntry>* CDECL create_sparse_entry_stream(const char* feature_set, const char* filename, bool cyclic)
+    EXPORT Stream<SparseEntry>* CDECL create_sparse_entry_stream(const char* feature_set, int concurrency, const char* filename, bool cyclic)
     {
-        return create_stream<FeaturedEntryStream, SparseEntry>(feature_set, filename, cyclic);
+        return create_stream<FeaturedEntryStream, SparseEntry>(feature_set, concurrency, filename, cyclic);
     }
 
-    EXPORT Stream<DenseBatch>* CDECL create_dense_batch_stream(const char* feature_set, const char* filename, int batch_size, bool cyclic)
+    EXPORT Stream<DenseBatch>* CDECL create_dense_batch_stream(const char* feature_set, int concurrency, const char* filename, int batch_size, bool cyclic)
     {
-        return create_stream<FeaturedBatchStream, DenseBatch>(feature_set, filename, batch_size, cyclic);
+        return create_stream<FeaturedBatchStream, DenseBatch>(feature_set, concurrency, filename, batch_size, cyclic);
     }
 
-    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set, const char* filename, int batch_size, bool cyclic)
+    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set, int concurrency, const char* filename, int batch_size, bool cyclic)
     {
-        return create_stream<FeaturedBatchStream, SparseBatch>(feature_set, filename, batch_size, cyclic);
+        return create_stream<FeaturedBatchStream, SparseBatch>(feature_set, concurrency, filename, batch_size, cyclic);
     }
 
     EXPORT void CDECL destroy_dense_entry_stream(Stream<DenseEntry>* stream)
@@ -552,3 +625,20 @@ extern "C" {
     }
 
 }
+
+/* benches */ //*
+#include <chrono>
+
+int main()
+{
+    auto stream = create_sparse_batch_stream("HalfKP", 4, "10m_d3_q_2.binpack", 8192, true);
+    auto t0 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < 1000; ++i)
+    {
+        if (i % 100 == 0) std::cout << i << '\n';
+        destroy_sparse_batch(stream->next());
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+    std::cout << (t1 - t0).count() / 1e9 << "s\n";
+}
+//*/

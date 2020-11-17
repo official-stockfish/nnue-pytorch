@@ -20,12 +20,12 @@ class FixedNumBatchesDataset(Dataset):
   def __getitem__(self, idx):
     return next(self.iter)
 
-def data_loader_cc(train_filename, val_filename):
+def data_loader_cc(train_filename, val_filename, num_workers):
   # Epoch and validation sizes are arbitrary
   epoch_size = 100000000
   val_size = 1000000
   batch_size = 8192
-  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, batch_size)
+  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, batch_size, num_workers=num_workers)
   val_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, val_filename, batch_size)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
@@ -45,6 +45,7 @@ def main():
   parser = pl.Trainer.add_argparse_args(parser)
   parser.add_argument("--py-data", action="store_true", help="Use python data loader (default=False)")
   parser.add_argument("--lambda", default=1.0, type=float, dest='lambda_', help="lambda=1.0 = train on evaluations, lambda=0.0 = train on game results, interpolates between (default=1.0).")
+  parser.add_argument("--num-workers", default=1, type=int, dest='num_workers', help="Number of worker threads to use for data loading. Currently only works well for binpack.")
   args = parser.parse_args()
 
   nnue = M.NNUE(halfkp, lambda_=args.lambda_)
@@ -54,7 +55,7 @@ def main():
     train, val = data_loader_py(args.train, args.val)
   else:
     print('Using c++ data loader')
-    train, val = data_loader_cc(args.train, args.val)
+    train, val = data_loader_cc(args.train, args.val, args.num_workers)
 
   tb_logger = pl_loggers.TensorBoardLogger('logs/')
   trainer = pl.Trainer.from_argparse_args(args, logger=tb_logger)
