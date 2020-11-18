@@ -583,7 +583,7 @@ namespace chess
 
         [[nodiscard]] static constexpr std::string_view toString(EnumType c) noexcept
         {
-            return std::string_view("wb" + ordinal(c), 1);
+            return std::string_view("wb").substr(ordinal(c), 1);
         }
 
         [[nodiscard]] static constexpr char toChar(EnumType c) noexcept
@@ -657,7 +657,7 @@ namespace chess
 
         [[nodiscard]] static constexpr std::string_view toString(EnumType p, Color c) noexcept
         {
-            return std::string_view("PpNnBbRrQqKk " + (chess::ordinal(p) * 2 + chess::ordinal(c)), 1);
+            return std::string_view("PpNnBbRrQqKk ").substr((chess::ordinal(p) * 2 + chess::ordinal(c)), 1);
         }
 
         [[nodiscard]] static constexpr char toChar(EnumType p, Color c) noexcept
@@ -810,7 +810,7 @@ namespace chess
 
         [[nodiscard]] static constexpr std::string_view toString(EnumType p) noexcept
         {
-            return std::string_view("PpNnBbRrQqKk " + ordinal(p), 1);
+            return std::string_view("PpNnBbRrQqKk ").substr(ordinal(p), 1);
         }
 
         [[nodiscard]] static constexpr char toChar(EnumType p) noexcept
@@ -976,7 +976,7 @@ namespace chess
         {
             assert(ordinal(c) >= 0 && ordinal(c) < 8);
 
-            return std::string_view("abcdefgh" + ordinal(c), 1);
+            return std::string_view("abcdefgh").substr(ordinal(c), 1);
         }
 
         [[nodiscard]] static constexpr std::optional<File> fromChar(char c) noexcept
@@ -1018,7 +1018,7 @@ namespace chess
         {
             assert(ordinal(c) >= 0 && ordinal(c) < 8);
 
-            return std::string_view("12345678" + ordinal(c), 1);
+            return std::string_view("12345678").substr(ordinal(c), 1);
         }
 
         [[nodiscard]] static constexpr std::optional<Rank> fromChar(char c) noexcept
@@ -1422,9 +1422,7 @@ namespace chess
                     "a6b6c6d6e6f6g6h6"
                     "a7b7c7d7e7f7g7h7"
                     "a8b8c8d8e8f8g8h8"
-                    + (ordinal(sq) * 2),
-                    2
-                );
+                ).substr(ordinal(sq) * 2, 2);
         }
 
         [[nodiscard]] static constexpr std::optional<Square> fromString(std::string_view sv) noexcept
