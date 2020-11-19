@@ -1,5 +1,6 @@
 import chess
 import halfkp
+import ranger
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -79,5 +80,5 @@ class NNUE(pl.LightningModule):
     self.step_(batch, batch_idx, 'test_loss')
 
   def configure_optimizers(self):
-    optimizer = torch.optim.Adadelta(self.parameters(), lr=1.0)
+    optimizer = ranger.Ranger(self.parameters())
     return optimizer
