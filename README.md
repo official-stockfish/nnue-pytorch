@@ -62,7 +62,8 @@ Then, go to http://localhost:6006/
 # Thanks
 
 * Sopel - for the amazing fast sparse data loader
-* syzygy - http://www.talkchess.com/forum3/viewtopic.php?f=7&t=75506
 * connormcmonigle - https://github.com/connormcmonigle/seer-nnue, and loss function advice.
+* syzygy - http://www.talkchess.com/forum3/viewtopic.php?f=7&t=75506
 * https://github.com/DanielUranga/TensorFlowNNUE
 * https://hxim.github.io/Stockfish-Evaluation-Guide/
+* dkappe - Suggesting ranger (https://github.com/lessw2020/Ranger-Deep-Learning-Optimizer)
