@@ -23,7 +23,7 @@ class FixedNumBatchesDataset(Dataset):
 
 def data_loader_cc(train_filename, val_filename, num_workers, batch_size):
   # Epoch and validation sizes are arbitrary
-  epoch_size = 300000000
+  epoch_size = 100000000
   val_size = 1000000
   train_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, batch_size, num_workers=num_workers)
   val_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, val_filename, batch_size)
