@@ -48,11 +48,15 @@ def main():
   parser.add_argument("--num-workers", default=1, type=int, dest='num_workers', help="Number of worker threads to use for data loading. Currently only works well for binpack.")
   parser.add_argument("--batch-size", default=-1, type=int, dest='batch_size', help="Number of positions per batch / per iteration. Default on GPU = 8192 on CPU = 128.")
   parser.add_argument("--threads", default=-1, type=int, dest='threads', help="Number of torch threads to use. Default automatic (cores) .")
+  parser.add_argument("--seed", default=42, type=int, dest='seed', help="torch seed to use.")
   args = parser.parse_args()
 
   nnue = M.NNUE(halfkp, lambda_=args.lambda_)
 
   print("Training with {} validating with {}".format(args.train, args.val))
+
+  pl.seed_everything(args.seed)
+  print("Seed {}".format(args.seed))
 
   batch_size = args.batch_size
   if batch_size <= 0:
@@ -70,7 +74,10 @@ def main():
     print('Using c++ data loader')
     train, val = data_loader_cc(args.train, args.val, args.num_workers, batch_size)
 
-  tb_logger = pl_loggers.TensorBoardLogger('logs/')
+  logdir = args.default_root_dir if args.default_root_dir else 'logs/'
+  print('Using log dir {}'.format(logdir), flush=True)
+
+  tb_logger = pl_loggers.TensorBoardLogger(logdir)
   trainer = pl.Trainer.from_argparse_args(args, logger=tb_logger)
   trainer.fit(nnue, train, val)
 
