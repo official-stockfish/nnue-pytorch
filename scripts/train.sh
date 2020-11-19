@@ -1,3 +1,3 @@
 #!/bin/bash
 
-python train.py ../data/d5_300000000_30059.binpack d8_100000.bin
+python train.py 10m_d3_2.binpack d8_100000.bin

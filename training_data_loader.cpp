@@ -27,8 +27,21 @@ struct HalfKP {
     static constexpr int NUM_SQ = 64;
     static constexpr int NUM_PT = 10;
     static constexpr int NUM_PLANES = (NUM_SQ * NUM_PT + 1);
-    static constexpr int INPUTS = NUM_PLANES * NUM_SQ;
-    static constexpr int MAX_ACTIVE_FEATURES = 32;
+    static constexpr int HALFKP_INPUTS = NUM_PLANES * NUM_SQ;
+
+    // Factorized features
+    static constexpr int K_INPUTS = NUM_SQ;
+    static constexpr int PIECE_INPUTS = NUM_SQ * NUM_PT;
+
+    static constexpr int INPUTS = HALFKP_INPUTS + K_INPUTS + PIECE_INPUTS;
+
+    // Factorized features
+    static constexpr int MAX_K_FEATURES = 1;
+    static constexpr int MAX_PIECE_FEATURES = 32;
+    static constexpr int MAX_FACTOR_FEATURES = MAX_K_FEATURES + MAX_PIECE_FEATURES;
+
+    // HalfKP features
+    static constexpr int MAX_ACTIVE_FEATURES = 32 + MAX_FACTOR_FEATURES;
 
     static Square orient(Color color, Square sq)
     {
@@ -63,6 +76,25 @@ struct HalfKP {
             counter += 1;
             features[idx] = i;
             features[idx + 1] = feature_index(color, orient(color, ksq), sq, p);
+        }
+        int offset = HALFKP_INPUTS;
+        {
+            // king square factor
+            int idx = counter * 2;
+            counter += 1;
+            features[idx] = i;
+            features[idx + 1] = offset + static_cast<int>(orient(color, ksq));
+        }
+        offset += K_INPUTS;
+        for(Square sq : pieces)
+        {
+            // pieces (without king included).
+            auto p = pos.pieceAt(sq);
+            int idx = counter * 2;
+            counter += 1;
+            features[idx] = i;
+            auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+            features[idx + 1] = offset + (p_idx * NUM_SQ) + static_cast<int>(orient(color, sq));
         }
     }
 };

@@ -21,7 +21,15 @@ class NNUE(pl.LightningModule):
   """
   def __init__(self, feature_set=halfkp, lambda_=1.0):
     super(NNUE, self).__init__()
-    self.input = nn.Linear(feature_set.INPUTS, L1)
+    num_inputs = feature_set.INPUTS
+    self.input = nn.Linear(num_inputs, L1)
+
+    # Zero out the weights/biases for the factorized features
+    # Weights stored as [256][41024]
+    weights = self.input.weight.narrow(1, 0, feature_set.INPUTS - feature_set.FACTOR_INPUTS)
+    weights = torch.cat((weights, torch.zeros(L1, feature_set.FACTOR_INPUTS)), dim=1)
+    self.input.weight = nn.Parameter(weights)
+
     self.l1 = nn.Linear(2 * L1, L2)
     self.l2 = nn.Linear(L2, L3)
     self.output = nn.Linear(L3, 1)
