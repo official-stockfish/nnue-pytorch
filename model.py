@@ -11,6 +11,25 @@ L1 = 256
 L2 = 32
 L3 = 32
 
+class FeatureTransformer(nn.Module):
+  def __init__(self, feature_set):
+    super(FeatureTransformer, self).__init__()
+    self.feature_Set = feature_set
+    self.num_inputs = feature_set.INPUTS
+
+    self.input = nn.Linear(self.num_inputs, L1)
+
+    # Zero out the weights/biases for the factorized features
+    # Weights stored as [256][41024]
+    weights = self.input.weight.narrow(1, 0, feature_set.INPUTS - feature_set.FACTOR_INPUTS)
+    weights = torch.cat((weights, torch.zeros(L1, feature_set.FACTOR_INPUTS)), dim=1)
+    self.input.weight = nn.Parameter(weights)
+
+  def forward(self, us, them, w_in, b_in):
+    w = self.input(w_in)
+    b = self.input(b_in)
+    return (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
+
 class NNUE(pl.LightningModule):
   """
   This model attempts to directly represent the nodchip Stockfish trainer methodology.
@@ -27,23 +46,14 @@ class NNUE(pl.LightningModule):
     self.devices = devices
     self.main_device = devices[0]
 
-    self.input = nn.Linear(num_inputs, L1).to(device=self.main_device)
-
-    # Zero out the weights/biases for the factorized features
-    # Weights stored as [256][41024]
-    weights = self.input.weight.narrow(1, 0, feature_set.INPUTS - feature_set.FACTOR_INPUTS)
-    weights = torch.cat((weights, torch.zeros(L1, feature_set.FACTOR_INPUTS, device=self.main_device)), dim=1)
-    self.input.weight = nn.Parameter(weights)
-
+    self.feature_transformer = FeatureTransformer(feature_set).to(device=self.main_device)
     self.l1 = nn.Linear(2 * L1, L2).to(device=self.main_device)
     self.l2 = nn.Linear(L2, L3).to(device=self.main_device)
     self.output = nn.Linear(L3, 1).to(device=self.main_device)
     self.lambda_ = lambda_
 
   def forward(self, us, them, w_in, b_in):
-    w = self.input(w_in)
-    b = self.input(b_in)
-    l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
+    l0_ = self.feature_transformer(us, them, w_in, b_in)
     # clamp here is used as a clipped relu to (0.0, 1.0)
     l0_ = torch.clamp(l0_, 0.0, 1.0)
     l1_ = torch.clamp(self.l1(l0_), 0.0, 1.0)
