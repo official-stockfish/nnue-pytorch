@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader
 
 def coalesce_weights(weights):
   # incoming weights are in [256][INPUTS]
-  print('factorized shape:', weights.shape)
   k_base = 41024
   p_base = k_base + 64
   result = []
@@ -30,6 +29,26 @@ def coalesce_weights(weights):
       w = w + weights.narrow(1, p_base + p_idx - 1, 1)
     result.append(w)
   return torch.cat(result, dim=1)
+
+def fuse_bn(linear, bn):
+  w = linear.weight
+  mean = bn.running_mean
+  var_sqrt = torch.sqrt(bn.running_var + bn.eps)
+  beta = bn.weight
+  gamma = bn.bias
+  b = linear.bias
+  w = w * (beta / var_sqrt).reshape([4096, 1])
+  b = (b - mean) / var_sqrt * beta + gamma
+
+  fused_linear = nn.Linear(linear.in_features, linear.out_features)
+  fused_linear.weight = nn.Parameter(w)
+  fused_linear.bias = nn.Parameter(b)
+  return fused_linear
+
+def fuse_bn_model(model):
+  model.input = fuse_bn(model.input, model.bn_input)
+  model.l1 = fuse_bn(model.l1, model.bn_l1)
+  return model
 
 class NNUEWriter():
   """

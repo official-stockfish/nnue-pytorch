@@ -24,6 +24,7 @@ class NNUE(pl.LightningModule):
     super(NNUE, self).__init__()
     num_inputs = feature_set.INPUTS
     self.input = nn.Linear(num_inputs, L1)
+    self.bn_input = nn.BatchNorm1d(num_features=L1)
 
     # Zero out the weights/biases for the factorized features
     # Weights stored as [256][41024]
@@ -31,20 +32,19 @@ class NNUE(pl.LightningModule):
     weights = torch.cat((weights, torch.zeros(L1, feature_set.FACTOR_INPUTS)), dim=1)
     self.input.weight = nn.Parameter(weights)
 
-    self.bn1 = nn.BatchNorm1d(num_features=2 * L1)
     self.l1 = nn.Linear(2 * L1, L2)
-    self.bn2 = nn.BatchNorm1d(num_features=L2)
+    self.bn_l1 = nn.BatchNorm1d(num_features=L2)
     self.l2 = nn.Linear(L2, L3)
     self.output = nn.Linear(L3, 1)
     self.lambda_ = lambda_
 
   def forward(self, us, them, w_in, b_in):
-    w = self.input(w_in)
-    b = self.input(b_in)
+    w = self.bn_input(self.input(w_in))
+    b = self.bn_input(self.input(b_in))
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
     # clamp here is used as a clipped relu to (0.0, 1.0)
-    l0_ = torch.clamp(self.bn1(l0_), 0.0, 1.0)
-    l1_ = torch.clamp(self.bn2(self.l1(l0_)), 0.0, 1.0)
+    l0_ = torch.clamp(l0_, 0.0, 1.0)
+    l1_ = torch.clamp(self.bn_l1(self.l1(l0_)), 0.0, 1.0)
     l2_ = torch.clamp(self.l2(l1_), 0.0, 1.0)
     x = self.output(l2_)
     return x
