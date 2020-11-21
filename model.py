@@ -62,7 +62,7 @@ class NNUE(pl.LightningModule):
   def forward(self, us, them, w_in, b_in):
     return self.model((us, them, w_in, b_in))
 
-  def step_(self, batches, batch_idx, loss_type):
+  def step_(self, batches, batch_idx):
     us, them, white, black, outcome, score = batches
 
 
@@ -70,14 +70,19 @@ class NNUE(pl.LightningModule):
     t = outcome[0]
     # Divide score by 600.0 to match the expected NNUE scaling factor
     p = (score[0] / 600.0).sigmoid()
-    return self.loss_fn(q=q, t=t, p=p, loss_type=loss_type)
+    return self.loss_fn(q=q, t=t, p=p)
 
     # MSE Loss function for debugging
     # Scale score by 600.0 to match the expected NNUE scaling factor
     # output = self(us, them, white, black) * 600.0
     # loss = F.mse_loss(output, score)
 
-  def loss_fn(self, *, q, p, t, loss_type):
+  def step_end_(self, batch_parts, loss_type):
+    loss = batch_parts
+    self.log(loss_type, loss)
+    return loss
+
+  def loss_fn(self, *, q, p, t):
     epsilon = 1e-12
     teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
     outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
@@ -86,17 +91,25 @@ class NNUE(pl.LightningModule):
     result  = self.lambda_ * teacher_loss    + (1.0 - self.lambda_) * outcome_loss
     entropy = self.lambda_ * teacher_entropy + (1.0 - self.lambda_) * outcome_entropy
     loss = result.mean() - entropy.mean()
-    self.log(loss_type, loss)
     return loss
 
   def training_step(self, batch, batch_idx):
-    return self.step_(batch, batch_idx, 'train_loss')
+    return self.step_(batch, batch_idx)
+
+  def training_step_end(self, batch_parts):
+    return self.step_end_(batch_parts, 'train_loss')
 
   def validation_step(self, batch, batch_idx):
-    self.step_(batch, batch_idx, 'val_loss')
+    self.step_(batch, batch_idx)
+
+  def validation_step_end(self, batch_parts):
+    return self.step_end_(batch_parts, 'val_loss')
 
   def test_step(self, batch, batch_idx):
-    self.step_(batch, batch_idx, 'test_loss')
+    self.step_(batch, batch_idx)
+
+  def test_step_end(self, batch_parts):
+    return self.step_end_(batch_parts, 'test_loss')
 
   def configure_optimizers(self):
     optimizer = ranger.Ranger(self.parameters())
