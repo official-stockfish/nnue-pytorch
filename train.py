@@ -50,6 +50,13 @@ def main():
   batch_size = args.batch_size
   if batch_size <= 0:
     batch_size = 128 if args.gpus == 0 else 8192
+
+  # Not sure where this should be done.
+  # We need to reduce the batch size by the number of used devices
+  # because we do one batch per device; the data loader produces
+  # N batches when there's N devices.
+  batch_size //= len(devices)
+
   print('Using batch size {}'.format(batch_size))
 
   if args.threads > 0:
