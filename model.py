@@ -5,6 +5,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
+import copy
 
 # 3 layer fully connected network
 L1 = 256
@@ -14,7 +15,6 @@ L3 = 32
 class FeatureTransformer(nn.Module):
   def __init__(self, feature_set):
     super(FeatureTransformer, self).__init__()
-    self.feature_Set = feature_set
     self.num_inputs = feature_set.INPUTS
 
     self.input = nn.Linear(self.num_inputs, L1)
@@ -50,6 +50,7 @@ class NNUE(pl.LightningModule):
     self.devices = devices
     self.main_device = devices[0]
     self.lambda_ = lambda_
+    self.feature_set = feature_set
 
     self.model = nn.Sequential(
       FeatureTransformer(feature_set),
@@ -71,14 +72,21 @@ class NNUE(pl.LightningModule):
     pass
 
   def step_(self, batches, batch_idx):
-    us, them, white, black, outcome, score = batches
+    uss, thems, whites, blacks, outcomes, scores = batches
+    if len(uss) != len(self.devices):
+      raise Exception('Number of batches doesn\'t match the number of devices')
 
+    local_models = [self.model] + [copy.deepcopy(self.model).to(device=device) for device in self.devices[1:]]
 
-    q = self(us[0], them[0], white[0], black[0])
-    t = outcome[0]
+    qs = [m((u, t, w, b)) for m, u, t, w, b in zip(local_models, uss, thems, whites, blacks)]
+    ts = outcomes
     # Divide score by 600.0 to match the expected NNUE scaling factor
-    p = (score[0] / 600.0).sigmoid()
-    return {'losses' : [self.loss_fn(q=q, t=t, p=p)]}
+    ps = [(score / 600.0).sigmoid() for score in scores]
+
+    return {
+      'losses' : [self.loss_fn(q=q, t=t, p=p) for q,t,p in zip(qs, ts, ps)],
+      'local_models' : local_models
+      }
 
     # MSE Loss function for debugging
     # Scale score by 600.0 to match the expected NNUE scaling factor
@@ -87,14 +95,25 @@ class NNUE(pl.LightningModule):
 
   def step_end_(self, batch_parts, loss_type, do_optimization=False):
     losses = batch_parts['losses']
+    local_models = batch_parts['local_models']
 
     if do_optimization:
-      losses[0].backward()
+      for m in local_models:
+          for param in m.parameters():
+              param.grad = None
+
+      for loss in losses:
+        loss.backward()
+
+      grads_by_model = [[param.grad.to(device=self.main_device, non_blocking=True) for param in m.parameters()] for m in local_models[1:]]
+
+      for grads in grads_by_model:
+          for main_param, grad in zip(self.model.parameters(), grads):
+              main_param.grad += grad
 
       self.optimizer.step()
-      self.optimizer.zero_grad()
 
-    loss = losses[0]
+    loss = sum(losses) / len(losses)
     self.log(loss_type, loss)
     return loss
 
