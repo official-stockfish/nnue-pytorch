@@ -65,10 +65,19 @@ class NNUE(pl.LightningModule):
   def step_(self, batches, batch_idx, loss_type):
     us, them, white, black, outcome, score = batches
 
+
     q = self(us[0], them[0], white[0], black[0])
     t = outcome[0]
     # Divide score by 600.0 to match the expected NNUE scaling factor
     p = (score[0] / 600.0).sigmoid()
+    return self.loss_fn(q=q, t=t, p=p, loss_type=loss_type)
+
+    # MSE Loss function for debugging
+    # Scale score by 600.0 to match the expected NNUE scaling factor
+    # output = self(us, them, white, black) * 600.0
+    # loss = F.mse_loss(output, score)
+
+  def loss_fn(self, *, q, p, t, loss_type):
     epsilon = 1e-12
     teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
     outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
@@ -79,11 +88,6 @@ class NNUE(pl.LightningModule):
     loss = result.mean() - entropy.mean()
     self.log(loss_type, loss)
     return loss
-
-    # MSE Loss function for debugging
-    # Scale score by 600.0 to match the expected NNUE scaling factor
-    # output = self(us, them, white, black) * 600.0
-    # loss = F.mse_loss(output, score)
 
   def training_step(self, batch, batch_idx):
     return self.step_(batch, batch_idx, 'train_loss')
