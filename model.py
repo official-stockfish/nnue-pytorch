@@ -20,20 +20,24 @@ class NNUE(pl.LightningModule):
 
   It is not ideal for training a Pytorch quantized model directly.
   """
-  def __init__(self, feature_set=halfkp, lambda_=1.0):
+  def __init__(self, feature_set=halfkp, lambda_=1.0, devices=['cpu']):
     super(NNUE, self).__init__()
     num_inputs = feature_set.INPUTS
-    self.input = nn.Linear(num_inputs, L1)
+
+    self.devices = devices
+    self.main_device = devices[0]
+
+    self.input = nn.Linear(num_inputs, L1).to(device=self.main_device)
 
     # Zero out the weights/biases for the factorized features
     # Weights stored as [256][41024]
     weights = self.input.weight.narrow(1, 0, feature_set.INPUTS - feature_set.FACTOR_INPUTS)
-    weights = torch.cat((weights, torch.zeros(L1, feature_set.FACTOR_INPUTS)), dim=1)
+    weights = torch.cat((weights, torch.zeros(L1, feature_set.FACTOR_INPUTS, device=self.main_device)), dim=1)
     self.input.weight = nn.Parameter(weights)
 
-    self.l1 = nn.Linear(2 * L1, L2)
-    self.l2 = nn.Linear(L2, L3)
-    self.output = nn.Linear(L3, 1)
+    self.l1 = nn.Linear(2 * L1, L2).to(device=self.main_device)
+    self.l2 = nn.Linear(L2, L3).to(device=self.main_device)
+    self.output = nn.Linear(L3, 1).to(device=self.main_device)
     self.lambda_ = lambda_
 
   def forward(self, us, them, w_in, b_in):
@@ -47,13 +51,13 @@ class NNUE(pl.LightningModule):
     x = self.output(l2_)
     return x
 
-  def step_(self, batch, batch_idx, loss_type):
-    us, them, white, black, outcome, score = batch
+  def step_(self, batches, batch_idx, loss_type):
+    us, them, white, black, outcome, score = batches
 
-    q = self(us, them, white, black)
-    t = outcome
+    q = self(us[0], them[0], white[0], black[0])
+    t = outcome[0]
     # Divide score by 600.0 to match the expected NNUE scaling factor
-    p = (score / 600.0).sigmoid()
+    p = (score[0] / 600.0).sigmoid()
     epsilon = 1e-12
     teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
     outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())

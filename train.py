@@ -8,12 +8,12 @@ from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
-def data_loader_cc(train_filename, val_filename, num_workers, batch_size):
+def data_loader_cc(train_filename, val_filename, num_workers, batch_size, devices):
   # Epoch and validation sizes are arbitrary
   epoch_size = 100000000
   val_size = 1000000
-  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, train_filename, batch_size, num_workers=num_workers)
-  val_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, val_filename, batch_size)
+  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, train_filename, batch_size, num_workers=num_workers, devices=devices)
+  val_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, val_filename, batch_size, devices=devices)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
   train = DataLoader(nnue_dataset.FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
@@ -38,7 +38,9 @@ def main():
   parser.add_argument("--seed", default=42, type=int, dest='seed', help="torch seed to use.")
   args = parser.parse_args()
 
-  nnue = M.NNUE(halfkp, lambda_=args.lambda_)
+  devices = ['cuda:0']
+
+  nnue = M.NNUE(halfkp, lambda_=args.lambda_, devices=devices)
 
   print("Training with {} validating with {}".format(args.train, args.val))
 
@@ -59,7 +61,7 @@ def main():
     train, val = data_loader_py(args.train, args.val, batch_size)
   else:
     print('Using c++ data loader')
-    train, val = data_loader_cc(args.train, args.val, args.num_workers, batch_size)
+    train, val = data_loader_cc(args.train, args.val, args.num_workers, batch_size, devices=devices)
 
   logdir = args.default_root_dir if args.default_root_dir else 'logs/'
   print('Using log dir {}'.format(logdir), flush=True)
