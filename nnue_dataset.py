@@ -4,6 +4,7 @@ import torch
 import os
 import sys
 import glob
+from torch.utils.data import Dataset
 
 local_dllpath = [n for n in glob.glob('./*training_data_loader.*') if n.endswith('.so') or n.endswith('.dll') or n.endswith('.dylib')]
 if not local_dllpath:
@@ -116,3 +117,16 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
 
   def __iter__(self):
     return SparseBatchProvider(self.feature_set, self.filename, self.batch_size, cyclic=self.cyclic, num_workers=self.num_workers)
+
+class FixedNumBatchesDataset(Dataset):
+  def __init__(self, dataset, num_batches):
+    super(FixedNumBatchesDataset, self).__init__()
+    self.dataset = dataset;
+    self.iter = iter(self.dataset)
+    self.num_batches = num_batches
+
+  def __len__(self):
+    return self.num_batches
+
+  def __getitem__(self, idx):
+    return next(self.iter)

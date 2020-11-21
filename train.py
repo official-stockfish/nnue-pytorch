@@ -8,29 +8,16 @@ from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
-class FixedNumBatchesDataset(Dataset):
-  def __init__(self, dataset, num_batches):
-    super(FixedNumBatchesDataset, self).__init__()
-    self.dataset = dataset;
-    self.iter = iter(self.dataset)
-    self.num_batches = num_batches
-
-  def __len__(self):
-    return self.num_batches
-
-  def __getitem__(self, idx):
-    return next(self.iter)
-
 def data_loader_cc(train_filename, val_filename, num_workers, batch_size):
   # Epoch and validation sizes are arbitrary
   epoch_size = 100000000
   val_size = 1000000
-  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, batch_size, num_workers=num_workers)
-  val_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, val_filename, batch_size)
+  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, train_filename, batch_size, num_workers=num_workers)
+  val_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, val_filename, batch_size)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
-  train = DataLoader(FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
-  val = DataLoader(FixedNumBatchesDataset(val_infinite, (val_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
+  train = DataLoader(nnue_dataset.FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
+  val = DataLoader(nnue_dataset.FixedNumBatchesDataset(val_infinite, (val_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
   return train, val
 
 def data_loader_py(train_filename, val_filename, batch_size):
