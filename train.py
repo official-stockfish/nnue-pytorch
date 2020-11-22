@@ -65,7 +65,8 @@ def main():
   print('Using log dir {}'.format(logdir), flush=True)
 
   tb_logger = pl_loggers.TensorBoardLogger(logdir)
-  trainer = pl.Trainer.from_argparse_args(args, logger=tb_logger)
+  checkpoint_callback = pl.callbacks.ModelCheckpoint(save_last=True)
+  trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback], logger=tb_logger)
   trainer.fit(nnue, train, val)
 
 if __name__ == '__main__':
