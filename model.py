@@ -90,11 +90,6 @@ class NNUE(pl.LightningModule):
       'losses' : [self.loss_fn(q=q, t=t, p=p) / len(self.devices) for q,t,p in zip(qs, ts, ps)]
       }
 
-    # MSE Loss function for debugging
-    # Scale score by 600.0 to match the expected NNUE scaling factor
-    # output = self(us, them, white, black) * 600.0
-    # loss = F.mse_loss(output, score)
-
   def step_end_(self, batch_parts, loss_type, do_optimization=False):
     losses = batch_parts['losses']
 
