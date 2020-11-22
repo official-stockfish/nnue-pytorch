@@ -114,7 +114,7 @@ class NNUE(pl.LightningModule):
 
       self.optimizer.step()
 
-    loss = torch.tensor([sum(loss.item() for loss in losses)])
+    loss = sum([loss.to(device=self.main_device, non_blocking=True) for loss in losses])
     self.log(loss_type, loss)
     return loss
 
