@@ -37,12 +37,12 @@ def fuse_bn(linear, bn):
   beta = bn.weight
   gamma = bn.bias
   b = linear.bias
-  w = w * (beta / var_sqrt).reshape([4096, 1])
+  w = w * (beta / var_sqrt).reshape([linear.out_features, 1])
   b = (b - mean) / var_sqrt * beta + gamma
 
-  fused_linear = nn.Linear(linear.in_features, linear.out_features)
-  fused_linear.weight = nn.Parameter(w)
-  fused_linear.bias = nn.Parameter(b)
+  fused_linear = torch.nn.Linear(linear.in_features, linear.out_features)
+  fused_linear.weight = torch.nn.Parameter(w)
+  fused_linear.bias = torch.nn.Parameter(b)
   return fused_linear
 
 def fuse_bn_model(model):
@@ -56,6 +56,7 @@ class NNUEWriter():
   """
   def __init__(self, model):
     self.buf = bytearray()
+    model = fuse_bn_model(model)
 
     self.write_header()
     self.int32(0x5d69d7b8) # Feature transformer hash
