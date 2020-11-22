@@ -84,7 +84,7 @@ class NNUE(pl.LightningModule):
     ps = [(score / 600.0).sigmoid() for score in scores]
 
     return {
-      'losses' : [self.loss_fn(q=q, t=t, p=p) for q,t,p in zip(qs, ts, ps)],
+      'losses' : [self.loss_fn(q=q, t=t, p=p) / len(self.devices) for q,t,p in zip(qs, ts, ps)],
       'local_models' : local_models
       }
 
@@ -113,7 +113,7 @@ class NNUE(pl.LightningModule):
 
       self.optimizer.step()
 
-    loss = torch.tensor([sum(loss.item() for loss in losses) / len(losses)])
+    loss = torch.tensor([sum(loss.item() for loss in losses)])
     self.log(loss_type, loss)
     return loss
 
