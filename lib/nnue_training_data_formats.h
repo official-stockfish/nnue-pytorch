@@ -6824,6 +6824,17 @@ namespace binpack
         {
             return pos.isMoveLegal(move);
         }
+
+        [[nodiscard]] bool isCapturingMove() const
+        {
+            return pos.pieceAt(move.to) != chess::Piece::none() &&
+                   pos.pieceAt(move.to).color() != pos.pieceAt(move.from).color(); // Exclude castling
+        }
+
+        [[nodiscard]] bool isInCheck() const
+        {
+            return pos.isCheck();
+        }
     };
 
     [[nodiscard]] inline TrainingDataEntry packedSfenValueToTrainingDataEntry(const nodchip::PackedSfenValue& psv)
@@ -7525,7 +7536,8 @@ namespace binpack
                                 isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk);
                             }
 
-                            m_localBuffer.emplace_back(e);
+                            if (!e.isCapturingMove() && !e.isInCheck())
+                                m_localBuffer.emplace_back(e);
                         }
                         else
                         {
@@ -7547,7 +7559,8 @@ namespace binpack
                                 isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk);
                             }
 
-                            m_localBuffer.emplace_back(e);
+                            if (!e.isCapturingMove() && !e.isInCheck())
+                                m_localBuffer.emplace_back(e);
                         }
 
                         if (isEnd || m_stopFlag.load())
