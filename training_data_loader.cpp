@@ -196,8 +196,8 @@ struct Stream : AnyStream
 {
     using StorageType = StorageT;
 
-    Stream(int concurrency, const char* filename, bool cyclic) :
-        m_stream(training_data::open_sfen_input_file_parallel(concurrency, filename, cyclic))
+    Stream(int concurrency, const char* filename, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate) :
+        m_stream(training_data::open_sfen_input_file_parallel(concurrency, filename, cyclic, skipPredicate))
     {
     }
 
@@ -212,8 +212,8 @@ struct AsyncStream : Stream<StorageT>
 {
     using BaseType = Stream<StorageT>;
 
-    AsyncStream(int concurrency, const char* filename, bool cyclic) :
-        BaseType(1, filename, cyclic)
+    AsyncStream(int concurrency, const char* filename, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate) :
+        BaseType(1, filename, cyclic, skipPredicate)
     {
     }
 
@@ -239,14 +239,15 @@ struct FeaturedBatchStream : Stream<StorageT>
 
     static constexpr int num_feature_threads_per_reading_thread = 2;
 
-    FeaturedBatchStream(int concurrency, const char* filename, int batch_size, bool cyclic) :
+    FeaturedBatchStream(int concurrency, const char* filename, int batch_size, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate) :
         BaseType(
             std::max(
                 1,
                 concurrency / num_feature_threads_per_reading_thread
             ),
             filename,
-            cyclic
+            cyclic,
+            skipPredicate
         ),
         m_concurrency(concurrency),
         m_batch_size(batch_size)
@@ -358,16 +359,24 @@ private:
 
 extern "C" {
 
-    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic)
+    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered)
     {
+        std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr;
+        if (filtered)
+        {
+            skipPredicate = [](const TrainingDataEntry& e){
+                return e.isCapturingMove() || e.isInCheck();
+            };
+        }
+
         std::string_view feature_set(feature_set_c);
         if (feature_set == "HalfKP")
         {
-            return new FeaturedBatchStream<FeatureSet<HalfKP>, SparseBatch>(concurrency, filename, batch_size, cyclic);
+            return new FeaturedBatchStream<FeatureSet<HalfKP>, SparseBatch>(concurrency, filename, batch_size, cyclic, skipPredicate);
         }
         else if (feature_set == "HalfKPFactorized")
         {
-            return new FeaturedBatchStream<FeatureSet<HalfKPFactorized>, SparseBatch>(concurrency, filename, batch_size, cyclic);
+            return new FeaturedBatchStream<FeatureSet<HalfKPFactorized>, SparseBatch>(concurrency, filename, batch_size, cyclic, skipPredicate);
         }
         fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
         return nullptr;
@@ -395,7 +404,7 @@ extern "C" {
 
 int main()
 {
-    auto stream = create_sparse_batch_stream("HalfKP", 4, "10m_d3_q_2.binpack", 8192, true);
+    auto stream = create_sparse_batch_stream("HalfKP", 4, "10m_d3_q_2.binpack", 8192, true, false);
     auto t0 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < 1000; ++i)
     {
