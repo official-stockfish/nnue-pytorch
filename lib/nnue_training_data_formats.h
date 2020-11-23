@@ -7497,10 +7497,16 @@ namespace binpack
     {
         static constexpr std::size_t chunkSize = suggestedChunkSize;
 
-        CompressedTrainingDataEntryParallelReader(int concurrency, std::string path, std::ios_base::openmode om = std::ios_base::app) :
+        CompressedTrainingDataEntryParallelReader(
+            int concurrency,
+            std::string path,
+            std::ios_base::openmode om = std::ios_base::app,
+            std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr
+        ) :
             m_concurrency(concurrency),
             m_inputFile(path, om),
-            m_bufferOffset(0)
+            m_bufferOffset(0),
+            m_skipPredicate(std::move(skipPredicate))
         {
             m_numRunningWorkers.store(0);
             if (!m_inputFile.hasNextChunk())
@@ -7536,7 +7542,7 @@ namespace binpack
                                 isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk);
                             }
 
-                            if (!e.isCapturingMove() && !e.isInCheck())
+                            if (!m_skipPredicate || !m_skipPredicate(e))
                                 m_localBuffer.emplace_back(e);
                         }
                         else
@@ -7559,7 +7565,7 @@ namespace binpack
                                 isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk);
                             }
 
-                            if (!e.isCapturingMove() && !e.isInCheck())
+                            if (!m_skipPredicate || !m_skipPredicate(e))
                                 m_localBuffer.emplace_back(e);
                         }
 
@@ -7686,6 +7692,7 @@ namespace binpack
         std::mutex m_fileMutex;
         std::condition_variable m_waitingBufferEmpty;
         std::condition_variable m_waitingBufferFull;
+        std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
 
         std::vector<std::thread> m_workers;
 

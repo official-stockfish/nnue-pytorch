@@ -50,7 +50,8 @@ class TrainingDataProvider:
         filename,
         cyclic,
         num_workers,
-        batch_size=None):
+        batch_size=None,
+        filtered=False):
 
         self.feature_set = feature_set.encode('utf-8')
         self.create_stream = create_stream
@@ -61,11 +62,12 @@ class TrainingDataProvider:
         self.cyclic = cyclic
         self.num_workers = num_workers
         self.batch_size = batch_size
+        self.filtered = filtered
 
         if batch_size:
-            self.stream = self.create_stream(self.feature_set, self.num_workers, self.filename, batch_size, cyclic)
+            self.stream = self.create_stream(self.feature_set, self.num_workers, self.filename, batch_size, cyclic, filtered)
         else:
-            self.stream = self.create_stream(self.feature_set, self.num_workers, self.filename, cyclic)
+            self.stream = self.create_stream(self.feature_set, self.num_workers, self.filename, cyclic, filtered)
 
     def __iter__(self):
         return self
@@ -85,6 +87,7 @@ class TrainingDataProvider:
 
 create_sparse_batch_stream = dll.create_sparse_batch_stream
 create_sparse_batch_stream.restype = ctypes.c_void_p
+create_sparse_batch_stream.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_bool, ctypes.c_bool]
 destroy_sparse_batch_stream = dll.destroy_sparse_batch_stream
 destroy_sparse_batch_stream.argtypes = [ctypes.c_void_p]
 
@@ -94,7 +97,7 @@ fetch_next_sparse_batch.argtypes = [ctypes.c_void_p]
 destroy_sparse_batch = dll.destroy_sparse_batch
 
 class SparseBatchProvider(TrainingDataProvider):
-    def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1):
+    def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1, filtered=False):
         super(SparseBatchProvider, self).__init__(
             feature_set,
             create_sparse_batch_stream,
@@ -104,19 +107,21 @@ class SparseBatchProvider(TrainingDataProvider):
             filename,
             cyclic,
             num_workers,
-            batch_size)
+            batch_size,
+            filtered)
 
 class SparseBatchDataset(torch.utils.data.IterableDataset):
-  def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1):
+  def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1, filtered=False):
     super(SparseBatchDataset).__init__()
     self.feature_set = feature_set
     self.filename = filename
     self.batch_size = batch_size
     self.cyclic = cyclic
     self.num_workers = num_workers
+    self.filtered = filtered
 
   def __iter__(self):
-    return SparseBatchProvider(self.feature_set, self.filename, self.batch_size, cyclic=self.cyclic, num_workers=self.num_workers)
+    return SparseBatchProvider(self.feature_set, self.filename, self.batch_size, cyclic=self.cyclic, num_workers=self.num_workers, filtered=self.filtered)
 
 class FixedNumBatchesDataset(Dataset):
   def __init__(self, dataset, num_batches):
