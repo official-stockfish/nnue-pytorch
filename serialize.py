@@ -48,6 +48,7 @@ def fuse_bn(linear, bn):
 def fuse_bn_model(model):
   model.input = fuse_bn(model.input, model.bn_input)
   model.l1 = fuse_bn(model.l1, model.bn_l1)
+  model.l2 = fuse_bn(model.l2, model.bn_l2)
   return model
 
 def ascii_hist(name, x, bins=6):
