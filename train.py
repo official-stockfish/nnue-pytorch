@@ -8,29 +8,16 @@ from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
-class FixedNumBatchesDataset(Dataset):
-  def __init__(self, dataset, num_batches):
-    super(FixedNumBatchesDataset, self).__init__()
-    self.dataset = dataset;
-    self.iter = iter(self.dataset)
-    self.num_batches = num_batches
-
-  def __len__(self):
-    return self.num_batches
-
-  def __getitem__(self, idx):
-    return next(self.iter)
-
-def data_loader_cc(train_filename, val_filename, num_workers, batch_size):
+def data_loader_cc(train_filename, val_filename, num_workers, batch_size, filtered):
   # Epoch and validation sizes are arbitrary
   epoch_size = 100000000
   val_size = 1000000
-  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, train_filename, batch_size, num_workers=num_workers)
-  val_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, val_filename, batch_size)
+  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, train_filename, batch_size, num_workers=num_workers, filtered=filtered)
+  val_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, val_filename, batch_size, filtered=filtered)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
-  train = DataLoader(FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
-  val = DataLoader(FixedNumBatchesDataset(val_infinite, (val_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
+  train = DataLoader(nnue_dataset.FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
+  val = DataLoader(nnue_dataset.FixedNumBatchesDataset(val_infinite, (val_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
   return train, val
 
 def data_loader_py(train_filename, val_filename, batch_size):
@@ -49,6 +36,7 @@ def main():
   parser.add_argument("--batch-size", default=-1, type=int, dest='batch_size', help="Number of positions per batch / per iteration. Default on GPU = 8192 on CPU = 128.")
   parser.add_argument("--threads", default=-1, type=int, dest='threads', help="Number of torch threads to use. Default automatic (cores) .")
   parser.add_argument("--seed", default=42, type=int, dest='seed', help="torch seed to use.")
+  parser.add_argument("--smart-fen-skipping", action='store_true', dest='smart_fen_skipping', help="If enabled positions that are bad training targets will be skipped during loading. Default: False")
   args = parser.parse_args()
 
   nnue = M.NNUE(halfkp, lambda_=args.lambda_)
@@ -63,6 +51,8 @@ def main():
     batch_size = 128 if args.gpus == 0 else 8192
   print('Using batch size {}'.format(batch_size))
 
+  print('Smart fen skipping: {}'.format(args.smart_fen_skipping))
+
   if args.threads > 0:
     print('limiting torch to {} threads.'.format(args.threads))
     t_set_num_threads(args.threads)
@@ -72,13 +62,14 @@ def main():
     train, val = data_loader_py(args.train, args.val, batch_size)
   else:
     print('Using c++ data loader')
-    train, val = data_loader_cc(args.train, args.val, args.num_workers, batch_size)
+    train, val = data_loader_cc(args.train, args.val, args.num_workers, batch_size, args.smart_fen_skipping)
 
   logdir = args.default_root_dir if args.default_root_dir else 'logs/'
   print('Using log dir {}'.format(logdir), flush=True)
 
   tb_logger = pl_loggers.TensorBoardLogger(logdir)
-  trainer = pl.Trainer.from_argparse_args(args, logger=tb_logger)
+  checkpoint_callback = pl.callbacks.ModelCheckpoint(save_last=True)
+  trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback], logger=tb_logger)
   trainer.fit(nnue, train, val)
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 import argparse
-import nnue_bin_dataset
+import nnue_dataset
+import halfkp
 import torch
 import model as M
 import pytorch_lightning as pl
@@ -25,18 +26,23 @@ def compute_mse(nnue, data):
 def main():
   parser = argparse.ArgumentParser(description="Runs evaluation for a model.")
   parser.add_argument("model", help="Source file (can be .ckpt, .pt or .nnue)")
-  parser.add_argument("--dataset", default="d8_100000.bin", help="Dataset to evaluate on (.bin)")
+  parser.add_argument("--dataset", default="d8_128000_21865.binpack", help="Dataset to evaluate on (.bin)")
   args = parser.parse_args()
 
   if args.model.endswith(".pt"):
     nnue = torch.load(args.model, map_location=torch.device('cpu'))
   else:
     nnue = M.NNUE.load_from_checkpoint(args.model)
-  data = nnue_bin_dataset.NNUEBinData(args.dataset)
 
-  #trainer = pl.Trainer()
-  #trainer.test(nnue, DataLoader(data, batch_size=128))
-  print('MSE:', compute_mse(nnue, data))
+  val_infinite = nnue_dataset.SparseBatchDataset(halfkp.NAME, args.dataset, 8000)
+  data = nnue_dataset.FixedNumBatchesDataset(val_infinite, 16)
+
+  trainer = pl.Trainer(progress_bar_refresh_rate=0)
+  for i in range(21):
+    nnue.lambda_ = i / 20.0
+    loss = trainer.test(nnue, data, verbose=False)
+    print(nnue.lambda_, ",", loss[0]['test_loss'])
+  #print('MSE:', compute_mse(nnue, data))
 
 if __name__ == '__main__':
   main()

@@ -6824,6 +6824,17 @@ namespace binpack
         {
             return pos.isMoveLegal(move);
         }
+
+        [[nodiscard]] bool isCapturingMove() const
+        {
+            return pos.pieceAt(move.to) != chess::Piece::none() &&
+                   pos.pieceAt(move.to).color() != pos.pieceAt(move.from).color(); // Exclude castling
+        }
+
+        [[nodiscard]] bool isInCheck() const
+        {
+            return pos.isCheck();
+        }
     };
 
     [[nodiscard]] inline TrainingDataEntry packedSfenValueToTrainingDataEntry(const nodchip::PackedSfenValue& psv)
@@ -7486,10 +7497,16 @@ namespace binpack
     {
         static constexpr std::size_t chunkSize = suggestedChunkSize;
 
-        CompressedTrainingDataEntryParallelReader(int concurrency, std::string path, std::ios_base::openmode om = std::ios_base::app) :
+        CompressedTrainingDataEntryParallelReader(
+            int concurrency,
+            std::string path,
+            std::ios_base::openmode om = std::ios_base::app,
+            std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr
+        ) :
             m_concurrency(concurrency),
             m_inputFile(path, om),
-            m_bufferOffset(0)
+            m_bufferOffset(0),
+            m_skipPredicate(std::move(skipPredicate))
         {
             m_numRunningWorkers.store(0);
             if (!m_inputFile.hasNextChunk())
@@ -7525,7 +7542,8 @@ namespace binpack
                                 isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk);
                             }
 
-                            m_localBuffer.emplace_back(e);
+                            if (!m_skipPredicate || !m_skipPredicate(e))
+                                m_localBuffer.emplace_back(e);
                         }
                         else
                         {
@@ -7547,7 +7565,8 @@ namespace binpack
                                 isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk);
                             }
 
-                            m_localBuffer.emplace_back(e);
+                            if (!m_skipPredicate || !m_skipPredicate(e))
+                                m_localBuffer.emplace_back(e);
                         }
 
                         if (isEnd || m_stopFlag.load())
@@ -7673,6 +7692,7 @@ namespace binpack
         std::mutex m_fileMutex;
         std::condition_variable m_waitingBufferEmpty;
         std::condition_variable m_waitingBufferFull;
+        std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
 
         std::vector<std::thread> m_workers;
 

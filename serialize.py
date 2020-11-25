@@ -50,6 +50,18 @@ def fuse_bn_model(model):
   model.l1 = fuse_bn(model.l1, model.bn_l1)
   return model
 
+def ascii_hist(name, x, bins=6):
+  N,X = numpy.histogram(x, bins=bins)
+  total = 1.0*len(x)
+  width = 50
+  nmax = N.max()
+
+  print(name)
+  for (xi, n) in zip(X,N):
+    bar = '#'*int(n*1.0*width/nmax)
+    xi = '{0: <8.4g}'.format(xi).ljust(10)
+    print('{0}| {1}'.format(xi,bar))
+
 class NNUEWriter():
   """
   All values are stored in little endian.
@@ -79,13 +91,13 @@ class NNUEWriter():
     # int16 weight = round(x * 127)
     bias = layer.bias.data
     bias = bias.mul(127).round().to(torch.int16)
-    print('ft bias:', numpy.histogram(bias.numpy()))
+    ascii_hist('ft bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
 
     weight = layer.weight.data
     weight = coalesce_weights(weight)
     weight = weight.mul(127).round().to(torch.int16)
-    print('ft weight:', numpy.histogram(weight.numpy()))
+    ascii_hist('ft weight:', weight.numpy())
     # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
     self.buf.extend(weight.transpose(0, 1).flatten().numpy().tobytes())
 
@@ -104,11 +116,11 @@ class NNUEWriter():
     # int8 weight = round(x * kWeightScale)
     bias = layer.bias.data
     bias = bias.mul(kBiasScale).round().to(torch.int32)
-    print('fc bias:', numpy.histogram(bias.numpy()))
+    ascii_hist('fc bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
     weight = layer.weight.data
     weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
-    print('fc weight:', numpy.histogram(weight.numpy()))
+    ascii_hist('fc weight:', weight.numpy())
     # Stored as [outputs][inputs], so we can flatten
     self.buf.extend(weight.flatten().numpy().tobytes())
 

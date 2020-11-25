@@ -22,41 +22,28 @@
 using namespace binpack;
 using namespace chess;
 
-struct HalfKP {
+static Square orient(Color color, Square sq)
+{
+    if (color == Color::White)
+    {
+        return sq;
+    }
+    else
+    {
+        // IMPORTANT: for now we use rotate180 instead of rank flip
+        //            for compatibility with the stockfish master branch.
+        //            Note that this is inconsistent with nodchip/master.
+        return sq.flippedVertically().flippedHorizontally();
+    }
+}
 
+struct HalfKP {
     static constexpr int NUM_SQ = 64;
     static constexpr int NUM_PT = 10;
     static constexpr int NUM_PLANES = (NUM_SQ * NUM_PT + 1);
-    static constexpr int HALFKP_INPUTS = NUM_PLANES * NUM_SQ;
+    static constexpr int INPUTS = NUM_PLANES * NUM_SQ;
 
-    // Factorized features
-    static constexpr int K_INPUTS = NUM_SQ;
-    static constexpr int PIECE_INPUTS = NUM_SQ * NUM_PT;
-
-    static constexpr int INPUTS = HALFKP_INPUTS + K_INPUTS + PIECE_INPUTS;
-
-    // Factorized features
-    static constexpr int MAX_K_FEATURES = 1;
-    static constexpr int MAX_PIECE_FEATURES = 32;
-    static constexpr int MAX_FACTOR_FEATURES = MAX_K_FEATURES + MAX_PIECE_FEATURES;
-
-    // HalfKP features
-    static constexpr int MAX_ACTIVE_FEATURES = 32 + MAX_FACTOR_FEATURES;
-
-    static Square orient(Color color, Square sq)
-    {
-        if (color == Color::White)
-        {
-            return sq;
-        }
-        else
-        {
-            // IMPORTANT: for now we use rotate180 instead of rank flip
-            //            for compatibility with the stockfish master branch.
-            //            Note that this is inconsistent with nodchip/master.
-            return sq.flippedVertically().flippedHorizontally();
-        }
-    }
+    static constexpr int MAX_ACTIVE_FEATURES = 32;
 
     static int feature_index(Color color, Square ksq, Square sq, Piece p)
     {
@@ -64,7 +51,7 @@ struct HalfKP {
         return 1 + static_cast<int>(orient(color, sq)) + p_idx * NUM_SQ + static_cast<int>(ksq) * NUM_PLANES;
     }
 
-    static void fill_features_sparse(int i, const TrainingDataEntry& e, int* features, int& counter, Color color)
+    static int fill_features_sparse(int i, const TrainingDataEntry& e, int* features, int& counter, Color color)
     {
         auto& pos = e.pos;
         auto pieces = pos.piecesBB() & ~(pos.piecesBB(Piece(PieceType::King, Color::White)) | pos.piecesBB(Piece(PieceType::King, Color::Black)));
@@ -77,15 +64,34 @@ struct HalfKP {
             features[idx] = i;
             features[idx + 1] = feature_index(color, orient(color, ksq), sq, p);
         }
-        int offset = HALFKP_INPUTS;
+        return INPUTS;
+    }
+};
+
+struct HalfKPFactorized {
+    // Factorized features
+    static constexpr int K_INPUTS = HalfKP::NUM_SQ;
+    static constexpr int PIECE_INPUTS = HalfKP::NUM_SQ * HalfKP::NUM_PT;
+    static constexpr int INPUTS = HalfKP::INPUTS + K_INPUTS + PIECE_INPUTS;
+
+    static constexpr int MAX_K_FEATURES = 1;
+    static constexpr int MAX_PIECE_FEATURES = 32;
+    static constexpr int MAX_ACTIVE_FEATURES = HalfKP::MAX_ACTIVE_FEATURES + MAX_K_FEATURES + MAX_PIECE_FEATURES;
+
+    static void fill_features_sparse(int i, const TrainingDataEntry& e, int* features, int& counter, Color color)
+    {
+        int offset = HalfKP::fill_features_sparse(i, e, features, counter, color);
+        auto& pos = e.pos;
         {
             // king square factor
+            auto ksq = pos.kingSquare(color);
             int idx = counter * 2;
             counter += 1;
             features[idx] = i;
             features[idx + 1] = offset + static_cast<int>(orient(color, ksq));
         }
         offset += K_INPUTS;
+        auto pieces = pos.piecesBB() & ~(pos.piecesBB(Piece(PieceType::King, Color::White)) | pos.piecesBB(Piece(PieceType::King, Color::Black)));
         for(Square sq : pieces)
         {
             // pieces (without king included).
@@ -94,10 +100,11 @@ struct HalfKP {
             counter += 1;
             features[idx] = i;
             auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-            features[idx + 1] = offset + (p_idx * NUM_SQ) + static_cast<int>(orient(color, sq));
+            features[idx + 1] = offset + (p_idx * HalfKP::NUM_SQ) + static_cast<int>(orient(color, sq));
         }
     }
 };
+
 
 template <typename T, typename... Ts>
 struct FeatureSet
@@ -189,8 +196,8 @@ struct Stream : AnyStream
 {
     using StorageType = StorageT;
 
-    Stream(int concurrency, const char* filename, bool cyclic) :
-        m_stream(training_data::open_sfen_input_file_parallel(concurrency, filename, cyclic))
+    Stream(int concurrency, const char* filename, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate) :
+        m_stream(training_data::open_sfen_input_file_parallel(concurrency, filename, cyclic, skipPredicate))
     {
     }
 
@@ -205,8 +212,8 @@ struct AsyncStream : Stream<StorageT>
 {
     using BaseType = Stream<StorageT>;
 
-    AsyncStream(int concurrency, const char* filename, bool cyclic) :
-        BaseType(1, filename, cyclic)
+    AsyncStream(int concurrency, const char* filename, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate) :
+        BaseType(1, filename, cyclic, skipPredicate)
     {
     }
 
@@ -232,14 +239,15 @@ struct FeaturedBatchStream : Stream<StorageT>
 
     static constexpr int num_feature_threads_per_reading_thread = 2;
 
-    FeaturedBatchStream(int concurrency, const char* filename, int batch_size, bool cyclic) :
+    FeaturedBatchStream(int concurrency, const char* filename, int batch_size, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate) :
         BaseType(
             std::max(
                 1,
                 concurrency / num_feature_threads_per_reading_thread
             ),
             filename,
-            cyclic
+            cyclic,
+            skipPredicate
         ),
         m_concurrency(concurrency),
         m_batch_size(batch_size)
@@ -349,24 +357,29 @@ private:
     std::vector<std::thread> m_workers;
 };
 
-template <template <typename, typename> typename StreamT, typename StorageT, typename... ArgsTs>
-StreamT<FeatureSet<HalfKP>, StorageT>* create_stream(std::string feature_set, ArgsTs&&... args)
-{
-    if (feature_set == "HalfKP")
-    {
-        return new StreamT<FeatureSet<HalfKP>, StorageT>(std::forward<ArgsTs>(args)...);
-    }
-    else
-    {
-        return nullptr;
-    }
-}
-
 extern "C" {
 
-    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set, int concurrency, const char* filename, int batch_size, bool cyclic)
+    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered)
     {
-        return create_stream<FeaturedBatchStream, SparseBatch>(feature_set, concurrency, filename, batch_size, cyclic);
+        std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr;
+        if (filtered)
+        {
+            skipPredicate = [](const TrainingDataEntry& e){
+                return e.isCapturingMove() || e.isInCheck();
+            };
+        }
+
+        std::string_view feature_set(feature_set_c);
+        if (feature_set == "HalfKP")
+        {
+            return new FeaturedBatchStream<FeatureSet<HalfKP>, SparseBatch>(concurrency, filename, batch_size, cyclic, skipPredicate);
+        }
+        else if (feature_set == "HalfKPFactorized")
+        {
+            return new FeaturedBatchStream<FeatureSet<HalfKPFactorized>, SparseBatch>(concurrency, filename, batch_size, cyclic, skipPredicate);
+        }
+        fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
+        return nullptr;
     }
 
     EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream)
@@ -391,7 +404,7 @@ extern "C" {
 
 int main()
 {
-    auto stream = create_sparse_batch_stream("HalfKP", 4, "10m_d3_q_2.binpack", 8192, true);
+    auto stream = create_sparse_batch_stream("HalfKP", 4, "10m_d3_q_2.binpack", 8192, true, false);
     auto t0 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < 1000; ++i)
     {
