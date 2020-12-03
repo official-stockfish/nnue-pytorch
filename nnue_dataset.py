@@ -39,6 +39,8 @@ class SparseBatch(ctypes.Structure):
         black_values = torch.from_numpy(np.ctypeslib.as_array(self.black_values, shape=(self.num_active_black_features,))).pin_memory().cuda(non_blocking=True)
         white = torch._sparse_coo_tensor_unsafe(iw.long(), white_values, (self.size, self.num_inputs))
         black = torch._sparse_coo_tensor_unsafe(ib.long(), black_values, (self.size, self.num_inputs))
+        white._coalesced_(True)
+        black._coalesced_(True)
         return us, them, white, black, outcome, score
 
 SparseBatchPtr = ctypes.POINTER(SparseBatch)

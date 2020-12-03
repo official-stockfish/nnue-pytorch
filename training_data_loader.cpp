@@ -61,12 +61,22 @@ struct HalfKP {
         auto& pos = e.pos;
         auto pieces = pos.piecesBB() & ~(pos.piecesBB(Piece(PieceType::King, Color::White)) | pos.piecesBB(Piece(PieceType::King, Color::Black)));
         auto ksq = pos.kingSquare(color);
+
+        // We order the features so that the resulting sparse
+        // tensor is coalesced.
+        int features_unordered[32];
+        int j = 0;
         for(Square sq : pieces)
         {
             auto p = pos.pieceAt(sq);
+            features_unordered[j++] = feature_index(color, orient(color, ksq), sq, p);
+        }
+        std::sort(features_unordered, features_unordered + j);
+        for (int k = 0; k < j; ++k)
+        {
             int idx = counter * 2;
             features[idx] = i;
-            features[idx + 1] = feature_index(color, orient(color, ksq), sq, p);
+            features[idx + 1] = features_unordered[k];
             values[counter] = 1.0f;
             counter += 1;
         }
@@ -101,14 +111,25 @@ struct HalfKPFactorized {
         }
         offset += K_INPUTS;
         auto pieces = pos.piecesBB() & ~(pos.piecesBB(Piece(PieceType::King, Color::White)) | pos.piecesBB(Piece(PieceType::King, Color::Black)));
+
+        // We order the features so that the resulting sparse
+        // tensor is coalesced. Note that we can just sort
+        // the parts where values are all 1.0f and leave the
+        // halfk feature where it was.
+        int features_unordered[32];
+        int j = 0;
         for(Square sq : pieces)
         {
-            // pieces (without king included).
             auto p = pos.pieceAt(sq);
+            auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+            features_unordered[j++] = offset + (p_idx * HalfKP::NUM_SQ) + static_cast<int>(orient(color, sq));
+        }
+        std::sort(features_unordered, features_unordered + j);
+        for (int k = 0; k < j; ++k)
+        {
             int idx = counter * 2;
             features[idx] = i;
-            auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-            features[idx + 1] = offset + (p_idx * HalfKP::NUM_SQ) + static_cast<int>(orient(color, sq));
+            features[idx + 1] = features_unordered[k];
             values[counter] = 1.0f;
             counter += 1;
         }
