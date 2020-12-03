@@ -23,7 +23,9 @@ class SparseBatch(ctypes.Structure):
         ('num_active_white_features', ctypes.c_int),
         ('num_active_black_features', ctypes.c_int),
         ('white', ctypes.POINTER(ctypes.c_int)),
-        ('black', ctypes.POINTER(ctypes.c_int))
+        ('black', ctypes.POINTER(ctypes.c_int)),
+        ('white_values', ctypes.POINTER(ctypes.c_float)),
+        ('black_values', ctypes.POINTER(ctypes.c_float))
     ]
 
     def get_tensors(self):
@@ -33,8 +35,10 @@ class SparseBatch(ctypes.Structure):
         score = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))).clone()
         iw = torch.from_numpy(np.ctypeslib.as_array(self.white, shape=(self.num_active_white_features, 2)).transpose()).clone()
         ib = torch.from_numpy(np.ctypeslib.as_array(self.black, shape=(self.num_active_white_features, 2)).transpose()).clone()
-        white = torch.sparse.FloatTensor(iw.long(), torch.ones((self.num_active_white_features), dtype=torch.float32), (self.size, self.num_inputs))
-        black = torch.sparse.FloatTensor(ib.long(), torch.ones((self.num_active_black_features), dtype=torch.float32), (self.size, self.num_inputs))
+        white_values = torch.from_numpy(np.ctypeslib.as_array(self.white_values, shape=(self.num_active_white_features,))).clone()
+        black_values = torch.from_numpy(np.ctypeslib.as_array(self.black_values, shape=(self.num_active_black_features,))).clone()
+        white = torch.sparse.FloatTensor(iw.long(), white_values, (self.size, self.num_inputs))
+        black = torch.sparse.FloatTensor(ib.long(), black_values, (self.size, self.num_inputs))
         return us, them, white, black, outcome, score
 
 SparseBatchPtr = ctypes.POINTER(SparseBatch)
