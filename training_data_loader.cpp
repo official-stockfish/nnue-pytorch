@@ -56,7 +56,7 @@ struct HalfKP {
         return 1 + static_cast<int>(orient(color, sq)) + p_idx * NUM_SQ + static_cast<int>(ksq) * NUM_PLANES;
     }
 
-    static int fill_features_sparse(int i, const TrainingDataEntry& e, int* features, float* values, int& counter, Color color)
+    static int fill_features_sparse(int i, const TrainingDataEntry& e, int64_t* features, int stride, float* values, int& counter, Color color)
     {
         auto& pos = e.pos;
         auto pieces = pos.piecesBB() & ~(pos.piecesBB(Piece(PieceType::King, Color::White)) | pos.piecesBB(Piece(PieceType::King, Color::Black)));
@@ -74,9 +74,8 @@ struct HalfKP {
         std::sort(features_unordered, features_unordered + j);
         for (int k = 0; k < j; ++k)
         {
-            int idx = counter * 2;
-            features[idx] = i;
-            features[idx + 1] = features_unordered[k];
+            features[counter] = i;
+            features[counter + stride] = features_unordered[k];
             values[counter] = 1.0f;
             counter += 1;
         }
@@ -94,18 +93,17 @@ struct HalfKPFactorized {
     static constexpr int MAX_PIECE_FEATURES = 32;
     static constexpr int MAX_ACTIVE_FEATURES = HalfKP::MAX_ACTIVE_FEATURES + MAX_K_FEATURES + MAX_PIECE_FEATURES;
 
-    static void fill_features_sparse(int i, const TrainingDataEntry& e, int* features, float* values, int& counter, Color color)
+    static void fill_features_sparse(int i, const TrainingDataEntry& e, int64_t* features, int stride, float* values, int& counter, Color color)
     {
         auto counter_before = counter;
-        int offset = HalfKP::fill_features_sparse(i, e, features, values, counter, color);
+        int offset = HalfKP::fill_features_sparse(i, e, features, stride, values, counter, color);
         auto& pos = e.pos;
         {
             auto num_added_features = counter - counter_before;
             // king square factor
             auto ksq = pos.kingSquare(color);
-            int idx = counter * 2;
-            features[idx] = i;
-            features[idx + 1] = offset + static_cast<int>(orient(color, ksq));
+            features[counter] = i;
+            features[counter + stride] = offset + static_cast<int>(orient(color, ksq));
             values[counter] = static_cast<float>(num_added_features);
             counter += 1;
         }
@@ -127,9 +125,8 @@ struct HalfKPFactorized {
         std::sort(features_unordered, features_unordered + j);
         for (int k = 0; k < j; ++k)
         {
-            int idx = counter * 2;
-            features[idx] = i;
-            features[idx + 1] = features_unordered[k];
+            features[counter] = i;
+            features[counter + stride] = features_unordered[k];
             values[counter] = 1.0f;
             counter += 1;
         }
@@ -145,9 +142,9 @@ struct FeatureSet
     static constexpr int INPUTS = T::INPUTS;
     static constexpr int MAX_ACTIVE_FEATURES = T::MAX_ACTIVE_FEATURES;
 
-    static void fill_features_sparse(int i, const TrainingDataEntry& e, int* features, float* values, int& counter, Color color)
+    static void fill_features_sparse(int i, const TrainingDataEntry& e, int64_t* features, int stride, float* values, int& counter, Color color)
     {
-        T::fill_features_sparse(i, e, features, values, counter, color);
+        T::fill_features_sparse(i, e, features, stride, values, counter, color);
     }
 };
 
@@ -163,21 +160,23 @@ struct SparseBatch
         is_white = new float[size];
         outcome = new float[size];
         score = new float[size];
-        white = new int[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES * 2];
-        black = new int[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES * 2];
+        white = new int64_t[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES * 2];
+        black = new int64_t[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES * 2];
         white_values = new float[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES];
         black_values = new float[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES];
 
         num_active_white_features = 0;
         num_active_black_features = 0;
 
-        std::memset(white, 0, size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES * 2 * sizeof(int));
-        std::memset(black, 0, size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES * 2 * sizeof(int));
-
         for(int i = 0; i < entries.size(); ++i)
         {
             fill_entry(FeatureSet<Ts...>{}, i, entries[i]);
         }
+
+        // Cheaper than a transposition later on.
+        const int stride = size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES;
+        std::memmove(white + num_active_white_features, white + stride, sizeof(int64_t) * num_active_white_features);
+        std::memmove(black + num_active_black_features, black + stride, sizeof(int64_t) * num_active_black_features);
     }
 
     int num_inputs;
@@ -188,8 +187,8 @@ struct SparseBatch
     float* score;
     int num_active_white_features;
     int num_active_black_features;
-    int* white;
-    int* black;
+    int64_t* white;
+    int64_t* black;
     float* white_values;
     float* black_values;
 
@@ -218,8 +217,10 @@ private:
     template <typename... Ts>
     void fill_features(FeatureSet<Ts...>, int i, const TrainingDataEntry& e)
     {
-        FeatureSet<Ts...>::fill_features_sparse(i, e, white, white_values, num_active_white_features, Color::White);
-        FeatureSet<Ts...>::fill_features_sparse(i, e, black, black_values, num_active_black_features, Color::Black);
+        // Cheaper than a transposition later on.
+        const int stride = size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES;
+        FeatureSet<Ts...>::fill_features_sparse(i, e, white, stride, white_values, num_active_white_features, Color::White);
+        FeatureSet<Ts...>::fill_features_sparse(i, e, black, stride, black_values, num_active_black_features, Color::Black);
     }
 };
 

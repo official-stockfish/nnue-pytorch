@@ -22,23 +22,23 @@ class SparseBatch(ctypes.Structure):
         ('score', ctypes.POINTER(ctypes.c_float)),
         ('num_active_white_features', ctypes.c_int),
         ('num_active_black_features', ctypes.c_int),
-        ('white', ctypes.POINTER(ctypes.c_int)),
-        ('black', ctypes.POINTER(ctypes.c_int)),
+        ('white', ctypes.POINTER(ctypes.c_longlong)),
+        ('black', ctypes.POINTER(ctypes.c_longlong)),
         ('white_values', ctypes.POINTER(ctypes.c_float)),
         ('black_values', ctypes.POINTER(ctypes.c_float))
     ]
 
     def get_tensors(self):
-        us = torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))).pin_memory().cuda(non_blocking=True)
+        us = torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))).pin_memory()
         them = 1.0 - us
-        outcome = torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))).pin_memory().cuda(non_blocking=True)
-        score = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))).pin_memory().cuda(non_blocking=True)
-        iw = torch.from_numpy(np.ctypeslib.as_array(self.white, shape=(self.num_active_white_features, 2)).transpose()).pin_memory().cuda(non_blocking=True)
-        ib = torch.from_numpy(np.ctypeslib.as_array(self.black, shape=(self.num_active_white_features, 2)).transpose()).pin_memory().cuda(non_blocking=True)
-        white_values = torch.from_numpy(np.ctypeslib.as_array(self.white_values, shape=(self.num_active_white_features,))).pin_memory().cuda(non_blocking=True)
-        black_values = torch.from_numpy(np.ctypeslib.as_array(self.black_values, shape=(self.num_active_black_features,))).pin_memory().cuda(non_blocking=True)
-        white = torch._sparse_coo_tensor_unsafe(iw.long(), white_values, (self.size, self.num_inputs))
-        black = torch._sparse_coo_tensor_unsafe(ib.long(), black_values, (self.size, self.num_inputs))
+        outcome = torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))).pin_memory()
+        score = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))).pin_memory()
+        iw = torch.from_numpy(np.ctypeslib.as_array(self.white, shape=(2, self.num_active_white_features))).pin_memory()
+        ib = torch.from_numpy(np.ctypeslib.as_array(self.black, shape=(2, self.num_active_white_features))).pin_memory()
+        white_values = torch.from_numpy(np.ctypeslib.as_array(self.white_values, shape=(self.num_active_white_features,))).pin_memory()
+        black_values = torch.from_numpy(np.ctypeslib.as_array(self.black_values, shape=(self.num_active_black_features,))).pin_memory()
+        white = torch._sparse_coo_tensor_unsafe(iw, white_values, (self.size, self.num_inputs))
+        black = torch._sparse_coo_tensor_unsafe(ib, black_values, (self.size, self.num_inputs))
         white._coalesced_(True)
         black._coalesced_(True)
         return us, them, white, black, outcome, score
