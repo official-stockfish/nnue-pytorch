@@ -29,16 +29,16 @@ class SparseBatch(ctypes.Structure):
     ]
 
     def get_tensors(self):
-        us = torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))).clone()
+        us = torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))).pin_memory().cuda(non_blocking=True)
         them = 1.0 - us
-        outcome = torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))).clone()
-        score = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))).clone()
-        iw = torch.from_numpy(np.ctypeslib.as_array(self.white, shape=(self.num_active_white_features, 2)).transpose()).clone()
-        ib = torch.from_numpy(np.ctypeslib.as_array(self.black, shape=(self.num_active_white_features, 2)).transpose()).clone()
-        white_values = torch.from_numpy(np.ctypeslib.as_array(self.white_values, shape=(self.num_active_white_features,))).clone()
-        black_values = torch.from_numpy(np.ctypeslib.as_array(self.black_values, shape=(self.num_active_black_features,))).clone()
-        white = torch.sparse.FloatTensor(iw.long(), white_values, (self.size, self.num_inputs))
-        black = torch.sparse.FloatTensor(ib.long(), black_values, (self.size, self.num_inputs))
+        outcome = torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))).pin_memory().cuda(non_blocking=True)
+        score = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))).pin_memory().cuda(non_blocking=True)
+        iw = torch.from_numpy(np.ctypeslib.as_array(self.white, shape=(self.num_active_white_features, 2)).transpose()).pin_memory().cuda(non_blocking=True)
+        ib = torch.from_numpy(np.ctypeslib.as_array(self.black, shape=(self.num_active_white_features, 2)).transpose()).pin_memory().cuda(non_blocking=True)
+        white_values = torch.from_numpy(np.ctypeslib.as_array(self.white_values, shape=(self.num_active_white_features,))).pin_memory().cuda(non_blocking=True)
+        black_values = torch.from_numpy(np.ctypeslib.as_array(self.black_values, shape=(self.num_active_black_features,))).pin_memory().cuda(non_blocking=True)
+        white = torch._sparse_coo_tensor_unsafe(iw.long(), white_values, (self.size, self.num_inputs))
+        black = torch._sparse_coo_tensor_unsafe(ib.long(), black_values, (self.size, self.num_inputs))
         return us, them, white, black, outcome, score
 
 SparseBatchPtr = ctypes.POINTER(SparseBatch)
