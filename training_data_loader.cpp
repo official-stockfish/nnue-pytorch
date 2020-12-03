@@ -56,7 +56,7 @@ struct HalfKP {
         return 1 + static_cast<int>(orient(color, sq)) + p_idx * NUM_SQ + static_cast<int>(ksq) * NUM_PLANES;
     }
 
-    static int fill_features_sparse(int i, const TrainingDataEntry& e, int* features, int& counter, Color color)
+    static int fill_features_sparse(int i, const TrainingDataEntry& e, int* features, float* values, int& counter, Color color)
     {
         auto& pos = e.pos;
         auto pieces = pos.piecesBB() & ~(pos.piecesBB(Piece(PieceType::King, Color::White)) | pos.piecesBB(Piece(PieceType::King, Color::Black)));
@@ -65,9 +65,10 @@ struct HalfKP {
         {
             auto p = pos.pieceAt(sq);
             int idx = counter * 2;
-            counter += 1;
             features[idx] = i;
             features[idx + 1] = feature_index(color, orient(color, ksq), sq, p);
+            values[counter] = 1.0f;
+            counter += 1;
         }
         return INPUTS;
     }
@@ -83,17 +84,20 @@ struct HalfKPFactorized {
     static constexpr int MAX_PIECE_FEATURES = 32;
     static constexpr int MAX_ACTIVE_FEATURES = HalfKP::MAX_ACTIVE_FEATURES + MAX_K_FEATURES + MAX_PIECE_FEATURES;
 
-    static void fill_features_sparse(int i, const TrainingDataEntry& e, int* features, int& counter, Color color)
+    static void fill_features_sparse(int i, const TrainingDataEntry& e, int* features, float* values, int& counter, Color color)
     {
-        int offset = HalfKP::fill_features_sparse(i, e, features, counter, color);
+        auto counter_before = counter;
+        int offset = HalfKP::fill_features_sparse(i, e, features, values, counter, color);
         auto& pos = e.pos;
         {
+            auto num_added_features = counter - counter_before;
             // king square factor
             auto ksq = pos.kingSquare(color);
             int idx = counter * 2;
-            counter += 1;
             features[idx] = i;
             features[idx + 1] = offset + static_cast<int>(orient(color, ksq));
+            values[counter] = static_cast<float>(num_added_features);
+            counter += 1;
         }
         offset += K_INPUTS;
         auto pieces = pos.piecesBB() & ~(pos.piecesBB(Piece(PieceType::King, Color::White)) | pos.piecesBB(Piece(PieceType::King, Color::Black)));
@@ -102,10 +106,11 @@ struct HalfKPFactorized {
             // pieces (without king included).
             auto p = pos.pieceAt(sq);
             int idx = counter * 2;
-            counter += 1;
             features[idx] = i;
             auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
             features[idx + 1] = offset + (p_idx * HalfKP::NUM_SQ) + static_cast<int>(orient(color, sq));
+            values[counter] = 1.0f;
+            counter += 1;
         }
     }
 };
@@ -119,9 +124,9 @@ struct FeatureSet
     static constexpr int INPUTS = T::INPUTS;
     static constexpr int MAX_ACTIVE_FEATURES = T::MAX_ACTIVE_FEATURES;
 
-    static void fill_features_sparse(int i, const TrainingDataEntry& e, int* features, int& counter, Color color)
+    static void fill_features_sparse(int i, const TrainingDataEntry& e, int* features, float* values, int& counter, Color color)
     {
-        T::fill_features_sparse(i, e, features, counter, color);
+        T::fill_features_sparse(i, e, features, values, counter, color);
     }
 };
 
@@ -139,6 +144,8 @@ struct SparseBatch
         score = new float[size];
         white = new int[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES * 2];
         black = new int[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES * 2];
+        white_values = new float[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES];
+        black_values = new float[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES];
 
         num_active_white_features = 0;
         num_active_black_features = 0;
@@ -162,6 +169,8 @@ struct SparseBatch
     int num_active_black_features;
     int* white;
     int* black;
+    float* white_values;
+    float* black_values;
 
     ~SparseBatch()
     {
@@ -170,6 +179,8 @@ struct SparseBatch
         delete[] score;
         delete[] white;
         delete[] black;
+        delete[] white_values;
+        delete[] black_values;
     }
 
 private:
@@ -186,8 +197,8 @@ private:
     template <typename... Ts>
     void fill_features(FeatureSet<Ts...>, int i, const TrainingDataEntry& e)
     {
-        FeatureSet<Ts...>::fill_features_sparse(i, e, white, num_active_white_features, Color::White);
-        FeatureSet<Ts...>::fill_features_sparse(i, e, black, num_active_black_features, Color::Black);
+        FeatureSet<Ts...>::fill_features_sparse(i, e, white, white_values, num_active_white_features, Color::White);
+        FeatureSet<Ts...>::fill_features_sparse(i, e, black, black_values, num_active_black_features, Color::Black);
     }
 };
 
