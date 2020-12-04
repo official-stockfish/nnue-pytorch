@@ -38,7 +38,7 @@ def main():
   parser.add_argument("--threads", default=-1, type=int, dest='threads', help="Number of torch threads to use. Default automatic (cores) .")
   parser.add_argument("--seed", default=42, type=int, dest='seed', help="torch seed to use.")
   parser.add_argument("--smart-fen-skipping", action='store_true', dest='smart_fen_skipping', help="If enabled positions that are bad training targets will be skipped during loading. Default: False")
-  parser.add_argument("--factorizer", action='store_true', dest='factorizer', help="Enables using the factorizer for training.")
+  parser.add_argument("--enable-factorizer", dest='enable_factorizer', action='store_true', help="Enables using the factorizer for training.")
   parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
   args = parser.parse_args()
 
@@ -46,7 +46,7 @@ def main():
 
   factorizer = None
   features_name = features.Features.name
-  if args.factorizer:
+  if args.enable_factorizer:
     factorizer = features.Factorizer()
     features_name = factorizer.name
 
@@ -66,7 +66,7 @@ def main():
   print('Using batch size {}'.format(batch_size))
 
   print('Smart fen skipping: {}'.format(args.smart_fen_skipping))
-  print('Factorizer: {}'.format(args.factorizer))
+  print('Factorizer: {}'.format(args.enable_factorizer))
 
   if args.threads > 0:
     print('limiting torch to {} threads.'.format(args.threads))
