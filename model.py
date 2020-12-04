@@ -35,7 +35,9 @@ class NNUE(pl.LightningModule):
     num_inputs = self.feature_set.inputs
     if self.factorizer is not None:
       num_inputs += self.factorizer.inputs
-    self.input = nn.Linear(num_inputs, L1)
+    # Don't reinitialize the weights if they've already been set.
+    if not hasattr(self, 'input'):
+      self.input = nn.Linear(num_inputs, L1)
 
     if self.factorizer is not None:
       # Zero out the weights/biases for the factorized features
