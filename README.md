@@ -35,6 +35,11 @@ python train.py --resume_from_checkpoint <path> ...
 python train.py --gpus 1 ...
 ```
 
+## Enable factorizer
+```
+python train.py --enable-factorizer ...
+```
+
 # Export a network
 
 Using either a checkpoint (`.ckpt`) or serialized model (`.pt`),
@@ -49,11 +54,6 @@ python serialize.py last.ckpt nn.nnue
 Import an existing SF NNUE network to the pytorch network format.
 ```
 python serialize.py nn.nnue converted.pt
-```
-
-Import the network, with the factorizer enabled (for resuming training):
-```
-python serialize.py nn.nnue converted.pt --enable-factorizer
 ```
 
 # Logging
