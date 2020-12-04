@@ -51,6 +51,11 @@ Import an existing SF NNUE network to the pytorch network format.
 python serialize.py nn.nnue converted.pt
 ```
 
+Import the network, with the factorizer enabled (for resuming training):
+```
+python serialize.py nn.nnue converted.pt --enable-factorizer
+```
+
 # Logging
 
 ```

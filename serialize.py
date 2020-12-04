@@ -111,7 +111,7 @@ class NNUEWriter():
 class NNUEReader():
   def __init__(self, f):
     self.f = f
-    self.model = M.NNUE()
+    self.model = M.NNUE(factorizer=None)
 
     self.read_header()
     self.read_int32(0x5d69d7b8) # Feature transformer hash
@@ -181,6 +181,7 @@ def main():
   parser = argparse.ArgumentParser(description="Converts files between ckpt and nnue format.")
   parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
   parser.add_argument("target", help="Target file (can be .pt or .nnue)")
+  parser.add_argument("--enable-factorizer", action='store_true', dest='enable_factorizer', help="When converting from .nnue to .pt, enables the factorizer")
   args = parser.parse_args()
 
   print('Converting %s to %s' % (args.source, args.target))
@@ -193,7 +194,6 @@ def main():
     else:
       nnue = M.NNUE.load_from_checkpoint(args.source)
     nnue.eval()
-    #test(nnue)
     writer = NNUEWriter(nnue)
     with open(args.target, 'wb') as f:
       f.write(writer.buf)
@@ -202,6 +202,9 @@ def main():
       raise Exception("Target file must end with .pt")
     with open(args.source, 'rb') as f:
       reader = NNUEReader(f)
+    if args.enable_factorizer:
+      reader.model.factorizer = halfkp.Factorizer()
+      reader.model.reset_weights()
     torch.save(reader.model, args.target)
   else:
     raise Exception('Invalid filetypes: ' + str(args))
