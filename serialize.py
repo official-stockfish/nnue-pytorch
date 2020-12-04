@@ -137,30 +137,10 @@ class NNUEReader():
       raise Exception("Expected: %x, got %x" % (expected, v))
     return v
 
-def test(model):
-  import nnue_dataset
-  dataset = 'd8_100000.bin'
-  stream_cpp = nnue_dataset.SparseBatchDataset(halfkp.NAME, dataset, 1)
-  stream_cpp_iter = iter(stream_cpp)
-  tensors_cpp  = next(stream_cpp_iter)[:4]
-  print('cpp:', tensors_cpp[3])
-  print(model(*tensors_cpp))
-
-  stream_py = nnue_bin_dataset.NNUEBinData(dataset)
-  stream_py_iter = iter(stream_py)
-  tensors_py = next(stream_py_iter)
-  print('python:', torch.nonzero(tensors_py[3]).squeeze())
-  tensors_py = [v.reshape((1,-1)) for v in tensors_py[:4]]
-
-  weights = coalesce_weights(model.input.weight.data)
-  model.input.weight = torch.nn.Parameter(weights)
-  print(model(*tensors_py))
-
 def main():
   parser = argparse.ArgumentParser(description="Converts files between ckpt and nnue format.")
   parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
   parser.add_argument("target", help="Target file (can be .pt or .nnue)")
-  parser.add_argument("--enable-factorizer", action='store_true', dest='enable_factorizer', help="When converting from .nnue to .pt, enables the factorizer")
   args = parser.parse_args()
 
   print('Converting %s to %s' % (args.source, args.target))
@@ -188,9 +168,6 @@ def main():
       raise Exception("Target file must end with .pt")
     with open(args.source, 'rb') as f:
       reader = NNUEReader(f)
-    if args.enable_factorizer:
-      reader.model.factorizer = halfkp.Factorizer()
-      reader.model.reset_weights()
     torch.save(reader.model, args.target)
   else:
     raise Exception('Invalid filetypes: ' + str(args))

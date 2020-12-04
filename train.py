@@ -54,6 +54,8 @@ def main():
     nnue = M.NNUE(feature_set=features.Features(), factorizer=factorizer, lambda_=args.lambda_)
   else:
     nnue = torch.load(args.resume_from_model)
+    nnue.change_factorizer(factorizer)
+    nnue.lambda_ = args.lambda_
 
   print("Training with {} validating with {}".format(args.train, args.val))
 

@@ -23,16 +23,15 @@ class NNUE(pl.LightningModule):
   def __init__(self, feature_set=halfkp.Features(), factorizer=halfkp.Factorizer(), lambda_=1.0):
     super(NNUE, self).__init__()
     self.feature_set = feature_set
-    self.factorizer = factorizer
-    self.reset_weights()
+    self.change_factorizer(factorizer)
     self.l1 = nn.Linear(2 * L1, L2)
     self.l2 = nn.Linear(L2, L3)
     self.output = nn.Linear(L3, 1)
     self.lambda_ = lambda_
 
-  # Call after changing the factorizer (eg. loading a .nnue net, then enabling the factorizer
-  # for training.
-  def reset_weights(self):
+  # Call to change the factorizer.  Will reset the input weights to match the expected shape.
+  def change_factorizer(self, factorizer):
+    self.factorizer = factorizer
     num_inputs = self.feature_set.inputs
     if self.factorizer is not None:
       num_inputs += self.factorizer.inputs
