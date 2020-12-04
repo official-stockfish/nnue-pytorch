@@ -35,6 +35,11 @@ python train.py --resume_from_checkpoint <path> ...
 python train.py --gpus 1 ...
 ```
 
+## Enable factorizer
+```
+python train.py --enable-factorizer ...
+```
+
 # Export a network
 
 Using either a checkpoint (`.ckpt`) or serialized model (`.pt`),

@@ -4,16 +4,17 @@ import nnue_dataset
 import nnue_bin_dataset
 import pytorch_lightning as pl
 import halfkp
+import torch
 from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
-def data_loader_cc(train_filename, val_filename, num_workers, batch_size, filtered):
+def data_loader_cc(train_filename, val_filename, features_name, num_workers, batch_size, filtered):
   # Epoch and validation sizes are arbitrary
   epoch_size = 100000000
   val_size = 1000000
-  train_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, train_filename, batch_size, num_workers=num_workers, filtered=filtered)
-  val_infinite = nnue_dataset.SparseBatchDataset(halfkp.FACTOR_NAME, val_filename, batch_size, filtered=filtered)
+  train_infinite = nnue_dataset.SparseBatchDataset(features_name, train_filename, batch_size, num_workers=num_workers, filtered=filtered)
+  val_infinite = nnue_dataset.SparseBatchDataset(features_name, val_filename, batch_size, filtered=filtered)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
   train = DataLoader(nnue_dataset.FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
@@ -37,9 +38,24 @@ def main():
   parser.add_argument("--threads", default=-1, type=int, dest='threads', help="Number of torch threads to use. Default automatic (cores) .")
   parser.add_argument("--seed", default=42, type=int, dest='seed', help="torch seed to use.")
   parser.add_argument("--smart-fen-skipping", action='store_true', dest='smart_fen_skipping', help="If enabled positions that are bad training targets will be skipped during loading. Default: False")
+  parser.add_argument("--enable-factorizer", dest='enable_factorizer', action='store_true', help="Enables using the factorizer for training.")
+  parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
   args = parser.parse_args()
 
-  nnue = M.NNUE(halfkp, lambda_=args.lambda_)
+  features = halfkp
+
+  factorizer = None
+  features_name = features.Features.name
+  if args.enable_factorizer:
+    factorizer = features.Factorizer()
+    features_name = factorizer.name
+
+  if args.resume_from_model is None:
+    nnue = M.NNUE(feature_set=features.Features(), factorizer=factorizer, lambda_=args.lambda_)
+  else:
+    nnue = torch.load(args.resume_from_model)
+    nnue.change_factorizer(factorizer)
+    nnue.lambda_ = args.lambda_
 
   print("Training with {} validating with {}".format(args.train, args.val))
 
@@ -52,6 +68,7 @@ def main():
   print('Using batch size {}'.format(batch_size))
 
   print('Smart fen skipping: {}'.format(args.smart_fen_skipping))
+  print('Factorizer: {}'.format(args.enable_factorizer))
 
   if args.threads > 0:
     print('limiting torch to {} threads.'.format(args.threads))
@@ -62,7 +79,7 @@ def main():
     train, val = data_loader_py(args.train, args.val, batch_size)
   else:
     print('Using c++ data loader')
-    train, val = data_loader_cc(args.train, args.val, args.num_workers, batch_size, args.smart_fen_skipping)
+    train, val = data_loader_cc(args.train, args.val, features_name, args.num_workers, batch_size, args.smart_fen_skipping)
 
   logdir = args.default_root_dir if args.default_root_dir else 'logs/'
   print('Using log dir {}'.format(logdir), flush=True)

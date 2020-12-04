@@ -20,21 +20,31 @@ class NNUE(pl.LightningModule):
 
   It is not ideal for training a Pytorch quantized model directly.
   """
-  def __init__(self, feature_set=halfkp, lambda_=1.0):
+  def __init__(self, feature_set=halfkp.Features(), factorizer=halfkp.Factorizer(), lambda_=1.0):
     super(NNUE, self).__init__()
-    num_inputs = feature_set.INPUTS
-    self.input = nn.Linear(num_inputs, L1)
-
-    # Zero out the weights/biases for the factorized features
-    # Weights stored as [256][41024]
-    weights = self.input.weight.narrow(1, 0, feature_set.INPUTS - feature_set.FACTOR_INPUTS)
-    weights = torch.cat((weights, torch.zeros(L1, feature_set.FACTOR_INPUTS)), dim=1)
-    self.input.weight = nn.Parameter(weights)
-
+    self.feature_set = feature_set
+    self.change_factorizer(factorizer)
     self.l1 = nn.Linear(2 * L1, L2)
     self.l2 = nn.Linear(L2, L3)
     self.output = nn.Linear(L3, 1)
     self.lambda_ = lambda_
+
+  # Call to change the factorizer.  Will reset the input weights to match the expected shape.
+  def change_factorizer(self, factorizer):
+    self.factorizer = factorizer
+    num_inputs = self.feature_set.inputs
+    if self.factorizer is not None:
+      num_inputs += self.factorizer.inputs
+    # Don't reinitialize the weights if they've already been set.
+    if not hasattr(self, 'input'):
+      self.input = nn.Linear(num_inputs, L1)
+
+    if self.factorizer is not None:
+      # Zero out the weights/biases for the factorized features
+      # Weights stored as [256][41024]
+      weights = self.input.weight.narrow(1, 0, self.feature_set.inputs)
+      weights = torch.cat((weights, torch.zeros(L1, self.factorizer.inputs)), dim=1)
+      self.input.weight = nn.Parameter(weights)
 
   def forward(self, us, them, w_in, b_in):
     w = self.input(w_in)

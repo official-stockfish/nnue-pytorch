@@ -44,13 +44,16 @@ def is_quiet(board, from_, to_):
   return False
 
 class ToTensor(object):
+  def __init__(self):
+    self.features = halfkp.Features()
+
   def __call__(self, sample):
     bd, _, outcome, score = sample
     us = torch.tensor([bd.turn])
     them = torch.tensor([not bd.turn])
     outcome = torch.tensor([outcome])
     score = torch.tensor([score])
-    white, black = halfkp.get_halfkp_indices(bd)
+    white, black = self.features.get_indices(bd)
     return us.float(), them.float(), white.float(), black.float(), outcome.float(), score.float()
 
 class RandomFlip(object):
