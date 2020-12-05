@@ -8,6 +8,8 @@ import struct
 import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
+from functools import reduce
+import operator
 
 def ascii_hist(name, x, bins=6):
   N,X = numpy.histogram(x, bins=bins)
@@ -107,7 +109,7 @@ class NNUEReader():
     description = self.f.read(desc_len)
 
   def tensor(self, dtype, shape):
-    d = numpy.fromfile(self.f, dtype, math.prod(shape))
+    d = numpy.fromfile(self.f, dtype, reduce(operator.mul, shape, 1))
     d = torch.from_numpy(d.astype(numpy.float32))
     d = d.reshape(shape)
     return d
