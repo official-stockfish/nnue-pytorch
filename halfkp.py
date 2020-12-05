@@ -51,7 +51,17 @@ class Factorizer:
       k_idx = i // NUM_PLANES
       p_idx = i % NUM_PLANES
       w = weights.narrow(1, i, 1).clone()
+      # King factorization.  Note that this is trickier than it appears.  The
+      # weights for the king factor in the training set is equal to the number
+      # of active base features.  This means that we (roughly) average the
+      # number of pieces across the training dataset, and "bake" that in here.
+      # If the king feature is treated as a one-hot encoding, you'd have to
+      # divide by the average number of pieces in the dataset here (eg. divide
+      # by 20).
       w = w + weights.narrow(1, k_base + k_idx, 1)
+      # Piece factorization.  Note that p_idx 0 is not used by SF currently,
+      # and the factorized pieces don't do the equivalent mapping, so that's
+      # why we ignore it here.
       if p_idx > 0:
         w = w + weights.narrow(1, p_base + p_idx - 1, 1)
       result.append(w)
