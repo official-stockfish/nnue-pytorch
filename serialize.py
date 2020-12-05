@@ -4,6 +4,7 @@ import math
 import model as M
 import numpy
 import nnue_bin_dataset
+import nnue_dataset
 import struct
 import torch
 import pytorch_lightning as pl
@@ -139,11 +140,52 @@ class NNUEReader():
       raise Exception("Expected: %x, got %x" % (expected, v))
     return v
 
+def test_eval_error(model, data_filename, num_samples):
+  enable_factorizer = model.factorizer is not None
+  features = halfkp
+  features_name = features.Features.name
+  if enable_factorizer:
+    factorizer = features.Factorizer()
+    features_name = factorizer.name
+  batch_size = 1024
+  num_samples = (num_samples + batch_size - 1) // batch_size * batch_size
+  data_provider = nnue_dataset.SparseBatchDataset(features_name, data_filename, batch_size, num_workers=1, filtered=True)
+
+  quantized_model = model.get_quantized()
+  it = iter(data_provider)
+  rel_errs = []
+  avg_abs_evals = []
+  avg_abs_evals_diff = []
+  for i in range(num_samples // batch_size):
+    batch = next(it)
+    us, them, white, black, outcome, score = batch
+    reference = model.forward(us, them, white, black) * 600.0
+    quantized = quantized_model.forward(us, them, white, black)
+    avg_abs_evals.append(reference.abs().mean())
+    avg_abs_evals_diff.append((reference - quantized).abs().mean())
+    rel_errs.append((reference - quantized).abs().mean() / reference.abs().mean())
+
+  print('Avg abs eval:      {}'.format(sum(avg_abs_evals) / len(avg_abs_evals)))
+  print('Avg abs eval diff: {}'.format(sum(avg_abs_evals_diff) / len(avg_abs_evals_diff)))
+  print('Relative error:    {}'.format(sum(rel_errs) / len(rel_errs)))
+
 def main():
   parser = argparse.ArgumentParser(description="Converts files between ckpt and nnue format.")
   parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
   parser.add_argument("target", help="Target file (can be .pt or .nnue)")
+  parser.add_argument("--test-eval-error", action='store_true', help="Measure eval error after quantization relative to before.")
+  parser.add_argument("--test-data", type=str, help="The file to get data from. Use for example when measuring eval error.")
+  parser.add_argument("--test-num-samples", type=int, help="The number of samples to use for any testing.")
   args = parser.parse_args()
+
+  if args.test_eval_error:
+    if not args.test_data:
+      print('To test eval one must specify data file with --test-data.')
+      raise Exception('Invalid parameters')
+
+    if not args.test_num_samples or args.test_num_samples < 1:
+      print('To test eval one must specify the number of samples to use with --test-num-samples')
+      raise Exception('Invalid parameters')
 
   print('Converting %s to %s' % (args.source, args.target))
 
@@ -162,6 +204,8 @@ def main():
         # If that fails, then try with factorizer disaabled.
         nnue = M.NNUE.load_from_checkpoint(args.source, factorizer=None)
     nnue.eval()
+    if args.test_eval_error:
+      test_eval_error(nnue, args.test_data, args.test_num_samples)
     writer = NNUEWriter(nnue)
     with open(args.target, 'wb') as f:
       f.write(writer.buf)
@@ -170,7 +214,10 @@ def main():
       raise Exception("Target file must end with .pt")
     with open(args.source, 'rb') as f:
       reader = NNUEReader(f)
-    torch.save(reader.model, args.target)
+    model = reader.model
+    if args.test_eval_error:
+      test_eval_error(model, args.test_data, args.test_num_samples)
+    torch.save(model, args.target)
   else:
     raise Exception('Invalid filetypes: ' + str(args))
 
