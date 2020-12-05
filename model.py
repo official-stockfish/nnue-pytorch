@@ -11,6 +11,35 @@ L1 = 256
 L2 = 32
 L3 = 32
 
+class QuantizedNNUE:
+  def __init__(self, model, feature_set=halfkp.Features()):
+    self.feature_set = feature_set
+    self.input = nn.Linear(model.input.in_features, L1)
+    self.l1 = nn.Linear(2 * L1, L2)
+    self.l2 = nn.Linear(L2, L3)
+    self.output = nn.Linear(L3, 1)
+
+    self.input.weight = nn.Parameter((model.input.weight * 127.0).to(dtype=torch.int32), requires_grad=False)
+    self.input.bias = nn.Parameter((model.input.bias * 127.0).to(dtype=torch.int32), requires_grad=False)
+    self.l1.bias = nn.Parameter((model.l1.bias * (127.0 * 64.0)).to(dtype=torch.int32), requires_grad=False)
+    self.l1.weight = nn.Parameter((model.l1.weight * 64.0).to(dtype=torch.int32), requires_grad=False)
+    self.l2.bias = nn.Parameter((model.l2.bias * (127.0 * 64.0)).to(dtype=torch.int32), requires_grad=False)
+    self.l2.weight = nn.Parameter((model.l2.weight * 64.0).to(dtype=torch.int32), requires_grad=False)
+    self.output.bias = nn.Parameter((model.output.bias * (600.0 * 16.0)).to(dtype=torch.int32), requires_grad=False)
+    self.output.weight = nn.Parameter((model.output.weight * (600.0 * 16.0 / 127.0)).to(dtype=torch.int32), requires_grad=False)
+
+  def forward(self, us, them, w_in, b_in):
+    w_in = w_in.to(dtype=torch.int32)
+    b_in = b_in.to(dtype=torch.int32)
+    w = self.input(w_in)
+    b = self.input(b_in)
+    l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
+    l0_ = torch.clamp(l0_, 0, 127).to(dtype=torch.int32)
+    l1_ = torch.clamp(self.l1(l0_) // 64, 0, 127).to(dtype=torch.int32)
+    l2_ = torch.clamp(self.l2(l1_) // 64, 0, 127).to(dtype=torch.int32)
+    x = self.output(l2_) // 16
+    return x
+
 class NNUE(pl.LightningModule):
   """
   This model attempts to directly represent the nodchip Stockfish trainer methodology.
@@ -56,6 +85,9 @@ class NNUE(pl.LightningModule):
     l2_ = torch.clamp(self.l2(l1_), 0.0, 1.0)
     x = self.output(l2_)
     return x
+
+  def get_quantized(self):
+    return QuantizedNNUE(self, feature_set=self.feature_set)
 
   def step_(self, batch, batch_idx, loss_type):
     us, them, white, black, outcome, score = batch
