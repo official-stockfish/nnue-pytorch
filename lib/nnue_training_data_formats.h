@@ -44,6 +44,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <optional>
 #include <thread>
 #include <mutex>
+#include <random>
 
 #if (defined(_MSC_VER) || defined(__INTEL_COMPILER)) && !defined(__clang__)
 #include <intrin.h>
@@ -7577,6 +7578,10 @@ namespace binpack
 
                     if (!m_localBuffer.empty())
                     {
+                        // now shuffle the local buffer
+			static thread_local std::mt19937 g(std::random_device{}());
+			std::shuffle(m_localBuffer.begin(), m_localBuffer.end(), g);
+
                         std::unique_lock lock(m_waitingBufferMutex);
                         m_waitingBufferEmpty.wait(lock, [this]() { return m_waitingBuffer.empty() || m_stopFlag.load(); });
                         m_waitingBuffer.swap(m_localBuffer);
@@ -7682,7 +7687,7 @@ namespace binpack
         CompressedTrainingDataFile m_inputFile;
         std::atomic_int m_numRunningWorkers;
 
-        static constexpr int threadBufferSize = 256 * 256 * 4;
+        static constexpr int threadBufferSize = 256 * 256 * 16;
 
         std::atomic_bool m_stopFlag;
         std::vector<TrainingDataEntry> m_waitingBuffer;
