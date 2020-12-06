@@ -7,6 +7,7 @@
 #include <mutex>
 #include <thread>
 #include <deque>
+#include <random>
 
 #include "lib/nnue_training_data_formats.h"
 #include "lib/nnue_training_data_stream.h"
@@ -396,13 +397,15 @@ private:
 
 extern "C" {
 
-    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered)
+    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping)
     {
         std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr;
-        if (filtered)
+        if (filtered || random_fen_skipping)
         {
-            skipPredicate = [](const TrainingDataEntry& e){
-                return e.isCapturingMove() || e.isInCheck();
+            skipPredicate = [random_fen_skipping, filtered](const TrainingDataEntry& e){
+                static thread_local std::mt19937 gen(std::random_device{}());
+		std::bernoulli_distribution distrib(double(random_fen_skipping) / (random_fen_skipping + 1));
+                return (random_fen_skipping && distrib(gen)) || (filtered && (e.isCapturingMove() || e.isInCheck()));
             };
         }
 
@@ -441,7 +444,7 @@ extern "C" {
 
 int main()
 {
-    auto stream = create_sparse_batch_stream("HalfKP", 4, "10m_d3_q_2.binpack", 8192, true, false);
+    auto stream = create_sparse_batch_stream("HalfKP", 4, "10m_d3_q_2.binpack", 8192, true, false, 0);
     auto t0 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < 1000; ++i)
     {
