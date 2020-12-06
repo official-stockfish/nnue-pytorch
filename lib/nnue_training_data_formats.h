@@ -46,6 +46,8 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <mutex>
 #include <random>
 
+#include "rng.h"
+
 #if (defined(_MSC_VER) || defined(__INTEL_COMPILER)) && !defined(__clang__)
 #include <intrin.h>
 #endif
@@ -7579,8 +7581,8 @@ namespace binpack
                     if (!m_localBuffer.empty())
                     {
                         // now shuffle the local buffer
-			static thread_local std::mt19937 g(std::random_device{}());
-			std::shuffle(m_localBuffer.begin(), m_localBuffer.end(), g);
+                        auto& prng = rng::get_thread_local_rng();
+                        std::shuffle(m_localBuffer.begin(), m_localBuffer.end(), prng);
 
                         std::unique_lock lock(m_waitingBufferMutex);
                         m_waitingBufferEmpty.wait(lock, [this]() { return m_waitingBuffer.empty() || m_stopFlag.load(); });
