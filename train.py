@@ -3,16 +3,17 @@ import model as M
 import nnue_dataset
 import nnue_bin_dataset
 import pytorch_lightning as pl
-import halfkp
+import features
 import torch
 from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
-def data_loader_cc(train_filename, val_filename, features_name, num_workers, batch_size, filtered, random_fen_skipping, main_device):
+def data_loader_cc(train_filename, val_filename, feature_set, num_workers, batch_size, filtered, random_fen_skipping, main_device):
   # Epoch and validation sizes are arbitrary
   epoch_size = 100000000
   val_size = 1000000
+  features_name = feature_set.name
   train_infinite = nnue_dataset.SparseBatchDataset(features_name, train_filename, batch_size, num_workers=num_workers,
                                                    filtered=filtered, random_fen_skipping=random_fen_skipping, device=main_device)
   val_infinite = nnue_dataset.SparseBatchDataset(features_name, val_filename, batch_size, filtered=filtered,
@@ -43,22 +44,21 @@ def main():
   parser.add_argument("--random-fen-skipping", default=0, type=int, dest='random_fen_skipping', help="skip fens randomly on average random_fen_skipping before using one.")
   parser.add_argument("--enable-factorizer", dest='enable_factorizer', action='store_true', help="Enables using the factorizer for training.")
   parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
+  parser.add_argument("--features", dest='features', help="The feature set to use. Can be a union of feature blocks (for example P+HalfKP). \"^\" denotes a factorized block. Currently available feature blocks are: " + ', '.join(features.get_available_feature_blocks_names()))
   args = parser.parse_args()
 
-  features = halfkp
-
-  factorizer = None
-  features_name = features.Features.name
-  if args.enable_factorizer:
-    factorizer = features.Factorizer()
-    features_name = factorizer.name
+  feature_set = features.get_feature_set_from_name(args.features)
 
   if args.resume_from_model is None:
-    nnue = M.NNUE(feature_set=features.Features(), factorizer=factorizer, lambda_=args.lambda_)
+    nnue = M.NNUE(feature_set=feature_set, lambda_=args.lambda_)
   else:
     nnue = torch.load(args.resume_from_model)
-    nnue.change_factorizer(factorizer)
     nnue.lambda_ = args.lambda_
+
+  print("Feature set: {}".format(feature_set.name))
+  print("Num real features: {}".format(feature_set.num_real_features))
+  print("Num virtual features: {}".format(feature_set.num_virtual_features))
+  print("Num features: {}".format(feature_set.num_features))
 
   print("Training with {} validating with {}".format(args.train, args.val))
 
@@ -72,7 +72,6 @@ def main():
 
   print('Smart fen skipping: {}'.format(args.smart_fen_skipping))
   print('Random fen skipping: {}'.format(args.random_fen_skipping))
-  print('Factorizer: {}'.format(args.enable_factorizer))
 
   if args.threads > 0:
     print('limiting torch to {} threads.'.format(args.threads))
@@ -92,7 +91,7 @@ def main():
     train, val = data_loader_py(args.train, args.val, batch_size, main_device)
   else:
     print('Using c++ data loader')
-    train, val = data_loader_cc(args.train, args.val, features_name, args.num_workers, batch_size, args.smart_fen_skipping, args.random_fen_skipping, main_device)
+    train, val = data_loader_cc(args.train, args.val, feature_set, args.num_workers, batch_size, args.smart_fen_skipping, args.random_fen_skipping, main_device)
 
   trainer.fit(nnue, train, val)
 
