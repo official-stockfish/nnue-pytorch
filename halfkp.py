@@ -44,3 +44,6 @@ class FactorizedFeatures(FeatureBlock):
     p_idx = idx % NUM_PLANES - 1
 
     return [idx, self.get_factor_base_feature('HalfK') + k_idx, self.get_factor_base_feature('P') + p_idx]
+
+def get_feature_block_clss():
+  return [Features, FactorizedFeatures]
