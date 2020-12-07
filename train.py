@@ -44,7 +44,7 @@ def main():
   parser.add_argument("--random-fen-skipping", default=0, type=int, dest='random_fen_skipping', help="skip fens randomly on average random_fen_skipping before using one.")
   parser.add_argument("--enable-factorizer", dest='enable_factorizer', action='store_true', help="Enables using the factorizer for training.")
   parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
-  parser.add_argument("--features", dest='features', help="The feature set to use. Can be a union of feature blocks (for example P+HalfKP). \"^\" denotes a factorized block. Currently available feature blocks are: " + ', '.join(features.get_available_feature_blocks_names()))
+  features.add_argparse_args(parser)
   args = parser.parse_args()
 
   feature_set = features.get_feature_set_from_name(args.features)

@@ -44,3 +44,15 @@ class FeatureSet:
             offset += feature.num_features
 
         raise Exception('No feature block to factorize {}'.format(idx))
+
+    def get_virtual_to_real_features_gather_indices(self):
+        indices = []
+        real_offset = 0
+        offset = 0
+        for feature in self.features:
+            for i_real in range(feature.num_real_features):
+                i_fact = feature.get_feature_factors(i_real)
+                indices.append([offset + i for i in i_fact])
+            real_offset += feature.num_real_features
+            offset += feature.num_features
+        return indices

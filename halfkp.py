@@ -40,7 +40,7 @@ class FactorizedFeatures(FeatureBlock):
     if idx >= self.num_real_features:
       raise Exception('Feature must be real')
 
-    k_idx = i // NUM_PLANES
-    p_idx = i % NUM_PLANES
+    k_idx = idx // NUM_PLANES
+    p_idx = idx % NUM_PLANES - 1
 
-    return [idx, get_factor_base_feature('HalfK') + k_idx, get_factor_base_feature('P') + p_idx]
+    return [idx, self.get_factor_base_feature('HalfK') + k_idx, self.get_factor_base_feature('P') + p_idx]
