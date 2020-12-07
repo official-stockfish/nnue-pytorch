@@ -31,7 +31,7 @@ class NNUEWriter():
     self.buf = bytearray()
 
     self.write_header()
-    self.int32(0x5d69d7b8) # Feature transformer hash
+    self.int32(model.feature_set.hash) # Feature transformer hash
     self.write_feature_transformer(model)
     self.int32(0x63337156) # FC layers hash
     self.write_fc_layer(model.l1)
@@ -104,7 +104,7 @@ class NNUEReader():
     self.model = M.NNUE(feature_set)
 
     self.read_header()
-    self.read_int32(0x5d69d7b8) # Feature transformer hash
+    self.read_int32(feature_set.hash) # Feature transformer hash
     self.read_feature_transformer(self.model.input)
     self.read_int32(0x63337156) # FC layers hash
     self.read_fc_layer(self.model.l1)

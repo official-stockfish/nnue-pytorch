@@ -4,11 +4,12 @@ def _get_main_factor_name(full_name):
     return full_name.replace('^', '')
 
 class FeatureBlock:
-    def __init__(self, name, factors):
+    def __init__(self, name, hash, factors):
         if not isinstance(factors, OrderedDict):
             raise Exception('Factors must be an collections.OrderedDict')
 
         self.name = name
+        self.hash = hash
         self.factors = factors
         self.num_real_features = factors[_get_main_factor_name(name)]
         self.num_features = sum(v for n, v in factors.items())

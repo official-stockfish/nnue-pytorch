@@ -1,6 +1,13 @@
 from collections import OrderedDict
 from feature_block import *
 
+def _calculate_features_hash(features):
+    if len(features) == 1:
+        return features[0].hash
+
+    tail_hash = calculate_features_hash(features[1:])
+    return features[0].hash ^ (tail_hash << 1) ^ (tail_hash >> 1) & 0xffffffff
+
 class FeatureSet:
     def __init__(self, features):
         for feature in features:
@@ -8,6 +15,7 @@ class FeatureSet:
                 raise Exception('All features must subclass FeatureBlock')
 
         self.features = features
+        self.hash = _calculate_features_hash(features)
         self.name = '+'.join(feature.name for feature in features)
         self.num_real_features = sum(feature.num_real_features for feature in features)
         self.num_virtual_features = sum(feature.num_virtual_features for feature in features)
