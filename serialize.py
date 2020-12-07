@@ -23,6 +23,10 @@ def ascii_hist(name, x, bins=6):
     xi = '{0: <8.4g}'.format(xi).ljust(10)
     print('{0}| {1}'.format(xi,bar))
 
+# hardcoded for now
+FC_HASH = 0x63337156
+VERSION = 0x7AF32F16
+
 class NNUEWriter():
   """
   All values are stored in little endian.
@@ -30,17 +34,17 @@ class NNUEWriter():
   def __init__(self, model):
     self.buf = bytearray()
 
-    self.write_header()
+    self.write_header(model)
     self.int32(model.feature_set.hash) # Feature transformer hash
     self.write_feature_transformer(model)
-    self.int32(0x63337156) # FC layers hash
+    self.int32(FC_HASH) # FC layers hash
     self.write_fc_layer(model.l1)
     self.write_fc_layer(model.l2)
     self.write_fc_layer(model.output, is_output=True)
 
-  def write_header(self):
-    self.int32(0x7AF32F16) # version
-    self.int32(0x3e5aa6ee) # halfkp network hash
+  def write_header(self, model):
+    self.int32(VERSION) # version
+    self.int32(FC_HASH ^ model.feature_set.hash) # halfkp network hash
     description = b"Features=HalfKP(Friend)[41024->256x2],"
     description += b"Network=AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
     description += b"(ClippedReLU[32](AffineTransform[32<-512](InputSlice[512(0:512)])))))"
@@ -103,17 +107,17 @@ class NNUEReader():
     self.feature_set = feature_set
     self.model = M.NNUE(feature_set)
 
-    self.read_header()
+    self.read_header(feature_set)
     self.read_int32(feature_set.hash) # Feature transformer hash
     self.read_feature_transformer(self.model.input)
-    self.read_int32(0x63337156) # FC layers hash
+    self.read_int32(FC_HASH) # FC layers hash
     self.read_fc_layer(self.model.l1)
     self.read_fc_layer(self.model.l2)
     self.read_fc_layer(self.model.output, is_output=True)
 
-  def read_header(self):
-    self.read_int32(0x7AF32F16) # version
-    self.read_int32(0x3e5aa6ee) # halfkp network hash
+  def read_header(self, feature_set):
+    self.read_int32(VERSION) # version
+    self.read_int32(FC_HASH ^ feature_set.hash) # halfkp network hash
     desc_len = self.read_int32() # Network definition
     description = self.f.read(desc_len)
 
