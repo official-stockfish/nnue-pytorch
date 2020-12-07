@@ -53,6 +53,7 @@ def main():
     nnue = M.NNUE(feature_set=feature_set, lambda_=args.lambda_)
   else:
     nnue = torch.load(args.resume_from_model)
+    nnue.set_feature_set(feature_set)
     nnue.lambda_ = args.lambda_
 
   print("Feature set: {}".format(feature_set.name))

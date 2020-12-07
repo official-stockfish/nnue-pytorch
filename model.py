@@ -36,6 +36,27 @@ class NNUE(pl.LightningModule):
       weights[a:b, :] = 0.0
     self.input.weight = nn.Parameter(weights)
 
+  def set_feature_set(self, new_feature_set):
+    if self.feature_set.name == new_feature_set.name:
+      return
+
+    # TODO: Implement this for more complicated conversions.
+    #       Currently we support only a single feature block.
+    if len(self.feature_set.features) > 1:
+      raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
+
+    old_feature_block = self.feature_set.features[0]
+    new_feature_block = new_feature_set.features[0]
+    if old_feature_block.name == next(iter(new_feature_block.factors)):
+      # We can just extend with zeros since it's unfactorized -> factorized
+      weights = self.input.weight
+      padding = weights.new_zeros((weights.shape[0], new_feature_block.num_virtual_features))
+      weights = torch.cat([weights, padding], dim=1)
+      self.input.weight = nn.Parameter(weights)
+      self.feature_set = new_feature_set
+    else:
+      raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
+
   def forward(self, us, them, w_in, b_in):
     w = self.input(w_in)
     b = self.input(b_in)
