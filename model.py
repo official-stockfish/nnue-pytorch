@@ -30,12 +30,24 @@ class NNUE(pl.LightningModule):
 
     self._zero_virtual_feature_weights()
 
+  '''
+  We zero all virtual feature weights because during serialization to .nnue
+  we compute weights for each real feature as being the sum of the weights for
+  the real feature in question and the virtual features it can be factored to.
+  This means that if we didn't initialize the virtual feature weights to zero
+  we would end up with the real features having effectively unexpected values
+  at initialization - following the bell curve based on how many factors there are.
+  '''
   def _zero_virtual_feature_weights(self):
     weights = self.input.weight
     for a, b in self.feature_set.get_virtual_feature_ranges():
       weights[a:b, :] = 0.0
     self.input.weight = nn.Parameter(weights)
 
+  '''
+  This method attempts to convert the model from using the self.feature_set
+  to new_feature_set.
+  '''
   def set_feature_set(self, new_feature_set):
     if self.feature_set.name == new_feature_set.name:
       return
@@ -45,8 +57,22 @@ class NNUE(pl.LightningModule):
     if len(self.feature_set.features) > 1:
       raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
 
+    # Currently we only support conversion for feature sets with
+    # one feature block each so we'll dig the feature blocks directly
+    # and forget about the set.
     old_feature_block = self.feature_set.features[0]
     new_feature_block = new_feature_set.features[0]
+
+    # next(iter(new_feature_block.factors)) is the way to get the
+    # first item in a OrderedDict. (the ordered dict being str : int
+    # mapping of the factor name to its size).
+    # It is our new_feature_factor_name.
+    # For example old_feature_block.name == "HalfKP"
+    # and new_feature_factor_name == "HalfKP^"
+    # We assume here that the "^" denotes factorized feature block
+    # and we would like feature block implementers to follow this convention.
+    # So if our current feature_set matches the first factor in the new_feature_set
+    # we only have to add the virtual feature on top of the already existing real ones.
     if old_feature_block.name == next(iter(new_feature_block.factors)):
       # We can just extend with zeros since it's unfactorized -> factorized
       weights = self.input.weight

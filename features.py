@@ -3,9 +3,16 @@ from feature_set import *
 
 import argparse
 
+'''
+Each module that defines feature blocks must be imported here and
+added to the _feature_modules list. Each such module must define a
+function `get_feature_block_clss` at module scope that returns the list
+of feature block classes in that module.
+'''
 import halfkp
 
 _feature_modules = [halfkp]
+
 _feature_blocks_by_name = dict()
 
 def _add_feature_block(feature_block_cls):
