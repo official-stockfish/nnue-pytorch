@@ -429,7 +429,7 @@ extern "C" {
         {
             return new FeaturedBatchStream<FeatureSet<HalfKP>, SparseBatch>(concurrency, filename, batch_size, cyclic, skipPredicate);
         }
-        else if (feature_set == "HalfKPFactorized")
+        else if (feature_set == "HalfKP^")
         {
             return new FeaturedBatchStream<FeatureSet<HalfKPFactorized>, SparseBatch>(concurrency, filename, batch_size, cyclic, skipPredicate);
         }

@@ -34,10 +34,12 @@ python train.py --resume_from_checkpoint <path> ...
 ```
 python train.py --gpus 1 ...
 ```
-
-## Enable factorizer
+## Feature set selection
+By default the trainer uses a factorized HalfKP feature set (named "HalfKP^")
+If you wish to change the feature set used then you can use the `--features=NAME` option. For the list of available features see `--help`
+The default is:
 ```
-python train.py --enable-factorizer ...
+python train.py ... --features="HalfKP^"
 ```
 
 # Export a network

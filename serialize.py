@@ -1,5 +1,5 @@
 import argparse
-import halfkp
+import features
 import math
 import model as M
 import numpy
@@ -23,6 +23,10 @@ def ascii_hist(name, x, bins=6):
     xi = '{0: <8.4g}'.format(xi).ljust(10)
     print('{0}| {1}'.format(xi,bar))
 
+# hardcoded for now
+FC_HASH = 0x63337156
+VERSION = 0x7AF32F16
+
 class NNUEWriter():
   """
   All values are stored in little endian.
@@ -30,34 +34,42 @@ class NNUEWriter():
   def __init__(self, model):
     self.buf = bytearray()
 
-    self.write_header()
-    self.int32(0x5d69d7b8) # Feature transformer hash
-    self.write_feature_transformer(model.factorizer, model.input)
-    self.int32(0x63337156) # FC layers hash
+    self.write_header(model)
+    self.int32(model.feature_set.hash) # Feature transformer hash
+    self.write_feature_transformer(model)
+    self.int32(FC_HASH) # FC layers hash
     self.write_fc_layer(model.l1)
     self.write_fc_layer(model.l2)
     self.write_fc_layer(model.output, is_output=True)
 
-  def write_header(self):
-    self.int32(0x7AF32F16) # version
-    self.int32(0x3e5aa6ee) # halfkp network hash
+  def write_header(self, model):
+    self.int32(VERSION) # version
+    self.int32(FC_HASH ^ model.feature_set.hash) # halfkp network hash
     description = b"Features=HalfKP(Friend)[41024->256x2],"
     description += b"Network=AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
     description += b"(ClippedReLU[32](AffineTransform[32<-512](InputSlice[512(0:512)])))))"
     self.int32(len(description)) # Network definition
     self.buf.extend(description)
 
-  def write_feature_transformer(self, factorizer, layer):
+  def coalesce_ft_weights(self, model, layer):
+    weight = layer.weight.data
+    indices = model.feature_set.get_virtual_to_real_features_gather_indices()
+    weight_coalesced = weight.new_zeros((weight.shape[0], model.feature_set.num_real_features))
+    for i_real, is_virtual in enumerate(indices):
+      weight_coalesced[:, i_real] = sum(weight[:, i_virtual] for i_virtual in is_virtual)
+
+    return weight_coalesced
+
+  def write_feature_transformer(self, model):
     # int16 bias = round(x * 127)
     # int16 weight = round(x * 127)
+    layer = model.input
     bias = layer.bias.data
     bias = bias.mul(127).round().to(torch.int16)
     ascii_hist('ft bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
 
-    weight = layer.weight.data
-    if factorizer is not None:
-      weight = factorizer.coalesce_weights(weight)
+    weight = self.coalesce_ft_weights(model, layer)
     weight = weight.mul(127).round().to(torch.int16)
     ascii_hist('ft weight:', weight.numpy())
     # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
@@ -90,21 +102,22 @@ class NNUEWriter():
     self.buf.extend(struct.pack("<i", v))
 
 class NNUEReader():
-  def __init__(self, f):
+  def __init__(self, f, feature_set):
     self.f = f
-    self.model = M.NNUE(factorizer=None)
+    self.feature_set = feature_set
+    self.model = M.NNUE(feature_set)
 
-    self.read_header()
-    self.read_int32(0x5d69d7b8) # Feature transformer hash
+    self.read_header(feature_set)
+    self.read_int32(feature_set.hash) # Feature transformer hash
     self.read_feature_transformer(self.model.input)
-    self.read_int32(0x63337156) # FC layers hash
+    self.read_int32(FC_HASH) # FC layers hash
     self.read_fc_layer(self.model.l1)
     self.read_fc_layer(self.model.l2)
     self.read_fc_layer(self.model.output, is_output=True)
 
-  def read_header(self):
-    self.read_int32(0x7AF32F16) # version
-    self.read_int32(0x3e5aa6ee) # halfkp network hash
+  def read_header(self, feature_set):
+    self.read_int32(VERSION) # version
+    self.read_int32(FC_HASH ^ feature_set.hash) # halfkp network hash
     desc_len = self.read_int32() # Network definition
     description = self.f.read(desc_len)
 
@@ -143,7 +156,10 @@ def main():
   parser = argparse.ArgumentParser(description="Converts files between ckpt and nnue format.")
   parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
   parser.add_argument("target", help="Target file (can be .pt or .nnue)")
+  features.add_argparse_args(parser)
   args = parser.parse_args()
+
+  feature_set = features.get_feature_set_from_name(args.features)
 
   print('Converting %s to %s' % (args.source, args.target))
 
@@ -153,14 +169,7 @@ def main():
     if args.source.endswith(".pt"):
       nnue = torch.load(args.source)
     else:
-      # This try/catch is not ideal, but we don't know if we are converting
-      # a factorized checkpoint, or an unfactorized one.
-      try:
-        # First try with defaults (factorizer on).
-        nnue = M.NNUE.load_from_checkpoint(args.source)
-      except:
-        # If that fails, then try with factorizer disaabled.
-        nnue = M.NNUE.load_from_checkpoint(args.source, factorizer=None)
+      nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set)
     nnue.eval()
     writer = NNUEWriter(nnue)
     with open(args.target, 'wb') as f:
@@ -169,7 +178,7 @@ def main():
     if not args.target.endswith(".pt"):
       raise Exception("Target file must end with .pt")
     with open(args.source, 'rb') as f:
-      reader = NNUEReader(f)
+      reader = NNUEReader(f, feature_set)
     torch.save(reader.model, args.target)
   else:
     raise Exception('Invalid filetypes: ' + str(args))
