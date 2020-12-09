@@ -11,6 +11,7 @@
 
 #include "lib/nnue_training_data_formats.h"
 #include "lib/nnue_training_data_stream.h"
+#include "lib/rng.h"
 
 #if defined (__x86_64__)
 #define EXPORT
@@ -402,10 +403,24 @@ extern "C" {
         std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr;
         if (filtered || random_fen_skipping)
         {
-            skipPredicate = [random_fen_skipping, filtered](const TrainingDataEntry& e){
+            skipPredicate = [
+                random_fen_skipping,
+                prob = double(random_fen_skipping) / (random_fen_skipping + 1),
+                filtered
+                ](const TrainingDataEntry& e){
+
+                auto do_skip = [&]() {
+                    std::bernoulli_distribution distrib(prob);
+                    auto& prng = rng::get_thread_local_rng();
+                    return distrib(prng);
+                };
+
+                auto do_filter = [&]() {
+                    return (e.isCapturingMove() || e.isInCheck());
+                };
+
                 static thread_local std::mt19937 gen(std::random_device{}());
-		std::bernoulli_distribution distrib(double(random_fen_skipping) / (random_fen_skipping + 1));
-                return (random_fen_skipping && distrib(gen)) || (filtered && (e.isCapturingMove() || e.isInCheck()));
+                return (random_fen_skipping && do_skip()) || (filtered && do_filter());
             };
         }
 
