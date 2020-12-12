@@ -21,7 +21,7 @@ class Features(FeatureBlock):
 
   def get_active_features(self, board: chess.Board):
     def piece_features(turn):
-      indices = torch.zeros(inputs)
+      indices = torch.zeros(NUM_PLANES * NUM_SQ)
       for sq, p in board.piece_map().items():
         if p.piece_type == chess.KING:
           continue
