@@ -24,9 +24,9 @@ def data_loader_cc(train_filename, val_filename, feature_set, num_workers, batch
   val = DataLoader(nnue_dataset.FixedNumBatchesDataset(val_infinite, (val_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
   return train, val
 
-def data_loader_py(train_filename, val_filename, batch_size, main_device):
-  train = DataLoader(nnue_bin_dataset.NNUEBinData(train_filename), batch_size=batch_size, shuffle=True, num_workers=4)
-  val = DataLoader(nnue_bin_dataset.NNUEBinData(val_filename), batch_size=32)
+def data_loader_py(train_filename, val_filename, feature_set, batch_size, main_device):
+  train = DataLoader(nnue_bin_dataset.NNUEBinData(train_filename, feature_set), batch_size=batch_size, shuffle=True, num_workers=4)
+  val = DataLoader(nnue_bin_dataset.NNUEBinData(val_filename, feature_set), batch_size=32)
   return train, val
 
 def main():
@@ -88,7 +88,7 @@ def main():
 
   if args.py_data:
     print('Using python data loader')
-    train, val = data_loader_py(args.train, args.val, batch_size, main_device)
+    train, val = data_loader_py(args.train, args.val, feature_set, batch_size, main_device)
   else:
     print('Using c++ data loader')
     train, val = data_loader_cc(args.train, args.val, feature_set, args.num_workers, batch_size, args.smart_fen_skipping, args.random_fen_skipping, main_device)

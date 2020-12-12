@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from feature_block import *
+import torch
 
 def _calculate_features_hash(features):
     if len(features) == 1:
@@ -52,14 +53,16 @@ class FeatureSet:
     to happen after concatenating many feature blocks.
     '''
     def get_active_features(self, board):
-        w = []
-        b = []
+        w = torch.zeros(0)
+        b = torch.zeros(0)
 
         offset = 0
         for feature in self.features:
             w_local, b_local = feature.get_active_features(board)
-            w += [i + offset for i in w_local]
-            b += [i + offset for i in b_local]
+            w_local += offset
+            b_local += offset
+            w = torch.cat([w, w_local])
+            b = torch.cat([b, b_local])
             offset += feature.num_features
 
         return w, b
