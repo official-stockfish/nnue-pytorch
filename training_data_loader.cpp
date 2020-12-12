@@ -44,6 +44,18 @@ static Square orient(Color color, Square sq)
     }
 }
 
+static Square orient_flip(Color color, Square sq)
+{
+    if (color == Color::White)
+    {
+        return sq;
+    }
+    else
+    {
+        return sq.flippedVertically();
+    }
+}
+
 struct HalfKP {
     static constexpr int NUM_SQ = 64;
     static constexpr int NUM_PT = 10;
@@ -138,6 +150,86 @@ struct HalfKPFactorized {
     }
 };
 
+struct HalfKA {
+    static constexpr int NUM_SQ = 64;
+    static constexpr int NUM_PT = 12;
+    static constexpr int NUM_PLANES = (NUM_SQ * NUM_PT + 1);
+    static constexpr int INPUTS = NUM_PLANES * NUM_SQ;
+
+    static constexpr int MAX_ACTIVE_FEATURES = 32;
+
+    static int feature_index(Color color, Square ksq, Square sq, Piece p)
+    {
+        auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+        return 1 + static_cast<int>(orient_flip(color, sq)) + p_idx * NUM_SQ + static_cast<int>(ksq) * NUM_PLANES;
+    }
+
+    static int fill_features_sparse(int i, const TrainingDataEntry& e, int* features, float* values, int& counter, Color color)
+    {
+        auto& pos = e.pos;
+        auto pieces = pos.piecesBB();
+        auto ksq = pos.kingSquare(color);
+
+        // We order the features so that the resulting sparse
+        // tensor is coalesced.
+        int features_unordered[32];
+        int j = 0;
+        for(Square sq : pieces)
+        {
+            auto p = pos.pieceAt(sq);
+            features_unordered[j++] = feature_index(color, orient_flip(color, ksq), sq, p);
+        }
+        std::sort(features_unordered, features_unordered + j);
+        for (int k = 0; k < j; ++k)
+        {
+            int idx = counter * 2;
+            features[idx] = i;
+            features[idx + 1] = features_unordered[k];
+            values[counter] = 1.0f;
+            counter += 1;
+        }
+        return INPUTS;
+    }
+};
+
+struct HalfKAFactorized {
+    // Factorized features
+    static constexpr int PIECE_INPUTS = HalfKA::NUM_SQ * HalfKA::NUM_PT;
+    static constexpr int INPUTS = HalfKA::INPUTS + PIECE_INPUTS;
+
+    static constexpr int MAX_PIECE_FEATURES = 32;
+    static constexpr int MAX_ACTIVE_FEATURES = HalfKA::MAX_ACTIVE_FEATURES + MAX_PIECE_FEATURES;
+
+    static void fill_features_sparse(int i, const TrainingDataEntry& e, int* features, float* values, int& counter, Color color)
+    {
+        auto counter_before = counter;
+        int offset = HalfKA::fill_features_sparse(i, e, features, values, counter, color);
+        auto& pos = e.pos;
+        auto pieces = pos.piecesBB();
+
+        // We order the features so that the resulting sparse
+        // tensor is coalesced. Note that we can just sort
+        // the parts where values are all 1.0f and leave the
+        // halfk feature where it was.
+        int features_unordered[32];
+        int j = 0;
+        for(Square sq : pieces)
+        {
+            auto p = pos.pieceAt(sq);
+            auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+            features_unordered[j++] = offset + (p_idx * HalfKA::NUM_SQ) + static_cast<int>(orient_flip(color, sq));
+        }
+        std::sort(features_unordered, features_unordered + j);
+        for (int k = 0; k < j; ++k)
+        {
+            int idx = counter * 2;
+            features[idx] = i;
+            features[idx + 1] = features_unordered[k];
+            values[counter] = 1.0f;
+            counter += 1;
+        }
+    }
+};
 
 template <typename T, typename... Ts>
 struct FeatureSet
@@ -432,6 +524,14 @@ extern "C" {
         else if (feature_set == "HalfKP^")
         {
             return new FeaturedBatchStream<FeatureSet<HalfKPFactorized>, SparseBatch>(concurrency, filename, batch_size, cyclic, skipPredicate);
+        }
+        else if (feature_set == "HalfKA")
+        {
+            return new FeaturedBatchStream<FeatureSet<HalfKA>, SparseBatch>(concurrency, filename, batch_size, cyclic, skipPredicate);
+        }
+        else if (feature_set == "HalfKA^")
+        {
+            return new FeaturedBatchStream<FeatureSet<HalfKAFactorized>, SparseBatch>(concurrency, filename, batch_size, cyclic, skipPredicate);
         }
         fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
         return nullptr;
