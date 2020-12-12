@@ -17,7 +17,7 @@ def halfka_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece):
 
 class Features(FeatureBlock):
   def __init__(self):
-    super(Features, self).__init__('HalfKA', 0x5f134cb9, OrderedDict([('HalfKA', NUM_PLANES * NUM_SQ)]))
+    super(Features, self).__init__('HalfKA', 0x5f134cb8, OrderedDict([('HalfKA', NUM_PLANES * NUM_SQ)]))
 
   def get_active_features(self, board: chess.Board):
     def piece_features(turn):
@@ -29,7 +29,7 @@ class Features(FeatureBlock):
 
 class FactorizedFeatures(FeatureBlock):
   def __init__(self):
-    super(FactorizedFeatures, self).__init__('HalfKA^', 0x5f134cb9, OrderedDict([('HalfKA', NUM_PLANES * NUM_SQ), ('A', NUM_SQ * NUM_PT)]))
+    super(FactorizedFeatures, self).__init__('HalfKA^', 0x5f134cb8, OrderedDict([('HalfKA', NUM_PLANES * NUM_SQ), ('A', NUM_SQ * NUM_PT)]))
 
   def get_active_features(self, board: chess.Board):
     raise Exception('Not supported yet, you must use the c++ data loader for factorizer support during training')
