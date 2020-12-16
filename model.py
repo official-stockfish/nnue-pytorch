@@ -97,8 +97,8 @@ class NNUE(pl.LightningModule):
     b = self.input(b_in)
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
     # clamp here is used as a clipped relu to (0.0, 1.0)
-    l0_ = torch.clamp(l0_, 0.0, 1.0)
-    l1_ = torch.clamp(self.l1(l0_), 0.0, 1.0)
+    l0_clamp = torch.clamp(l0_, 0.0, 1.0)
+    l1_ = torch.clamp(self.l1(l0_clamp), 0.0, 1.0)
     l2_ = torch.clamp(self.l2(l1_), 0.0, 1.0)
     x = self.output(l2_)
     # Policy head
@@ -113,9 +113,8 @@ class NNUE(pl.LightningModule):
 
     q, p = self(us, them, white, black)
     # Scale score by 600.0 to match the expected NNUE scaling factor
-    q *= 600.0
-    value_loss = F.mse_loss(q, score)
-    policy_loss = F.cross_entropy(p, move)
+    value_loss = F.mse_loss(q, score / 600)
+    policy_loss = F.cross_entropy(p, move.long())
     self.log(loss_type + '_value_loss', value_loss)
     self.log(loss_type + '_policy_loss', policy_loss)
     return value_loss + policy_loss
