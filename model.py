@@ -102,7 +102,7 @@ class NNUE(pl.LightningModule):
     l2_ = torch.clamp(self.l2(l1_), 0.0, 1.0)
     x = self.output(l2_)
     # Policy head
-    p_l1 = F.relu(self.policy_l1(l0_))
+    p_l1 = F.relu(self.policy_l1(F.relu(l0_)))
     p_l2 = F.relu(self.policy_l2(p_l1))
     policy_ = self.policy(p_l2)
 
@@ -114,7 +114,8 @@ class NNUE(pl.LightningModule):
     q, p = self(us, them, white, black)
     # Scale score by 600.0 to match the expected NNUE scaling factor
     value_loss = F.mse_loss(q, score / 600)
-    policy_loss = F.cross_entropy(p, move.long())
+    # Scale policy loss down by 5 so mse loss has a bit more weight (policy loss ~3)
+    policy_loss = F.cross_entropy(p, move.long()) / 50
     self.log(loss_type + '_value_loss', value_loss)
     self.log(loss_type + '_policy_loss', policy_loss)
     return value_loss + policy_loss
