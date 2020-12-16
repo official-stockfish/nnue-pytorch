@@ -10,6 +10,10 @@ L1 = 256
 L2 = 32
 L3 = 32
 
+POLICY_L1 = 256
+POLICY_L2 = 256
+POLICY = 64 * 64 # one-hot -> from x to (ignores underpromotions)
+
 class NNUE(pl.LightningModule):
   """
   This model attempts to directly represent the nodchip Stockfish trainer methodology.
@@ -26,6 +30,11 @@ class NNUE(pl.LightningModule):
     self.l1 = nn.Linear(2 * L1, L2)
     self.l2 = nn.Linear(L2, L3)
     self.output = nn.Linear(L3, 1)
+
+    self.policy_l1 = nn.Linear(2 * L1, POLICY_L1)
+    self.policy_l2 = nn.Linear(POLICY_L1, POLICY_L2)
+    self.policy = nn.Linear(POLICY_L2, POLICY)
+
     self.lambda_ = lambda_
 
     self._zero_virtual_feature_weights()
@@ -92,39 +101,33 @@ class NNUE(pl.LightningModule):
     l1_ = torch.clamp(self.l1(l0_), 0.0, 1.0)
     l2_ = torch.clamp(self.l2(l1_), 0.0, 1.0)
     x = self.output(l2_)
-    return x
+    # Policy head
+    p_l1 = F.relu(self.policy_l1(l0_))
+    p_l2 = F.relu(self.policy_l2(p_l1))
+    policy_ = self.policy(p_l2)
+
+    return x, policy_
 
   def step_(self, batch, batch_idx, loss_type):
-    us, them, white, black, outcome, score = batch
+    us, them, white, black, outcome, score, move = batch
 
-    q = self(us, them, white, black)
-    t = outcome
-    # Divide score by 600.0 to match the expected NNUE scaling factor
-    p = (score / 600.0).sigmoid()
-    epsilon = 1e-12
-    teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
-    outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
-    teacher_loss = -(p * F.logsigmoid(q) + (1.0 - p) * F.logsigmoid(-q))
-    outcome_loss = -(t * F.logsigmoid(q) + (1.0 - t) * F.logsigmoid(-q))
-    result  = self.lambda_ * teacher_loss    + (1.0 - self.lambda_) * outcome_loss
-    entropy = self.lambda_ * teacher_entropy + (1.0 - self.lambda_) * outcome_entropy
-    loss = result.mean() - entropy.mean()
-    self.log(loss_type, loss)
-    return loss
-
-    # MSE Loss function for debugging
+    q, p = self(us, them, white, black)
     # Scale score by 600.0 to match the expected NNUE scaling factor
-    # output = self(us, them, white, black) * 600.0
-    # loss = F.mse_loss(output, score)
+    q *= 600.0
+    value_loss = F.mse_loss(q, score)
+    policy_loss = F.cross_entropy(p, move)
+    self.log(loss_type + '_value_loss', value_loss)
+    self.log(loss_type + '_policy_loss', policy_loss)
+    return value_loss + policy_loss
 
   def training_step(self, batch, batch_idx):
-    return self.step_(batch, batch_idx, 'train_loss')
+    return self.step_(batch, batch_idx, 'train')
 
   def validation_step(self, batch, batch_idx):
-    self.step_(batch, batch_idx, 'val_loss')
+    self.step_(batch, batch_idx, 'val')
 
   def test_step(self, batch, batch_idx):
-    self.step_(batch, batch_idx, 'test_loss')
+    self.step_(batch, batch_idx, 'test')
 
   def configure_optimizers(self):
     optimizer = ranger.Ranger(self.parameters())
