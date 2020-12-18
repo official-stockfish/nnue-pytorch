@@ -4,12 +4,34 @@ import torch
 import os
 import sys
 import glob
+import subprocess
 from torch.utils.data import Dataset
+
+commands = [
+    ['/bin/bash', 'compile_data_loader.bat'],
+    ['compile_data_loader.bat']
+]
+
+initialized = False
+for command in commands:
+    if initialized:
+        break
+
+    try:
+        subprocess.run(command, check=True)
+        initialized = True
+    except:
+        pass
+
+if not initialized:
+    print('Cannot compile data_loader shared library.')
+    sys.exit(1)
 
 local_dllpath = [n for n in glob.glob('./*training_data_loader.*') if n.endswith('.so') or n.endswith('.dll') or n.endswith('.dylib')]
 if not local_dllpath:
     print('Cannot find data_loader shared library.')
     sys.exit(1)
+
 dllpath = os.path.abspath(local_dllpath[0])
 dll = ctypes.cdll.LoadLibrary(dllpath)
 
