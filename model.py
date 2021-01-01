@@ -1,4 +1,5 @@
 import chess
+import math
 import ranger
 import torch
 from torch import nn
@@ -22,7 +23,7 @@ class NNUE(pl.LightningModule):
   def __init__(self, feature_set, lambda_=1.0):
     super(NNUE, self).__init__()
     self.input = nn.Linear(feature_set.num_features, L1)
-    weights = self.input.weight
+    weights = self.input.weight.clone()
     kMaxActiveDimensions = 32
     kSigma = 0.1 / math.sqrt(kMaxActiveDimensions)
     weights = weights.normal_(0.0, kSigma)
