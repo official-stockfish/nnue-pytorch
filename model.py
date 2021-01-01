@@ -22,6 +22,14 @@ class NNUE(pl.LightningModule):
   def __init__(self, feature_set, lambda_=1.0):
     super(NNUE, self).__init__()
     self.input = nn.Linear(feature_set.num_features, L1)
+    weights = self.input.weight
+    kMaxActiveDimensions = 32
+    kSigma = 0.1 / math.sqrt(kMaxActiveDimensions)
+    weights = weights.normal_(0.0, kSigma)
+    biases = self.input.bias
+    biases = biases.clone().fill_(0.5)
+    self.input.weight = nn.Parameter(weights)
+    self.input.bias = nn.Parameter(biases)
     self.feature_set = feature_set
     self.l1 = nn.Linear(2 * L1, L2)
     self.l2 = nn.Linear(L2, L3)
