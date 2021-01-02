@@ -58,6 +58,14 @@ Import an existing SF NNUE network to the pytorch network format.
 python serialize.py nn.nnue converted.pt
 ```
 
+# Visualize a network
+
+Visualize a network from either a checkpoint (`.ckpt`), a serialized model (`.pt`)
+or a SF NNUE file (`.nnue`).
+```
+python visualize.py nn.nnue
+```
+
 # Logging
 
 ```
