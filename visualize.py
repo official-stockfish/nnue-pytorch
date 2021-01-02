@@ -23,7 +23,7 @@ class NNUEVisualizer():
 
         return weight_coalesced
 
-    def plot_feature_transformer_weights(self, basename, vmin=0, vmax=0.5):
+    def plot_input_weights(self, basename, vmin=0, vmax=0.5, save_fig=False):
         # Coalesce weights and transform them to Numpy domain.
         weights = self.coalesce_ft_weights(self.model, self.model.input)
         weights = weights.transpose(0, 1).flatten().numpy()
@@ -40,6 +40,8 @@ class NNUEVisualizer():
         totaldim = totalx*totaly
 
         # Generate image.
+        print("Generating input weights plot...", end="", flush=True)
+
         # [Thanks to https://github.com/hxim/Stockfish-Evaluation-Guide
         # upon which the following code is based.]
         img = np.zeros(totaldim)
@@ -72,9 +74,12 @@ class NNUEVisualizer():
         else:
             title_template = "input weights [{BASENAME}]"
 
+        print(" done")
+
         # Plot image.
+        plt.figure(figsize=(16, 9))
         plt.matshow(img.reshape((totaldim//totalx, totalx)),
-                    vmin=vmin, vmax=vmax, cmap='jet')
+                    fignum=0, vmin=vmin, vmax=vmax, cmap='jet')
         plt.colorbar(fraction=0.046, pad=0.04)
 
         line_options = {'color': 'black', 'linewidth': 0.5}
@@ -90,6 +95,13 @@ class NNUEVisualizer():
         plt.yticks(ticks=widthy*np.arange(1, numy) - 0.5)
         plt.axis('off')
         plt.title(title_template.format(BASENAME=basename))
+        plt.tight_layout()
+
+        # Save figure.
+        if save_fig:
+            destname = "input-weights_{}.jpg".format(basename)
+            print("Saving input weights plot to {}".format(destname))
+            plt.savefig(destname)
 
 
 def main():
@@ -101,6 +113,8 @@ def main():
         "--input-weights-vmin", default=-0.5, type=float, help="Minimum of color map range for input weights (absolute values are plotted if this is positive or zero).")
     parser.add_argument(
         "--input-weights-vmax", default=0.5, type=float, help="Maximum of color map range for input weights.")
+    parser.add_argument("--save-fig", action="store_true",
+                        help="Directly store the plots to file (don't show them).")
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -127,9 +141,11 @@ def main():
     bn = basename(args.source)
 
     visualizer = NNUEVisualizer(nnue)
-    visualizer.plot_feature_transformer_weights(
-        bn, args.input_weights_vmin, args.input_weights_vmax)
-    plt.show()
+    visualizer.plot_input_weights(
+        bn, args.input_weights_vmin, args.input_weights_vmax, args.save_fig)
+
+    if not args.save_fig:
+        plt.show()
 
 
 if __name__ == '__main__':
