@@ -23,7 +23,7 @@ class NNUEVisualizer():
 
         return weight_coalesced
 
-    def plot_feature_transformer(self, title):
+    def plot_feature_transformer_weights(self, basename, vmin=0, vmax=0.5):
         # Coalesce weights and transform them to Numpy domain.
         weights = self.coalesce_ft_weights(self.model, self.model.input)
         weights = weights.transpose(0, 1).flatten().numpy()
@@ -66,20 +66,30 @@ class NNUEVisualizer():
 
             img[ii] = weights[j]
 
+        if vmin >= 0:
+            img = np.abs(img)
+            title_template = "abs(input weights) [{BASENAME}]"
+        else:
+            title_template = "input weights [{BASENAME}]"
+
         # Plot image.
-        plt.matshow(np.abs(img.reshape((totaldim//totalx, totalx))),
-                    vmin=0, vmax=0.5)
-        plt.colorbar()
+        plt.matshow(img.reshape((totaldim//totalx, totalx)),
+                    vmin=vmin, vmax=vmax, cmap='jet')
+        plt.colorbar(fraction=0.046, pad=0.04)
 
-        for i in range(numx):
-            plt.axvline(x=widthx*i-0.5, color='red')
+        line_options = {'color': 'black', 'linewidth': 0.5}
+        for i in range(1, numx):
+            plt.axvline(x=widthx*i-0.5, **line_options)
 
-        for j in range(numy):
-            plt.axhline(y=widthy*j-0.5, color='red')
+        for j in range(1, numy):
+            plt.axhline(y=widthy*j-0.5, **line_options)
 
         plt.xlim([0, totalx])
         plt.ylim([totaly, 0])
-        plt.title(title)
+        plt.xticks(ticks=widthx*np.arange(1, numx) - 0.5)
+        plt.yticks(ticks=widthy*np.arange(1, numy) - 0.5)
+        plt.axis('off')
+        plt.title(title_template.format(BASENAME=basename))
 
 
 def main():
@@ -87,9 +97,14 @@ def main():
         description="Visualizes networks in ckpt, pt and nnue format.")
     parser.add_argument(
         "source", help="Source file (can be .ckpt, .pt or .nnue)")
+    parser.add_argument(
+        "--input-weights-vmin", default=-0.5, type=float, help="Minimum of color map range for input weights (absolute values are plotted if this is positive or zero).")
+    parser.add_argument(
+        "--input-weights-vmax", default=0.5, type=float, help="Maximum of color map range for input weights.")
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
+    assert args.features == 'HalfKP'
     feature_set = features.get_feature_set_from_name(args.features)
 
     print("Visualizing {}".format(args.source))
@@ -112,8 +127,8 @@ def main():
     bn = basename(args.source)
 
     visualizer = NNUEVisualizer(nnue)
-    visualizer.plot_feature_transformer(
-        "abs(input weights) [{}]".format(bn))
+    visualizer.plot_feature_transformer_weights(
+        bn, args.input_weights_vmin, args.input_weights_vmax)
     plt.show()
 
 
