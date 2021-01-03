@@ -23,7 +23,7 @@ class NNUEVisualizer():
 
         return weight_coalesced
 
-    def plot_input_weights(self, basename, vmin=0, vmax=0.5, save_fig=False):
+    def plot_input_weights(self, net_name, vmin, vmax, save_dir=None):
         # Coalesce weights and transform them to Numpy domain.
         weights = self.coalesce_ft_weights(self.model, self.model.input)
         weights = weights.transpose(0, 1).flatten().numpy()
@@ -70,9 +70,9 @@ class NNUEVisualizer():
 
         if vmin >= 0:
             img = np.abs(img)
-            title_template = "abs(input weights) [{BASENAME}]"
+            title_template = "abs(input weights) [{NETNAME}]"
         else:
-            title_template = "input weights [{BASENAME}]"
+            title_template = "input weights [{NETNAME}]"
 
         print(" done")
 
@@ -94,12 +94,13 @@ class NNUEVisualizer():
         plt.xticks(ticks=widthx*np.arange(1, numx) - 0.5)
         plt.yticks(ticks=widthy*np.arange(1, numy) - 0.5)
         plt.axis('off')
-        plt.title(title_template.format(BASENAME=basename))
+        plt.title(title_template.format(NETNAME=net_name))
         plt.tight_layout()
 
         # Save figure.
-        if save_fig:
-            destname = "input-weights_{}.jpg".format(basename)
+        if save_dir:
+            from os.path import join
+            destname = join(save_dir, "input-weights.jpg")
             print("Saving input weights plot to {}".format(destname))
             plt.savefig(destname)
 
@@ -113,8 +114,12 @@ def main():
         "--input-weights-vmin", default=-0.5, type=float, help="Minimum of color map range for input weights (absolute values are plotted if this is positive or zero).")
     parser.add_argument(
         "--input-weights-vmax", default=0.5, type=float, help="Maximum of color map range for input weights.")
-    parser.add_argument("--save-fig", action="store_true",
-                        help="Directly store the plots to file (don't show them).")
+    parser.add_argument("--save-dir", type=str, required=False,
+                        help="Save the plots in this directory.")
+    parser.add_argument("--dont-show", action="store_true",
+                        help="Don't show the plots.")
+    parser.add_argument("--net-name", type=str, required=False,
+                        help="Override the network name used in plot titles (default = network basename).")
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -137,14 +142,17 @@ def main():
     else:
         raise Exception("Invalid filetype: " + str(args))
 
-    from os.path import basename
-    bn = basename(args.source)
+    if args.net_name:
+        net_name = args.net_name
+    else:
+        from os.path import basename
+        net_name = basename(args.source)
 
     visualizer = NNUEVisualizer(nnue)
     visualizer.plot_input_weights(
-        bn, args.input_weights_vmin, args.input_weights_vmax, args.save_fig)
+        net_name, args.input_weights_vmin, args.input_weights_vmax, args.save_dir)
 
-    if not args.save_fig:
+    if not args.dont_show:
         plt.show()
 
 
