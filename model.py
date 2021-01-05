@@ -97,10 +97,15 @@ class NNUE(pl.LightningModule):
   def step_(self, batch, batch_idx, loss_type):
     us, them, white, black, outcome, score = batch
 
-    q = self(us, them, white, black)
+    # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
+    # This needs to match the value used in the serializer
+    nnue2score = 600
+    scaling = 361
+
+    q = self(us, them, white, black) * nnue2score / scaling
     t = outcome
-    # Divide score by 600.0 to match the expected NNUE scaling factor
-    p = (score / 600.0).sigmoid()
+    p = (score / scaling).sigmoid()
+
     epsilon = 1e-12
     teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
     outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
@@ -127,7 +132,8 @@ class NNUE(pl.LightningModule):
     self.step_(batch, batch_idx, 'test_loss')
 
   def configure_optimizers(self):
-    optimizer = ranger.Ranger(self.parameters(),betas=(.9, 0.999))
+    # increasing the eps leads to less saturated nets with a few dead neurons
+    optimizer = ranger.Ranger(self.parameters(),betas=(.9, 0.999), eps=1.0e-7)
     # Drop learning rate after 75 epochs
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
     return [optimizer], [scheduler]
