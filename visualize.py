@@ -23,7 +23,7 @@ class NNUEVisualizer():
 
         return weight_coalesced
 
-    def plot_feature_transformer(self, title):
+    def plot_input_weights(self, net_name, vmin, vmax, save_dir=None):
         # Coalesce weights and transform them to Numpy domain.
         weights = self.coalesce_ft_weights(self.model, self.model.input)
         weights = weights.transpose(0, 1).flatten().numpy()
@@ -40,6 +40,8 @@ class NNUEVisualizer():
         totaldim = totalx*totaly
 
         # Generate image.
+        print("Generating input weights plot...", end="", flush=True)
+
         # [Thanks to https://github.com/hxim/Stockfish-Evaluation-Guide
         # upon which the following code is based.]
         img = np.zeros(totaldim)
@@ -66,20 +68,41 @@ class NNUEVisualizer():
 
             img[ii] = weights[j]
 
+        if vmin >= 0:
+            img = np.abs(img)
+            title_template = "abs(input weights) [{NETNAME}]"
+        else:
+            title_template = "input weights [{NETNAME}]"
+
+        print(" done")
+
         # Plot image.
-        plt.matshow(np.abs(img.reshape((totaldim//totalx, totalx))),
-                    vmin=0, vmax=0.5)
-        plt.colorbar()
+        plt.figure(figsize=(16, 9))
+        plt.matshow(img.reshape((totaldim//totalx, totalx)),
+                    fignum=0, vmin=vmin, vmax=vmax, cmap='jet')
+        plt.colorbar(fraction=0.046, pad=0.04)
 
-        for i in range(numx):
-            plt.axvline(x=widthx*i-0.5, color='red')
+        line_options = {'color': 'black', 'linewidth': 0.5}
+        for i in range(1, numx):
+            plt.axvline(x=widthx*i-0.5, **line_options)
 
-        for j in range(numy):
-            plt.axhline(y=widthy*j-0.5, color='red')
+        for j in range(1, numy):
+            plt.axhline(y=widthy*j-0.5, **line_options)
 
         plt.xlim([0, totalx])
         plt.ylim([totaly, 0])
-        plt.title(title)
+        plt.xticks(ticks=widthx*np.arange(1, numx) - 0.5)
+        plt.yticks(ticks=widthy*np.arange(1, numy) - 0.5)
+        plt.axis('off')
+        plt.title(title_template.format(NETNAME=net_name))
+        plt.tight_layout()
+
+        # Save figure.
+        if save_dir:
+            from os.path import join
+            destname = join(save_dir, "input-weights.jpg")
+            print("Saving input weights plot to {}".format(destname))
+            plt.savefig(destname)
 
 
 def main():
@@ -87,9 +110,20 @@ def main():
         description="Visualizes networks in ckpt, pt and nnue format.")
     parser.add_argument(
         "source", help="Source file (can be .ckpt, .pt or .nnue)")
+    parser.add_argument(
+        "--input-weights-vmin", default=-0.5, type=float, help="Minimum of color map range for input weights (absolute values are plotted if this is positive or zero).")
+    parser.add_argument(
+        "--input-weights-vmax", default=0.5, type=float, help="Maximum of color map range for input weights.")
+    parser.add_argument("--save-dir", type=str, required=False,
+                        help="Save the plots in this directory.")
+    parser.add_argument("--dont-show", action="store_true",
+                        help="Don't show the plots.")
+    parser.add_argument("--net-name", type=str, required=False,
+                        help="Override the network name used in plot titles (default = network basename).")
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
+    assert args.features == 'HalfKP'
     feature_set = features.get_feature_set_from_name(args.features)
 
     print("Visualizing {}".format(args.source))
@@ -108,13 +142,18 @@ def main():
     else:
         raise Exception("Invalid filetype: " + str(args))
 
-    from os.path import basename
-    bn = basename(args.source)
+    if args.net_name:
+        net_name = args.net_name
+    else:
+        from os.path import basename
+        net_name = basename(args.source)
 
     visualizer = NNUEVisualizer(nnue)
-    visualizer.plot_feature_transformer(
-        "abs(input weights) [{}]".format(bn))
-    plt.show()
+    visualizer.plot_input_weights(
+        net_name, args.input_weights_vmin, args.input_weights_vmax, args.save_dir)
+
+    if not args.dont_show:
+        plt.show()
 
 
 if __name__ == '__main__':
