@@ -93,6 +93,10 @@ class NNUEWriter():
     ascii_hist('fc bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
     weight = layer.weight.data
+    clipped = torch.count_nonzero(weight.clamp(-kMaxWeight, kMaxWeight) - weight)
+    total_elements = torch.numel(weight)
+    clipped_max = torch.max(torch.abs(weight.clamp(-kMaxWeight, kMaxWeight) - weight))
+    print("layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(clipped, total_elements, clipped_max, kMaxWeight))
     weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
     ascii_hist('fc weight:', weight.numpy())
     # Stored as [outputs][inputs], so we can flatten
