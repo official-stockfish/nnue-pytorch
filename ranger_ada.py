@@ -102,11 +102,9 @@ class RangerAdaBelief(Optimizer):
 
     def step(self, closure=None):
         loss = None
-        # note - below is commented out b/c I have other work that passes back the loss as a float, and thus not a callable closure.
-        # Uncomment if you need to use the actual closure...
-
-        # if closure is not None:
-        #loss = closure()
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
 
         # Evaluate averages and grad, update param tensors
         for group in self.param_groups:
