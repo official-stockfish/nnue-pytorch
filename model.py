@@ -1,5 +1,5 @@
 import chess
-import ranger
+import ranger_ada
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -133,7 +133,7 @@ class NNUE(pl.LightningModule):
 
   def configure_optimizers(self):
     # increasing the eps leads to less saturated nets with a few dead neurons
-    optimizer = ranger.Ranger(self.parameters(),betas=(.9, 0.999), eps=1.0e-7)
+    optimizer = ranger_ada.RangerAdaBelief(self.parameters(), betas=(.9, 0.999), eps=1.0e-7)
     # Drop learning rate after 75 epochs
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
     return [optimizer], [scheduler]
