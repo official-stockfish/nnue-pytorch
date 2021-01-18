@@ -35,7 +35,7 @@ class NNUEWriter():
     self.buf = bytearray()
 
     self.write_header(model)
-    self.int32(model.feature_set.hash) # Feature transformer hash
+    self.int32(model.feature_set.hash ^ (M.L1*2)) # Feature transformer hash
     self.write_feature_transformer(model)
     self.int32(FC_HASH) # FC layers hash
     self.write_fc_layer(model.l1)
@@ -44,7 +44,7 @@ class NNUEWriter():
 
   def write_header(self, model):
     self.int32(VERSION) # version
-    self.int32(FC_HASH ^ model.feature_set.hash) # halfkp network hash
+    self.int32(FC_HASH ^ model.feature_set.hash ^ (M.L1*2)) # halfkp network hash
     description = b"Features=HalfKP(Friend)[41024->256x2],"
     description += b"Network=AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
     description += b"(ClippedReLU[32](AffineTransform[32<-512](InputSlice[512(0:512)])))))"
@@ -93,6 +93,10 @@ class NNUEWriter():
     ascii_hist('fc bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
     weight = layer.weight.data
+    clipped = torch.count_nonzero(weight.clamp(-kMaxWeight, kMaxWeight) - weight)
+    total_elements = torch.numel(weight)
+    clipped_max = torch.max(torch.abs(weight.clamp(-kMaxWeight, kMaxWeight) - weight))
+    print("layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(clipped, total_elements, clipped_max, kMaxWeight))
     weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
     ascii_hist('fc weight:', weight.numpy())
     # Stored as [outputs][inputs], so we can flatten
@@ -108,7 +112,7 @@ class NNUEReader():
     self.model = M.NNUE(feature_set)
 
     self.read_header(feature_set)
-    self.read_int32(feature_set.hash) # Feature transformer hash
+    self.read_int32(feature_set.hash ^ (M.L1*2)) # Feature transformer hash
     self.read_feature_transformer(self.model.input)
     self.read_int32(FC_HASH) # FC layers hash
     self.read_fc_layer(self.model.l1)
@@ -117,7 +121,7 @@ class NNUEReader():
 
   def read_header(self, feature_set):
     self.read_int32(VERSION) # version
-    self.read_int32(FC_HASH ^ feature_set.hash) # halfkp network hash
+    self.read_int32(FC_HASH ^ feature_set.hash ^ (M.L1*2)) # halfkp network hash
     desc_len = self.read_int32() # Network definition
     description = self.f.read(desc_len)
 

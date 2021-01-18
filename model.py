@@ -113,7 +113,7 @@ class NNUE(pl.LightningModule):
 
     q, p = self(us, them, white, black)
     # Scale score by 600.0 to match the expected NNUE scaling factor
-    value_loss = F.mse_loss(q, score / 600)
+    value_loss = F.mse_loss(q, score / 361)
     # Scale policy loss down by 5 so mse loss has a bit more weight (policy loss ~3)
     policy_loss = F.cross_entropy(p, move.long()) / 50
     self.log(loss_type + '_value_loss', value_loss)
@@ -130,5 +130,8 @@ class NNUE(pl.LightningModule):
     self.step_(batch, batch_idx, 'test')
 
   def configure_optimizers(self):
-    optimizer = ranger.Ranger(self.parameters())
-    return optimizer
+    # increasing the eps leads to less saturated nets with a few dead neurons
+    optimizer = ranger.Ranger(self.parameters(),betas=(.9, 0.999), eps=1.0e-7)
+    # Drop learning rate after 75 epochs
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
+    return [optimizer], [scheduler]
