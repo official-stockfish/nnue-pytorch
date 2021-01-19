@@ -111,11 +111,26 @@ class NNUE(pl.LightningModule):
   def step_(self, batch, batch_idx, loss_type):
     us, them, white, black, outcome, score, move = batch
 
-    q, p = self(us, them, white, black)
-    # Scale score by 600.0 to match the expected NNUE scaling factor
-    value_loss = F.mse_loss(q, score / 361)
-    # Scale policy loss down by 5 so mse loss has a bit more weight (policy loss ~3)
-    policy_loss = F.cross_entropy(p, move.long()) / 50
+    # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
+    # This needs to match the value used in the serializer
+    nnue2score = 600
+    scaling = 361
+
+    q, moves = self(us, them, white, black)
+    q = q * nnue2score / scaling
+    t = outcome
+    p = (score / scaling).sigmoid()
+
+    epsilon = 1e-12
+    teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
+    outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
+    teacher_loss = -(p * F.logsigmoid(q) + (1.0 - p) * F.logsigmoid(-q))
+    outcome_loss = -(t * F.logsigmoid(q) + (1.0 - t) * F.logsigmoid(-q))
+    result  = self.lambda_ * teacher_loss    + (1.0 - self.lambda_) * outcome_loss
+    entropy = self.lambda_ * teacher_entropy + (1.0 - self.lambda_) * outcome_entropy
+    value_loss = result.mean() - entropy.mean()
+
+    policy_loss = F.cross_entropy(moves, move.long()) / 50
     self.log(loss_type + '_value_loss', value_loss)
     self.log(loss_type + '_policy_loss', policy_loss)
     return value_loss + policy_loss
