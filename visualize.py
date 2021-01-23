@@ -23,13 +23,26 @@ class NNUEVisualizer():
 
         return weight_coalesced
 
-    def plot_input_weights(self, net_name, vmin, vmax, save_dir=None):
+    def plot_input_weights(self, net_name, vmin, vmax, order_neurons=False, save_dir=None):
         # Coalesce weights and transform them to Numpy domain.
         weights = self.coalesce_ft_weights(self.model, self.model.input)
         weights = weights.transpose(0, 1).flatten().numpy()
 
         hd = 256  # Output feature dimension.
         numx = 32  # Number of output features per row.
+
+        self.ordered_input_neurons = np.arange(hd, dtype=int)
+
+        if order_neurons:
+            # Order input neuron by the L1-norm of their associated weights.
+            neuron_weights_norm = np.zeros(hd)
+            for i in range(hd):
+                neuron_weights_norm[i] = np.sum(np.abs(weights[i::256]))
+
+            inv_order = np.flip(np.argsort(neuron_weights_norm))
+
+            for i in range(hd):
+                self.ordered_input_neurons[inv_order[i]] = i
 
         # Derived/fixed constants.
         numy = hd//numx
@@ -61,7 +74,7 @@ class NNUEVisualizer():
             inpos = [(7-kipos[0])+pipos[0]*8,
                      kipos[1]+(7-pipos[1])*8]
             d = - 8 if piece < 2 else 48 + (piece // 2 - 1) * 64
-            jhd = j % hd
+            jhd = self.ordered_input_neurons[j % hd]
             x = inpos[0] + widthx * ((jhd) % numx) + (piece % 2)*64
             y = inpos[1] + d + widthy * (jhd // numx)
             ii = x + y * totalx
@@ -105,6 +118,93 @@ class NNUEVisualizer():
             print("Saving input weights plot to {}".format(destname))
             plt.savefig(destname)
 
+    def plot_fc_weights(self, net_name, vmin, vmax, save_dir=None):
+        l1_weights_ = self.model.l1.weight.data.numpy()
+        l1_weights = np.zeros_like(l1_weights_)
+
+        for i in range(32):
+            l1_weights[i][::2] = l1_weights_[i][self.ordered_input_neurons]
+            l1_weights[i][1::2] = l1_weights_[
+                i][256+self.ordered_input_neurons]
+
+        if vmin >= 0:
+            l1_weights = np.abs(l1_weights)
+            title_template = "abs(L1 weights) [{NETNAME}]"
+        else:
+            title_template = "L1 weights [{NETNAME}]"
+
+        cmap = 'coolwarm' if vmin < 0 else 'viridis'
+        plt.figure(figsize=(16, 9))
+        plt.subplot(3, 1, 1)
+        plt.matshow(l1_weights,
+                    fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
+        plt.colorbar(fraction=0.046, pad=0.04)
+        plt.axis('off')
+        plt.title(title_template.format(NETNAME=net_name))
+
+        l2_weights = self.model.l2.weight.data.numpy()
+
+        if vmin >= 0:
+            l2_weights = np.abs(l2_weights)
+            title_template = "abs(L2 weights) [{NETNAME}]"
+        else:
+            title_template = "L2 weights [{NETNAME}]"
+
+        cmap = 'coolwarm' if vmin < 0 else 'viridis'
+        plt.subplot(3, 1, 2)
+        plt.matshow(l2_weights,
+                    fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
+        plt.colorbar(fraction=0.046, pad=0.04)
+        plt.axis('off')
+        plt.title(title_template.format(NETNAME=net_name))
+
+        output_weights = self.model.output.weight.data.numpy()
+
+        if vmin >= 0:
+            output_weights = np.abs(output_weights)
+            title_template = "abs(output weights) [{NETNAME}]"
+        else:
+            title_template = "output weights [{NETNAME}]"
+
+        cmap = 'coolwarm' if vmin < 0 else 'viridis'
+        plt.subplot(3, 1, 3)
+        plt.matshow(output_weights,
+                    fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
+        plt.colorbar(fraction=0.046, pad=0.04)
+        plt.axis('off')
+        plt.title(title_template.format(NETNAME=net_name))
+
+        # Save figure.
+        if save_dir:
+            from os.path import join
+            destname = join(save_dir, "fc-weights.jpg")
+            print("Saving FC weights plot to {}".format(destname))
+            plt.savefig(destname)
+
+        plt.figure()
+        title_template = "L1 weights histogram [{NETNAME}]"
+        plt.hist(l1_weights.flatten(), bins=(np.arange(-128, 127)-0.5)/64)
+        plt.title(title_template.format(NETNAME=net_name))
+
+        # Save figure.
+        if save_dir:
+            from os.path import join
+            destname = join(save_dir, "l1-weights-histogram.jpg")
+            print("Saving L1 weights histogram to {}".format(destname))
+            plt.savefig(destname)
+
+        plt.figure()
+        title_template = "L2 weights histogram [{NETNAME}]"
+        plt.hist(l2_weights.flatten(), bins=(np.arange(-128, 128)-0.5)/64)
+        plt.title(title_template.format(NETNAME=net_name))
+
+        # Save figure.
+        if save_dir:
+            from os.path import join
+            destname = join(save_dir, "l2-weights-histogram.jpg")
+            print("Saving L2 weights histogram to {}".format(destname))
+            plt.savefig(destname)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -112,9 +212,16 @@ def main():
     parser.add_argument(
         "source", help="Source file (can be .ckpt, .pt or .nnue)")
     parser.add_argument(
-        "--input-weights-vmin", default=-0.5, type=float, help="Minimum of color map range for input weights (absolute values are plotted if this is positive or zero).")
+        "--input-weights-vmin", default=-1, type=float, help="Minimum of color map range for input weights (absolute values are plotted if this is positive or zero).")
     parser.add_argument(
-        "--input-weights-vmax", default=0.5, type=float, help="Maximum of color map range for input weights.")
+        "--input-weights-vmax", default=1, type=float, help="Maximum of color map range for input weights.")
+    parser.add_argument(
+        "--order-input-neurons", action="store_true",
+        help="Order the neurons of the input layer by the L1-norm (sum of absolute values) of their weights.")
+    parser.add_argument(
+        "--fc-weights-vmin", default=-1, type=float, help="Minimum of color map range for fully-connected layer weights (absolute values are plotted if this is positive or zero).")
+    parser.add_argument(
+        "--fc-weights-vmax", default=1, type=float, help="Maximum of color map range for fully-connected layer weights.")
     parser.add_argument("--save-dir", type=str, required=False,
                         help="Save the plots in this directory.")
     parser.add_argument("--dont-show", action="store_true",
@@ -151,7 +258,9 @@ def main():
 
     visualizer = NNUEVisualizer(nnue)
     visualizer.plot_input_weights(
-        net_name, args.input_weights_vmin, args.input_weights_vmax, args.save_dir)
+        net_name, args.input_weights_vmin, args.input_weights_vmax, args.order_input_neurons, args.save_dir)
+    visualizer.plot_fc_weights(
+        net_name, args.fc_weights_vmin, args.fc_weights_vmax, args.save_dir)
 
     if not args.dont_show:
         plt.show()
