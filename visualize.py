@@ -134,7 +134,6 @@ class NNUEVisualizer():
                                                self.ordered_input_neurons]
 
         if vmin >= 0:
-            l1_weights = np.abs(l1_weights)
             title_template = "abs(L1 weights) [{NETNAME}]"
         else:
             title_template = "L1 weights [{NETNAME}]"
@@ -143,7 +142,7 @@ class NNUEVisualizer():
         plt.figure(figsize=(16, 9))
         gs = GridSpec(100, 100)
         plt.subplot(gs[:50, :])
-        plt.matshow(l1_weights,
+        plt.matshow(np.abs(l1_weights) if vmin >= 0 else l1_weights,
                     fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
         plt.colorbar(fraction=0.046, pad=0.04)
         plt.axis('off')
@@ -162,14 +161,13 @@ class NNUEVisualizer():
         l2_weights = self.model.l2.weight.data.numpy()
 
         if vmin >= 0:
-            l2_weights = np.abs(l2_weights)
             title_template = "abs(L2 weights) [{NETNAME}]"
         else:
             title_template = "L2 weights [{NETNAME}]"
 
         cmap = 'coolwarm' if vmin < 0 else 'viridis'
         plt.subplot(gs[55:75, 40:60])
-        plt.matshow(l2_weights,
+        plt.matshow(np.abs(l2_weights) if vmin >= 0 else l2_weights,
                     fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
         plt.colorbar(fraction=0.046, pad=0.04)
         plt.axis('off')
@@ -179,14 +177,13 @@ class NNUEVisualizer():
         output_weights = self.model.output.weight.data.numpy()
 
         if vmin >= 0:
-            output_weights = np.abs(output_weights)
             title_template = "abs(output weights) [{NETNAME}]"
         else:
             title_template = "output weights [{NETNAME}]"
 
         cmap = 'coolwarm' if vmin < 0 else 'viridis'
         plt.subplot(gs[75:, :])
-        plt.matshow(output_weights,
+        plt.matshow(np.abs(output_weights) if vmin >= 0 else output_weights,
                     fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
         plt.colorbar(fraction=0.046, pad=0.04)
         plt.axis('off')
