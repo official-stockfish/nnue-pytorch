@@ -4,6 +4,7 @@ import serialize
 import nnue_bin_dataset
 import subprocess
 import re
+from model import NNUE
 
 def read_model(nnue_path, feature_set):
     with open(nnue_path, 'rb') as f:
@@ -74,12 +75,17 @@ def main():
     parser.add_argument("--net", type=str, help="path to a .nnue net")
     parser.add_argument("--engine", type=str, help="path to stockfish")
     parser.add_argument("--data", type=str, help="path to .bin dataset")
+    parser.add_argument("--checkpoint", type=str, help="Optional checkpoint (used instead of nnue for local eval)")
     parser.add_argument("--count", type=int, default=100, help="number of datapoints to process")
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
     feature_set = features.get_feature_set_from_name(args.features)
-    model = read_model(args.net, feature_set)
+    if args.checkpoint:
+      model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set)
+    else:
+      model = read_model(args.net, feature_set)
+    model.eval()
     data_reader = make_data_reader(args.data, feature_set)
 
     fens = []

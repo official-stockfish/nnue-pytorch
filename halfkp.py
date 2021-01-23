@@ -32,9 +32,24 @@ class Features(FeatureBlock):
 class FactorizedFeatures(FeatureBlock):
   def __init__(self):
     super(FactorizedFeatures, self).__init__('HalfKP^', 0x5d69d5b8, OrderedDict([('HalfKP', NUM_PLANES * NUM_SQ), ('HalfK', NUM_SQ), ('P', NUM_SQ * 10 )]))
+    self.base = Features()
 
   def get_active_features(self, board: chess.Board):
-    raise Exception('Not supported yet, you must use the c++ data loader for factorizer support during training')
+    white, black = self.base.get_active_features(board)
+    def piece_features(base, color):
+      indices = torch.zeros(NUM_SQ * 11)
+      piece_count = 0
+      # P feature
+      for sq, p in board.piece_map().items():
+        if p.piece_type == chess.KING:
+          continue
+        piece_count += 1
+        p_idx = (p.piece_type - 1) * 2 + (p.color != color)
+        indices[(p_idx + 1) * NUM_SQ + orient(color, sq)] = 1.0
+      # HalfK feature
+      indices[orient(color, board.king(color))] = piece_count
+      return torch.cat((base, indices))
+    return (piece_features(white, chess.WHITE), piece_features(black, chess.BLACK))
 
   def get_feature_factors(self, idx):
     if idx >= self.num_real_features:
