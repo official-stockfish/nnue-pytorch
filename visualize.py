@@ -252,7 +252,7 @@ def main():
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
-    assert args.features == 'HalfKP' or args.features == 'HalfKP^'
+    assert args.features in ['HalfKP', 'HalfKP^']
     feature_set = features.get_feature_set_from_name(args.features)
 
     print("Visualizing {}".format(args.source))
