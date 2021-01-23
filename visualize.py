@@ -24,7 +24,7 @@ class NNUEVisualizer():
 
         return weight_coalesced
 
-    def plot_input_weights(self, net_name, vmin, vmax, order_neurons=False, save_dir=None):
+    def plot_input_weights(self, net_name, vmin, vmax, order_neurons=False, save_dir=None, save_prefix=None):
         # Coalesce weights and transform them to Numpy domain.
         weights = self.coalesce_ft_weights(self.model, self.model.input)
         weights = weights.transpose(0, 1).flatten().numpy()
@@ -116,11 +116,12 @@ class NNUEVisualizer():
         # Save figure.
         if save_dir:
             from os.path import join
-            destname = join(save_dir, "input-weights.jpg")
+            destname = join(
+                save_dir, "{}input-weights.jpg".format("" if save_prefix is None else save_prefix + "_"))
             print("Saving input weights plot to {}".format(destname))
             plt.savefig(destname)
 
-    def plot_fc_weights(self, net_name, vmin, vmax, save_dir=None):
+    def plot_fc_weights(self, net_name, vmin, vmax, save_dir=None, save_prefix=None):
         # L1.
         l1_weights_ = self.model.l1.weight.data.numpy()
 
@@ -192,7 +193,8 @@ class NNUEVisualizer():
         # Save figure.
         if save_dir:
             from os.path import join
-            destname = join(save_dir, "fc-weights.jpg")
+            destname = join(
+                save_dir, "{}fc-weights.jpg".format("" if save_prefix is None else save_prefix + "_"))
             print("Saving FC weights plot to {}".format(destname))
             plt.savefig(destname)
 
@@ -204,7 +206,8 @@ class NNUEVisualizer():
         # Save figure.
         if save_dir:
             from os.path import join
-            destname = join(save_dir, "l1-weights-histogram.jpg")
+            destname = join(save_dir, "{}l1-weights-histogram.jpg".format(
+                "" if save_prefix is None else save_prefix + "_"))
             print("Saving L1 weights histogram to {}".format(destname))
             plt.savefig(destname)
 
@@ -216,7 +219,8 @@ class NNUEVisualizer():
         # Save figure.
         if save_dir:
             from os.path import join
-            destname = join(save_dir, "l2-weights-histogram.jpg")
+            destname = join(save_dir, "{}l2-weights-histogram.jpg".format(
+                "" if save_prefix is None else save_prefix + "_"))
             print("Saving L2 weights histogram to {}".format(destname))
             plt.savefig(destname)
 
@@ -239,6 +243,8 @@ def main():
         "--fc-weights-vmax", default=2, type=float, help="Maximum of color map range for fully-connected layer weights.")
     parser.add_argument("--save-dir", type=str, required=False,
                         help="Save the plots in this directory.")
+    parser.add_argument("--save-prefix", type=str, required=False,
+                        help="Prefix used for the name of the saved files (default = network name).")
     parser.add_argument("--dont-show", action="store_true",
                         help="Don't show the plots.")
     parser.add_argument("--net-name", type=str, required=False,
@@ -271,14 +277,19 @@ def main():
         from os.path import basename
         net_name = basename(args.source)
 
+    if args.save_prefix:
+        save_prefix = args.save_prefix
+    else:
+        save_prefix = net_name
+
     if args.order_input_neurons:
         net_name = "reordered " + net_name
 
     visualizer = NNUEVisualizer(nnue)
     visualizer.plot_input_weights(
-        net_name, args.input_weights_vmin, args.input_weights_vmax, args.order_input_neurons, args.save_dir)
+        net_name, args.input_weights_vmin, args.input_weights_vmax, args.order_input_neurons, args.save_dir, save_prefix)
     visualizer.plot_fc_weights(
-        net_name, args.fc_weights_vmin, args.fc_weights_vmax, args.save_dir)
+        net_name, args.fc_weights_vmin, args.fc_weights_vmax, args.save_dir, save_prefix)
 
     if not args.dont_show:
         plt.show()
