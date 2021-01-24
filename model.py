@@ -1,4 +1,4 @@
-import chess
+from collections import namedtuple
 import ranger
 import torch
 from torch import nn
@@ -10,14 +10,36 @@ L1 = 256
 L2 = 32
 L3 = 32
 
+QTensor = namedtuple('QTensor', ['tensor', 'scale'])
+def quantize_tensor(x, dtype=torch.int8, scale=127.0, min_max=None):
+  if min_max is not None:
+    q_x = x.clamp(min_max[0], min_max[1])
+  else:
+    q_x = x
+  q_x = (q_x * scale).round().to(dtype)
+  return QTensor(tensor=q_x, scale=scale)
+
+def dequantize_tensor(q_x):
+  return q_x.tensor.float() / q_x.scale
+
+class FakeQuantOp(torch.autograd.Function):
+  @staticmethod
+  def forward(ctx, x, dtype=torch.int8, scale=127.0, min_max=None):
+    x = quantize_tensor(x, dtype=dtype, scale=scale, min_max=min_max)
+    x = dequantize_tensor(x)
+    return x
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    # straight through estimator
+    return grad_output, None, None, None
+
 class NNUE(pl.LightningModule):
   """
   This model attempts to directly represent the nodchip Stockfish trainer methodology.
 
   lambda_ = 0.0 - purely based on game results
   lambda_ = 1.0 - purely based on search scores
-
-  It is not ideal for training a Pytorch quantized model directly.
   """
   def __init__(self, feature_set, lambda_=1.0):
     super(NNUE, self).__init__()
@@ -84,6 +106,8 @@ class NNUE(pl.LightningModule):
       raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
 
   def forward(self, us, them, w_in, b_in):
+    return self.quant_forward(us, them, w_in, b_in)
+
     w = self.input(w_in)
     b = self.input(b_in)
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
@@ -92,6 +116,38 @@ class NNUE(pl.LightningModule):
     l1_ = torch.clamp(self.l1(l0_), 0.0, 1.0)
     l2_ = torch.clamp(self.l2(l1_), 0.0, 1.0)
     x = self.output(l2_)
+    return x
+
+  def quant_fc(self, layer, x, is_output=False):
+    l_w = layer.weight.data
+    l_b = layer.bias.data
+    if not is_output:
+      bias_scale = 8128
+    else:
+      bias_scale = 9600
+    layer.weight.data = FakeQuantOp.apply(l_w, torch.int8, bias_scale / 127.0, (-127.0 / 64.0, 127.0 / 64.0))
+    layer.bias.data = FakeQuantOp.apply(l_b, torch.int32, bias_scale)
+    result = layer(x)
+    layer.weight.data = l_w
+    layer.bias.data = l_b
+    return result
+
+  def quant_forward(self, us, them, w_in, b_in):
+    input_w = self.input.weight.data
+    input_b = self.input.bias.data
+    self.input.weight.data = FakeQuantOp.apply(input_w, torch.int16, 127.0)
+    self.input.bias.data = FakeQuantOp.apply(input_b, torch.int16, 127.0)
+    w = self.input(w_in)
+    b = self.input(b_in)
+    self.input.weight.data = input_w
+    self.input.bias.data = input_b
+
+    l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
+    # clamp here is used as a clipped relu to (0.0, 1.0)
+    l0_ = torch.clamp(l0_, 0.0, 1.0)
+    l1_ = torch.clamp(self.quant_fc(self.l1, l0_), 0.0, 1.0)
+    l2_ = torch.clamp(self.quant_fc(self.l2, l1_), 0.0, 1.0)
+    x = self.quant_fc(self.output, l2_, is_output=True)
     return x
 
   def step_(self, batch, batch_idx, loss_type):
