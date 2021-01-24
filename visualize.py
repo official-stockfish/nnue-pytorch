@@ -265,44 +265,60 @@ def main():
     parser.add_argument(
         "source", help="Source file (can be .ckpt, .pt or .nnue)")
     parser.add_argument(
-        "--input-weights-vmin", default=-1, type=float, help="Minimum of color map range for input weights (absolute values are plotted if this is positive or zero).")
+        "--input-weights-vmin", default=-1, type=float,
+        help="Minimum of color map range for input weights (absolute values are plotted if this is positive or zero).")
     parser.add_argument(
-        "--input-weights-vmax", default=1, type=float, help="Maximum of color map range for input weights.")
+        "--input-weights-vmax", default=1, type=float,
+        help="Maximum of color map range for input weights.")
     parser.add_argument(
-        "--input-weights-auto-scale", action="store_true", help="Use auto-scale for the color map range for input weights. This ignores input-weights-vmin and input-weights-vmax.")
+        "--input-weights-auto-scale", action="store_true",
+        help="Use auto-scale for the color map range for input weights. This ignores input-weights-vmin and input-weights-vmax.")
     parser.add_argument(
         "--order-input-neurons", action="store_true",
         help="Order the neurons of the input layer by the L1-norm (sum of absolute values) of their weights.")
     parser.add_argument(
-        "--fc-weights-vmin", default=-2, type=float, help="Minimum of color map range for fully-connected layer weights (absolute values are plotted if this is positive or zero).")
+        "--fc-weights-vmin", default=-2, type=float,
+        help="Minimum of color map range for fully-connected layer weights (absolute values are plotted if this is positive or zero).")
     parser.add_argument(
-        "--fc-weights-vmax", default=2, type=float, help="Maximum of color map range for fully-connected layer weights.")
+        "--fc-weights-vmax", default=2, type=float,
+        help="Maximum of color map range for fully-connected layer weights.")
     parser.add_argument(
-        "--fc-weights-auto-scale", action="store_true", help="Use auto-scale for the color map range for fully-connected layer weights. This ignores fc-weights-vmin and fc-weights-vmax.")
+        "--fc-weights-auto-scale", action="store_true",
+        help="Use auto-scale for the color map range for fully-connected layer weights. This ignores fc-weights-vmin and fc-weights-vmax.")
     parser.add_argument(
-        "--no-hist", action="store_true", help="Don't generate any histograms.")
+        "--no-hist", action="store_true",
+        help="Don't generate any histograms.")
     parser.add_argument(
-        "--no-biases", action="store_true", help="Don't generate plots for biases.")
+        "--no-biases", action="store_true",
+        help="Don't generate plots for biases.")
     parser.add_argument(
-        "--default-width", default=1600, type=int, help="Default width of all plots (in pixels).")
+        "--no-input-weights", action="store_true",
+        help="Don't generate plots or histograms for input weights.")
     parser.add_argument(
-        "--default-height", default=900, type=int, help="Default height of all plots (in pixels).")
+        "--no-fc-weights", action="store_true",
+        help="Don't generate plots or histograms for fully-connected layer weights.")
     parser.add_argument(
-        "--no-input-weights", action="store_true", help="Don't generate plots or histograms for input weights.")
+        "--default-width", default=1600, type=int,
+        help="Default width of all plots (in pixels).")
     parser.add_argument(
-        "--no-fc-weights", action="store_true", help="Don't generate plots or histograms for fully-connected layer weights.")
-    parser.add_argument("--save-dir", type=str, required=False,
-                        help="Save the plots in this directory.")
-    parser.add_argument("--save-prefix", type=str, required=False,
-                        help="Prefix used for the name of the saved files (default = network name).")
-    parser.add_argument("--dont-show", action="store_true",
-                        help="Don't show the plots.")
-    parser.add_argument("--net-name", type=str, required=False,
-                        help="Override the network name used in plot titles (default = network basename).")
+        "--default-height", default=900, type=int,
+        help="Default height of all plots (in pixels).")
+    parser.add_argument(
+        "--save-dir", type=str, required=False,
+        help="Save the plots in this directory.")
+    parser.add_argument(
+        "--save-prefix", type=str, required=False,
+        help="Prefix used for the name of the saved files (default = network name).")
+    parser.add_argument(
+        "--dont-show", action="store_true",
+        help="Don't show the plots.")
+    parser.add_argument(
+        "--net-name", type=str, required=False,
+        help="Override the network name used in plot titles (default = network basename).")
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
-    assert args.features in ['HalfKP', 'HalfKP^']
+    assert args.features in ('HalfKP', 'HalfKP^')
     feature_set = features.get_feature_set_from_name(args.features)
 
     print("Visualizing {}".format(args.source))
