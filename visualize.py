@@ -143,7 +143,7 @@ class NNUEVisualizer():
                 plt.figure()
                 title_template = "input weights histogram [{NETNAME}]"
                 plt.hist(img, log=True, bins=(
-                    np.arange(int(np.min(img)*127), int(np.max(img)*127+1))-0.5)/127)
+                    np.arange(int(np.min(img)*127)-1, int(np.max(img)*127)+3)-0.5)/127)
                 plt.title(title_template.format(NETNAME=self.args.net_name))
                 plt.tight_layout()
                 self._process_fig("input-weights-histogram")
@@ -223,7 +223,7 @@ class NNUEVisualizer():
                 plt.figure()
                 title_template = "L1 weights histogram [{NETNAME}]"
                 plt.hist(l1_weights.flatten(), log=True, bins=(
-                    np.arange(int(np.min(l1_weights)*64), int(np.max(l1_weights)*64+1))-0.5)/64)
+                    np.arange(int(np.min(l1_weights)*64)-1, int(np.max(l1_weights)*64)+3)-0.5)/64)
                 plt.title(title_template.format(NETNAME=self.args.net_name))
                 plt.tight_layout()
                 self._process_fig("l1-weights-histogram")
@@ -232,7 +232,7 @@ class NNUEVisualizer():
                 plt.figure()
                 title_template = "L2 weights histogram [{NETNAME}]"
                 plt.hist(l2_weights.flatten(), log=True, bins=(
-                    np.arange(int(np.min(l2_weights)*64), int(np.max(l2_weights)*64+1))-0.5)/64)
+                    np.arange(int(np.min(l2_weights)*64)-1, int(np.max(l2_weights)*64)+3)-0.5)/64)
                 plt.title(title_template.format(NETNAME=self.args.net_name))
                 plt.tight_layout()
                 self._process_fig("l2-weights-histogram")
