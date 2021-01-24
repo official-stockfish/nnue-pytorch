@@ -132,11 +132,11 @@ class NNUE(pl.LightningModule):
     self.step_(batch, batch_idx, 'test_loss')
 
   def configure_optimizers(self):
-    # Train the feature transformer layer with higher LR
+    # Train with a lower LR on the output layer
     LR = 1e-3
     train_params = [
-      {'params': self.get_layers(lambda x: self.input != x), 'lr': LR},
-      {'params': self.get_layers(lambda x: self.input == x), 'lr': LR * 10},
+      {'params': self.get_layers(lambda x: self.output != x), 'lr': LR},
+      {'params': self.get_layers(lambda x: self.output == x), 'lr': LR / 10},
     ]
     # increasing the eps leads to less saturated nets with a few dead neurons
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
