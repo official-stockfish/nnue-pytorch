@@ -14,6 +14,12 @@ class NNUEVisualizer():
         self.model = model
         self.args = args
 
+        import matplotlib as mpl
+        dpi = 100
+        mpl.rcParams["figure.figsize"] = (
+            self.args.default_width//dpi, self.args.default_height//dpi)
+        mpl.rcParams["figure.dpi"] = dpi
+
     def _process_fig(self, name):
         if self.args.save_dir:
             from os.path import join
@@ -111,7 +117,7 @@ class NNUEVisualizer():
             print(" done")
 
             # Input weights.
-            plt.figure(figsize=(16, 9))
+            plt.figure()
             plt.matshow(img.reshape((totaldim//totalx, totalx)),
                         fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
             plt.colorbar(fraction=0.046, pad=0.04)
@@ -134,7 +140,7 @@ class NNUEVisualizer():
 
             if not self.args.no_hist:
                 # Input weights histogram.
-                plt.figure(figsize=(16, 9))
+                plt.figure()
                 title_template = "input weights histogram [{NETNAME}]"
                 plt.hist(img, log=True, bins=(
                     np.arange(int(np.min(img)*127), int(np.max(img)*127+1))-0.5)/127)
@@ -176,7 +182,7 @@ class NNUEVisualizer():
                 plot_abs = True
                 cmap = 'viridis'
 
-            plt.figure(figsize=(16, 9))
+            plt.figure()
             gs = GridSpec(100, 100)
             plt.subplot(gs[:50, :])
             plt.matshow(np.abs(l1_weights) if plot_abs else l1_weights,
@@ -214,7 +220,7 @@ class NNUEVisualizer():
 
             if not self.args.no_hist:
                 # L1 weights histogram.
-                plt.figure(figsize=(16, 9))
+                plt.figure()
                 title_template = "L1 weights histogram [{NETNAME}]"
                 plt.hist(l1_weights.flatten(), log=True, bins=(
                     np.arange(int(np.min(l1_weights)*64), int(np.max(l1_weights)*64+1))-0.5)/64)
@@ -223,7 +229,7 @@ class NNUEVisualizer():
                 self._process_fig("l1-weights-histogram")
 
                 # L2 weights histogram.
-                plt.figure(figsize=(16, 9))
+                plt.figure()
                 title_template = "L2 weights histogram [{NETNAME}]"
                 plt.hist(l2_weights.flatten(), log=True, bins=(
                     np.arange(int(np.min(l2_weights)*64), int(np.max(l2_weights)*64+1))-0.5)/64)
@@ -238,7 +244,7 @@ class NNUEVisualizer():
             l2_biases = self.model.l2.bias.data.numpy()
             output_bias = self.model.output.bias.data.numpy()
 
-            plt.figure(figsize=(16, 9))
+            plt.figure()
             title_template = "biases [{NETNAME}]"
             plt.subplot(2, 1, 1)
             plt.plot(input_biases, '+', label='input')
@@ -277,6 +283,10 @@ def main():
         "--no-hist", action="store_true", help="Don't generate any histograms.")
     parser.add_argument(
         "--no-biases", action="store_true", help="Don't generate plots for biases.")
+    parser.add_argument(
+        "--default-width", default=1600, type=int, help="Default width of all plots (in pixels).")
+    parser.add_argument(
+        "--default-height", default=900, type=int, help="Default height of all plots (in pixels).")
     parser.add_argument(
         "--no-input-weights", action="store_true", help="Don't generate plots or histograms for input weights.")
     parser.add_argument(
