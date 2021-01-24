@@ -10,8 +10,17 @@ from serialize import NNUEReader
 
 
 class NNUEVisualizer():
-    def __init__(self, model):
+    def __init__(self, model, args):
         self.model = model
+        self.args = args
+
+    def _process_fig(self, name):
+        if self.args.save_dir:
+            from os.path import join
+            destname = join(
+                self.args.save_dir, "{}{}.jpg".format("" if self.args.save_prefix is None else self.args.save_prefix + "_", name))
+            print("Saving {}".format(destname))
+            plt.savefig(destname)
 
     def coalesce_ft_weights(self, model, layer):
         weight = layer.weight.data
@@ -24,7 +33,7 @@ class NNUEVisualizer():
 
         return weight_coalesced
 
-    def plot_input_weights(self, net_name, vmin, vmax, auto_scale=False, order_neurons=False, save_dir=None, save_prefix=None):
+    def plot_input_weights(self):
         # Coalesce weights and transform them to Numpy domain.
         weights = self.coalesce_ft_weights(self.model, self.model.input)
         weights = weights.transpose(0, 1).flatten().numpy()
@@ -35,7 +44,7 @@ class NNUEVisualizer():
 
         self.ordered_input_neurons = np.arange(hd, dtype=int)
 
-        if order_neurons:
+        if self.args.order_input_neurons:
             # Order input neuron by the L1-norm of their associated weights.
             neuron_weights_norm = np.zeros(hd)
             for i in range(hd):
@@ -54,178 +63,194 @@ class NNUEVisualizer():
         totaly = numy * widthy
         totaldim = totalx*totaly
 
-        # Generate image.
-        print("Generating input weights plot...", end="", flush=True)
+        if not self.args.no_input_weights:
+            # Generate image.
+            print("Generating input weights plot...", end="", flush=True)
 
-        # [Thanks to https://github.com/hxim/Stockfish-Evaluation-Guide
-        # upon which the following code is based.]
-        img = np.zeros(totaldim)
-        for j in range(weights.size):
-            # Calculate piece and king placement.
-            pi = (j // hd - 1) % 641
-            ki = (j // hd - 1) // 641
-            piece = pi // 64
-            rank = (pi % 64) // 8
+            # [Thanks to https://github.com/hxim/Stockfish-Evaluation-Guide
+            # upon which the following code is based.]
+            img = np.zeros(totaldim)
+            for j in range(weights.size):
+                # Calculate piece and king placement.
+                pi = (j // hd - 1) % 641
+                ki = (j // hd - 1) // 641
+                piece = pi // 64
+                rank = (pi % 64) // 8
 
-            if (pi == 640 or (rank == 0 or rank == 7) and (piece == 0 or piece == 1)):
-                # Ignore unused weights for "Shogi piece drop" and pawns on first/last rank.
-                continue
+                if (pi == 640 or (rank == 0 or rank == 7) and (piece == 0 or piece == 1)):
+                    # Ignore unused weights for "Shogi piece drop" and pawns on first/last rank.
+                    continue
 
-            kipos = [ki % 8, ki // 8]
-            pipos = [pi % 8, rank]
-            inpos = [(7-kipos[0])+pipos[0]*8,
-                     kipos[1]+(7-pipos[1])*8]
-            d = - 8 if piece < 2 else 48 + (piece // 2 - 1) * 64
-            jhd = self.ordered_input_neurons[j % hd]
-            x = inpos[0] + widthx * ((jhd) % numx) + (piece % 2)*64
-            y = inpos[1] + d + widthy * (jhd // numx)
-            ii = x + y * totalx
+                kipos = [ki % 8, ki // 8]
+                pipos = [pi % 8, rank]
+                inpos = [(7-kipos[0])+pipos[0]*8,
+                         kipos[1]+(7-pipos[1])*8]
+                d = - 8 if piece < 2 else 48 + (piece // 2 - 1) * 64
+                jhd = self.ordered_input_neurons[j % hd]
+                x = inpos[0] + widthx * ((jhd) % numx) + (piece % 2)*64
+                y = inpos[1] + d + widthy * (jhd // numx)
+                ii = x + y * totalx
 
-            img[ii] = weights[j]
+                img[ii] = weights[j]
 
-        if auto_scale:
-            vmin = None
-            vmax = None
+            if self.args.input_weights_auto_scale:
+                vmin = None
+                vmax = None
+            else:
+                vmin = self.args.input_weights_vmin
+                vmax = self.args.input_weights_vmax
 
-        if auto_scale or vmin < 0:
-            title_template = "input weights [{NETNAME}]"
-            cmap = 'coolwarm'
-        else:
-            img = np.abs(img)
-            title_template = "abs(input weights) [{NETNAME}]"
-            cmap = 'viridis'
+            if self.args.input_weights_auto_scale or self.args.input_weights_vmin < 0:
+                title_template = "input weights [{NETNAME}]"
+                cmap = 'coolwarm'
+            else:
+                img = np.abs(img)
+                title_template = "abs(input weights) [{NETNAME}]"
+                cmap = 'viridis'
 
-        print(" done")
+            print(" done")
 
-        # Plot image.
-        plt.figure(figsize=(16, 9))
-        plt.matshow(img.reshape((totaldim//totalx, totalx)),
-                    fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
-        plt.colorbar(fraction=0.046, pad=0.04)
+            # Input weights.
+            plt.figure(figsize=(16, 9))
+            plt.matshow(img.reshape((totaldim//totalx, totalx)),
+                        fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
+            plt.colorbar(fraction=0.046, pad=0.04)
 
-        line_options = {'color': 'black', 'linewidth': 0.5}
-        for i in range(1, numx):
-            plt.axvline(x=widthx*i-0.5, **line_options)
+            line_options = {'color': 'black', 'linewidth': 0.5}
+            for i in range(1, numx):
+                plt.axvline(x=widthx*i-0.5, **line_options)
 
-        for j in range(1, numy):
-            plt.axhline(y=widthy*j-0.5, **line_options)
+            for j in range(1, numy):
+                plt.axhline(y=widthy*j-0.5, **line_options)
 
-        plt.xlim([0, totalx])
-        plt.ylim([totaly, 0])
-        plt.xticks(ticks=widthx*np.arange(1, numx) - 0.5)
-        plt.yticks(ticks=widthy*np.arange(1, numy) - 0.5)
-        plt.axis('off')
-        plt.title(title_template.format(NETNAME=net_name))
-        plt.tight_layout()
+            plt.xlim([0, totalx])
+            plt.ylim([totaly, 0])
+            plt.xticks(ticks=widthx*np.arange(1, numx) - 0.5)
+            plt.yticks(ticks=widthy*np.arange(1, numy) - 0.5)
+            plt.axis('off')
+            plt.title(title_template.format(NETNAME=self.args.net_name))
+            plt.tight_layout()
+            self._process_fig("input-weights")
 
-        # Save figure.
-        if save_dir:
-            from os.path import join
-            destname = join(
-                save_dir, "{}input-weights.jpg".format("" if save_prefix is None else save_prefix + "_"))
-            print("Saving input weights plot to {}".format(destname))
-            plt.savefig(destname)
+            if not self.args.no_hist:
+                # Input weights histogram.
+                plt.figure(figsize=(16, 9))
+                title_template = "input weights histogram [{NETNAME}]"
+                plt.hist(img, log=True, bins=(
+                    np.arange(int(np.min(img)*127), int(np.max(img)*127+1))-0.5)/127)
+                plt.title(title_template.format(NETNAME=self.args.net_name))
+                plt.tight_layout()
+                self._process_fig("input-weights-histogram")
 
-    def plot_fc_weights(self, net_name, vmin, vmax,  auto_scale=False, save_dir=None, save_prefix=None):
-        # L1.
-        l1_weights_ = self.model.l1.weight.data.numpy()
+    def plot_fc_weights(self):
+        if not self.args.no_fc_weights:
+            # L1 weights.
+            l1_weights_ = self.model.l1.weight.data.numpy()
 
-        N = l1_weights_.size // (2*self.M)
+            N = l1_weights_.size // (2*self.M)
 
-        l1_weights = np.zeros((2*N, self.M))
+            l1_weights = np.zeros((2*N, self.M))
 
-        for i in range(N):
-            l1_weights[2*i] = l1_weights_[i][self.ordered_input_neurons]
-            l1_weights[2*i+1] = l1_weights_[i][self.M +
-                                               self.ordered_input_neurons]
+            for i in range(N):
+                l1_weights[2*i] = l1_weights_[i][self.ordered_input_neurons]
+                l1_weights[2*i+1] = l1_weights_[i][self.M +
+                                                   self.ordered_input_neurons]
 
-        if auto_scale:
-            vmin = None
-            vmax = None
+            if self.args.fc_weights_auto_scale:
+                vmin = None
+                vmax = None
+            else:
+                vmin = self.args.fc_weights_vmin
+                vmax = self.args.fc_weights_vmax
 
-        if auto_scale or vmin < 0:
-            l1_title_template = "L1 weights [{NETNAME}]"
-            l2_title_template = "L2 weights [{NETNAME}]"
-            output_title_template = "output weights [{NETNAME}]"
-            plot_abs = False
-            cmap = 'coolwarm'
-        else:
-            l1_title_template = "abs(L1 weights) [{NETNAME}]"
-            l2_title_template = "abs(L2 weights) [{NETNAME}]"
-            output_title_template = "abs(output weights) [{NETNAME}]"
-            plot_abs = True
-            cmap = 'viridis'
+            if self.args.fc_weights_auto_scale or self.args.fc_weights_vmin < 0:
+                l1_title_template = "L1 weights [{NETNAME}]"
+                l2_title_template = "L2 weights [{NETNAME}]"
+                output_title_template = "output weights [{NETNAME}]"
+                plot_abs = False
+                cmap = 'coolwarm'
+            else:
+                l1_title_template = "abs(L1 weights) [{NETNAME}]"
+                l2_title_template = "abs(L2 weights) [{NETNAME}]"
+                output_title_template = "abs(output weights) [{NETNAME}]"
+                plot_abs = True
+                cmap = 'viridis'
 
-        plt.figure(figsize=(16, 9))
-        gs = GridSpec(100, 100)
-        plt.subplot(gs[:50, :])
-        plt.matshow(np.abs(l1_weights) if plot_abs else l1_weights,
-                    fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
-        plt.colorbar(fraction=0.046, pad=0.04)
-        plt.axis('off')
-        plt.title(l1_title_template.format(NETNAME=net_name))
+            plt.figure(figsize=(16, 9))
+            gs = GridSpec(100, 100)
+            plt.subplot(gs[:50, :])
+            plt.matshow(np.abs(l1_weights) if plot_abs else l1_weights,
+                        fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
+            plt.colorbar(fraction=0.046, pad=0.04)
+            plt.axis('off')
+            plt.title(l1_title_template.format(NETNAME=self.args.net_name))
 
-        line_options = {'color': 'gray', 'linewidth': 0.5}
+            line_options = {'color': 'gray', 'linewidth': 0.5}
 
-        for j in range(1, N):
-            plt.axhline(y=2*j-0.5, **line_options)
+            for j in range(1, N):
+                plt.axhline(y=2*j-0.5, **line_options)
 
-        # L2.
-        l2_weights = self.model.l2.weight.data.numpy()
+            # L2 weights.
+            l2_weights = self.model.l2.weight.data.numpy()
 
-        plt.subplot(gs[55:75, 40:60])
-        plt.matshow(np.abs(l2_weights) if plot_abs else l2_weights,
-                    fignum=0, vmin=None if vmin == float(
-            "-inf") else vmin, vmax=vmax, cmap=cmap)
-        plt.colorbar(fraction=0.046, pad=0.04)
-        plt.axis('off')
-        plt.title(l2_title_template.format(NETNAME=net_name))
+            plt.subplot(gs[55:75, 40:60])
+            plt.matshow(np.abs(l2_weights) if plot_abs else l2_weights,
+                        fignum=0, vmin=None if vmin == float(
+                "-inf") else vmin, vmax=vmax, cmap=cmap)
+            plt.colorbar(fraction=0.046, pad=0.04)
+            plt.axis('off')
+            plt.title(l2_title_template.format(NETNAME=self.args.net_name))
 
-        # Output.
-        output_weights = self.model.output.weight.data.numpy()
+            # Output weights.
+            output_weights = self.model.output.weight.data.numpy()
 
-        plt.subplot(gs[75:, :])
-        plt.matshow(np.abs(output_weights) if plot_abs else output_weights,
-                    fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
-        plt.colorbar(fraction=0.046, pad=0.04)
-        plt.axis('off')
-        plt.title(output_title_template.format(NETNAME=net_name))
+            plt.subplot(gs[75:, :])
+            plt.matshow(np.abs(output_weights) if plot_abs else output_weights,
+                        fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
+            plt.colorbar(fraction=0.046, pad=0.04)
+            plt.axis('off')
+            plt.title(output_title_template.format(NETNAME=self.args.net_name))
+            self._process_fig("fc-weights")
 
-        # Save figure.
-        if save_dir:
-            from os.path import join
-            destname = join(
-                save_dir, "{}fc-weights.jpg".format("" if save_prefix is None else save_prefix + "_"))
-            print("Saving FC weights plot to {}".format(destname))
-            plt.savefig(destname)
+            if not self.args.no_hist:
+                # L1 weights histogram.
+                plt.figure(figsize=(16, 9))
+                title_template = "L1 weights histogram [{NETNAME}]"
+                plt.hist(l1_weights.flatten(), log=True, bins=(
+                    np.arange(int(np.min(l1_weights)*64), int(np.max(l1_weights)*64+1))-0.5)/64)
+                plt.title(title_template.format(NETNAME=self.args.net_name))
+                plt.tight_layout()
+                self._process_fig("l1-weights-histogram")
 
-        plt.figure()
-        title_template = "L1 weights histogram [{NETNAME}]"
-        plt.hist(l1_weights.flatten(), log=True, bins=(
-            np.arange(int(np.min(l1_weights)*64), int(np.max(l1_weights)*64+1))-0.5)/64)
-        plt.title(title_template.format(NETNAME=net_name))
+                # L2 weights histogram.
+                plt.figure(figsize=(16, 9))
+                title_template = "L2 weights histogram [{NETNAME}]"
+                plt.hist(l2_weights.flatten(), log=True, bins=(
+                    np.arange(int(np.min(l2_weights)*64), int(np.max(l2_weights)*64+1))-0.5)/64)
+                plt.title(title_template.format(NETNAME=self.args.net_name))
+                plt.tight_layout()
+                self._process_fig("l2-weights-histogram")
 
-        # Save figure.
-        if save_dir:
-            from os.path import join
-            destname = join(save_dir, "{}l1-weights-histogram.jpg".format(
-                "" if save_prefix is None else save_prefix + "_"))
-            print("Saving L1 weights histogram to {}".format(destname))
-            plt.savefig(destname)
+    def plot_biases(self):
+        if not self.args.no_biases:
+            input_biases = self.model.input.bias.data.numpy()
+            l1_biases = self.model.l1.bias.data.numpy()
+            l2_biases = self.model.l2.bias.data.numpy()
+            output_bias = self.model.output.bias.data.numpy()
 
-        plt.figure()
-        title_template = "L2 weights histogram [{NETNAME}]"
-        plt.hist(l2_weights.flatten(), log=True, bins=(
-            np.arange(int(np.min(l2_weights)*64), int(np.max(l2_weights)*64+1))-0.5)/64)
-        plt.title(title_template.format(NETNAME=net_name))
-
-        # Save figure.
-        if save_dir:
-            from os.path import join
-            destname = join(save_dir, "{}l2-weights-histogram.jpg".format(
-                "" if save_prefix is None else save_prefix + "_"))
-            print("Saving L2 weights histogram to {}".format(destname))
-            plt.savefig(destname)
+            plt.figure(figsize=(16, 9))
+            title_template = "biases [{NETNAME}]"
+            plt.subplot(2, 1, 1)
+            plt.plot(input_biases, '+', label='input')
+            plt.title(title_template.format(NETNAME=self.args.net_name))
+            plt.legend()
+            plt.subplot(2, 1, 2)
+            plt.plot(l1_biases, 'x', label='L1')
+            plt.plot(l2_biases, '+', label='L2')
+            plt.plot(output_bias, 'o', label='output')
+            plt.legend()
+            plt.tight_layout()
+            self._process_fig("biases")
 
 
 def main():
@@ -248,6 +273,14 @@ def main():
         "--fc-weights-vmax", default=2, type=float, help="Maximum of color map range for fully-connected layer weights.")
     parser.add_argument(
         "--fc-weights-auto-scale", action="store_true", help="Use auto-scale for the color map range for fully-connected layer weights. This ignores fc-weights-vmin and fc-weights-vmax.")
+    parser.add_argument(
+        "--no-hist", action="store_true", help="Don't generate any histograms.")
+    parser.add_argument(
+        "--no-biases", action="store_true", help="Don't generate plots for biases.")
+    parser.add_argument(
+        "--no-input-weights", action="store_true", help="Don't generate plots or histograms for input weights.")
+    parser.add_argument(
+        "--no-fc-weights", action="store_true", help="Don't generate plots or histograms for fully-connected layer weights.")
     parser.add_argument("--save-dir", type=str, required=False,
                         help="Save the plots in this directory.")
     parser.add_argument("--save-prefix", type=str, required=False,
@@ -278,25 +311,21 @@ def main():
     else:
         raise Exception("Invalid filetype: " + str(args))
 
-    if args.net_name:
-        net_name = args.net_name
-    else:
+    if args.net_name is None:
         from os.path import basename
-        net_name = basename(args.source)
+        args.net_name = basename(args.source)
 
-    if args.save_prefix:
-        save_prefix = args.save_prefix
-    else:
-        save_prefix = net_name
+    if args.save_prefix is None:
+        args.save_prefix = args.net_name
 
     if args.order_input_neurons:
-        net_name = "reordered " + net_name
+        args.net_name = "reordered " + args.net_name
 
-    visualizer = NNUEVisualizer(nnue)
-    visualizer.plot_input_weights(
-        net_name, args.input_weights_vmin, args.input_weights_vmax, args.input_weights_auto_scale, args.order_input_neurons, args.save_dir, save_prefix)
-    visualizer.plot_fc_weights(
-        net_name, args.fc_weights_vmin, args.fc_weights_vmax,  args.fc_weights_auto_scale, args.save_dir, save_prefix)
+    visualizer = NNUEVisualizer(nnue, args)
+
+    visualizer.plot_input_weights()
+    visualizer.plot_fc_weights()
+    visualizer.plot_biases()
 
     if not args.dont_show:
         plt.show()
