@@ -42,6 +42,20 @@ The default is:
 python train.py ... --features="HalfKP^"
 ```
 
+## Skipping certain fens in the training
+
+`--smart-fen-skipping` currently skips over moves where the king is in check, or where the bestMove is a capture (typical of non-quiet positions).
+`--random-fen-skipping N` skip N fens on average before using one. Uses fewer fens per game, useful with large data sets.
+
+## Current recommended training invocation
+
+```
+python train.py --smart-fen-skipping --random-fen-skipping 10 --batch-size 16384 --threads 8 --num-workers 8 --gpus 1 trainingdata validationdata 
+```
+best nets have been trained with 16B d9-scored nets, training runs >200 epochs
+
+
+
 # Export a network
 
 Using either a checkpoint (`.ckpt`) or serialized model (`.pt`),
