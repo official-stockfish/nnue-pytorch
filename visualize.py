@@ -24,7 +24,7 @@ class NNUEVisualizer():
 
         return weight_coalesced
 
-    def plot_input_weights(self, net_name, vmin, vmax, order_neurons=False, save_dir=None, save_prefix=None):
+    def plot_input_weights(self, net_name, vmin, vmax, auto_scale=False, order_neurons=False, save_dir=None, save_prefix=None):
         # Coalesce weights and transform them to Numpy domain.
         weights = self.coalesce_ft_weights(self.model, self.model.input)
         weights = weights.transpose(0, 1).flatten().numpy()
@@ -83,17 +83,22 @@ class NNUEVisualizer():
 
             img[ii] = weights[j]
 
-        if vmin >= 0:
+        if auto_scale:
+            vmin = None
+            vmax = None
+
+        if auto_scale or vmin < 0:
+            title_template = "input weights [{NETNAME}]"
+            cmap = 'coolwarm'
+        else:
             img = np.abs(img)
             title_template = "abs(input weights) [{NETNAME}]"
-        else:
-            title_template = "input weights [{NETNAME}]"
+            cmap = 'viridis'
 
         print(" done")
 
         # Plot image.
         plt.figure(figsize=(16, 9))
-        cmap = 'coolwarm' if vmin < 0 else 'viridis'
         plt.matshow(img.reshape((totaldim//totalx, totalx)),
                     fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
         plt.colorbar(fraction=0.046, pad=0.04)
@@ -121,7 +126,7 @@ class NNUEVisualizer():
             print("Saving input weights plot to {}".format(destname))
             plt.savefig(destname)
 
-    def plot_fc_weights(self, net_name, vmin, vmax, save_dir=None, save_prefix=None):
+    def plot_fc_weights(self, net_name, vmin, vmax,  auto_scale=False, save_dir=None, save_prefix=None):
         # L1.
         l1_weights_ = self.model.l1.weight.data.numpy()
 
@@ -134,61 +139,57 @@ class NNUEVisualizer():
             l1_weights[2*i+1] = l1_weights_[i][self.M +
                                                self.ordered_input_neurons]
 
-        if vmin >= 0:
-            title_template = "abs(L1 weights) [{NETNAME}]"
-        else:
-            title_template = "L1 weights [{NETNAME}]"
+        if auto_scale:
+            vmin = None
+            vmax = None
 
-        cmap = 'coolwarm' if vmin < 0 else 'viridis'
+        if auto_scale or vmin < 0:
+            l1_title_template = "L1 weights [{NETNAME}]"
+            l2_title_template = "L2 weights [{NETNAME}]"
+            output_title_template = "output weights [{NETNAME}]"
+            plot_abs = False
+            cmap = 'coolwarm'
+        else:
+            l1_title_template = "abs(L1 weights) [{NETNAME}]"
+            l2_title_template = "abs(L2 weights) [{NETNAME}]"
+            output_title_template = "abs(output weights) [{NETNAME}]"
+            plot_abs = True
+            cmap = 'viridis'
+
         plt.figure(figsize=(16, 9))
         gs = GridSpec(100, 100)
         plt.subplot(gs[:50, :])
-        plt.matshow(np.abs(l1_weights) if vmin >= 0 else l1_weights,
+        plt.matshow(np.abs(l1_weights) if plot_abs else l1_weights,
                     fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
         plt.colorbar(fraction=0.046, pad=0.04)
         plt.axis('off')
-        plt.title(title_template.format(NETNAME=net_name))
+        plt.title(l1_title_template.format(NETNAME=net_name))
 
         line_options = {'color': 'gray', 'linewidth': 0.5}
-        for i in range(1, self.M):
-            #plt.axvline(x=i-0.5, **line_options)
-            pass
 
         for j in range(1, N):
             plt.axhline(y=2*j-0.5, **line_options)
-            # pass
 
         # L2.
         l2_weights = self.model.l2.weight.data.numpy()
 
-        if vmin >= 0:
-            title_template = "abs(L2 weights) [{NETNAME}]"
-        else:
-            title_template = "L2 weights [{NETNAME}]"
-
-        cmap = 'coolwarm' if vmin < 0 else 'viridis'
         plt.subplot(gs[55:75, 40:60])
-        plt.matshow(np.abs(l2_weights) if vmin >= 0 else l2_weights,
-                    fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
+        plt.matshow(np.abs(l2_weights) if plot_abs else l2_weights,
+                    fignum=0, vmin=None if vmin == float(
+            "-inf") else vmin, vmax=vmax, cmap=cmap)
         plt.colorbar(fraction=0.046, pad=0.04)
         plt.axis('off')
-        plt.title(title_template.format(NETNAME=net_name))
+        plt.title(l2_title_template.format(NETNAME=net_name))
 
         # Output.
         output_weights = self.model.output.weight.data.numpy()
 
-        if vmin >= 0:
-            title_template = "abs(output weights) [{NETNAME}]"
-        else:
-            title_template = "output weights [{NETNAME}]"
-
-        cmap = 'coolwarm' if vmin < 0 else 'viridis'
         plt.subplot(gs[75:, :])
-        plt.matshow(np.abs(output_weights) if vmin >= 0 else output_weights,
+        plt.matshow(np.abs(output_weights) if plot_abs else output_weights,
                     fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
         plt.colorbar(fraction=0.046, pad=0.04)
         plt.axis('off')
-        plt.title(title_template.format(NETNAME=net_name))
+        plt.title(output_title_template.format(NETNAME=net_name))
 
         # Save figure.
         if save_dir:
@@ -200,7 +201,8 @@ class NNUEVisualizer():
 
         plt.figure()
         title_template = "L1 weights histogram [{NETNAME}]"
-        plt.hist(l1_weights.flatten(), bins=(np.arange(-128, 129)-0.5)/64)
+        plt.hist(l1_weights.flatten(), log=True, bins=(
+            np.arange(int(np.min(l1_weights)*64), int(np.max(l1_weights)*64+1))-0.5)/64)
         plt.title(title_template.format(NETNAME=net_name))
 
         # Save figure.
@@ -213,7 +215,8 @@ class NNUEVisualizer():
 
         plt.figure()
         title_template = "L2 weights histogram [{NETNAME}]"
-        plt.hist(l2_weights.flatten(), bins=(np.arange(-128, 129)-0.5)/64)
+        plt.hist(l2_weights.flatten(), log=True, bins=(
+            np.arange(int(np.min(l2_weights)*64), int(np.max(l2_weights)*64+1))-0.5)/64)
         plt.title(title_template.format(NETNAME=net_name))
 
         # Save figure.
@@ -235,12 +238,16 @@ def main():
     parser.add_argument(
         "--input-weights-vmax", default=1, type=float, help="Maximum of color map range for input weights.")
     parser.add_argument(
+        "--input-weights-auto-scale", action="store_true", help="Use auto-scale for the color map range for input weights. This ignores input-weights-vmin and input-weights-vmax.")
+    parser.add_argument(
         "--order-input-neurons", action="store_true",
         help="Order the neurons of the input layer by the L1-norm (sum of absolute values) of their weights.")
     parser.add_argument(
         "--fc-weights-vmin", default=-2, type=float, help="Minimum of color map range for fully-connected layer weights (absolute values are plotted if this is positive or zero).")
     parser.add_argument(
         "--fc-weights-vmax", default=2, type=float, help="Maximum of color map range for fully-connected layer weights.")
+    parser.add_argument(
+        "--fc-weights-auto-scale", action="store_true", help="Use auto-scale for the color map range for fully-connected layer weights. This ignores fc-weights-vmin and fc-weights-vmax.")
     parser.add_argument("--save-dir", type=str, required=False,
                         help="Save the plots in this directory.")
     parser.add_argument("--save-prefix", type=str, required=False,
@@ -287,9 +294,9 @@ def main():
 
     visualizer = NNUEVisualizer(nnue)
     visualizer.plot_input_weights(
-        net_name, args.input_weights_vmin, args.input_weights_vmax, args.order_input_neurons, args.save_dir, save_prefix)
+        net_name, args.input_weights_vmin, args.input_weights_vmax, args.input_weights_auto_scale, args.order_input_neurons, args.save_dir, save_prefix)
     visualizer.plot_fc_weights(
-        net_name, args.fc_weights_vmin, args.fc_weights_vmax, args.save_dir, save_prefix)
+        net_name, args.fc_weights_vmin, args.fc_weights_vmax,  args.fc_weights_auto_scale, args.save_dir, save_prefix)
 
     if not args.dont_show:
         plt.show()
