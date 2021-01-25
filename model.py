@@ -143,10 +143,9 @@ class NNUE(pl.LightningModule):
     self.input.bias.data = input_b
 
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-    # clamp here is used as a clipped relu to (0.0, 1.0)
-    l0_ = torch.clamp(l0_, 0.0, 1.0)
-    l1_ = torch.clamp(self.quant_fc(self.l1, l0_), 0.0, 1.0)
-    l2_ = torch.clamp(self.quant_fc(self.l2, l1_), 0.0, 1.0)
+    l0_ = F.relu(l0_)
+    l1_ = F.relu(self.quant_fc(self.l1, l0_))
+    l2_ = F.relu(self.quant_fc(self.l2, l1_))
     x = self.quant_fc(self.output, l2_, is_output=True)
     return x
 
