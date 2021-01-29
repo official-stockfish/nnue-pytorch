@@ -4,6 +4,7 @@ import nnue_dataset
 import nnue_bin_dataset
 import pytorch_lightning as pl
 import features
+import os
 import torch
 from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
@@ -45,6 +46,11 @@ def main():
   parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
   features.add_argparse_args(parser)
   args = parser.parse_args()
+
+  if not os.path.exists(args.train):
+    raise Exception('{0} does not exist'.format(args.train))
+  if not os.path.exists(args.val):
+    raise Exception('{0} does not exist'.format(args.val))
 
   feature_set = features.get_feature_set_from_name(args.features)
 
