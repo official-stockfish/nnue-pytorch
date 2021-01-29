@@ -169,16 +169,19 @@ def main():
   print('Converting %s to %s' % (args.source, args.target))
 
   if args.source.endswith(".pt") or args.source.endswith(".ckpt"):
-    if not args.target.endswith(".nnue"):
-      raise Exception("Target file must end with .nnue")
     if args.source.endswith(".pt"):
       nnue = torch.load(args.source)
     else:
       nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set)
     nnue.eval()
-    writer = NNUEWriter(nnue)
-    with open(args.target, 'wb') as f:
-      f.write(writer.buf)
+    if args.target.endswith(".nnue"):
+      writer = NNUEWriter(nnue)
+      with open(args.target, 'wb') as f:
+        f.write(writer.buf)
+    elif args.target.endswith(".pt"):
+      torch.save(nnue, args.target)
+    else:
+      raise Exception("Target file must end with .nnue or .pt")
   elif args.source.endswith(".nnue"):
     if not args.target.endswith(".pt"):
       raise Exception("Target file must end with .pt")

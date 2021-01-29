@@ -146,12 +146,12 @@ class NNUE(pl.LightningModule):
     # increasing the eps leads to less saturated nets with a few dead neurons
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
     # Drop learning rate after 75 epochs
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
-    return [optimizer], [scheduler]
+    #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
+    swa_scheduler = SWALR(optimizer, swa_lr=0.05)
+    return [optimizer], [swa_scheduler]
 
   def training_epoch_end(self, outputs):
-    if self.global_step > 75:
-      self.swa_model.update_parameters(self)
+    self.swa_model.update_parameters(self)
 
   def get_layers(self, filt):
     """
