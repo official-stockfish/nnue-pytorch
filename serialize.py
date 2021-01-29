@@ -36,7 +36,7 @@ class NNUEWriter():
 
     self.write_header(model)
     self.int32(model.feature_set.hash ^ (M.L1*2)) # Feature transformer hash
-    swa_model = model.swa_model
+    swa_model = model.swa_model.module
     self.write_feature_transformer(swa_model)
     self.int32(FC_HASH) # FC layers hash
     self.write_fc_layer(swa_model.l1)
