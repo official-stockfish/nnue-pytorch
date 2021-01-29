@@ -5,6 +5,9 @@ from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 
+from torch.optim.swa_utils import AveragedModel, SWALR
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
 # 3 layer fully connected network
 L1 = 256
 L2 = 32
@@ -29,6 +32,8 @@ class NNUE(pl.LightningModule):
     self.lambda_ = lambda_
 
     self._zero_virtual_feature_weights()
+
+    self.swa_model = AveragedModel(self)
 
   '''
   We zero all virtual feature weights because during serialization to .nnue
@@ -143,6 +148,10 @@ class NNUE(pl.LightningModule):
     # Drop learning rate after 75 epochs
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
     return [optimizer], [scheduler]
+
+  def training_epoch_end(self, outputs):
+    if self.global_step > 75:
+      self.swa_model.update_parameters(self)
 
   def get_layers(self, filt):
     """
