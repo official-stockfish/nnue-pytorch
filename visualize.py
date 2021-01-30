@@ -55,7 +55,7 @@ class NNUEVisualizer():
         self.M = hd
         numx = 32  # Number of output features per row.
 
-        self.ordered_input_neurons = np.arange(hd, dtype=int)
+        inv_ordered_input_neurons = np.arange(hd, dtype=int)
 
         if self.args.order_input_neurons:
             # Order input neuron by the L1-norm of their associated weights.
@@ -63,10 +63,11 @@ class NNUEVisualizer():
             for i in range(hd):
                 neuron_weights_norm[i] = np.sum(np.abs(weights[i::256]))
 
-            inv_order = np.flip(np.argsort(neuron_weights_norm))
+            self.ordered_input_neurons = np.flip(
+                np.argsort(neuron_weights_norm))
 
             for i in range(hd):
-                self.ordered_input_neurons[inv_order[i]] = i
+                inv_ordered_input_neurons[self.ordered_input_neurons[i]] = i
 
         # Derived/fixed constants.
         numy = hd//numx
@@ -99,7 +100,7 @@ class NNUEVisualizer():
                 inpos = [(7-kipos[0])+pipos[0]*8,
                          kipos[1]+(7-pipos[1])*8]
                 d = - 8 if piece < 2 else 48 + (piece // 2 - 1) * 64
-                jhd = self.ordered_input_neurons[j % hd]
+                jhd = inv_ordered_input_neurons[j % hd]
                 x = inpos[0] + widthx * ((jhd) % numx) + (piece % 2)*64
                 y = inpos[1] + d + widthy * (jhd // numx)
                 ii = x + y * totalx
@@ -255,13 +256,15 @@ class NNUEVisualizer():
 
     def plot_biases(self):
         if not self.args.no_biases:
-            input_biases = self.model.input.bias.data.numpy()
+            input_biases = self.model.input.bias.data.numpy()[
+                self.ordered_input_neurons]
             l1_biases = self.model.l1.bias.data.numpy()
             l2_biases = self.model.l2.bias.data.numpy()
             output_bias = self.model.output.bias.data.numpy()
 
             if self.args.ref_model:
-                input_biases -= self.ref_model.input.bias.data.numpy()
+                input_biases -= self.ref_model.input.bias.data.numpy()[
+                    self.ordered_input_neurons]
                 l1_biases -= self.ref_model.l1.bias.data.numpy()
                 l2_biases -= self.ref_model.l2.bias.data.numpy()
                 output_bias -= self.ref_model.output.bias.data.numpy()
