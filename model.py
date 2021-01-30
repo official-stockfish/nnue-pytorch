@@ -31,9 +31,8 @@ class NNUE(pl.LightningModule):
     self.output = nn.Linear(L3, 1)
     self.lambda_ = lambda_
 
-    self._zero_virtual_feature_weights()
-
     self.swa_model = AveragedModel(self)
+    self._zero_virtual_feature_weights()
 
   '''
   We zero all virtual feature weights because during serialization to .nnue
@@ -54,6 +53,8 @@ class NNUE(pl.LightningModule):
   to new_feature_set.
   '''
   def set_feature_set(self, new_feature_set):
+    self.swa_model = AveragedModel(self)
+
     if self.feature_set.name == new_feature_set.name:
       return
 
@@ -107,7 +108,7 @@ class NNUE(pl.LightningModule):
     nnue2score = 600
     scaling = 361
 
-    q = self(us, them, white, black) * nnue2score / scaling
+    q = self.swa_model(us, them, white, black) * nnue2score / scaling
     t = outcome
     p = (score / scaling).sigmoid()
 
@@ -147,7 +148,8 @@ class NNUE(pl.LightningModule):
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
     # Drop learning rate after 75 epochs
     #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
-    swa_scheduler = SWALR(optimizer, swa_lr=0.05)
+    #1e-3 version_0
+    swa_scheduler = SWALR(optimizer, swa_lr=1e-4)
     return [optimizer], [swa_scheduler]
 
   def training_epoch_end(self, outputs):
