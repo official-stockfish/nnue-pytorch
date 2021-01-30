@@ -10,8 +10,9 @@ from serialize import NNUEReader
 
 
 class NNUEVisualizer():
-    def __init__(self, model, args):
+    def __init__(self, model, ref_model, args):
         self.model = model
+        self.ref_model = ref_model
         self.args = args
 
         import matplotlib as mpl
@@ -24,7 +25,7 @@ class NNUEVisualizer():
         if self.args.save_dir:
             from os.path import join
             destname = join(
-                self.args.save_dir, "{}{}.jpg".format("" if self.args.save_prefix is None else self.args.save_prefix + "_", name))
+                self.args.save_dir, "{}{}.jpg".format("" if self.args.label is None else self.args.label + "_", name))
             print("Saving {}".format(destname))
             plt.savefig(destname)
 
@@ -43,6 +44,12 @@ class NNUEVisualizer():
         # Coalesce weights and transform them to Numpy domain.
         weights = self.coalesce_ft_weights(self.model, self.model.input)
         weights = weights.transpose(0, 1).flatten().numpy()
+
+        if self.args.ref_model:
+            ref_weights = self.coalesce_ft_weights(
+                self.ref_model, self.ref_model.input)
+            ref_weights = ref_weights.transpose(0, 1).flatten().numpy()
+            weights -= ref_weights
 
         hd = 256  # Output feature dimension.
         self.M = hd
@@ -107,11 +114,11 @@ class NNUEVisualizer():
                 vmax = self.args.input_weights_vmax
 
             if self.args.input_weights_auto_scale or self.args.input_weights_vmin < 0:
-                title_template = "input weights [{NETNAME}]"
+                title_template = "input weights [{LABEL}]"
                 cmap = 'coolwarm'
             else:
                 img = np.abs(img)
-                title_template = "abs(input weights) [{NETNAME}]"
+                title_template = "abs(input weights) [{LABEL}]"
                 cmap = 'viridis'
 
             print(" done")
@@ -134,17 +141,17 @@ class NNUEVisualizer():
             plt.xticks(ticks=widthx*np.arange(1, numx) - 0.5)
             plt.yticks(ticks=widthy*np.arange(1, numy) - 0.5)
             plt.axis('off')
-            plt.title(title_template.format(NETNAME=self.args.net_name))
+            plt.title(title_template.format(LABEL=self.args.label))
             plt.tight_layout()
             self._process_fig("input-weights")
 
             if not self.args.no_hist:
                 # Input weights histogram.
                 plt.figure()
-                title_template = "input weights histogram [{NETNAME}]"
+                title_template = "input weights histogram [{LABEL}]"
                 plt.hist(img, log=True, bins=(
                     np.arange(int(np.min(img)*127)-1, int(np.max(img)*127)+3)-0.5)/127)
-                plt.title(title_template.format(NETNAME=self.args.net_name))
+                plt.title(title_template.format(LABEL=self.args.label))
                 plt.tight_layout()
                 self._process_fig("input-weights-histogram")
 
@@ -152,6 +159,9 @@ class NNUEVisualizer():
         if not self.args.no_fc_weights:
             # L1 weights.
             l1_weights_ = self.model.l1.weight.data.numpy()
+
+            if self.args.ref_model:
+                l1_weights_ -= self.ref_model.l1.weight.data.numpy()
 
             N = l1_weights_.size // (2*self.M)
 
@@ -170,15 +180,15 @@ class NNUEVisualizer():
                 vmax = self.args.fc_weights_vmax
 
             if self.args.fc_weights_auto_scale or self.args.fc_weights_vmin < 0:
-                l1_title_template = "L1 weights [{NETNAME}]"
-                l2_title_template = "L2 weights [{NETNAME}]"
-                output_title_template = "output weights [{NETNAME}]"
+                l1_title_template = "L1 weights [{LABEL}]"
+                l2_title_template = "L2 weights [{LABEL}]"
+                output_title_template = "output weights [{LABEL}]"
                 plot_abs = False
                 cmap = 'coolwarm'
             else:
-                l1_title_template = "abs(L1 weights) [{NETNAME}]"
-                l2_title_template = "abs(L2 weights) [{NETNAME}]"
-                output_title_template = "abs(output weights) [{NETNAME}]"
+                l1_title_template = "abs(L1 weights) [{LABEL}]"
+                l2_title_template = "abs(L2 weights) [{LABEL}]"
+                output_title_template = "abs(output weights) [{LABEL}]"
                 plot_abs = True
                 cmap = 'viridis'
 
@@ -189,7 +199,7 @@ class NNUEVisualizer():
                         fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
             plt.colorbar(fraction=0.046, pad=0.04)
             plt.axis('off')
-            plt.title(l1_title_template.format(NETNAME=self.args.net_name))
+            plt.title(l1_title_template.format(LABEL=self.args.label))
 
             line_options = {'color': 'gray', 'linewidth': 0.5}
 
@@ -199,41 +209,47 @@ class NNUEVisualizer():
             # L2 weights.
             l2_weights = self.model.l2.weight.data.numpy()
 
+            if self.args.ref_model:
+                l2_weights -= self.ref_model.l2.weight.data.numpy()
+
             plt.subplot(gs[55:75, 40:60])
             plt.matshow(np.abs(l2_weights) if plot_abs else l2_weights,
                         fignum=0, vmin=None if vmin == float(
                 "-inf") else vmin, vmax=vmax, cmap=cmap)
             plt.colorbar(fraction=0.046, pad=0.04)
             plt.axis('off')
-            plt.title(l2_title_template.format(NETNAME=self.args.net_name))
+            plt.title(l2_title_template.format(LABEL=self.args.label))
 
             # Output weights.
             output_weights = self.model.output.weight.data.numpy()
+
+            if self.args.ref_model:
+                output_weights -= self.ref_model.output.weight.data.numpy()
 
             plt.subplot(gs[75:, :])
             plt.matshow(np.abs(output_weights) if plot_abs else output_weights,
                         fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
             plt.colorbar(fraction=0.046, pad=0.04)
             plt.axis('off')
-            plt.title(output_title_template.format(NETNAME=self.args.net_name))
+            plt.title(output_title_template.format(LABEL=self.args.label))
             self._process_fig("fc-weights")
 
             if not self.args.no_hist:
                 # L1 weights histogram.
                 plt.figure()
-                title_template = "L1 weights histogram [{NETNAME}]"
+                title_template = "L1 weights histogram [{LABEL}]"
                 plt.hist(l1_weights.flatten(), log=True, bins=(
                     np.arange(int(np.min(l1_weights)*64)-1, int(np.max(l1_weights)*64)+3)-0.5)/64)
-                plt.title(title_template.format(NETNAME=self.args.net_name))
+                plt.title(title_template.format(LABEL=self.args.label))
                 plt.tight_layout()
                 self._process_fig("l1-weights-histogram")
 
                 # L2 weights histogram.
                 plt.figure()
-                title_template = "L2 weights histogram [{NETNAME}]"
+                title_template = "L2 weights histogram [{LABEL}]"
                 plt.hist(l2_weights.flatten(), log=True, bins=(
                     np.arange(int(np.min(l2_weights)*64)-1, int(np.max(l2_weights)*64)+3)-0.5)/64)
-                plt.title(title_template.format(NETNAME=self.args.net_name))
+                plt.title(title_template.format(LABEL=self.args.label))
                 plt.tight_layout()
                 self._process_fig("l2-weights-histogram")
 
@@ -244,11 +260,17 @@ class NNUEVisualizer():
             l2_biases = self.model.l2.bias.data.numpy()
             output_bias = self.model.output.bias.data.numpy()
 
+            if self.args.ref_model:
+                input_biases -= self.ref_model.input.bias.data.numpy()
+                l1_biases -= self.ref_model.l1.bias.data.numpy()
+                l2_biases -= self.ref_model.l2.bias.data.numpy()
+                output_bias -= self.ref_model.output.bias.data.numpy()
+
             plt.figure()
-            title_template = "biases [{NETNAME}]"
+            title_template = "biases [{LABEL}]"
             plt.subplot(2, 1, 1)
             plt.plot(input_biases, '+', label='input')
-            plt.title(title_template.format(NETNAME=self.args.net_name))
+            plt.title(title_template.format(LABEL=self.args.label))
             plt.legend()
             plt.subplot(2, 1, 2)
             plt.plot(l1_biases, 'x', label='L1')
@@ -259,11 +281,35 @@ class NNUEVisualizer():
             self._process_fig("biases")
 
 
+def load_model(filename, feature_set):
+    if filename.endswith(".pt") or filename.endswith(".ckpt"):
+        if filename.endswith(".pt"):
+            model = torch.load(filename)
+        else:
+            model = M.NNUE.load_from_checkpoint(
+                filename, feature_set=feature_set)
+        model.eval()
+    elif filename.endswith(".nnue"):
+        with open(filename, 'rb') as f:
+            reader = NNUEReader(f, feature_set)
+        model = reader.model
+    else:
+        raise Exception("Invalid filetype: " + str(filename))
+
+    return model
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Visualizes networks in ckpt, pt and nnue format.")
     parser.add_argument(
-        "source", help="Source file (can be .ckpt, .pt or .nnue)")
+        "model", help="Source model (can be .ckpt, .pt or .nnue)")
+    parser.add_argument(
+        "--ref-model", type=str, required=False,
+        help="Visualize the difference between the given reference model (can be .ckpt, .pt or .nnue).")
+    parser.add_argument(
+        "--ref-features", type=str, required=False,
+        help="The reference feature set to use (default = same as source model).")
     parser.add_argument(
         "--input-weights-vmin", default=-1, type=float,
         help="Minimum of color map range for input weights (absolute values are plotted if this is positive or zero).")
@@ -315,39 +361,47 @@ def main():
     parser.add_argument(
         "--net-name", type=str, required=False,
         help="Override the network name used in plot titles (default = network basename).")
+    parser.add_argument(
+        "--label", type=str, required=False,
+        help="Override the label used in plot titles.")
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
-    assert args.features in ('HalfKP', 'HalfKP^')
+    supported_features = ('HalfKP', 'HalfKP^')
+    assert args.features in supported_features
     feature_set = features.get_feature_set_from_name(args.features)
 
-    print("Visualizing {}".format(args.source))
+    from os.path import basename
+    label = basename(args.model)
 
-    if args.source.endswith(".pt") or args.source.endswith(".ckpt"):
-        if args.source.endswith(".pt"):
-            nnue = torch.load(args.source)
+    model = load_model(args.model, feature_set)
+
+    if args.ref_model:
+        if args.ref_features:
+            assert args.ref_features in supported_features
+            ref_feature_set = features.get_feature_set_from_name(
+                args.ref_features)
         else:
-            nnue = M.NNUE.load_from_checkpoint(
-                args.source, feature_set=feature_set)
-        nnue.eval()
-    elif args.source.endswith(".nnue"):
-        with open(args.source, 'rb') as f:
-            reader = NNUEReader(f, feature_set)
-        nnue = reader.model
-    else:
-        raise Exception("Invalid filetype: " + str(args))
+            ref_feature_set = feature_set
 
-    if args.net_name is None:
+        ref_model = load_model(args.ref_model, ref_feature_set)
+
+        print("Visualizing difference between {} and {}".format(
+            args.model, args.ref_model))
+
         from os.path import basename
-        args.net_name = basename(args.source)
-
-    if args.save_prefix is None:
-        args.save_prefix = args.net_name
+        label = "diff " + label + "-" + basename(args.ref_model)
+    else:
+        ref_model = None
+        print("Visualizing {}".format(args.model))
 
     if args.order_input_neurons:
-        args.net_name = "reordered " + args.net_name
+        label = "reordered " + label
 
-    visualizer = NNUEVisualizer(nnue, args)
+    if args.label is None:
+        args.label = label
+
+    visualizer = NNUEVisualizer(model, ref_model, args)
 
     visualizer.plot_input_weights()
     visualizer.plot_fc_weights()

@@ -77,7 +77,13 @@ python serialize.py nn.nnue converted.pt
 Visualize a network from either a checkpoint (`.ckpt`), a serialized model (`.pt`)
 or a SF NNUE file (`.nnue`).
 ```
-python visualize.py nn.nnue
+python visualize.py nn.nnue --features="HalfKP"
+```
+
+Visualize the difference between two networks from either a checkpoint (`.ckpt`), a serialized model (`.pt`)
+or a SF NNUE file (`.nnue`).
+```
+python visualize.py nn.nnue  --features="HalfKP" --ref-model nn.cpkt --ref-features="HalfKP^"
 ```
 
 # Logging
