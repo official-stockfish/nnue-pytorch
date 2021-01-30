@@ -68,6 +68,8 @@ class NNUEVisualizer():
 
             for i in range(hd):
                 inv_ordered_input_neurons[self.ordered_input_neurons[i]] = i
+        else:
+            self.ordered_input_neurons = inv_ordered_input_neurons
 
         # Derived/fixed constants.
         numy = hd//numx
@@ -356,17 +358,11 @@ def main():
         "--save-dir", type=str, required=False,
         help="Save the plots in this directory.")
     parser.add_argument(
-        "--save-prefix", type=str, required=False,
-        help="Prefix used for the name of the saved files (default = network name).")
-    parser.add_argument(
         "--dont-show", action="store_true",
         help="Don't show the plots.")
     parser.add_argument(
-        "--net-name", type=str, required=False,
-        help="Override the network name used in plot titles (default = network basename).")
-    parser.add_argument(
         "--label", type=str, required=False,
-        help="Override the label used in plot titles.")
+        help="Override the label used in plot titles and as prefix of saved files.")
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
