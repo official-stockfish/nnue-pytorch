@@ -1,5 +1,6 @@
 import re
 import os
+import sys
 import time
 import argparse
 
@@ -22,7 +23,7 @@ def convert_ckpt(root_dir):
         nnue_file_name = re.sub("epoch=", "nn-epoch", nnue_file_name)
         nnue_file_name = re.sub(".ckpt", ".nnue", nnue_file_name)
         if not os.path.exists(nnue_file_name):
-            command = "python3 serialize.py {} {} ".format(ckpt, nnue_file_name)
+            command = "{} serialize.py {} {} ".format(sys.executable, ckpt, nnue_file_name)
             ret = os.system(command)
             if ret != 0:
                 print("Error serializing!")
