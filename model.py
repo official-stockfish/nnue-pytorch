@@ -41,7 +41,7 @@ class NNUE(pl.LightningModule):
   def _zero_virtual_feature_weights(self):
     weights = self.input.weight
     for a, b in self.feature_set.get_virtual_feature_ranges():
-      weights[a:b, :] = 0.0
+      weights[:, a:b] = 0.0
     self.input.weight = nn.Parameter(weights)
 
   '''
@@ -132,8 +132,26 @@ class NNUE(pl.LightningModule):
     self.step_(batch, batch_idx, 'test_loss')
 
   def configure_optimizers(self):
+    # Train with a lower LR on the output layer
+    LR = 1e-3
+    train_params = [
+      {'params': self.get_layers(lambda x: self.output != x), 'lr': LR},
+      {'params': self.get_layers(lambda x: self.output == x), 'lr': LR / 10},
+    ]
     # increasing the eps leads to less saturated nets with a few dead neurons
     optimizer = ranger_ada.RangerAdaBelief(self.parameters(), betas=(.9, 0.999), eps=1.0e-7)
     # Drop learning rate after 75 epochs
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
     return [optimizer], [scheduler]
+
+  def get_layers(self, filt):
+    """
+    Returns a list of layers.
+    filt: Return true to include the given layer.
+    """
+    for i in self.children():
+      if filt(i):
+        if isinstance(i, nn.Linear):
+          for p in i.parameters():
+            if p.requires_grad:
+              yield p
