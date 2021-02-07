@@ -1,5 +1,6 @@
 import re
 import os
+import subprocess
 import sys
 import time
 import argparse
@@ -64,7 +65,6 @@ def parse_ordo(root_dir, nnues):
 def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_exe):
     """ Run a match using c-chess-cli adding pgns to a file to be analysed with ordo """
     pgn_file_name = os.path.join(root_dir, "out.pgn")
-    c_chess_out_file_name = os.path.join(root_dir, "c_chess.out")
     command = "{} -each tc=4+0.04 option.Hash=8 option.Threads=1 -gauntlet -games 200 -rounds 1 -concurrency {}".format(
         c_chess_exe, concurrency
     )
@@ -79,13 +79,26 @@ def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfis
         command = command + " -engine cmd={} name={} option.EvalFile={}".format(
             stockfish_exe, net, os.path.join(os.getcwd(), net)
         )
-    command = command + " -pgn {} 0 > {} 2>&1".format(
-        pgn_file_name, c_chess_out_file_name
+    command = command + " -pgn {} 0 2>&1".format(
+        pgn_file_name
     )
 
     print("Running match with c-chess-cli ... {}".format(pgn_file_name), flush=True)
-    ret = os.system(command)
-    if ret != 0:
+    c_chess_out = open(os.path.join(root_dir, "c_chess.out"), 'w')
+    process = subprocess.Popen("stdbuf -o0 " + command, stdout=subprocess.PIPE, shell=True)
+    seen = {}
+    for line in process.stdout:
+        line = line.decode('utf-8')
+        c_chess_out.write(line)
+        if 'Score' in line:
+            epoch_num = re.search(r'epoch(\d+)', line)
+            if epoch_num.group(1) not in seen:
+                sys.stdout.write('\n')
+            seen[epoch_num.group(1)] = True
+            sys.stdout.write('\r' + line.rstrip())
+    sys.stdout.write('\n')
+    c_chess_out.close()
+    if process.wait() != 0:
         print("Error running match!")
 
 
