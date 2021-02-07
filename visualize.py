@@ -1,4 +1,5 @@
 import argparse
+import chess
 import features
 import model as M
 import numpy as np
@@ -173,6 +174,48 @@ class NNUEVisualizer():
             plt.axis('off')
             plt.title(title_template.format(LABEL=self.args.label))
             plt.tight_layout()
+
+            def format_coord(x, y):
+                x, y = int(round(x)), int(round(y))
+
+                x_ = x % widthx
+                y_ = y % widthy
+                piece_type = (y_+16)//64
+                piece_name = "{} {}".format(
+                    "white" if x_ // (widthx//2) == 0 else "black", chess.piece_name(piece_type+1))
+
+                x_ = x_ % (widthx//2)
+                y_ = (y_+16) % 64 if y_ >= 48 else y_+8
+                if default_order:
+                    # Piece centric, flipped king.
+                    piece_square_name = chess.square_name(x_//8 + 8*(7-y_//8))
+                    king_square_name = chess.square_name(
+                        7-(x_ % 8) + 8*(y_ % 8))
+                else:
+                    # King centric.
+                    if piece_type == 0:
+                        piece_square_name = chess.square_name(
+                            x_ % 8 + 8*(6-((y_-8) % 6)))
+                        king_square_name = chess.square_name(
+                            x_//8 + 8*(7-(y_-8)//6))
+                    else:
+                        piece_square_name = chess.square_name(
+                            x_ % 8 + 8*(7-(y_ % 8)))
+                        king_square_name = chess.square_name(
+                            x_//8 + 8*(7-y_//8))
+
+                neuron_id = int(numx * (y // widthy) + x // widthx)
+                if self.args.sort_input_neurons:
+                    neuron_label = "sorted neuron {} (original {})".format(
+                        neuron_id, self.sorted_input_neurons[neuron_id])
+                else:
+                    neuron_label = "neuron {}".format(neuron_id)
+
+                return "{}, {} on {}, white king on {}".format(neuron_label, piece_name, piece_square_name, king_square_name)
+
+            ax = plt.gca()
+            ax.format_coord = format_coord
+
             self._process_fig("input-weights")
 
             if not self.args.no_hist:
