@@ -7,8 +7,8 @@ import argparse
 
 def convert_ckpt(root_dir):
     """ Find the list of checkpoints that are available, and convert those that have no matching .nnue """
-    # run96/run0/default/version_0/checkpoints/epoch=3.ckpt
-    p = re.compile("epoch=[0-9]*.ckpt")
+    # run96/run0/default/version_0/checkpoints/epoch=3.ckpt, or epoch=3-step=321151.ckpt
+    p = re.compile("epoch.*\.ckpt")
     ckpts = []
     for path, subdirs, files in os.walk(root_dir, followlinks=False):
         for filename in files:
@@ -20,8 +20,7 @@ def convert_ckpt(root_dir):
     # run96/run0/default/version_0/checkpoints/epoch=3.ckpt -> run96/run0/nn-epoch3.nnue
     for ckpt in ckpts:
         nnue_file_name = re.sub("default/version_[0-9]+/checkpoints/", "", ckpt)
-        nnue_file_name = re.sub("epoch=", "nn-epoch", nnue_file_name)
-        nnue_file_name = re.sub(".ckpt", ".nnue", nnue_file_name)
+        nnue_file_name = re.sub(r"epoch\=([0-9]+).*\.ckpt", r"nn-epoch\1.nnue", nnue_file_name)
         if not os.path.exists(nnue_file_name):
             command = "{} serialize.py {} {} ".format(sys.executable, ckpt, nnue_file_name)
             ret = os.system(command)
