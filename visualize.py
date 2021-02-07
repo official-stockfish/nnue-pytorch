@@ -55,21 +55,21 @@ class NNUEVisualizer():
         self.M = hd
         numx = 32  # Number of output features per row.
 
-        inv_ordered_input_neurons = np.arange(hd, dtype=int)
+        inv_sorted_input_neurons = np.arange(hd, dtype=int)
 
-        if self.args.order_input_neurons:
-            # Order input neuron by the L1-norm of their associated weights.
+        if self.args.sort_input_neurons:
+            # Sort input neurons by the L1-norm of their associated weights.
             neuron_weights_norm = np.zeros(hd)
             for i in range(hd):
                 neuron_weights_norm[i] = np.sum(np.abs(weights[i::256]))
 
-            self.ordered_input_neurons = np.flip(
+            self.sorted_input_neurons = np.flip(
                 np.argsort(neuron_weights_norm))
 
             for i in range(hd):
-                inv_ordered_input_neurons[self.ordered_input_neurons[i]] = i
+                inv_sorted_input_neurons[self.sorted_input_neurons[i]] = i
         else:
-            self.ordered_input_neurons = inv_ordered_input_neurons
+            self.sorted_input_neurons = inv_sorted_input_neurons
 
         # Derived/fixed constants.
         numy = hd//numx
@@ -86,6 +86,7 @@ class NNUEVisualizer():
             # [Thanks to https://github.com/hxim/Stockfish-Evaluation-Guide
             # upon which the following code is based.]
             img = np.zeros(totaldim)
+            default_order = self.args.input_weights_order == "piece-centric-flipped-king"
             for j in range(weights.size):
                 # Calculate piece and king placement.
                 pi = (j // hd - 1) % 641
@@ -99,10 +100,22 @@ class NNUEVisualizer():
 
                 kipos = [ki % 8, ki // 8]
                 pipos = [pi % 8, rank]
-                inpos = [(7-kipos[0])+pipos[0]*8,
-                         kipos[1]+(7-pipos[1])*8]
-                d = - 8 if piece < 2 else 48 + (piece // 2 - 1) * 64
-                jhd = inv_ordered_input_neurons[j % hd]
+
+                if default_order:
+                    # Piece centric, but with flipped king position.
+                    # Same order as used by https://github.com/hxim/Stockfish-Evaluation-Guide.
+                    # See also https://github.com/glinscott/nnue-pytorch/issues/42#issuecomment-753604393.
+                    inpos = [(7-kipos[0])+pipos[0]*8,
+                             kipos[1]+(7-pipos[1])*8]
+                    d = - 8 if piece < 2 else 48 + (piece // 2 - 1) * 64
+                else:
+                    # King centric.
+                    inpos = [8*kipos[0]+pipos[0],
+                             8*(7-kipos[1])+(7-pipos[1])]
+                    d = -2*(7-kipos[1]) - 1 if piece < 2 else 48 + \
+                        (piece // 2 - 1) * 64
+
+                jhd = inv_sorted_input_neurons[j % hd]
                 x = inpos[0] + widthx * ((jhd) % numx) + (piece % 2)*64
                 y = inpos[1] + d + widthy * (jhd // numx)
                 ii = x + y * totalx
@@ -116,12 +129,26 @@ class NNUEVisualizer():
                 vmin = self.args.input_weights_vmin
                 vmax = self.args.input_weights_vmax
 
+            extra_info = ""
+            if self.args.sort_input_neurons:
+                extra_info += "sorted"
+                if not default_order:
+                    extra_info += ", " + self.args.input_weights_order
+            else:
+                if not default_order:
+                    extra_info += self.args.input_weights_order
+            if len(extra_info) > 0:
+                extra_info = "; " + extra_info
+
             if self.args.input_weights_auto_scale or self.args.input_weights_vmin < 0:
-                title_template = "input weights [{LABEL}]"
+                title_template = "input weights [{LABEL}" + extra_info + "]"
+                hist_title_template = "input weights histogram [{LABEL}]"
                 cmap = 'coolwarm'
             else:
                 img = np.abs(img)
-                title_template = "abs(input weights) [{LABEL}]"
+                title_template = "abs(input weights) [{LABEL}" + \
+                    extra_info + "]"
+                hist_title_template = "abs(input weights) histogram [{LABEL}]"
                 cmap = 'viridis'
 
             print(" done")
@@ -151,10 +178,9 @@ class NNUEVisualizer():
             if not self.args.no_hist:
                 # Input weights histogram.
                 plt.figure()
-                title_template = "input weights histogram [{LABEL}]"
                 plt.hist(img, log=True, bins=(
                     np.arange(int(np.min(img)*127)-1, int(np.max(img)*127)+3)-0.5)/127)
-                plt.title(title_template.format(LABEL=self.args.label))
+                plt.title(hist_title_template.format(LABEL=self.args.label))
                 plt.tight_layout()
                 self._process_fig("input-weights-histogram")
 
@@ -171,9 +197,9 @@ class NNUEVisualizer():
             l1_weights = np.zeros((2*N, self.M))
 
             for i in range(N):
-                l1_weights[2*i] = l1_weights_[i][self.ordered_input_neurons]
+                l1_weights[2*i] = l1_weights_[i][self.sorted_input_neurons]
                 l1_weights[2*i+1] = l1_weights_[i][self.M +
-                                                   self.ordered_input_neurons]
+                                                   self.sorted_input_neurons]
 
             if self.args.fc_weights_auto_scale:
                 vmin = None
@@ -182,14 +208,19 @@ class NNUEVisualizer():
                 vmin = self.args.fc_weights_vmin
                 vmax = self.args.fc_weights_vmax
 
+            extra_info_l1 = ""
+            if self.args.sort_input_neurons:
+                extra_info_l1 += "; sorted input neurons"
+
             if self.args.fc_weights_auto_scale or self.args.fc_weights_vmin < 0:
-                l1_title_template = "L1 weights [{LABEL}]"
+                l1_title_template = "L1 weights [{LABEL}" + extra_info_l1 + "]"
                 l2_title_template = "L2 weights [{LABEL}]"
                 output_title_template = "output weights [{LABEL}]"
                 plot_abs = False
                 cmap = 'coolwarm'
             else:
-                l1_title_template = "abs(L1 weights) [{LABEL}]"
+                l1_title_template = "abs(L1 weights) [{LABEL}" + \
+                    extra_info_l1 + "]"
                 l2_title_template = "abs(L2 weights) [{LABEL}]"
                 output_title_template = "abs(output weights) [{LABEL}]"
                 plot_abs = True
@@ -259,20 +290,24 @@ class NNUEVisualizer():
     def plot_biases(self):
         if not self.args.no_biases:
             input_biases = self.model.input.bias.data.numpy()[
-                self.ordered_input_neurons]
+                self.sorted_input_neurons]
             l1_biases = self.model.l1.bias.data.numpy()
             l2_biases = self.model.l2.bias.data.numpy()
             output_bias = self.model.output.bias.data.numpy()
 
             if self.args.ref_model:
                 input_biases -= self.ref_model.input.bias.data.numpy()[
-                    self.ordered_input_neurons]
+                    self.sorted_input_neurons]
                 l1_biases -= self.ref_model.l1.bias.data.numpy()
                 l2_biases -= self.ref_model.l2.bias.data.numpy()
                 output_bias -= self.ref_model.output.bias.data.numpy()
 
+            extra_info = ""
+            if self.args.sort_input_neurons:
+                extra_info += "; sorted input neurons"
+
             plt.figure()
-            title_template = "biases [{LABEL}]"
+            title_template = "biases [{LABEL}" + extra_info + "]"
             plt.subplot(2, 1, 1)
             plt.plot(input_biases, '+', label='input')
             plt.title(title_template.format(LABEL=self.args.label))
@@ -325,8 +360,11 @@ def main():
         "--input-weights-auto-scale", action="store_true",
         help="Use auto-scale for the color map range for input weights. This ignores input-weights-vmin and input-weights-vmax.")
     parser.add_argument(
-        "--order-input-neurons", action="store_true",
-        help="Order the neurons of the input layer by the L1-norm (sum of absolute values) of their weights.")
+        "--input-weights-order", type=str, choices=["piece-centric-flipped-king", "king-centric"], default="piece-centric-flipped-king",
+        help="Order of the input weights for each input neuron.")
+    parser.add_argument(
+        "--sort-input-neurons", action="store_true",
+        help="Sort the neurons of the input layer by the L1-norm (sum of absolute values) of their weights.")
     parser.add_argument(
         "--fc-weights-vmin", default=-2, type=float,
         help="Minimum of color map range for fully-connected layer weights (absolute values are plotted if this is positive or zero).")
@@ -393,9 +431,6 @@ def main():
     else:
         ref_model = None
         print("Visualizing {}".format(args.model))
-
-    if args.order_input_neurons:
-        label = "reordered " + label
 
     if args.label is None:
         args.label = label
