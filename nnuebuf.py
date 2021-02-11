@@ -190,6 +190,9 @@ File
         in bytes, including the "NNUE" marker
     num_authors : uint8
     authors : ShortString[num_authors]
+    license : ShortString
+        an SPDX-License-Identifier as specified here https://spdx.dev/licenses/
+        a value not listed on the spdx site is to be interpreted as no license
     description : LongString
     num_nets : byte
     nets : Net[num_nets]
@@ -1495,7 +1498,7 @@ class Net:
 
         return net
 
-def write(stream, nets, authors=[], description=''):
+def write(stream, nets, authors=[], license='', description=''):
     '''
     Writes the given networks along with other metadata into a single byte stream.
 
@@ -1532,6 +1535,8 @@ def write(stream, nets, authors=[], description=''):
     for author in authors:
         write_small_string(stream, author)
 
+    write_small_string(stream, license)
+
     write_long_string(stream, description)
 
     write_uint8(stream, len(nets))
@@ -1562,6 +1567,8 @@ def read(stream):
     for i in range(num_authors):
         authors.append(read_small_string(stream))
 
+    license = read_small_string(stream)
+
     description = read_long_string(stream)
 
     num_nets = read_uint8(stream)
@@ -1569,7 +1576,7 @@ def read(stream):
     for i in range(num_nets):
         nets.append(Net.read(stream))
 
-    return nets, authors, description
+    return nets, authors, license, description
 
 if __name__ == '__main__':
     import sys
@@ -1673,16 +1680,16 @@ if __name__ == '__main__':
             net2.layer_stacks = [ls]
 
             with io.BytesIO() as out:
-                write(out, [net2], ['author1', 'author2'], 'description')
+                write(out, [net2], ['author1', 'author2'], 'Unlicense', 'description')
                 out.seek(0)
                 serialized = out.read()
                 fout.write(serialized)
 
                 if '--test' in sys.argv:
                     print('Serialized size: {}'.format(len(serialized)))
-                    nets, authors, description = read(io.BytesIO(serialized))
+                    nets, authors, license, description = read(io.BytesIO(serialized))
                     with io.BytesIO() as out2:
-                        write(out2, nets, authors, description)
+                        write(out2, nets, authors, license, description)
                         out2.seek(0)
                         serialized2 = out2.read()
                         print('Reserialized size: {}'.format(len(serialized)))
