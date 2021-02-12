@@ -24,7 +24,6 @@ def ascii_hist(name, x, bins=6):
     print('{0}| {1}'.format(xi,bar))
 
 # hardcoded for now
-FC_HASH = 0x63337156
 VERSION = 0x7AF32F16
 
 class NNUEWriter():
@@ -34,17 +33,37 @@ class NNUEWriter():
   def __init__(self, model):
     self.buf = bytearray()
 
-    self.write_header(model)
+    fc_hash = self.fc_hash(model)
+    self.write_header(model, fc_hash)
     self.int32(model.feature_set.hash ^ (M.L1*2)) # Feature transformer hash
     self.write_feature_transformer(model)
-    self.int32(FC_HASH) # FC layers hash
+    self.int32(fc_hash) # FC layers hash
     self.write_fc_layer(model.l1)
     self.write_fc_layer(model.l2)
     self.write_fc_layer(model.output, is_output=True)
 
-  def write_header(self, model):
+  def fc_hash(self, model):
+    # InputSlice hash
+    prev_hash = 0xEC42E90D
+    prev_hash ^= (M.L1 * 2)
+
+    # Fully connected layers
+    layers = [model.l1, model.l2, model.output]
+    for layer in layers:
+      layer_hash = 0xCC03DAE4
+      layer_hash += layer.out_features
+      layer_hash ^= prev_hash >> 1
+      layer_hash ^= (prev_hash << 31) & 0xFFFFFFFF
+      if layer.out_features != 1:
+        # Clipped ReLU hash
+        layer_hash = (layer_hash + 0x538D24C7) & 0xFFFFFFFF
+      prev_hash = layer_hash
+    print('%x' % (layer_hash))
+    return layer_hash
+
+  def write_header(self, model, fc_hash):
     self.int32(VERSION) # version
-    self.int32(FC_HASH ^ model.feature_set.hash ^ (M.L1*2)) # halfkp network hash
+    self.int32(fc_hash ^ model.feature_set.hash ^ (M.L1*2)) # halfkp network hash
     description = b"Features=HalfKP(Friend)[41024->256x2],"
     description += b"Network=AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
     description += b"(ClippedReLU[32](AffineTransform[32<-512](InputSlice[512(0:512)])))))"
