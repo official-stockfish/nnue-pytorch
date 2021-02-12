@@ -95,7 +95,7 @@ class NNUE(pl.LightningModule):
     return x
 
   def step_(self, batch, batch_idx, loss_type):
-    us, them, white, black, outcome, score = batch
+    us, them, white, black, outcome, score, ply = batch
 
     # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
     # This needs to match the value used in the serializer
@@ -103,16 +103,17 @@ class NNUE(pl.LightningModule):
     scaling = 361
 
     q = self(us, them, white, black) * nnue2score / scaling
-    t = outcome
+    # Normalize ply to [0,1].
+    ply = torch.clamp((ply - 40) / 100.0, 0.0, 1.0)
     p = (score / scaling).sigmoid()
+    # Interpolate from eval at ply = 0, to game score at ply = 1.
+    p = (1.0 - ply) * p + ply * outcome
 
     epsilon = 1e-12
     teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
-    outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
     teacher_loss = -(p * F.logsigmoid(q) + (1.0 - p) * F.logsigmoid(-q))
-    outcome_loss = -(t * F.logsigmoid(q) + (1.0 - t) * F.logsigmoid(-q))
-    result  = self.lambda_ * teacher_loss    + (1.0 - self.lambda_) * outcome_loss
-    entropy = self.lambda_ * teacher_entropy + (1.0 - self.lambda_) * outcome_entropy
+    result  = self.lambda_ * teacher_loss
+    entropy = self.lambda_ * teacher_entropy
     loss = result.mean() - entropy.mean()
     self.log(loss_type, loss)
     return loss
