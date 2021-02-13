@@ -58,7 +58,6 @@ class NNUEWriter():
         # Clipped ReLU hash
         layer_hash = (layer_hash + 0x538D24C7) & 0xFFFFFFFF
       prev_hash = layer_hash
-    print('%x' % (layer_hash))
     return layer_hash
 
   def write_header(self, model, fc_hash):
@@ -118,6 +117,13 @@ class NNUEWriter():
     print("layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(clipped, total_elements, clipped_max, kMaxWeight))
     weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
     ascii_hist('fc weight:', weight.numpy())
+    # FC inputs are padded to 32 elements for simd.
+    num_input = weight.shape[1]
+    if num_input % 32 != 0:
+      num_input += 32 - (num_input % 32)
+      new_w = torch.zeros(weight.shape[0], num_input, dtype=torch.int8)
+      new_w[:, :weight.shape[1]] = weight
+      weight = new_w
     # Stored as [outputs][inputs], so we can flatten
     self.buf.extend(weight.flatten().numpy().tobytes())
 
