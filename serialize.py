@@ -174,8 +174,15 @@ class NNUEReader():
       kBiasScale = 9600.0 # kPonanzaConstant * FV_SCALE = 600 * 16 = 9600
     kWeightScale = kBiasScale / kActivationScale # = 64.0 for normal layers
 
+    # FC inputs are padded to 32 elements for simd.
+    non_padded_shape = layer.weight.shape
+    padded_shape = (non_padded_shape[0], ((non_padded_shape[1]+31)//32)*32)
+
     layer.bias.data = self.tensor(numpy.int32, layer.bias.shape).divide(kBiasScale)
-    layer.weight.data = self.tensor(numpy.int8, layer.weight.shape).divide(kWeightScale)
+    layer.weight.data = self.tensor(numpy.int8, padded_shape).divide(kWeightScale)
+
+    # Strip padding.
+    layer.weight.data = layer.weight.data[:non_padded_shape[0], :non_padded_shape[1]]
 
   def read_int32(self, expected=None):
     v = struct.unpack("<i", self.f.read(4))[0]
