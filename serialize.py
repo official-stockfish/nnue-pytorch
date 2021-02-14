@@ -42,7 +42,8 @@ class NNUEWriter():
     self.write_fc_layer(model.l2)
     self.write_fc_layer(model.output, is_output=True)
 
-  def fc_hash(self, model):
+  @staticmethod
+  def fc_hash(model):
     # InputSlice hash
     prev_hash = 0xEC42E90D
     prev_hash ^= (M.L1 * 2)
@@ -135,18 +136,19 @@ class NNUEReader():
     self.f = f
     self.feature_set = feature_set
     self.model = M.NNUE(feature_set)
+    fc_hash = NNUEWriter.fc_hash(self.model)
 
-    self.read_header(feature_set)
+    self.read_header(feature_set, fc_hash)
     self.read_int32(feature_set.hash ^ (M.L1*2)) # Feature transformer hash
     self.read_feature_transformer(self.model.input)
-    self.read_int32(FC_HASH) # FC layers hash
+    self.read_int32(fc_hash) # FC layers hash
     self.read_fc_layer(self.model.l1)
     self.read_fc_layer(self.model.l2)
     self.read_fc_layer(self.model.output, is_output=True)
 
-  def read_header(self, feature_set):
+  def read_header(self, feature_set, fc_hash):
     self.read_int32(VERSION) # version
-    self.read_int32(FC_HASH ^ feature_set.hash ^ (M.L1*2)) # halfkp network hash
+    self.read_int32(fc_hash ^ feature_set.hash ^ (M.L1*2)) # halfkp network hash
     desc_len = self.read_int32() # Network definition
     description = self.f.read(desc_len)
 
