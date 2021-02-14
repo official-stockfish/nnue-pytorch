@@ -17,10 +17,10 @@ class NNUEVisualizer():
         self.args = args
 
         import matplotlib as mpl
-        dpi = 100
+        self.dpi = 100
         mpl.rcParams["figure.figsize"] = (
-            self.args.default_width//dpi, self.args.default_height//dpi)
-        mpl.rcParams["figure.dpi"] = dpi
+            self.args.default_width//self.dpi, self.args.default_height//self.dpi)
+        mpl.rcParams["figure.dpi"] = self.dpi
 
     def _process_fig(self, name):
         if self.args.save_dir:
@@ -52,9 +52,25 @@ class NNUEVisualizer():
             ref_weights = ref_weights.transpose(0, 1).flatten().numpy()
             weights -= ref_weights
 
-        hd = 256  # Output feature dimension.
+        hd = M.L1  # Number of input neurons.
         self.M = hd
-        numx = 32  # Number of output features per row.
+
+        # Preferred ratio of number of input neurons per row/col.
+        preferred_ratio = 4
+
+        # Number of input neurons per row.
+        # Find a factor of hd such that the aspect ratio
+        # is as close to the preferred ratio as possible.
+        factor, smallest_diff = 0, hd
+        for n in range(1, hd+1):
+            if hd % n == 0:
+                ratio = hd / (n*n)
+                diff = abs(preferred_ratio-ratio)
+                if diff < smallest_diff:
+                    factor = n
+                    smallest_diff = diff
+
+        numx = hd // factor
 
         inv_sorted_input_neurons = np.arange(hd, dtype=int)
 
@@ -62,7 +78,7 @@ class NNUEVisualizer():
             # Sort input neurons by the L1-norm of their associated weights.
             neuron_weights_norm = np.zeros(hd)
             for i in range(hd):
-                neuron_weights_norm[i] = np.sum(np.abs(weights[i::256]))
+                neuron_weights_norm[i] = np.sum(np.abs(weights[i::hd]))
 
             self.sorted_input_neurons = np.flip(
                 np.argsort(neuron_weights_norm))
@@ -155,7 +171,9 @@ class NNUEVisualizer():
             print(" done")
 
             # Input weights.
-            plt.figure()
+            scalex = (numx / numy) / preferred_ratio
+            plt.figure(figsize=((scalex*self.args.default_width) //
+                                self.dpi, self.args.default_height//self.dpi))
             plt.matshow(img.reshape((totaldim//totalx, totalx)),
                         fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
             plt.colorbar(fraction=0.046, pad=0.04)
