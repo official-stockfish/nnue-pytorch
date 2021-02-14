@@ -1,5 +1,5 @@
 import argparse
-import halfkp
+import features
 import math
 import model as M
 import numpy
@@ -8,27 +8,8 @@ import struct
 import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
-
-def coalesce_weights(weights):
-  # incoming weights are in [256][INPUTS]
-  k_base = 41024
-  p_base = k_base + 64
-  result = []
-  # Goal here is to add together all the weights that would be active for the
-  # given piece and king position in the halfkp inputs.
-  for i in range(k_base):
-    k_idx = i // halfkp.NUM_PLANES
-    p_idx = i % halfkp.NUM_PLANES
-    w = weights.narrow(1, i, 1).clone()
-    # TODO - divide by 20 to approximate # of pieces on the board, but this is
-    # a huge hack.  Issue is there is only one king position set in the factored
-    # positions, but we add it's weights to the # of pieces on the board.  This
-    # vastly overweights the king value.
-    w = w + weights.narrow(1, k_base + k_idx, 1) / 20
-    if p_idx > 0:
-      w = w + weights.narrow(1, p_base + p_idx - 1, 1)
-    result.append(w)
-  return torch.cat(result, dim=1)
+from functools import reduce
+import operator
 
 def fuse_bn(linear, bn):
   w = linear.weight
@@ -63,6 +44,10 @@ def ascii_hist(name, x, bins=6):
     xi = '{0: <8.4g}'.format(xi).ljust(10)
     print('{0}| {1}'.format(xi,bar))
 
+# hardcoded for now
+FC_HASH = 0x63337156
+VERSION = 0x7AF32F16
+
 class NNUEWriter():
   """
   All values are stored in little endian.
@@ -71,33 +56,42 @@ class NNUEWriter():
     self.buf = bytearray()
     model = fuse_bn_model(model)
 
-    self.write_header()
-    self.int32(0x5d69d7b8) # Feature transformer hash
-    self.write_feature_transformer(model.input)
-    self.int32(0x63337156) # FC layers hash
+    self.write_header(model)
+    self.int32(model.feature_set.hash ^ (M.L1*2)) # Feature transformer hash
+    self.write_feature_transformer(model)
+    self.int32(FC_HASH) # FC layers hash
     self.write_fc_layer(model.l1)
     self.write_fc_layer(model.l2)
     self.write_fc_layer(model.output, is_output=True)
 
-  def write_header(self):
-    self.int32(0x7AF32F16) # version
-    self.int32(0x3e5aa6ee) # halfkp network hash
+  def write_header(self, model):
+    self.int32(VERSION) # version
+    self.int32(FC_HASH ^ model.feature_set.hash ^ (M.L1*2)) # halfkp network hash
     description = b"Features=HalfKP(Friend)[41024->256x2],"
     description += b"Network=AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
     description += b"(ClippedReLU[32](AffineTransform[32<-512](InputSlice[512(0:512)])))))"
     self.int32(len(description)) # Network definition
     self.buf.extend(description)
 
-  def write_feature_transformer(self, layer):
+  def coalesce_ft_weights(self, model, layer):
+    weight = layer.weight.data
+    indices = model.feature_set.get_virtual_to_real_features_gather_indices()
+    weight_coalesced = weight.new_zeros((weight.shape[0], model.feature_set.num_real_features))
+    for i_real, is_virtual in enumerate(indices):
+      weight_coalesced[:, i_real] = sum(weight[:, i_virtual] for i_virtual in is_virtual)
+
+    return weight_coalesced
+
+  def write_feature_transformer(self, model):
     # int16 bias = round(x * 127)
     # int16 weight = round(x * 127)
+    layer = model.input
     bias = layer.bias.data
     bias = bias.mul(127).round().to(torch.int16)
     ascii_hist('ft bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
 
-    weight = layer.weight.data
-    weight = coalesce_weights(weight)
+    weight = self.coalesce_ft_weights(model, layer)
     weight = weight.mul(127).round().to(torch.int16)
     ascii_hist('ft weight:', weight.numpy())
     # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
@@ -121,6 +115,10 @@ class NNUEWriter():
     ascii_hist('fc bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
     weight = layer.weight.data
+    clipped = torch.count_nonzero(weight.clamp(-kMaxWeight, kMaxWeight) - weight)
+    total_elements = torch.numel(weight)
+    clipped_max = torch.max(torch.abs(weight.clamp(-kMaxWeight, kMaxWeight) - weight))
+    print("layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(clipped, total_elements, clipped_max, kMaxWeight))
     weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
     ascii_hist('fc weight:', weight.numpy())
     # Stored as [outputs][inputs], so we can flatten
@@ -130,26 +128,27 @@ class NNUEWriter():
     self.buf.extend(struct.pack("<i", v))
 
 class NNUEReader():
-  def __init__(self, f):
+  def __init__(self, f, feature_set):
     self.f = f
-    self.model = M.NNUE()
+    self.feature_set = feature_set
+    self.model = M.NNUE(feature_set)
 
-    self.read_header()
-    self.read_int32(0x5d69d7b8) # Feature transformer hash
+    self.read_header(feature_set)
+    self.read_int32(feature_set.hash ^ (M.L1*2)) # Feature transformer hash
     self.read_feature_transformer(self.model.input)
-    self.read_int32(0x63337156) # FC layers hash
+    self.read_int32(FC_HASH) # FC layers hash
     self.read_fc_layer(self.model.l1)
     self.read_fc_layer(self.model.l2)
     self.read_fc_layer(self.model.output, is_output=True)
 
-  def read_header(self):
-    self.read_int32(0x7AF32F16) # version
-    self.read_int32(0x3e5aa6ee) # halfkp network hash
+  def read_header(self, feature_set):
+    self.read_int32(VERSION) # version
+    self.read_int32(FC_HASH ^ feature_set.hash ^ (M.L1*2)) # halfkp network hash
     desc_len = self.read_int32() # Network definition
     description = self.f.read(desc_len)
 
   def tensor(self, dtype, shape):
-    d = numpy.fromfile(self.f, dtype, math.prod(shape))
+    d = numpy.fromfile(self.f, dtype, reduce(operator.mul, shape, 1))
     d = torch.from_numpy(d.astype(numpy.float32))
     d = d.reshape(shape)
     return d
@@ -179,30 +178,14 @@ class NNUEReader():
       raise Exception("Expected: %x, got %x" % (expected, v))
     return v
 
-def test(model):
-  import nnue_dataset
-  dataset = 'd8_100000.bin'
-  stream_cpp = nnue_dataset.SparseBatchDataset(halfkp.NAME, dataset, 1)
-  stream_cpp_iter = iter(stream_cpp)
-  tensors_cpp  = next(stream_cpp_iter)[:4]
-  print('cpp:', tensors_cpp[3])
-  print(model(*tensors_cpp))
-
-  stream_py = nnue_bin_dataset.NNUEBinData(dataset)
-  stream_py_iter = iter(stream_py)
-  tensors_py = next(stream_py_iter)
-  print('python:', torch.nonzero(tensors_py[3]).squeeze())
-  tensors_py = [v.reshape((1,-1)) for v in tensors_py[:4]]
-
-  weights = coalesce_weights(model.input.weight.data)
-  model.input.weight = torch.nn.Parameter(weights)
-  print(model(*tensors_py))
-
 def main():
   parser = argparse.ArgumentParser(description="Converts files between ckpt and nnue format.")
   parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
   parser.add_argument("target", help="Target file (can be .pt or .nnue)")
+  features.add_argparse_args(parser)
   args = parser.parse_args()
+
+  feature_set = features.get_feature_set_from_name(args.features)
 
   print('Converting %s to %s' % (args.source, args.target))
 
@@ -212,9 +195,8 @@ def main():
     if args.source.endswith(".pt"):
       nnue = torch.load(args.source)
     else:
-      nnue = M.NNUE.load_from_checkpoint(args.source)
+      nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set)
     nnue.eval()
-    #test(nnue)
     writer = NNUEWriter(nnue)
     with open(args.target, 'wb') as f:
       f.write(writer.buf)
@@ -222,7 +204,7 @@ def main():
     if not args.target.endswith(".pt"):
       raise Exception("Target file must end with .pt")
     with open(args.source, 'rb') as f:
-      reader = NNUEReader(f)
+      reader = NNUEReader(f, feature_set)
     torch.save(reader.model, args.target)
   else:
     raise Exception('Invalid filetypes: ' + str(args))

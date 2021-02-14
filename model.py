@@ -1,5 +1,4 @@
 import chess
-import halfkp
 import ranger
 import torch
 from torch import nn
@@ -20,24 +19,72 @@ class NNUE(pl.LightningModule):
 
   It is not ideal for training a Pytorch quantized model directly.
   """
-  def __init__(self, feature_set=halfkp, lambda_=1.0):
+  def __init__(self, feature_set, lambda_=1.0):
     super(NNUE, self).__init__()
-    num_inputs = feature_set.INPUTS
-    self.input = nn.Linear(num_inputs, L1)
+    self.input = nn.Linear(feature_set.num_features, L1)
     self.bn_input = nn.BatchNorm1d(num_features=L1)
-
-    # Zero out the weights/biases for the factorized features
-    # Weights stored as [256][41024]
-    weights = self.input.weight.narrow(1, 0, feature_set.INPUTS - feature_set.FACTOR_INPUTS)
-    weights = torch.cat((weights, torch.zeros(L1, feature_set.FACTOR_INPUTS)), dim=1)
-    self.input.weight = nn.Parameter(weights)
-
+    self.feature_set = feature_set
     self.l1 = nn.Linear(2 * L1, L2)
     self.bn_l1 = nn.BatchNorm1d(num_features=L2)
     self.l2 = nn.Linear(L2, L3)
     self.bn_l2 = nn.BatchNorm1d(num_features=L3)
     self.output = nn.Linear(L3, 1)
     self.lambda_ = lambda_
+
+    self._zero_virtual_feature_weights()
+
+  '''
+  We zero all virtual feature weights because during serialization to .nnue
+  we compute weights for each real feature as being the sum of the weights for
+  the real feature in question and the virtual features it can be factored to.
+  This means that if we didn't initialize the virtual feature weights to zero
+  we would end up with the real features having effectively unexpected values
+  at initialization - following the bell curve based on how many factors there are.
+  '''
+  def _zero_virtual_feature_weights(self):
+    weights = self.input.weight
+    for a, b in self.feature_set.get_virtual_feature_ranges():
+      weights[:, a:b] = 0.0
+    self.input.weight = nn.Parameter(weights)
+
+  '''
+  This method attempts to convert the model from using the self.feature_set
+  to new_feature_set.
+  '''
+  def set_feature_set(self, new_feature_set):
+    if self.feature_set.name == new_feature_set.name:
+      return
+
+    # TODO: Implement this for more complicated conversions.
+    #       Currently we support only a single feature block.
+    if len(self.feature_set.features) > 1:
+      raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
+
+    # Currently we only support conversion for feature sets with
+    # one feature block each so we'll dig the feature blocks directly
+    # and forget about the set.
+    old_feature_block = self.feature_set.features[0]
+    new_feature_block = new_feature_set.features[0]
+
+    # next(iter(new_feature_block.factors)) is the way to get the
+    # first item in a OrderedDict. (the ordered dict being str : int
+    # mapping of the factor name to its size).
+    # It is our new_feature_factor_name.
+    # For example old_feature_block.name == "HalfKP"
+    # and new_feature_factor_name == "HalfKP^"
+    # We assume here that the "^" denotes factorized feature block
+    # and we would like feature block implementers to follow this convention.
+    # So if our current feature_set matches the first factor in the new_feature_set
+    # we only have to add the virtual feature on top of the already existing real ones.
+    if old_feature_block.name == next(iter(new_feature_block.factors)):
+      # We can just extend with zeros since it's unfactorized -> factorized
+      weights = self.input.weight
+      padding = weights.new_zeros((weights.shape[0], new_feature_block.num_virtual_features))
+      weights = torch.cat([weights, padding], dim=1)
+      self.input.weight = nn.Parameter(weights)
+      self.feature_set = new_feature_set
+    else:
+      raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
 
   def forward(self, us, them, w_in, b_in):
     w = self.bn_input(self.input(w_in))
@@ -53,10 +100,15 @@ class NNUE(pl.LightningModule):
   def step_(self, batch, batch_idx, loss_type):
     us, them, white, black, outcome, score = batch
 
-    q = self(us, them, white, black)
+    # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
+    # This needs to match the value used in the serializer
+    nnue2score = 600
+    scaling = 361
+
+    q = self(us, them, white, black) * nnue2score / scaling
     t = outcome
-    # Divide score by 600.0 to match the expected NNUE scaling factor
-    p = (score / 600.0).sigmoid()
+    p = (score / scaling).sigmoid()
+
     epsilon = 1e-12
     teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
     outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
@@ -83,5 +135,26 @@ class NNUE(pl.LightningModule):
     self.step_(batch, batch_idx, 'test_loss')
 
   def configure_optimizers(self):
-    optimizer = ranger.Ranger(self.parameters())
-    return optimizer
+    # Train with a lower LR on the output layer
+    LR = 1e-3
+    train_params = [
+      {'params': self.get_layers(lambda x: self.output != x), 'lr': LR},
+      {'params': self.get_layers(lambda x: self.output == x), 'lr': LR / 10},
+    ]
+    # increasing the eps leads to less saturated nets with a few dead neurons
+    optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
+    # Drop learning rate after 75 epochs
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
+    return [optimizer], [scheduler]
+
+  def get_layers(self, filt):
+    """
+    Returns a list of layers.
+    filt: Return true to include the given layer.
+    """
+    for i in self.children():
+      if filt(i):
+        if isinstance(i, nn.Linear):
+          for p in i.parameters():
+            if p.requires_grad:
+              yield p

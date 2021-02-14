@@ -44,6 +44,9 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <optional>
 #include <thread>
 #include <mutex>
+#include <random>
+
+#include "rng.h"
 
 #if (defined(_MSC_VER) || defined(__INTEL_COMPILER)) && !defined(__clang__)
 #include <intrin.h>
@@ -6238,7 +6241,7 @@ namespace chess
 
                     return Move::castle(castleType, pos.sideToMove());
                 }
-                else if (pos.epSquare() == to)
+                else if (pos.pieceAt(from).type() == PieceType::Pawn && pos.epSquare() == to)
                 {
                     return Move::enPassant(from, to);
                 }
@@ -7577,6 +7580,10 @@ namespace binpack
 
                     if (!m_localBuffer.empty())
                     {
+                        // now shuffle the local buffer
+                        auto& prng = rng::get_thread_local_rng();
+                        std::shuffle(m_localBuffer.begin(), m_localBuffer.end(), prng);
+
                         std::unique_lock lock(m_waitingBufferMutex);
                         m_waitingBufferEmpty.wait(lock, [this]() { return m_waitingBuffer.empty() || m_stopFlag.load(); });
                         m_waitingBuffer.swap(m_localBuffer);
@@ -7682,7 +7689,7 @@ namespace binpack
         CompressedTrainingDataFile m_inputFile;
         std::atomic_int m_numRunningWorkers;
 
-        static constexpr int threadBufferSize = 256 * 256 * 4;
+        static constexpr int threadBufferSize = 256 * 256 * 16;
 
         std::atomic_bool m_stopFlag;
         std::vector<TrainingDataEntry> m_waitingBuffer;
