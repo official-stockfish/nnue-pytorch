@@ -129,7 +129,7 @@ class NNUEWriter():
     self.buf.extend(weight.flatten().numpy().tobytes())
 
   def int32(self, v):
-    self.buf.extend(struct.pack("<i", v))
+    self.buf.extend(struct.pack("<I", v))
 
 class NNUEReader():
   def __init__(self, f, feature_set):
@@ -185,7 +185,7 @@ class NNUEReader():
     layer.weight.data = layer.weight.data[:non_padded_shape[0], :non_padded_shape[1]]
 
   def read_int32(self, expected=None):
-    v = struct.unpack("<i", self.f.read(4))[0]
+    v = struct.unpack("<I", self.f.read(4))[0]
     if expected is not None and v != expected:
       raise Exception("Expected: %x, got %x" % (expected, v))
     return v
