@@ -40,6 +40,7 @@ class NNUEWriter():
     self.int32(fc_hash) # FC layers hash
     self.write_fc_layer(model.l1)
     self.write_fc_layer(model.l2)
+    self.write_fc_layer(model.l3)
     self.write_fc_layer(model.output, is_output=True)
 
   @staticmethod
@@ -49,7 +50,7 @@ class NNUEWriter():
     prev_hash ^= (M.L1 * 2)
 
     # Fully connected layers
-    layers = [model.l1, model.l2, model.output]
+    layers = [model.l1, model.l2, model.l3, model.output]
     for layer in layers:
       layer_hash = 0xCC03DAE4
       layer_hash += layer.out_features
@@ -84,12 +85,12 @@ class NNUEWriter():
     # int16 weight = round(x * 127)
     layer = model.input
     bias = layer.bias.data
-    bias = bias.mul(127).round().to(torch.int16)
+    #bias = bias.mul(127).round().to(torch.int16)
     ascii_hist('ft bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
 
     weight = self.coalesce_ft_weights(model, layer)
-    weight = weight.mul(127).round().to(torch.int16)
+    #weight = weight.mul(127).round().to(torch.int16)
     ascii_hist('ft weight:', weight.numpy())
     # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
     self.buf.extend(weight.transpose(0, 1).flatten().numpy().tobytes())
@@ -108,7 +109,7 @@ class NNUEWriter():
     # int32 bias = round(x * kBiasScale)
     # int8 weight = round(x * kWeightScale)
     bias = layer.bias.data
-    bias = bias.mul(kBiasScale).round().to(torch.int32)
+    #bias = bias.mul(kBiasScale).round().to(torch.int32)
     ascii_hist('fc bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
     weight = layer.weight.data
@@ -116,7 +117,7 @@ class NNUEWriter():
     total_elements = torch.numel(weight)
     clipped_max = torch.max(torch.abs(weight.clamp(-kMaxWeight, kMaxWeight) - weight))
     print("layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(clipped, total_elements, clipped_max, kMaxWeight))
-    weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
+    #weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
     ascii_hist('fc weight:', weight.numpy())
     # FC inputs are padded to 32 elements for simd.
     num_input = weight.shape[1]
@@ -129,7 +130,7 @@ class NNUEWriter():
     self.buf.extend(weight.flatten().numpy().tobytes())
 
   def int32(self, v):
-    self.buf.extend(struct.pack("<i", v))
+    self.buf.extend(struct.pack("<I", v))
 
 class NNUEReader():
   def __init__(self, f, feature_set):
@@ -185,7 +186,7 @@ class NNUEReader():
     layer.weight.data = layer.weight.data[:non_padded_shape[0], :non_padded_shape[1]]
 
   def read_int32(self, expected=None):
-    v = struct.unpack("<i", self.f.read(4))[0]
+    v = struct.unpack("<I", self.f.read(4))[0]
     if expected is not None and v != expected:
       raise Exception("Expected: %x, got %x" % (expected, v))
     return v
