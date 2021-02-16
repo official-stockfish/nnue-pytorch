@@ -62,10 +62,10 @@ def parse_ordo(root_dir, nnues):
     return ordo_scores
 
 
-def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_master, stockfish_new):
+def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_base, stockfish_test):
     """ Run a match using c-chess-cli adding pgns to a file to be analysed with ordo """
-    if stockfish_new is None:
-        stockfish_new = stockfish_master
+    if stockfish_test is None:
+        stockfish_test = stockfish_base
 
     pgn_file_name = os.path.join(root_dir, "out.pgn")
     command = "{} -each tc=4+0.04 option.Hash=8 option.Threads=1 -gauntlet -games 200 -rounds 1 -concurrency {}".format(
@@ -77,10 +77,10 @@ def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfis
             book_file_name
         )
     )
-    command = command + " -engine cmd={} name=master".format(stockfish_master)
+    command = command + " -engine cmd={} name=master".format(stockfish_base)
     for net in best:
         command = command + " -engine cmd={} name={} option.EvalFile={}".format(
-            stockfish_new, net, os.path.join(os.getcwd(), net)
+            stockfish_test, net, os.path.join(os.getcwd(), net)
         )
     command = command + " -pgn {} 0 2>&1".format(
         pgn_file_name
@@ -124,8 +124,8 @@ def run_round(
     explore_factor,
     ordo_exe,
     c_chess_exe,
-    stockfish_master,
-    stockfish_new,
+    stockfish_base,
+    stockfish_test,
     book_file_name,
     concurrency,
 ):
@@ -175,7 +175,7 @@ def run_round(
             break
 
     # run these nets against master...
-    run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_master, stockfish_new)
+    run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_base, stockfish_test)
 
     # and run a new ordo ranking for the games played so far
     run_ordo(root_dir, ordo_exe, concurrency)
@@ -220,15 +220,15 @@ def main():
         help="Path to c-chess-cli, see https://github.com/lucasart/c-chess-cli",
     )
     parser.add_argument(
-        "--stockfish_master",
+        "--stockfish_base",
         type=str,
         default="./stockfish",
         help="Path to stockfish master (reference version), see https://github.com/official-stockfish/Stockfish",
     )
     parser.add_argument(
-        "--stockfish_new",
+        "--stockfish_test",
         type=str,
-        help="(optional) Path to new stockfish binary, if not set, will use stockfish_master",
+        help="(optional) Path to new stockfish binary, if not set, will use stockfish_base",
     )
     parser.add_argument(
         "--book_file_name",
@@ -244,8 +244,8 @@ def main():
             args.explore_factor,
             args.ordo_exe,
             args.c_chess_exe,
-            args.stockfish_master,
-            args.stockfish_new,
+            args.stockfish_base,
+            args.stockfish_test,
             args.book_file_name,
             args.concurrency,
         )
