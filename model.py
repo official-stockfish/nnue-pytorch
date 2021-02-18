@@ -10,14 +10,29 @@ L1 = 256
 L2 = 32
 L3 = 32
 
+"""
+QTensor = namedtuple('QTensor', ['tensor', 'scale', 'zero_point'])
+def quantize_tensor(x):
+  qmin = 0.0
+  qmax = 255.0
+  min_val, max_val = x.min(), x.max()
+  scale = (max_val - min_val) / (qmax - qmin)
+  zero_point = int(torch.clamp(qmin - min_val / scale, qmin, qmax))
+  q_x = zero_point + x / scale
+  q_x.clamp_(qmin, qmax).round_()
+  q_x = q_x.round().to(torch.uint8)
+  return QTensor(tensor=q_x, scale=scale, zero_point=zero_point)
+
+def dequantize_tensor(q_x):
+  return q_x.scale * (q_x.tensor.float() - q_x.zero_point)
+"""
+
 class NNUE(pl.LightningModule):
   """
   This model attempts to directly represent the nodchip Stockfish trainer methodology.
 
   lambda_ = 0.0 - purely based on game results
   lambda_ = 1.0 - purely based on search scores
-
-  It is not ideal for training a Pytorch quantized model directly.
   """
   def __init__(self, feature_set, lambda_=1.0):
     super(NNUE, self).__init__()

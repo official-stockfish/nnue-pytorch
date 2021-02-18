@@ -1,3 +1,5 @@
+import features
+import model
 import qmodel as M
 import nnue_bin_dataset
 import numpy
@@ -6,60 +8,42 @@ import struct
 import torch
 from metrics import compute_mse
 from torch.utils.data import DataLoader
+from torch import nn
 
-class NNUEQuantizedWriter():
-  """
-  All values are stored in little endian.
-  """
-  def __init__(self, model):
-    self.buf = bytearray()
+def coalesce_ft_weights(model, layer):
+  weight = layer.weight.data
+  indices = model.feature_set.get_virtual_to_real_features_gather_indices()
+  weight_coalesced = weight.new_zeros((weight.shape[0], model.feature_set.num_real_features))
+  for i_real, is_virtual in enumerate(indices):
+    weight_coalesced[:, i_real] = sum(weight[:, i_virtual] for i_virtual in is_virtual)
+  return weight_coalesced
 
-    for m in model.modules():
-      print(m)
-
-    self.write_header()
-    self.int32(0x5d69d7b8) # Feature transformer hash
-    self.write_feature_transformer(model.input)
-    self.int32(0x63337156) # FC layers hash
-    self.write_fc_layer(model.l1)
-    self.write_fc_layer(model.l2)
-    self.write_fc_layer(model.output, is_output=True)
-
-  def write_header(self):
-    self.int32(0x7AF32F17) # version
-    self.int32(0x3e5aa6ee) # halfkp network hash
-    description = b"Features=HalfKP(Friend)[41024->256x2],"
-    description += b"Network=AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
-    description += b"(ClippedReLU[32](AffineTransform[32<-512](InputSlice[512(0:512)])))))"
-    self.int32(len(description)) # Network definition
-    self.buf.extend(description)
-
-  def write_feature_transformer(self, layer):
-    # int16 bias
-    # int16 weight
-    bias = layer.bias().data
-    self.buf.extend(bias.flatten().numpy().astype(numpy.int16).tobytes())
-    weight = layer.weight().data
-    # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
-    self.buf.extend(weight.transpose(0, 1).flatten().numpy().astype(numpy.int16).tobytes())
-
-  def write_fc_layer(self, layer, is_output=False):
-    # FC layers are stored as int8 weights, and int32 biases
-    bias = layer.bias().data
-    self.buf.extend(bias.flatten().numpy().astype(numpy.int32).tobytes())
-    weight = layer.weight().data
-    # Stored as [outputs][inputs], so we can flatten
-    self.buf.extend(weight.flatten().numpy().tobytes())
-
-  def int16(self, v):
-    self.buf.extend(struct.pack("<h", v))
-
-  def int32(self, v):
-    self.buf.extend(struct.pack("<i", v))
+def qmodel_from_model(ckpt_name):
+  # Hardcoded to convert from HalfKP^ right now...
+  factorized = features.get_feature_set_from_name('HalfKP^')
+  #halfkp = features.get_feature_set_from_name('HalfKP')
+  nnue = model.NNUE.load_from_checkpoint(ckpt_name, map_location='cpu', feature_set=factorized)
+  nnue.eval()
+  return nnue
+  #qm = M.NNUE(halfkp)
+  qm = M.NNUE(factorized)
+  qm.eval()
+  layers = ['input', 'l1', 'l2', 'l3', 'output']
+  for name in layers:
+    setattr(qm, name, getattr(nnue, name))
+  #qm.input.weight = nn.Parameter(coalesce_ft_weights(nnue, nnue.input))
+  #qm.input.in_features = halfkp.num_real_features
+  return qm
 
 def main():
-  nnue = M.NNUE.load_from_checkpoint('last.ckpt')
-  nnue.eval()
+  nnue = qmodel_from_model('epoch279_3layer.ckpt')
+
+  halfkp = features.get_feature_set_from_name('HalfKP^')
+  train = nnue_bin_dataset.NNUEBinData('large_gensfen_multipvdiff_100_d9.bin', halfkp)
+  train_loader = DataLoader(torch.utils.data.Subset(train, range(0, 1000)))
+  trainer = pl.Trainer()
+  trainer.test(nnue, train_loader)
+
   fuse_layers = [
     ['input', 'input_act'],
     ['l1', 'l1_act'],
@@ -67,24 +51,14 @@ def main():
   ]
   torch.quantization.fuse_modules(nnue, fuse_layers, inplace=True)
 
-  train = nnue_bin_dataset.NNUEBinData('d8_100000.bin')
-  train_small = torch.utils.data.Subset(train, range(0, len(train) // 1000))
-  train_loader = DataLoader(train_small)
-  val_loader = DataLoader(nnue_bin_dataset.NNUEBinData('d10_10000.bin'))
-  trainer = pl.Trainer()
-
   nnue.qconfig = torch.quantization.get_default_qconfig('fbgemm')
   nnue_prep = torch.quantization.prepare(nnue)
   trainer.test(nnue_prep, train_loader)
   nnue_int8 = torch.quantization.convert(nnue_prep)
-  #trainer.test(nnue_int8, train_loader)
+  trainer.test(nnue_int8, train_loader)
 
-  print('Baseline MSE:', compute_mse(nnue, train))
-  print('Quantized MSE:', compute_mse(nnue_int8, train))
-
-  writer = NNUEQuantizedWriter(nnue_int8)
-  with open('quantized.nnue', 'wb') as f:
-    f.write(writer.buf)
+  #print('Baseline MSE:', compute_mse(nnue, train))
+  #print('Quantized MSE:', compute_mse(nnue_int8, train))
 
   #torch.jit.save(torch.jit.script(nnue_int8), 'quantized.pt')
   #nnueq = torch.jit.load('quantized.pt')

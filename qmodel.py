@@ -31,6 +31,8 @@ class NNUE(pl.LightningModule):
     self.l1_act = nn.ReLU()
     self.l2 = nn.Linear(L2, L3)
     self.l2_act = nn.ReLU()
+    self.l3 = nn.Linear(L2, L3)
+    self.l3_act = nn.ReLU()
     self.output = nn.Linear(L3, 1)
     self.quant = QuantStub()
     self.dequant = DeQuantStub()
@@ -104,7 +106,8 @@ class NNUE(pl.LightningModule):
     l0_ = self.input_act(l0_)
     l1_ = self.l1_act(self.l1(l0_))
     l2_ = self.l2_act(self.l2(l1_))
-    x = self.output(l2_)
+    l3_ = self.l3_act(self.l3(l2_))
+    x = self.output(l3_)
     x = self.dequant(x)
     return x
 
