@@ -18,31 +18,37 @@ def coalesce_ft_weights(model, layer):
     weight_coalesced[:, i_real] = sum(weight[:, i_virtual] for i_virtual in is_virtual)
   return weight_coalesced
 
-def qmodel_from_model(ckpt_name):
-  # Hardcoded to convert from HalfKP^ right now...
-  factorized = features.get_feature_set_from_name('HalfKP^')
-  #halfkp = features.get_feature_set_from_name('HalfKP')
-  nnue = model.NNUE.load_from_checkpoint(ckpt_name, map_location='cpu', feature_set=factorized)
-  nnue.eval()
-  return nnue
-  #qm = M.NNUE(halfkp)
-  qm = M.NNUE(factorized)
+def qmodel_from_model(baseline):
+  halfkp = features.get_feature_set_from_name('HalfKP')
+  qm = M.NNUE(halfkp)
   qm.eval()
   layers = ['input', 'l1', 'l2', 'l3', 'output']
   for name in layers:
-    setattr(qm, name, getattr(nnue, name))
-  #qm.input.weight = nn.Parameter(coalesce_ft_weights(nnue, nnue.input))
-  #qm.input.in_features = halfkp.num_real_features
+    setattr(qm, name, getattr(baseline, name))
+  qm.input.weight = nn.Parameter(coalesce_ft_weights(baseline, baseline.input))
+  qm.input.in_features = halfkp.num_real_features
   return qm
 
-def main():
-  nnue = qmodel_from_model('epoch279_3layer.ckpt')
-
-  halfkp = features.get_feature_set_from_name('HalfKP^')
+def get_loader(feature_set_name):
+  halfkp = features.get_feature_set_from_name(feature_set_name)
   train = nnue_bin_dataset.NNUEBinData('large_gensfen_multipvdiff_100_d9.bin', halfkp)
-  train_loader = DataLoader(torch.utils.data.Subset(train, range(0, 1000)))
-  trainer = pl.Trainer()
-  trainer.test(nnue, train_loader)
+  return DataLoader(torch.utils.data.Subset(train, range(0, 1024)), batch_size=64)
+
+def load_model(ckpt_name):
+  # Hardcoded to convert from HalfKP^ right now...
+  factorized = features.get_feature_set_from_name('HalfKP^')
+  nnue = model.NNUE.load_from_checkpoint(ckpt_name, map_location='cpu', feature_set=factorized)
+  nnue.eval()
+  return nnue
+
+def main():
+  trainer = pl.Trainer(progress_bar_refresh_rate=0)
+  baseline = load_model('epoch279_3layer.ckpt')
+  print('baseline:', trainer.test(baseline, get_loader('HalfKP^'), verbose=False))
+
+  nnue = qmodel_from_model(baseline)
+  loader = get_loader('HalfKP')
+  print('converted to quantized net, and fused factorizer:', trainer.test(nnue, loader, verbose=False))
 
   fuse_layers = [
     ['input', 'input_act'],
@@ -53,12 +59,10 @@ def main():
 
   nnue.qconfig = torch.quantization.get_default_qconfig('fbgemm')
   nnue_prep = torch.quantization.prepare(nnue)
-  trainer.test(nnue_prep, train_loader)
-  nnue_int8 = torch.quantization.convert(nnue_prep)
-  trainer.test(nnue_int8, train_loader)
+  print('fused net:', trainer.test(nnue_prep, loader, verbose=False))
 
-  #print('Baseline MSE:', compute_mse(nnue, train))
-  #print('Quantized MSE:', compute_mse(nnue_int8, train))
+  nnue_int8 = torch.quantization.convert(nnue_prep)
+  print('quantized net:', trainer.test(nnue_int8, loader, verbose=False))
 
   #torch.jit.save(torch.jit.script(nnue_int8), 'quantized.pt')
   #nnueq = torch.jit.load('quantized.pt')
