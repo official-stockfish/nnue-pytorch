@@ -72,8 +72,6 @@ class NNUEVisualizer():
 
         numx = hd // factor
 
-        inv_sorted_input_neurons = np.arange(hd, dtype=int)
-
         if self.args.sort_input_neurons:
             # Sort input neurons by the L1-norm of their associated weights.
             neuron_weights_norm = np.zeros(hd)
@@ -82,11 +80,8 @@ class NNUEVisualizer():
 
             self.sorted_input_neurons = np.flip(
                 np.argsort(neuron_weights_norm))
-
-            for i in range(hd):
-                inv_sorted_input_neurons[self.sorted_input_neurons[i]] = i
         else:
-            self.sorted_input_neurons = inv_sorted_input_neurons
+            self.sorted_input_neurons = np.arange(hd, dtype=int)
 
         # Derived/fixed constants.
         numy = hd//numx
@@ -97,21 +92,19 @@ class NNUEVisualizer():
         totaldim = totalx*totaly
 
         if not self.args.no_input_weights:
-            # Generate image.
-            print("Generating input weights plot...", end="", flush=True)
-
-            # [Thanks to https://github.com/hxim/Stockfish-Evaluation-Guide
-            # upon which the following code is based.]
-            img = np.zeros(totaldim)
             default_order = self.args.input_weights_order == "piece-centric-flipped-king"
-            for j in range(weights.size):
+
+            # Calculate masks for first input neuron.
+            img_mask = []
+            weights_mask = []
+            for j in range(0, weights.size, hd):
                 # Calculate piece and king placement.
                 pi = (j // hd - 1) % 641
                 ki = (j // hd - 1) // 641
                 piece = pi // 64
                 rank = (pi % 64) // 8
 
-                if (pi == 640 or (rank == 0 or rank == 7) and (piece == 0 or piece == 1)):
+                if pi == 640 or ((rank == 0 or rank == 7) and (piece == 0 or piece == 1)):
                     # Ignore unused weights for "Shogi piece drop" and pawns on first/last rank.
                     continue
 
@@ -132,12 +125,24 @@ class NNUEVisualizer():
                     d = -2*(7-kipos[1]) - 1 if piece < 2 else 48 + \
                         (piece // 2 - 1) * 64
 
-                jhd = inv_sorted_input_neurons[j % hd]
-                x = inpos[0] + widthx * ((jhd) % numx) + (piece % 2)*64
+                jhd = j % hd
+                x = inpos[0] + widthx * (jhd % numx) + (piece % 2)*64
                 y = inpos[1] + d + widthy * (jhd // numx)
                 ii = x + y * totalx
 
-                img[ii] = weights[j]
+                img_mask.append(ii)
+                weights_mask.append(j)
+
+            img_mask = np.array(img_mask, dtype=int)
+            weights_mask = np.array(weights_mask, dtype=int)
+
+            # Fill image for all input neurons.
+            img = np.zeros(totaldim)
+            for k in range(hd):
+                offset_x = k % numx
+                offset_y = k // numx
+                img[img_mask + offset_x*widthx + totalx*widthy *
+                    offset_y] = weights[weights_mask + self.sorted_input_neurons[k]]
 
             if self.args.input_weights_auto_scale:
                 vmin = None
@@ -167,8 +172,6 @@ class NNUEVisualizer():
                     extra_info + "]"
                 hist_title_template = "abs(input weights) histogram [{LABEL}]"
                 cmap = 'viridis'
-
-            print(" done")
 
             # Input weights.
             scalex = (numx / numy) / preferred_ratio
