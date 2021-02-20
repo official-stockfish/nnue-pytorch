@@ -5,6 +5,7 @@ import nnue_bin_dataset
 import subprocess
 import re
 from model import NNUE
+import torch
 
 def read_model(nnue_path, feature_set):
     with open(nnue_path, 'rb') as f:
@@ -52,10 +53,9 @@ def compute_correlation(engine_evals, model_evals):
     print('Avg engine/model eval: {} / {}'.format(avg_engine_eval, avg_model_eval))
     print('Avg abs engine/model eval: {} / {}'.format(avg_abs_engine_eval, avg_abs_model_eval))
 
-    relative_model_error = sum(abs(model - engine) / (abs(engine)+0.001) for model, engine in zip(model_evals, engine_evals)) / len(engine_evals)
-    relative_engine_error = sum(abs(model - engine) / (abs(model)+0.001) for model, engine in zip(model_evals, engine_evals)) / len(engine_evals)
-    print('Relative engine error: {}'.format(relative_engine_error))
-    print('Relative model error: {}'.format(relative_model_error))
+    errors = ((abs(model - engine), max(abs(model), abs(engine))) for model, engine in zip(model_evals, engine_evals))
+    relative_error = sum(map(lambda x: 0.0 if x[1] == 0 else x[0] / x[1], errors)) / len(engine_evals)
+    print('Relative error: {}'.format(relative_error))
     print('Avg abs difference: {}'.format(sum(abs(model - engine) for model, engine in zip(model_evals, engine_evals)) / len(engine_evals)))
 
 def eval_engine_batch(engine_path, net_path, fens):
@@ -76,6 +76,7 @@ def main():
     parser.add_argument("--engine", type=str, help="path to stockfish")
     parser.add_argument("--data", type=str, help="path to .bin dataset")
     parser.add_argument("--checkpoint", type=str, help="Optional checkpoint (used instead of nnue for local eval)")
+    parser.add_argument("--jitpt", type=str, help="Optional torch.jit .pt model (used instead of nnue for local eval)")
     parser.add_argument("--count", type=int, default=100, help="number of datapoints to process")
     features.add_argparse_args(parser)
     args = parser.parse_args()
@@ -83,6 +84,8 @@ def main():
     feature_set = features.get_feature_set_from_name(args.features)
     if args.checkpoint:
       model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set)
+    elif args.jitpt:
+      model = torch.jit.load(args.jitpt)
     else:
       model = read_model(args.net, feature_set)
     model.eval()

@@ -92,7 +92,7 @@ class NNUEWriter():
     layer = model.input
     bias_scale = self.write_quant_params(layer, None)
 
-    bias = (layer.bias().data / bias_scale).round().to(torch.int32)
+    bias = (layer.bias().data / bias_scale).round().to(torch.int16)
     self.buf.extend(bias.flatten().numpy().tobytes())
 
     weight = layer.weight().data.int_repr()
@@ -200,6 +200,7 @@ def main():
   trainer.test(nnue_prep, loader, verbose=False)
 
   nnue_int8 = torch.quantization.convert(nnue_prep)
+  torch.jit.save(torch.jit.script(nnue_int8), 'quantized.pt')
   #dump_activations(nnue_int8)
   #print('quantized net:', trainer.test(nnue_int8, loader, verbose=False))
 
