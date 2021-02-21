@@ -1,3 +1,4 @@
+import argparse
 import features
 import model
 import qmodel as M
@@ -170,14 +171,19 @@ def dump_activations(model):
   print(model(us, them, w_in, b_in))
 
 def main():
-  binfile = 'large_gensfen_multipvdiff_100_d9.bin'
+  parser = argparse.ArgumentParser(description="Converts files between ckpt and nnue format.")
+  parser.add_argument("source", help="Source file (.ckpt).  Only supports HalfKP^")
+  parser.add_argument("target", help="Target file (.nnue)")
+  parser.add_argument("binfile", help=".bin file for activation statistics, will only use first 1000 positions currently")
+  features.add_argparse_args(parser)
+  args = parser.parse_args()
 
   trainer = pl.Trainer(progress_bar_refresh_rate=0)
-  baseline = load_model('epoch279_3layer.ckpt')
-  #print('baseline:', trainer.test(baseline, get_loader('HalfKP^', binfile), verbose=False))
+  baseline = load_model(args.source)
+  #print('baseline:', trainer.test(baseline, get_loader('HalfKP^', args.binfile), verbose=False))
 
   nnue = qmodel_from_model(baseline)
-  loader = get_loader('HalfKP', binfile)
+  loader = get_loader('HalfKP', args.binfile)
   #print('converted to quantized net, and fused factorizer:', trainer.test(nnue, loader, verbose=False))
 
   fuse_layers = [
@@ -205,7 +211,7 @@ def main():
   #print('quantized net:', trainer.test(nnue_int8, loader, verbose=False))
 
   writer = NNUEWriter(nnue_int8)
-  with open('quantized.nnue', 'wb') as f:
+  with open(args.target, 'wb') as f:
     f.write(writer.buf)
 
 if __name__ == '__main__':
