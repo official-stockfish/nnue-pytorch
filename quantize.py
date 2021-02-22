@@ -36,8 +36,7 @@ class NNUEWriter():
     self.uint32(fc_hash) # FC layers hash
     self.write_fc_layer(model.l1, model.input)
     self.write_fc_layer(model.l2, model.l1)
-    self.write_fc_layer(model.l3, model.l2)
-    self.write_fc_layer(model.output, model.l3, is_output=True)
+    self.write_fc_layer(model.output, model.l2, is_output=True)
 
   @staticmethod
   def fc_hash(model):
@@ -46,7 +45,7 @@ class NNUEWriter():
     prev_hash ^= (M.L1 * 2)
 
     # Fully connected layers
-    layers = [model.l1, model.l2, model.l3, model.output]
+    layers = [model.l1, model.l2, model.output]
     for layer in layers:
       layer_hash = 0xCC03DAE4
       layer_hash += layer.out_features
@@ -126,7 +125,7 @@ def qmodel_from_model(baseline):
   halfkp = features.get_feature_set_from_name('HalfKP')
   qm = M.NNUE(halfkp)
   qm.eval()
-  layers = ['input', 'l1', 'l2', 'l3', 'output']
+  layers = ['input', 'l1', 'l2', 'output']
   for name in layers:
     setattr(qm, name, getattr(baseline, name))
   qm.input.weight = nn.Parameter(coalesce_ft_weights(baseline, baseline.input))
@@ -166,7 +165,6 @@ def dump_activations(model):
   model.input.register_forward_hook(get_activation('input'))
   model.l1.register_forward_hook(get_activation('l1'))
   model.l2.register_forward_hook(get_activation('l2'))
-  model.l3.register_forward_hook(get_activation('l3'))
   model.output.register_forward_hook(get_activation('output'))
   print(model(us, them, w_in, b_in))
 

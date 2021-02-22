@@ -23,7 +23,7 @@ def convert_ckpt(root_dir):
         nnue_file_name = re.sub("default/version_[0-9]+/checkpoints/", "", ckpt)
         nnue_file_name = re.sub(r"epoch\=([0-9]+).*\.ckpt", r"nn-epoch\1.nnue", nnue_file_name)
         if not os.path.exists(nnue_file_name):
-            command = "{} serialize.py {} {} ".format(sys.executable, ckpt, nnue_file_name)
+            command = "{} quantize.py {} {} {}".format(sys.executable, ckpt, nnue_file_name, 'large_gensfen_multipvdiff_100_d9.bin')
             ret = os.system(command)
             if ret != 0:
                 print("Error serializing!")
@@ -68,7 +68,7 @@ def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfis
         stockfish_test = stockfish_base
 
     pgn_file_name = os.path.join(root_dir, "out.pgn")
-    command = "{} -each tc=4+0.04 option.Hash=8 option.Threads=1 -gauntlet -games 200 -rounds 1 -concurrency {}".format(
+    command = "{} -each tc=4+0.04 option.Hash=8 option.Threads=1 -gauntlet -games 75 -rounds 1 -concurrency {}".format(
         c_chess_exe, concurrency
     )
     command = (

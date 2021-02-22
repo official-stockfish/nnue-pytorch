@@ -10,23 +10,6 @@ L1 = 256
 L2 = 32
 L3 = 32
 
-"""
-QTensor = namedtuple('QTensor', ['tensor', 'scale', 'zero_point'])
-def quantize_tensor(x):
-  qmin = 0.0
-  qmax = 255.0
-  min_val, max_val = x.min(), x.max()
-  scale = (max_val - min_val) / (qmax - qmin)
-  zero_point = int(torch.clamp(qmin - min_val / scale, qmin, qmax))
-  q_x = zero_point + x / scale
-  q_x.clamp_(qmin, qmax).round_()
-  q_x = q_x.round().to(torch.uint8)
-  return QTensor(tensor=q_x, scale=scale, zero_point=zero_point)
-
-def dequantize_tensor(q_x):
-  return q_x.scale * (q_x.tensor.float() - q_x.zero_point)
-"""
-
 class NNUE(pl.LightningModule):
   """
   This model attempts to directly represent the nodchip Stockfish trainer methodology.
@@ -40,7 +23,6 @@ class NNUE(pl.LightningModule):
     self.feature_set = feature_set
     self.l1 = nn.Linear(2 * L1, L2)
     self.l2 = nn.Linear(L2, L3)
-    self.l3 = nn.Linear(L2, L3)
     self.output = nn.Linear(L3, 1)
     self.lambda_ = lambda_
 
@@ -107,8 +89,7 @@ class NNUE(pl.LightningModule):
     l0_ = F.relu(l0_)
     l1_ = F.relu(self.l1(l0_))
     l2_ = F.relu(self.l2(l1_))
-    l3_ = F.relu(self.l3(l2_))
-    x = self.output(l3_)
+    x = self.output(l2_)
     return x
 
   def step_(self, batch, batch_idx, loss_type):
@@ -158,7 +139,7 @@ class NNUE(pl.LightningModule):
     # increasing the eps leads to less saturated nets with a few dead neurons
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
     # Drop learning rate after 75 epochs
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.3)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=125, gamma=0.25)
     return [optimizer], [scheduler]
 
   def get_layers(self, filt):
