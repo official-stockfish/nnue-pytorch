@@ -49,8 +49,9 @@ class NNUE(pl.LightningModule):
   '''
   def _zero_virtual_feature_weights(self):
     weights = self.input.weight
-    for a, b in self.feature_set.get_virtual_feature_ranges():
-      weights[:, a:b] = 0.0
+    with torch.no_grad():
+      for a, b in self.feature_set.get_virtual_feature_ranges():
+        weights[:, a:b] = 0.0
     self.input.weight = nn.Parameter(weights)
 
   '''
