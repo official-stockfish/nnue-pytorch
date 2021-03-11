@@ -191,6 +191,12 @@ class Ranger(Optimizer):
                     G_grad = centralized_gradient(G_grad, use_gc=self.use_gc, gc_conv_only=self.gc_conv_only)
 
                 p_data_fp32.add_(G_grad, alpha=-step_size * group['lr'])
+
+                # constrain weights
+                min_weight = group['min_weight']
+                max_weight = group['max_weight']
+                p_data_fp32.clamp_(min_weight, max_weight)
+                
                 p.data.copy_(p_data_fp32)
 
                 # integrated look ahead...
