@@ -4,9 +4,10 @@
 # and/or
 # https://github.com/lessw2020/Best-Deep-Learning-Optimizers
 
-# Ranger has now been used to capture 12 records on the FastAI leaderboard.
+# Ranger has been used to capture 12 records on the FastAI leaderboard.
 
-# This version = 20.4.11
+# This version = 2020.9.4
+
 
 # Credits:
 # Gradient Centralization --> https://arxiv.org/abs/2004.01461v2 (a new optimization technique for DNNs), github:  https://github.com/Yonghongwei/Gradient-Centralization
@@ -15,6 +16,7 @@
 # Lookahead paper --> MZhang,G Hinton  https://arxiv.org/abs/1907.08610
 
 # summary of changes:
+# 9/4/20 - updated addcmul_ signature to avoid warning.  Integrates latest changes from GC developer (he did the work for this), and verified on performance on private dataset.
 # 4/11/20 - add gradient centralization option.  Set new testing benchmark for accuracy with it, toggle with use_gc flag at init.
 # full code integration with all updates at param level instead of group, moves slow weights into state dict (from generic weights),
 # supports group learning rates (thanks @SHolderbach), fixes sporadic load from saved model issues.
@@ -26,13 +28,25 @@ import torch
 from torch.optim.optimizer import Optimizer, required
 
 
+def centralized_gradient(x, use_gc=True, gc_conv_only=False):
+    '''credit - https://github.com/Yonghongwei/Gradient-Centralization '''
+    if use_gc:
+        if gc_conv_only:
+            if len(list(x.size())) > 3:
+                x.add_(-x.mean(dim=tuple(range(1, len(list(x.size())))), keepdim=True))
+        else:
+            if len(list(x.size())) > 1:
+                x.add_(-x.mean(dim=tuple(range(1, len(list(x.size())))), keepdim=True))
+    return x
+
+
 class Ranger(Optimizer):
 
     def __init__(self, params, lr=1e-3,                       # lr
                  alpha=0.5, k=6, N_sma_threshhold=5,           # Ranger options
                  betas=(.95, 0.999), eps=1e-5, weight_decay=0,  # Adam options
                  # Gradient centralization on or off, applied to conv layers only or conv + fc layers
-                 use_gc=True, gc_conv_only=False
+                 use_gc=True, gc_conv_only=False, gc_loc=True
                  ):
 
         # parameter checks
@@ -67,16 +81,17 @@ class Ranger(Optimizer):
         self.radam_buffer = [[None, None, None] for ind in range(10)]
 
         # gc on or off
+        self.gc_loc = gc_loc
         self.use_gc = use_gc
-
+        self.gc_conv_only = gc_conv_only
         # level of gradient centralization
-        self.gc_gradient_threshold = 3 if gc_conv_only else 1
+        #self.gc_gradient_threshold = 3 if gc_conv_only else 1
 
         print(
             f"Ranger optimizer loaded. \nGradient Centralization usage = {self.use_gc}")
-        if (self.use_gc and self.gc_gradient_threshold == 1):
+        if (self.use_gc and self.gc_conv_only == False):
             print(f"GC applied to both conv and fc layers")
-        elif (self.use_gc and self.gc_gradient_threshold == 3):
+        elif (self.use_gc and self.gc_conv_only == True):
             print(f"GC applied to conv layers only")
 
     def __setstate__(self, state):
@@ -88,7 +103,7 @@ class Ranger(Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-
+        
         # Evaluate averages and grad, update param tensors
         for group in self.param_groups:
 
@@ -127,15 +142,18 @@ class Ranger(Optimizer):
                 beta1, beta2 = group['betas']
 
                 # GC operation for Conv layers and FC layers
-                if grad.dim() > self.gc_gradient_threshold:
-                    grad.add_(-grad.mean(dim=tuple(range(1, grad.dim())), keepdim=True))
+                # if grad.dim() > self.gc_gradient_threshold:
+                #    grad.add_(-grad.mean(dim=tuple(range(1, grad.dim())), keepdim=True))
+                if self.gc_loc:
+                    grad = centralized_gradient(grad, use_gc=self.use_gc, gc_conv_only=self.gc_conv_only)
 
                 state['step'] += 1
 
                 # compute variance mov avg
-                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
                 # compute mean moving avg
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
 
                 buffered = self.radam_buffer[int(state['step'] % 10)]
 
@@ -155,18 +173,24 @@ class Ranger(Optimizer):
                         step_size = 1.0 / (1 - beta1 ** state['step'])
                     buffered[2] = step_size
 
-                if group['weight_decay'] != 0:
-                    p_data_fp32.add_(-group['weight_decay']
-                                     * group['lr'], p_data_fp32)
+                # if group['weight_decay'] != 0:
+                #    p_data_fp32.add_(-group['weight_decay']
+                #                     * group['lr'], p_data_fp32)
 
                 # apply lr
                 if N_sma > self.N_sma_threshhold:
                     denom = exp_avg_sq.sqrt().add_(group['eps'])
-                    p_data_fp32.addcdiv_(-step_size *
-                                         group['lr'], exp_avg, denom)
+                    G_grad = exp_avg / denom
                 else:
-                    p_data_fp32.add_(-step_size * group['lr'], exp_avg)
+                    G_grad = exp_avg
 
+                if group['weight_decay'] != 0:
+                    G_grad.add_(p_data_fp32, alpha=group['weight_decay'])
+                # GC operation
+                if self.gc_loc == False:
+                    G_grad = centralized_gradient(G_grad, use_gc=self.use_gc, gc_conv_only=self.gc_conv_only)
+
+                p_data_fp32.add_(G_grad, alpha=-step_size * group['lr'])
                 p.data.copy_(p_data_fp32)
 
                 # integrated look ahead...
@@ -175,7 +199,7 @@ class Ranger(Optimizer):
                     # get access to slow param tensor
                     slow_p = state['slow_buffer']
                     # (fast weights - slow weights) * alpha
-                    slow_p.add_(self.alpha, p.data - slow_p)
+                    slow_p.add_(p.data - slow_p, alpha=self.alpha)
                     # copy interpolated weights to RAdam param tensor
                     p.data.copy_(slow_p)
 
