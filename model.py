@@ -101,11 +101,26 @@ class NNUE(pl.LightningModule):
     # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
     # This needs to match the value used in the serializer
     nnue2score = 600
-    scaling = 361
 
-    q = self(us, them, white, black) * nnue2score / scaling
+    # in_scaling determines what sigmoid matches perf% derived from the input data
+    # the formula to convert input score to perf% is sigmoid(score/in_scaling)
+    # the value 410 matches the large 20B d9 binpack from vondele
+    # other data might need different scaling, one can use the
+    # perf_sigmoid_fitter.py script to determine that scaling
+    # if the WDL of the positions is a good signal (that is,
+    # the data is of reasonable quality)
+    in_scaling = 410
+
+    # previous scaling (and currently used in the nodchip trainer) was 361
+    # this scaling is used to convert nnue eval (of the network being trained)
+    # to perf%, using the formula sigmoid(nnue_eval/out_scaling).
+    # The value of 600 looks better. It is not related in any way
+    # to the nnue2score (kPonanzaConstant) constant
+    out_scaling = 600
+
+    q = self(us, them, white, black) * nnue2score / out_scaling
     t = outcome
-    p = (score / scaling).sigmoid()
+    p = (score / in_scaling).sigmoid()
 
     epsilon = 1e-12
     teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
