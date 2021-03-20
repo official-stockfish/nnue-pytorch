@@ -15,6 +15,28 @@ def halfkp_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece):
   p_idx = (p.piece_type - 1) * 2 + (p.color != is_white_pov)
   return 1 + orient(is_white_pov, sq) + p_idx * NUM_SQ + king_sq * NUM_PLANES
 
+def halfkp_psqts():
+  # values copied from stockfish, in stockfish internal units
+  piece_values = {
+    chess.PAWN : 126,
+    chess.KNIGHT : 781,
+    chess.BISHOP : 825,
+    chess.ROOK : 1276,
+    chess.QUEEN : 2538
+  }
+
+  values = [0] * (NUM_PLANES * NUM_SQ)
+
+  for ksq in range(64):
+    for s in range(64):
+      for pt, val in piece_values.items():
+        idxw = halfkp_idx(True, ksq, s, chess.Piece(pt, chess.WHITE))
+        idxb = halfkp_idx(True, ksq, s, chess.Piece(pt, chess.BLACK))
+        values[idxw] = val
+        values[idxb] = -val
+
+  return values
+
 class Features(FeatureBlock):
   def __init__(self):
     super(Features, self).__init__('HalfKP', 0x5d69d5b8, OrderedDict([('HalfKP', NUM_PLANES * NUM_SQ)]))
@@ -28,6 +50,9 @@ class Features(FeatureBlock):
         indices[halfkp_idx(turn, orient(turn, board.king(turn)), sq, p)] = 1.0
       return indices
     return (piece_features(chess.WHITE), piece_features(chess.BLACK))
+
+  def get_initial_psqt_features(self):
+    return halfkp_psqts()
 
 class FactorizedFeatures(FeatureBlock):
   def __init__(self):
@@ -59,6 +84,9 @@ class FactorizedFeatures(FeatureBlock):
     p_idx = idx % NUM_PLANES - 1
 
     return [idx, self.get_factor_base_feature('HalfK') + k_idx, self.get_factor_base_feature('P') + p_idx]
+
+  def get_initial_psqt_features(self):
+    return halfkp_psqts() + [0] * (NUM_SQ * NUM_PT)
 
 '''
 This is used by the features module for discovery of feature blocks.
