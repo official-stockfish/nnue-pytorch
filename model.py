@@ -29,6 +29,7 @@ class NNUE(pl.LightningModule):
     self.lambda_ = lambda_
 
     self._zero_virtual_feature_weights()
+    self._correct_init_biases()
 
   '''
   We zero all virtual feature weights because during serialization to .nnue
@@ -44,6 +45,26 @@ class NNUE(pl.LightningModule):
       for a, b in self.feature_set.get_virtual_feature_ranges():
         weights[:, a:b] = 0.0
     self.input.weight = nn.Parameter(weights)
+
+  '''
+  Pytorch initializes biases around 0, but we want them
+  to be around activation range. Also the bias for the output
+  layer should always be 0.
+  '''
+  def _correct_init_biases(self):
+    input_bias = self.input.bias
+    l1_bias = self.l1.bias
+    l2_bias = self.l2.bias
+    output_bias = self.output.bias
+    with torch.no_grad():
+      input_bias.add_(0.5)
+      l1_bias.add_(0.5)
+      l2_bias.add_(0.5)
+      output_bias.fill_(0.0)
+    self.input.bias = nn.Parameter(input_bias)
+    self.l1.bias = nn.Parameter(l1_bias)
+    self.l2.bias = nn.Parameter(l2_bias)
+    self.output.bias = nn.Parameter(output_bias)
 
   '''
   This method attempts to convert the model from using the self.feature_set
