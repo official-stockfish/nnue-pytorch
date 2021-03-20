@@ -38,6 +38,7 @@ class NNUE(pl.LightningModule):
     self.lambda_ = lambda_
 
     self._zero_virtual_feature_weights()
+    self._correct_init_biases()
 
   '''
   We zero all virtual feature weights because during serialization to .nnue
@@ -53,6 +54,26 @@ class NNUE(pl.LightningModule):
       for a, b in self.feature_set.get_virtual_feature_ranges():
         weights[a:b, :] = 0.0
     self.input.weight = nn.Parameter(weights)
+
+  '''
+  Pytorch initializes biases around 0, but we want them
+  to be around activation range. Also the bias for the output
+  layer should always be 0.
+  '''
+  def _correct_init_biases(self):
+    input_bias = self.input.bias
+    l1_bias = self.l1.bias
+    l2_bias = self.l2.bias
+    output_bias = self.output.bias
+    with torch.no_grad():
+      input_bias.add_(0.5)
+      l1_bias.add_(0.5)
+      l2_bias.add_(0.5)
+      output_bias.fill_(0.0)
+    self.input.bias = nn.Parameter(input_bias)
+    self.l1.bias = nn.Parameter(l1_bias)
+    self.l2.bias = nn.Parameter(l2_bias)
+    self.output.bias = nn.Parameter(output_bias)
 
   '''
   This method attempts to convert the model from using the self.feature_set
@@ -109,11 +130,12 @@ class NNUE(pl.LightningModule):
     # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
     # This needs to match the value used in the serializer
     nnue2score = 600
-    scaling = 361
+    in_scaling = 410
+    out_scaling = 361
 
     q = self(us, them, white_indices, white_values, black_indices, black_values) * nnue2score / scaling
     t = outcome
-    p = (score / scaling).sigmoid()
+    p = (score / in_scaling).sigmoid()
 
     epsilon = 1e-12
     teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
@@ -144,15 +166,19 @@ class NNUE(pl.LightningModule):
     # Train with a lower LR on the output layer
     LR = 1e-3
     train_params = [
-      {'params': self.get_layers(lambda x: self.output != x and self.input != x), 'lr': LR},
-      {'params': self.get_layers(lambda x: self.input == x), 'lr': LR, 'gc_dim' : 0},
-      {'params': self.get_layers(lambda x: self.output == x), 'lr': LR / 10},
+      {'params' : self.get_specific_layers([self.input]), 'lr' : LR, 'min_weight' : -(2**15-1)/127, 'max_weight' : (2**15-1)/127 },
+      {'params' : self.get_specific_layers([self.l1, self.l2]), 'lr' : LR, 'min_weight' : -127/64, 'max_weight' : 127/64 },
+      {'params' : self.get_specific_layers([self.output]), 'lr' : LR / 10, 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
     ]
     # increasing the eps leads to less saturated nets with a few dead neurons
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
     # Drop learning rate after 75 epochs
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
     return [optimizer], [scheduler]
+
+  def get_specific_layers(self, layers):
+    pred = lambda x: x in layers
+    return self.get_layers(pred)
 
   def get_layers(self, filt):
     """
