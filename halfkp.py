@@ -29,6 +29,9 @@ class Features(FeatureBlock):
       return indices
     return (piece_features(chess.WHITE), piece_features(chess.BLACK))
 
+  def get_initial_psqt_features(self):
+    raise Exception('Not supported yet. See HalfKA')
+
 class FactorizedFeatures(FeatureBlock):
   def __init__(self):
     super(FactorizedFeatures, self).__init__('HalfKP^', 0x5d69d5b8, OrderedDict([('HalfKP', NUM_PLANES * NUM_SQ), ('HalfK', NUM_SQ), ('P', NUM_SQ * 10 )]))
@@ -59,6 +62,9 @@ class FactorizedFeatures(FeatureBlock):
     p_idx = idx % NUM_PLANES - 1
 
     return [idx, self.get_factor_base_feature('HalfK') + k_idx, self.get_factor_base_feature('P') + p_idx]
+
+  def get_initial_psqt_features(self):
+    raise Exception('Not supported yet. See HalfKA^')
 
 '''
 This is used by the features module for discovery of feature blocks.
