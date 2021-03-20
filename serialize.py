@@ -24,7 +24,7 @@ def ascii_hist(name, x, bins=6):
     print('{0}| {1}'.format(xi,bar))
 
 # hardcoded for now
-VERSION = 0x7AF32F16
+VERSION = 0x7AF32F20
 
 class NNUEWriter():
   """
@@ -64,7 +64,7 @@ class NNUEWriter():
   def write_header(self, model, fc_hash):
     self.int32(VERSION) # version
     self.int32(fc_hash ^ model.feature_set.hash ^ (M.L1*2)) # halfkp network hash
-    description = b"Features=HalfKP(Friend)[41024->256x2],"
+    description = b"Features=HalfKA(Friend)[49216->256x2],"
     description += b"Network=AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
     description += b"(ClippedReLU[32](AffineTransform[32<-512](InputSlice[512(0:512)])))))"
     self.int32(len(description)) # Network definition
@@ -83,16 +83,20 @@ class NNUEWriter():
     # int16 bias = round(x * 127)
     # int16 weight = round(x * 127)
     layer = model.input
-    bias = layer.bias.data
+    bias = layer.bias.data[:M.L1]
     bias = bias.mul(127).round().to(torch.int16)
     ascii_hist('ft bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
 
     weight = self.coalesce_ft_weights(model, layer)
-    weight = weight.mul(127).round().to(torch.int16)
+    weight0 = weight[:M.L1, :]
+    psqtweight0 = weight[M.L1, :]
+    weight = weight0.mul(127).round().to(torch.int16)
+    psqtweight = psqtweight0.mul(9600).round().to(torch.int32) # kPonanzaConstant * FV_SCALE = 9600
     ascii_hist('ft weight:', weight.numpy())
     # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
     self.buf.extend(weight.transpose(0, 1).flatten().numpy().tobytes())
+    self.buf.extend(psqtweight.flatten().numpy().tobytes())
 
   def write_fc_layer(self, layer, is_output=False):
     # FC layers are stored as int8 weights, and int32 biases
@@ -159,10 +163,15 @@ class NNUEReader():
     return d
 
   def read_feature_transformer(self, layer):
-    layer.bias.data = self.tensor(numpy.int16, layer.bias.shape).divide(127.0)
+    bias = self.tensor(numpy.int16, [layer.bias.shape[0]-1]).divide(127.0)
+    layer.bias.data = torch.cat([bias, torch.tensor([0])])
     # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
-    weights = self.tensor(numpy.int16, layer.weight.shape[::-1])
-    layer.weight.data = weights.divide(127.0).transpose(0, 1)
+    shape = layer.weight.shape[::-1]
+    weights = self.tensor(numpy.int16, [shape[0], shape[1]-1])
+    psqtweights = self.tensor(numpy.int32, [1, shape[0]])
+    weights = weights.divide(127.0).transpose(0, 1)
+    psqtweights = psqtweights.divide(9600.0)
+    layer.weight.data = torch.cat([weights, psqtweights], dim=0)
 
   def read_fc_layer(self, layer, is_output=False):
     # FC layers are stored as int8 weights, and int32 biases
