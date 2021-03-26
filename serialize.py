@@ -6,6 +6,7 @@ import numpy
 import nnue_bin_dataset
 import struct
 import torch
+from torch import nn
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from functools import reduce
@@ -37,10 +38,11 @@ class NNUEWriter():
     self.write_header(model, fc_hash)
     self.int32(model.feature_set.hash ^ (M.L1*2)) # Feature transformer hash
     self.write_feature_transformer(model)
-    self.int32(fc_hash) # FC layers hash
-    self.write_fc_layer(model.l1)
-    self.write_fc_layer(model.l2)
-    self.write_fc_layer(model.output, is_output=True)
+    for l1, l2, output in model.layer_stacks.get_coalesced_layer_stacks():
+      self.int32(fc_hash) # FC layers hash
+      self.write_fc_layer(l1)
+      self.write_fc_layer(l2)
+      self.write_fc_layer(output, is_output=True)
 
   @staticmethod
   def fc_hash(model):
@@ -49,13 +51,13 @@ class NNUEWriter():
     prev_hash ^= (M.L1 * 2)
 
     # Fully connected layers
-    layers = [model.l1, model.l2, model.output]
+    layers = [model.layer_stacks.l1, model.layer_stacks.l2, model.layer_stacks.output]
     for layer in layers:
       layer_hash = 0xCC03DAE4
-      layer_hash += layer.out_features
+      layer_hash += layer.out_features // model.num_ls_buckets
       layer_hash ^= prev_hash >> 1
       layer_hash ^= (prev_hash << 31) & 0xFFFFFFFF
-      if layer.out_features != 1:
+      if layer.out_features // model.num_ls_buckets != 1:
         # Clipped ReLU hash
         layer_hash = (layer_hash + 0x538D24C7) & 0xFFFFFFFF
       prev_hash = layer_hash
@@ -81,7 +83,7 @@ class NNUEWriter():
 
     weight = self.coalesce_ft_weights(model, layer)
     weight0 = weight[:, :M.L1]
-    psqtweight0 = weight[:, M.L1]
+    psqtweight0 = weight[:, M.L1:]
     weight = weight0.mul(127).round().to(torch.int16)
     psqtweight = psqtweight0.mul(9600).round().to(torch.int32) # kPonanzaConstant * FV_SCALE = 9600
     ascii_hist('ft weight:', weight.numpy())
@@ -135,11 +137,21 @@ class NNUEReader():
 
     self.read_header(feature_set, fc_hash)
     self.read_int32(feature_set.hash ^ (M.L1*2)) # Feature transformer hash
-    self.read_feature_transformer(self.model.input)
-    self.read_int32(fc_hash) # FC layers hash
-    self.read_fc_layer(self.model.l1)
-    self.read_fc_layer(self.model.l2)
-    self.read_fc_layer(self.model.output, is_output=True)
+    self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
+    for i in range(self.model.num_ls_buckets):
+      l1 = nn.Linear(2*M.L1, M.L2)
+      l2 = nn.Linear(M.L2, M.L3)
+      output = nn.Linear(M.L3, 1)
+      self.read_int32(fc_hash) # FC layers hash
+      self.read_fc_layer(l1)
+      self.read_fc_layer(l2)
+      self.read_fc_layer(output, is_output=True)
+      self.model.layer_stacks.l1.weight.data[i*M.L2:(i+1)*M.L2, :] = l1.weight
+      self.model.layer_stacks.l1.bias.data[i*M.L2:(i+1)*M.L2] = l1.bias
+      self.model.layer_stacks.l2.weight.data[i*M.L3:(i+1)*M.L3, :] = l2.weight
+      self.model.layer_stacks.l2.bias.data[i*M.L3:(i+1)*M.L3] = l2.bias
+      self.model.layer_stacks.output.weight.data[i:(i+1), :] = output.weight
+      self.model.layer_stacks.output.bias.data[i:(i+1)] = output.bias
 
   def read_header(self, feature_set, fc_hash):
     self.read_int32(VERSION) # version
@@ -153,13 +165,13 @@ class NNUEReader():
     d = d.reshape(shape)
     return d
 
-  def read_feature_transformer(self, layer):
-    bias = self.tensor(numpy.int16, [layer.bias.shape[0]-1]).divide(127.0)
-    layer.bias.data = torch.cat([bias, torch.tensor([0])])
+  def read_feature_transformer(self, layer, num_psqt_buckets):
+    bias = self.tensor(numpy.int16, [layer.bias.shape[0]-num_psqt_buckets]).divide(127.0)
+    layer.bias.data = torch.cat([bias, torch.tensor([0]*num_psqt_buckets)])
     # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
     shape = layer.weight.shape
-    weights = self.tensor(numpy.int16, [shape[0], shape[1]-1])
-    psqtweights = self.tensor(numpy.int32, [shape[0], 1])
+    weights = self.tensor(numpy.int16, [shape[0], shape[1]-num_psqt_buckets])
+    psqtweights = self.tensor(numpy.int32, [shape[0], num_psqt_buckets])
     weights = weights.divide(127.0)
     psqtweights = psqtweights.divide(9600.0)
     layer.weight.data = torch.cat([weights, psqtweights], dim=1)

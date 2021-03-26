@@ -4,6 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
+import copy
 from feature_transformer import DoubleFeatureTransformerSlice
 
 # 3 layer fully connected network
@@ -18,6 +19,97 @@ def coalesce_ft_weights(model, layer):
   for i_real, is_virtual in enumerate(indices):
     weight_coalesced[i_real, :] = sum(weight[i_virtual, :] for i_virtual in is_virtual)
   return weight_coalesced
+  
+def get_parameters(layers):
+  return [p for layer in layers for p in layer.parameters()]
+
+class LayerStacks(nn.Module):
+  def __init__(self, count):
+    super(LayerStacks, self).__init__()
+
+    self.count = count
+    self.l1 = nn.Linear(2 * L1, L2 * count)
+    # Factorizer only for the first layer because later
+    # there's a non-linearity and factorization breaks.
+    # It breaks the min/max weight clipping but hopefully it's not bad.
+    # TODO: try solving it
+    #       one potential solution would be to coalesce the weights on each step.
+    self.l1_fact = nn.Linear(2 * L1, L2, bias=False)
+    self.l2 = nn.Linear(L2, L3 * count)
+    self.output = nn.Linear(L3, 1 * count)
+
+    self.idx_offset = None
+
+    self._init_layers()
+
+  def _init_layers(self):
+    l1_weight = self.l1.weight
+    l1_bias = self.l1.bias
+    l1_fact_weight = self.l1_fact.weight
+    l2_weight = self.l2.weight
+    l2_bias = self.l2.bias
+    output_weight = self.output.weight
+    output_bias = self.output.bias
+    with torch.no_grad():
+      l1_fact_weight.fill_(0.0)
+      output_bias.fill_(0.0)
+
+      for i in range(1, self.count):
+        # Make all layer stacks have the same initialization.
+        # Basically copy the first to all other layer stacks.
+        l1_weight[i*L2:(i+1)*L2, :] = l1_weight[0:L2, :]
+        l1_bias[i*L2:(i+1)*L2] = l1_bias[0:L2]
+        l2_weight[i*L3:(i+1)*L3, :] = l2_weight[0:L3, :]
+        l2_bias[i*L3:(i+1)*L3] = l2_bias[0:L3]
+        output_weight[i:i+1, :] = output_weight[0:1, :]
+
+    self.l1.weight = nn.Parameter(l1_weight)
+    self.l1.bias = nn.Parameter(l1_bias)
+    self.l1_fact.weight = nn.Parameter(l1_fact_weight)
+    self.l2.weight = nn.Parameter(l2_weight)
+    self.l2.bias = nn.Parameter(l2_bias)
+    self.output.weight = nn.Parameter(output_weight)
+    self.output.bias = nn.Parameter(output_bias)
+
+  def forward(self, x, ls_indices):
+    # precompute and cache the offset for gathers
+    if self.idx_offset == None or self.idx_offset.shape[0] != x.shape[0]:
+      self.idx_offset = torch.arange(0,x.shape[0]*self.count,self.count, device=ls_indices.device)
+
+    indices = ls_indices.flatten() + self.idx_offset
+
+    l1s_ = self.l1(x).reshape((-1, self.count, L2))
+    l1f_ = self.l1_fact(x)
+    # https://stackoverflow.com/questions/55881002/pytorch-tensor-indexing-how-to-gather-rows-by-tensor-containing-indices
+    # basically we present it as a list of individual results and pick not only based on
+    # the ls index but also based on batch (they are combined into one index)
+    l1c_ = l1s_.view(-1, L2)[indices]
+    l1x_ = torch.clamp(l1c_ + l1f_, 0.0, 1.0)
+
+    l2s_ = self.l2(l1x_).reshape((-1, self.count, L3))
+    l2c_ = l2s_.view(-1, L3)[indices]
+    l2x_ = torch.clamp(l2c_, 0.0, 1.0)
+
+    l3s_ = self.output(l2x_).reshape((-1, self.count, 1))
+    l3c_ = l3s_.view(-1, 1)[indices]
+    l3x_ = l3c_
+
+    return l3x_
+
+  def get_coalesced_layer_stacks(self):
+    for i in range(self.count):
+      with torch.no_grad():
+        l1 = nn.Linear(2*L1, L2)
+        l2 = nn.Linear(L2, L3)
+        output = nn.Linear(L3, 1)
+        l1.weight.data = self.l1.weight[i*L2:(i+1)*L2, :] + self.l1_fact.weight.data
+        l1.bias.data = self.l1.bias[i*L2:(i+1)*L2]
+        l2.weight.data = self.l2.weight[i*L3:(i+1)*L3, :]
+        l2.bias.data = self.l2.bias[i*L3:(i+1)*L3]
+        output.weight.data = self.output.weight[i:(i+1), :]
+        output.bias.data = self.output.bias[i:(i+1)]
+        yield l1, l2, output
+
 
 class NNUE(pl.LightningModule):
   """
@@ -30,24 +122,18 @@ class NNUE(pl.LightningModule):
   """
   def __init__(self, feature_set, lambda_=1.0):
     super(NNUE, self).__init__()
-    self.input = DoubleFeatureTransformerSlice(feature_set.num_features, L1 + 1)
+    self.num_psqt_buckets = feature_set.num_psqt_buckets
+    self.num_ls_buckets = feature_set.num_ls_buckets
+    self.input = DoubleFeatureTransformerSlice(feature_set.num_features, L1 + self.num_psqt_buckets)
     self.feature_set = feature_set
-    self.l1 = nn.Linear(2 * L1, L2)
-    self.l2 = nn.Linear(L2, L3)
-    self.output = nn.Linear(L3, 1)
+    self.layer_stacks = LayerStacks(self.num_ls_buckets)
     self.lambda_ = lambda_
 
-    self._zero_virtual_feature_weights()
-    self._correct_init_biases()
-    self._init_psqt()
+    self._init_layers()
 
   '''
-  We zero all virtual feature weights because during serialization to .nnue
-  we compute weights for each real feature as being the sum of the weights for
-  the real feature in question and the virtual features it can be factored to.
-  This means that if we didn't initialize the virtual feature weights to zero
-  we would end up with the real features having effectively unexpected values
-  at initialization - following the bell curve based on how many factors there are.
+  We zero all real feature weights because we want to start the training
+  with fewest differences between correlated features.
   '''
   def _zero_virtual_feature_weights(self):
     weights = self.input.weight
@@ -61,21 +147,15 @@ class NNUE(pl.LightningModule):
   to be around activation range. Also the bias for the output
   layer should always be 0.
   '''
-  def _correct_init_biases(self):
+  def _init_layers(self):
     input_bias = self.input.bias
-    l1_bias = self.l1.bias
-    l2_bias = self.l2.bias
-    output_bias = self.output.bias
     with torch.no_grad():
-      input_bias.add_(0.5)
-      input_bias[L1] = 0.0
-      l1_bias.add_(0.5)
-      l2_bias.add_(0.5)
-      output_bias.fill_(0.0)
+      for i in range(8):
+        input_bias[L1 + i] = 0.0
     self.input.bias = nn.Parameter(input_bias)
-    self.l1.bias = nn.Parameter(l1_bias)
-    self.l2.bias = nn.Parameter(l2_bias)
-    self.output.bias = nn.Parameter(output_bias)
+
+    self._zero_virtual_feature_weights()
+    self._init_psqt()
 
   def _init_psqt(self):
     input_weights = self.input.weight
@@ -84,7 +164,8 @@ class NNUE(pl.LightningModule):
     with torch.no_grad():
       initial_values = self.feature_set.get_initial_psqt_features()
       assert len(initial_values) == self.feature_set.num_features
-      input_weights[L1, :] = torch.FloatTensor(initial_values) * scale
+      for i in range(8):
+        input_weights[:, L1 + i] = torch.FloatTensor(initial_values) * scale
     self.input.weight = nn.Parameter(input_weights)
 
   '''
@@ -126,20 +207,23 @@ class NNUE(pl.LightningModule):
     else:
       raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
 
-  def forward(self, us, them, white_indices, white_values, black_indices, black_values):
+  def forward(self, us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices):
     wp, bp = self.input(white_indices, white_values, black_indices, black_values)
     w, wpsqt = torch.split(wp, L1, dim=1)
     b, bpsqt = torch.split(bp, L1, dim=1)
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
     # clamp here is used as a clipped relu to (0.0, 1.0)
     l0_ = torch.clamp(l0_, 0.0, 1.0)
-    l1_ = torch.clamp(self.l1(l0_), 0.0, 1.0)
-    l2_ = torch.clamp(self.l2(l1_), 0.0, 1.0)
-    x = self.output(l2_) + (wpsqt - bpsqt) * (us - 0.5)
+
+    psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
+    wpsqt = wpsqt.gather(1, psqt_indices_unsq)
+    bpsqt = bpsqt.gather(1, psqt_indices_unsq)
+    x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
+
     return x
 
   def step_(self, batch, batch_idx, loss_type):
-    us, them, white_indices, white_values, black_indices, black_values, outcome, score = batch
+    us, them, white_indices, white_values, black_indices, black_values, outcome, score, psqt_indices, layer_stack_indices = batch
 
     # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
     # This needs to match the value used in the serializer
@@ -147,7 +231,7 @@ class NNUE(pl.LightningModule):
     in_scaling = 410
     out_scaling = 361
 
-    q = self(us, them, white_indices, white_values, black_indices, black_values) * nnue2score / scaling
+    q = self(us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices) * nnue2score / scaling
     t = outcome
     p = (score / in_scaling).sigmoid()
 
@@ -180,27 +264,14 @@ class NNUE(pl.LightningModule):
     # Train with a lower LR on the output layer
     LR = 1e-3
     train_params = [
-      {'params' : self.get_specific_layers([self.input]), 'lr' : LR, 'min_weight' : -(2**15-1)/127, 'max_weight' : (2**15-1)/127 },
-      {'params' : self.get_specific_layers([self.l1, self.l2]), 'lr' : LR, 'min_weight' : -127/64, 'max_weight' : 127/64 },
-      {'params' : self.get_specific_layers([self.output]), 'lr' : LR / 10, 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
+      {'params' : get_parameters([self.input]), 'lr' : LR, 'min_weight' : -(2**15-1)/127, 'max_weight' : (2**15-1)/127 },
+      {'params' : get_parameters([self.layer_stacks.l1, self.layer_stacks.l2]), 'lr' : LR, 'min_weight' : -127/64, 'max_weight' : 127/64 },
+      # factorization kinda breaks the min/max weight clipping, but not sure we can do better
+      {'params' : get_parameters([self.layer_stacks.l1_fact]), 'lr' : LR, 'min_weight' : -127/64, 'max_weight' : 127/64 },
+      {'params' : get_parameters([self.layer_stacks.output]), 'lr' : LR / 10, 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
     ]
     # increasing the eps leads to less saturated nets with a few dead neurons
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
     # Drop learning rate after 75 epochs
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
     return [optimizer], [scheduler]
-
-  def get_specific_layers(self, layers):
-    pred = lambda x: x in layers
-    return self.get_layers(pred)
-
-  def get_layers(self, filt):
-    """
-    Returns a list of layers.
-    filt: Return true to include the given layer.
-    """
-    for i in self.children():
-      if filt(i):
-        for p in i.parameters():
-          if p.requires_grad:
-            yield p
