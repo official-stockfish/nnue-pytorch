@@ -40,7 +40,7 @@ def get_available_feature_blocks_names():
     return list(iter(_feature_blocks_by_name))
 
 def add_argparse_args(parser):
-    _default_feature_set_name = 'HalfKP^'
+    _default_feature_set_name = 'HalfKA^'
     parser.add_argument("--features", dest='features', default=_default_feature_set_name, help="The feature set to use. Can be a union of feature blocks (for example P+HalfKP). \"^\" denotes a factorized block. Currently available feature blocks are: " + ', '.join(get_available_feature_blocks_names()))
 
 def _init():
