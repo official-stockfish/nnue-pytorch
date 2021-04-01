@@ -142,11 +142,12 @@ class NNUE(pl.LightningModule):
     # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
     # This needs to match the value used in the serializer
     nnue2score = 600
-    scaling = 361
+    in_scaling = 410
+    out_scaling = 361
 
-    q = self(us, them, white, black) * nnue2score / scaling
+    q = self(us, them, white, black) * nnue2score / out_scaling
     t = outcome
-    p = (score / scaling).sigmoid()
+    p = (score / in_scaling).sigmoid()
 
     epsilon = 1e-12
     teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
