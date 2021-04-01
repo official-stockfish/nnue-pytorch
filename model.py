@@ -157,14 +157,19 @@ class NNUE(pl.LightningModule):
     # Train with a lower LR on the output layer
     LR = 1e-3
     train_params = [
-      {'params': self.get_layers(lambda x: self.output != x), 'lr': LR},
-      {'params': self.get_layers(lambda x: self.output == x), 'lr': LR / 10},
+      {'params' : self.get_specific_layers([self.input]), 'lr' : LR, 'min_weight' : -(2**15-1)/127, 'max_weight' : (2**15-1)/127 },
+      {'params' : self.get_specific_layers([self.l1, self.l2]), 'lr' : LR, 'min_weight' : -127/64, 'max_weight' : 127/64 },
+      {'params' : self.get_specific_layers([self.output]), 'lr' : LR / 10, 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
     ]
     # increasing the eps leads to less saturated nets with a few dead neurons
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
     # Drop learning rate after 75 epochs
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=75, gamma=0.3)
     return [optimizer], [scheduler]
+
+  def get_specific_layers(self, layers):
+    pred = lambda x: x in layers
+    return self.get_layers(pred)
 
   def get_layers(self, filt):
     """
