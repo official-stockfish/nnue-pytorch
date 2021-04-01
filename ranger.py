@@ -46,7 +46,8 @@ class Ranger(Optimizer):
                  alpha=0.5, k=6, N_sma_threshhold=5,           # Ranger options
                  betas=(.95, 0.999), eps=1e-5, weight_decay=0,  # Adam options
                  # Gradient centralization on or off, applied to conv layers only or conv + fc layers
-                 use_gc=True, gc_conv_only=False, gc_loc=True
+                 use_gc=True, gc_conv_only=False, gc_loc=True,
+                 min_weight=-1000000.0, max_weight=1000000
                  ):
 
         # parameter checks
@@ -66,7 +67,8 @@ class Ranger(Optimizer):
 
         # prep defaults and init torch.optim base
         defaults = dict(lr=lr, alpha=alpha, k=k, step_counter=0, betas=betas,
-                        N_sma_threshhold=N_sma_threshhold, eps=eps, weight_decay=weight_decay)
+                        N_sma_threshhold=N_sma_threshhold, eps=eps, weight_decay=weight_decay,
+                        min_weight=min_weight, max_weight=max_weight)
         super().__init__(params, defaults)
 
         # adjustable threshold
@@ -103,7 +105,7 @@ class Ranger(Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-        
+
         # Evaluate averages and grad, update param tensors
         for group in self.param_groups:
 
@@ -191,6 +193,12 @@ class Ranger(Optimizer):
                     G_grad = centralized_gradient(G_grad, use_gc=self.use_gc, gc_conv_only=self.gc_conv_only)
 
                 p_data_fp32.add_(G_grad, alpha=-step_size * group['lr'])
+
+                # constrain weights
+                min_weight = group['min_weight']
+                max_weight = group['max_weight']
+                p_data_fp32.clamp_(min_weight, max_weight)
+
                 p.data.copy_(p_data_fp32)
 
                 # integrated look ahead...
