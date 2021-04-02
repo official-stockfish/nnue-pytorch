@@ -44,6 +44,8 @@ def main():
   parser.add_argument("--smart-fen-skipping", action='store_true', dest='smart_fen_skipping', help="If enabled positions that are bad training targets will be skipped during loading. Default: False")
   parser.add_argument("--random-fen-skipping", default=0, type=int, dest='random_fen_skipping', help="skip fens randomly on average random_fen_skipping before using one.")
   parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
+  parser.add_argument("--ckpt-save-policy", dest='ckpt_save_policy', default="best", help="Either `best` or `periodic`. If `periodic` then --ckpt-save-period controls the period.")
+  parser.add_argument("--ckpt-save-period", dest='ckpt_save_period', default=10, help="The period (in epochs) of saving ckpt files.")
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
@@ -87,7 +89,13 @@ def main():
   print('Using log dir {}'.format(logdir), flush=True)
 
   tb_logger = pl_loggers.TensorBoardLogger(logdir)
-  checkpoint_callback = pl.callbacks.ModelCheckpoint(save_last=True)
+  if args.ckpt_save_policy == "best":
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(save_last=True)
+  elif args.ckpt_save_policy == "periodic":
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(save_last=True, period=args.ckpt_save_period, save_top_k=-1)
+  else:
+    raise Exception('Invalid ckpt-save-policy argument {}'.format(args.ckpt_save_policy))
+
   trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback], logger=tb_logger)
 
   main_device = trainer.root_device if trainer.root_gpu is None else 'cuda:' + str(trainer.root_gpu)
