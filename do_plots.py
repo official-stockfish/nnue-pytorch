@@ -59,13 +59,13 @@ def dict_to_xy(d):
         y.append(v)
     return x, y
 
-def parse_ordo_file(filename):
+def parse_ordo_file(filename, label):
     p = re.compile('.*nn-epoch(\\d*)\\.nnue')
     with open(filename, 'r') as ordo_file:
         rows = []
         lines = ordo_file.readlines()
         for line in lines:
-            if 'nn-epoch' in line:
+            if 'nn-epoch' in line and label in line:
                 fields = line.split()
                 net = fields[1]
                 epoch = int(p.match(net)[1])
@@ -78,7 +78,7 @@ def parse_ordo_file(filename):
 def transpose_list_of_tuples(l):
     return list(map(list, zip(*l)))
 
-def do_plots(out_filename, root_dirs, elo_range, loss_range):
+def do_plots(out_filename, root_dirs, elo_range, loss_range, split):
     '''
         1. Find tfevents files for each root directory
         2. Look for metrics
@@ -107,72 +107,92 @@ def do_plots(out_filename, root_dirs, elo_range, loss_range):
     ax_train_loss.set_xlabel('step')
     ax_train_loss.set_ylabel('train_loss')
 
-    for root_dir in root_dirs:
-        print('Processing root_dir {}'.format(root_dir))
-        tfevents_files = find_event_files(root_dir)
-        print('Found {} tfevents files.'.format(len(tfevents_files)))
 
-        val_losses = collections.defaultdict(lambda: [])
-        train_losses = collections.defaultdict(lambda: [])
-        for i, tfevents_file in enumerate(tfevents_files):
-            print('Processing tfevents file {}/{}: {}'.format(i+1, len(tfevents_files), tfevents_file))
-            events_acc = EventAccumulator(tfevents_file, tf_size_guidance)
-            events_acc.Reload()
+    for user_root_dir in root_dirs:
 
-            vv = events_acc.Scalars('val_loss')
-            print('Found {} val_loss entries.'.format(len(vv)))
-            minloss = min([v[2] for v in vv])
-            for v in vv:
-                if v[2] < minloss + loss_range:
-                   step = v[1]
-                   val_losses[step].append(v[2])
+        # if asked to split we split the roto dir into a number of user root dirs,
+        # i.e. all direct subdirectories containing tfevent files.
+        # we use the ordo file in the root dir, but split the content.
+        split_root_dirs = [user_root_dir]
+        if split:
+           split_root_dirs = []
+           for item in os.listdir(user_root_dir):
+               if os.path.isdir(os.path.join(user_root_dir, item)):
+                  root_dir = os.path.join(user_root_dir, item)
+                  if len(find_event_files(root_dir)) > 0:
+                     split_root_dirs.append(root_dir)
+           split_root_dirs.sort()
 
-            vv = events_acc.Scalars('train_loss')
-            minloss = min([v[2] for v in vv])
-            print('Found {} train_loss entries.'.format(len(vv)))
-            for v in vv:
-                if v[2] < minloss + loss_range:
-                   step = v[1]
-                   train_losses[step].append(v[2])
+        for root_dir in split_root_dirs:
+            print('Processing root_dir {}'.format(root_dir))
+            tfevents_files = find_event_files(root_dir)
+            print('Found {} tfevents files.'.format(len(tfevents_files)))
 
-        print('Aggregating data...')
+            val_losses = collections.defaultdict(lambda: [])
+            train_losses = collections.defaultdict(lambda: [])
+            for i, tfevents_file in enumerate(tfevents_files):
+                print('Processing tfevents file {}/{}: {}'.format(i+1, len(tfevents_files), tfevents_file))
+                events_acc = EventAccumulator(tfevents_file, tf_size_guidance)
+                events_acc.Reload()
 
-        val_loss = aggregate_dict(val_losses, 'min')
-        x, y = dict_to_xy(val_loss)
-        ax_val_loss.plot(x, y, label=root_dir)
+                vv = events_acc.Scalars('val_loss')
+                print('Found {} val_loss entries.'.format(len(vv)))
+                minloss = min([v[2] for v in vv])
+                for v in vv:
+                    if v[2] < minloss + loss_range:
+                       step = v[1]
+                       val_losses[step].append(v[2])
 
-        train_loss = aggregate_dict(train_losses, 'min')
-        x, y = dict_to_xy(train_loss)
-        ax_train_loss.plot(x, y, label=root_dir)
+                vv = events_acc.Scalars('train_loss')
+                minloss = min([v[2] for v in vv])
+                print('Found {} train_loss entries.'.format(len(vv)))
+                for v in vv:
+                    if v[2] < minloss + loss_range:
+                       step = v[1]
+                       train_losses[step].append(v[2])
 
-        print('Finished aggregating data.')
+            print('Aggregating data...')
 
-        ordo_file = find_ordo_file(root_dir)
+            val_loss = aggregate_dict(val_losses, 'min')
+            x, y = dict_to_xy(val_loss)
+            ax_val_loss.plot(x, y, label=root_dir)
+
+            train_loss = aggregate_dict(train_losses, 'min')
+            x, y = dict_to_xy(train_loss)
+            ax_train_loss.plot(x, y, label=root_dir)
+
+            print('Finished aggregating data.')
+
+        ordo_file = find_ordo_file(user_root_dir)
         if ordo_file:
             print('Found ordo file {}'.format(ordo_file))
             if ax_elo is None:
                 ax_elo = fig.add_subplot(313)
                 ax_elo.set_xlabel('epoch')
-                ax_elo.set_ylabel('elo')
-            rows = parse_ordo_file(ordo_file)
-            rows = sorted(rows, key=lambda x:x[1])
-            epochs = []
-            elos = []
-            errors = []
-            maxelo = max([row[2] for row in rows])
-            for row in rows:
-                epoch = row[1]
-                elo = row[2]
-                error = row[3]
-                if not epoch in epochs:
-                   if elo > maxelo - elo_range:
-                      epochs.append(epoch)
-                      elos.append(elo)
-                      errors.append(error)
+                ax_elo.set_ylabel('Elo')
 
-            print('Found ordo data for {} epochs'.format(len(epochs)))
+            for root_dir in split_root_dirs:
+                rows = parse_ordo_file(ordo_file, root_dir if split else "nnue")
+                if len(rows) == 0:
+                   continue
+                rows = sorted(rows, key=lambda x:x[1])
+                epochs = []
+                elos = []
+                errors = []
+                maxelo = max([row[2] for row in rows])
+                for row in rows:
+                    epoch = row[1]
+                    elo = row[2]
+                    error = row[3]
+                    if not epoch in epochs:
+                       if elo > maxelo - elo_range:
+                          epochs.append(epoch)
+                          elos.append(elo)
+                          errors.append(error)
 
-            ax_elo.errorbar(epochs, elos, yerr=errors, label=root_dir)
+                print('Found ordo data for {} epochs'.format(len(epochs)))
+
+                ax_elo.errorbar(epochs, elos, yerr=errors, label=root_dir)
 
         else:
             print('Did not find ordo file. Skipping.')
@@ -219,10 +239,14 @@ def main():
         default=0.004,
         help="Limit loss data shown to the best result + loss_range",
     )
+    parser.add_argument("--split",
+        action='store_true',
+        help="Split the root dirs provided, assumes the ordo file is still at the root, and nets in that ordo file match root_dir/sub_dir/",
+    )
     args = parser.parse_args()
 
     print(args.root_dirs)
-    do_plots(args.output, args.root_dirs, elo_range = args.elo_range, loss_range = args.loss_range)
+    do_plots(args.output, args.root_dirs, elo_range = args.elo_range, loss_range = args.loss_range, split = args.split)
 
 if __name__ == '__main__':
     main()
