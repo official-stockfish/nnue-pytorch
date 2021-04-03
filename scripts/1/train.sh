@@ -40,15 +40,15 @@ then
     mkdir "$EXPERIMENT_DIR/Stockfish"
 
     echo "Copying the trainer..."
-    cp -R "$NNUE_PYTORCH_DIR/" "$EXPERIMENT_DIR/nnue-pytorch/"
+    cp -R "$NNUE_PYTORCH_DIR/." "$EXPERIMENT_DIR/nnue-pytorch/"
 
     echo "Copying stockfish..."
-    cp -R "$STOCKFISH_DIR/" "$EXPERIMENT_DIR/Stockfish/"
+    cp -R "$STOCKFISH_DIR/." "$EXPERIMENT_DIR/Stockfish/"
 
     # Always compile the data loader and stockfish after copying
     # to ensure the correct versions
     echo "Compiling stockfish..."
-    if (cd "$EXPERIMENT_DIR/Stockfish/" && "make build ARCH=$ARCH -j")
+    if (cd "$EXPERIMENT_DIR/Stockfish/src/" && make "build" "ARCH=$ARCH" "-j")
     then
         echo "Stockfish compilation successful."
     else
@@ -77,19 +77,22 @@ else
 fi
 
 echo "Starting the training..."
-python3 "$EXPERIMENT_DIR/nnue-pytorch/train.py" \
-    "$TRAINING_DATA_PATH" \
-    "$VALIDATION_DATA_PATH" \
-    --gpus "$GPU_ID," \
-    --threads "$NUM_TORCH_THREADS" \
-    --num-workers "$NUM_DATALOADER_THREADS" \
-    --batch-size "$BATCH_SIZE" \
-    --progress_bar_refresh_rate "$PROGRESS_BAR_REFRESH_RATE" \
-    --smart-fen-skipping \
-    --random-fen-skipping "$RANDOM_FEN_SKIPPING" \
-    --features "$FEATURE_SET" \
-    --lambda "$LAMBDA" \
-    --max_epochs "$MAX_EPOCHS" \
-    --default_root_dir "$RUN_DIR" \
-    --ckpt-save-policy "$CKPT_SAVE_POLICY" \
-    --ckpt-save-period "$CKPT_SAVE_PERIOD"
+# It's important that pwd is the directory with the script because it affects
+# the way dynamic libraries are searched. Otherwise it doesn't find the data loader.
+(cd "$EXPERIMENT_DIR/nnue-pytorch/" && \
+    python3 "train.py" \
+        "$TRAINING_DATA_PATH" \
+        "$VALIDATION_DATA_PATH" \
+        --gpus "$GPU_ID," \
+        --threads "$NUM_TORCH_THREADS" \
+        --num-workers "$NUM_DATALOADER_THREADS" \
+        --batch-size "$BATCH_SIZE" \
+        --progress_bar_refresh_rate "$PROGRESS_BAR_REFRESH_RATE" \
+        --smart-fen-skipping \
+        --random-fen-skipping "$RANDOM_FEN_SKIPPING" \
+        --features "$FEATURE_SET" \
+        --lambda "$LAMBDA" \
+        --max_epochs "$MAX_EPOCHS" \
+        --default_root_dir "$RUN_DIR" \
+        --ckpt-save-policy "$CKPT_SAVE_POLICY" \
+        --ckpt-save-period "$CKPT_SAVE_PERIOD")

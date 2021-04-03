@@ -16,6 +16,6 @@ EXPERIMENT_DIR="$EXPERIMENTS_DIR/experiment_$EXPERIMENT_ID"
 PRESERVE_N="${2:-16}"
 
 echo "Executing..."
-python3 "$BASEDIR/delete_bad_nets.py"
-    "$EXPERIMENT_DIR"
+python3 "$BASEDIR/delete_bad_nets.py" \
+    "$EXPERIMENT_DIR" \
     "$PRESERVE_N"

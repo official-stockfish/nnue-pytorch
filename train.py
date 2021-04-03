@@ -44,8 +44,8 @@ def main():
   parser.add_argument("--smart-fen-skipping", action='store_true', dest='smart_fen_skipping', help="If enabled positions that are bad training targets will be skipped during loading. Default: False")
   parser.add_argument("--random-fen-skipping", default=0, type=int, dest='random_fen_skipping', help="skip fens randomly on average random_fen_skipping before using one.")
   parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
-  parser.add_argument("--ckpt-save-policy", dest='ckpt_save_policy', default="best", help="Either `best` or `periodic`. If `periodic` then --ckpt-save-period controls the period.")
-  parser.add_argument("--ckpt-save-period", dest='ckpt_save_period', default=10, help="The period (in epochs) of saving ckpt files.")
+  parser.add_argument("--ckpt-save-policy", dest='ckpt_save_policy', type=str, default="best", help="Either `best` or `periodic`. If `periodic` then --ckpt-save-period controls the period.")
+  parser.add_argument("--ckpt-save-period", dest='ckpt_save_period', type=int, default=10, help="The period (in epochs) of saving ckpt files.")
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
