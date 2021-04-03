@@ -2,7 +2,7 @@
 ```
 python3 -m venv env
 source env/bin/activate
-pip install python-chess==0.31.4 pytorch-lightning torch
+pip install python-chess==0.31.4 pytorch-lightning torch matplotlib
 ```
 
 # Build the fast DataLoader
