@@ -54,7 +54,7 @@ def aggregate_dict(values, aggregation_mode='avg'):
 def dict_to_xy(d):
     x = []
     y = []
-    for k, v in d.items():
+    for k, v in sorted(d.items()):
         x.append(k)
         y.append(v)
     return x, y
@@ -78,7 +78,7 @@ def parse_ordo_file(filename):
 def transpose_list_of_tuples(l):
     return list(map(list, zip(*l)))
 
-def do_plots(out_filename, root_dirs):
+def do_plots(out_filename, root_dirs, elo_range, loss_range):
     '''
         1. Find tfevents files for each root directory
         2. Look for metrics
@@ -121,15 +121,19 @@ def do_plots(out_filename, root_dirs):
 
             vv = events_acc.Scalars('val_loss')
             print('Found {} val_loss entries.'.format(len(vv)))
+            minloss = min([v[2] for v in vv])
             for v in vv:
-                step = v[1]
-                val_losses[step].append(v[2])
+                if v[2] < minloss + loss_range:
+                   step = v[1]
+                   val_losses[step].append(v[2])
 
             vv = events_acc.Scalars('train_loss')
+            minloss = min([v[2] for v in vv])
             print('Found {} train_loss entries.'.format(len(vv)))
             for v in vv:
-                step = v[1]
-                train_losses[step].append(v[2])
+                if v[2] < minloss + loss_range:
+                   step = v[1]
+                   train_losses[step].append(v[2])
 
         print('Aggregating data...')
 
@@ -155,14 +159,16 @@ def do_plots(out_filename, root_dirs):
             epochs = []
             elos = []
             errors = []
+            maxelo = max([row[2] for row in rows])
             for row in rows:
                 epoch = row[1]
                 elo = row[2]
                 error = row[3]
                 if not epoch in epochs:
-                    epochs.append(epoch)
-                    elos.append(elo)
-                    errors.append(error)
+                   if elo > maxelo - elo_range:
+                      epochs.append(epoch)
+                      elos.append(elo)
+                      errors.append(error)
 
             print('Found ordo data for {} epochs'.format(len(epochs)))
 
@@ -179,12 +185,44 @@ def do_plots(out_filename, root_dirs):
 
     print('Saving plot at {}'.format(out_filename))
     #plt.show()
-    plt.savefig(out_filename, dpi=100)
+    plt.savefig(out_filename, dpi=300)
 
 
 def main():
     #do_plots('test_plot_out.png', ['../nnue-pytorch-training/experiment_10', '../nnue-pytorch-training/experiment_11'])
-    do_plots(sys.argv[1], sys.argv[2:])
+
+    parser = argparse.ArgumentParser(
+        description="Generate plots of losses and Elo for experiments run",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "root_dirs",
+        type=str,
+        nargs='+',
+        help="multiple root directories (containing ordo.out and tensorflow event files)"
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="experiment_loss_Elo.png",
+        help="Filename of the plot generated",
+    )
+    parser.add_argument(
+        "--elo_range",
+        type=float,
+        default=50.0,
+        help="Limit Elo data shown to the best result - elo_range",
+    )
+    parser.add_argument(
+        "--loss_range",
+        type=float,
+        default=0.004,
+        help="Limit loss data shown to the best result + loss_range",
+    )
+    args = parser.parse_args()
+
+    print(args.root_dirs)
+    do_plots(args.output, args.root_dirs, elo_range = args.elo_range, loss_range = args.loss_range)
 
 if __name__ == '__main__':
     main()
