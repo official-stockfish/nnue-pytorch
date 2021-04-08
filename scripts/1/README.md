@@ -46,6 +46,6 @@ With `config.sh` correctly configured the usual way to proceed is the following:
 
 There are also other utilities.
 
-`./do_plots.sh EXPERIMENT_ID [EXPERIMENT_ID2] [EXPERIMENT_ID3] ...` will produce plots of train loss, validation loss, and elo (if `ordo.out` is present in the experiment directory) for the given experiments (one plot). The plot is saved under a name containing all experiment ids in the configured plots directory.
+`./do_plots.sh EXPERIMENT_ID [EXPERIMENT_ID2] [EXPERIMENT_ID3] ...` will produce plots of train loss, validation loss, and elo (if `ordo.out` is present in the experiment directory) for the given experiments (one plot). The plot is saved under a name containing all experiment ids in the configured plots directory. `./do_plots_split.sh` behaves in the same way but will not combine individual runs of experiments.
 
 `./delete_bad_nets.sh EXPERIMENT_ID [PRESERVE_N]` will delete the worst (as determined from `ordo.out`) nets (both `.nnue` and `.ckpt`) from the given experiment. Only the best `PRESERVE_N` nets will be kept (default: 16). This is a nice automated way of freeing some disk space.
