@@ -154,7 +154,7 @@ class NNUE(pl.LightningModule):
     """
     for i in self.children():
       if filt(i):
-        if isinstance(i, nn.Linear):
+        if isinstance(i, nn.Linear) or isinstance(i, nn.BatchNorm1d):
           for p in i.parameters():
             if p.requires_grad:
               yield p
