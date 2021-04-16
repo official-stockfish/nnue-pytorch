@@ -19,7 +19,7 @@ def coalesce_ft_weights(model, layer):
   for i_real, is_virtual in enumerate(indices):
     weight_coalesced[i_real, :] = sum(weight[i_virtual, :] for i_virtual in is_virtual)
   return weight_coalesced
-  
+
 def get_parameters(layers):
   return [p for layer in layers for p in layer.parameters()]
 
@@ -129,6 +129,12 @@ class NNUE(pl.LightningModule):
     self.layer_stacks = LayerStacks(self.num_ls_buckets)
     self.lambda_ = lambda_
 
+    self.weight_clipping = [
+      {'params' : [self.layer_stacks.l1.weight], 'min_weight' : -127/64, 'max_weight' : 127/64, 'virtual_params' : self.layer_stacks.l1_fact.weight },
+      {'params' : [self.layer_stacks.l2.weight], 'min_weight' : -127/64, 'max_weight' : 127/64 },
+      {'params' : [self.layer_stacks.output.weight], 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
+    ]
+
     self._init_layers()
 
   '''
@@ -167,6 +173,35 @@ class NNUE(pl.LightningModule):
       for i in range(8):
         input_weights[:, L1 + i] = torch.FloatTensor(initial_values) * scale
     self.input.weight = nn.Parameter(input_weights)
+
+  '''
+  Clips the weights of the model based on the min/max values allowed
+  by the quantization scheme.
+  '''
+  def _clip_weights(self):
+    for group in self.weight_clipping:
+      for p in group['params']:
+        if 'min_weight' in group or 'max_weight' in group:
+          p_data_fp32 = p.data
+          min_weight = group['min_weight']
+          max_weight = group['max_weight']
+          if 'virtual_params' in group:
+            virtual_params = group['virtual_params']
+            xs = p_data_fp32.shape[0] // virtual_params.shape[0]
+            ys = p_data_fp32.shape[1] // virtual_params.shape[1]
+            expanded_virtual_layer = virtual_params.repeat(xs, ys)
+            if min_weight is not None:
+              min_weight_t = p_data_fp32.new_full(p_data_fp32.shape, min_weight) - expanded_virtual_layer
+              p_data_fp32 = torch.max(p_data_fp32, min_weight_t)
+            if max_weight is not None:
+              max_weight_t = p_data_fp32.new_full(p_data_fp32.shape, max_weight) - expanded_virtual_layer
+              p_data_fp32 = torch.min(p_data_fp32, max_weight_t)
+          else:
+            if min_weight is not None and max_weight is not None:
+              p_data_fp32.clamp_(min_weight, max_weight)
+            else:
+              raise Exception('Not supported.')
+          p.data.copy_(p_data_fp32)
 
   '''
   This method attempts to convert the model from using the self.feature_set
@@ -223,6 +258,8 @@ class NNUE(pl.LightningModule):
     return x
 
   def step_(self, batch, batch_idx, loss_type):
+    self._clip_weights()
+
     us, them, white_indices, white_values, black_indices, black_values, outcome, score, psqt_indices, layer_stack_indices = batch
 
     # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
@@ -264,11 +301,14 @@ class NNUE(pl.LightningModule):
     # Train with a lower LR on the output layer
     LR = 1e-3
     train_params = [
-      {'params' : get_parameters([self.input]), 'lr' : LR, 'min_weight' : -(2**15-1)/127, 'max_weight' : (2**15-1)/127 },
-      {'params' : get_parameters([self.layer_stacks.l1, self.layer_stacks.l2]), 'lr' : LR, 'min_weight' : -127/64, 'max_weight' : 127/64 },
-      # factorization kinda breaks the min/max weight clipping, but not sure we can do better
-      {'params' : get_parameters([self.layer_stacks.l1_fact]), 'lr' : LR, 'min_weight' : -127/64, 'max_weight' : 127/64 },
-      {'params' : get_parameters([self.layer_stacks.output]), 'lr' : LR / 10, 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
+      {'params' : get_parameters([self.input]), 'lr' : LR, 'gc_dim' : 0 },
+      {'params' : [self.layer_stacks.l1_fact.weight], 'lr' : LR },
+      {'params' : [self.layer_stacks.l1.weight], 'lr' : LR },
+      {'params' : [self.layer_stacks.l1.bias], 'lr' : LR },
+      {'params' : [self.layer_stacks.l2.weight], 'lr' : LR },
+      {'params' : [self.layer_stacks.l2.bias], 'lr' : LR },
+      {'params' : [self.layer_stacks.output.weight], 'lr' : LR / 10 },
+      {'params' : [self.layer_stacks.output.bias], 'lr' : LR / 10 },
     ]
     # increasing the eps leads to less saturated nets with a few dead neurons
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
