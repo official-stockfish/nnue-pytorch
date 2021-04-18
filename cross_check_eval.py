@@ -2,6 +2,7 @@ import argparse
 import features
 import serialize
 import nnue_bin_dataset
+import nnue_dataset
 import subprocess
 import re
 from model import NNUE
@@ -14,21 +15,14 @@ def read_model(nnue_path, feature_set):
 def make_data_reader(data_path, feature_set):
     return nnue_bin_dataset.NNUEBinData(data_path, feature_set)
 
-def eval_model(model, item):
-    us, them, white, black, outcome, score = item
-    us = us.unsqueeze(dim=0)
-    them = them.unsqueeze(dim=0)
-    white = white.unsqueeze(dim=0)
-    black = black.unsqueeze(dim=0)
+def eval_model_batch(model, batch):
+    us, them, white, black, outcome, score = batch.contents.get_tensors('cpu')
 
-    eval = model.forward(us, them, white, black).item() * 600.0
-    if them[0] > 0.5:
-        return -eval
-    else:
-        return eval
-
-def eval_engine(engine, fen):
-    pass
+    evals = [v.item() for v in model.forward(us, them, white, black) * 600.0]
+    for i in range(len(evals)):
+        if them[i] > 0.5:
+            evals[i] = -evals[i]
+    return evals
 
 re_nnue_eval = re.compile(r'NNUE evaluation:\s*?(-?\d*?\.\d*)')
 
@@ -89,8 +83,31 @@ def main():
     data_reader = make_data_reader(args.data, feature_set)
 
     fens = []
+    results = []
+    scores = []
+    plies = []
     model_evals = []
+    engine_evals = []
     i = -1
+
+    def commit_batch():
+        nonlocal fens
+        nonlocal results
+        nonlocal scores
+        nonlocal plies
+        nonlocal model_evals
+        nonlocal engine_evals
+        if len(fens) == 0:
+            return
+        b = nnue_dataset.make_sparse_batch_from_fens(feature_set, fens, scores, plies, results)
+        model_evals += eval_model_batch(model, b)
+        nnue_dataset.destroy_sparse_batch(b)
+        engine_evals += eval_engine_batch(args.engine, args.net, fens)
+        fens = []
+        results = []
+        scores = []
+        plies = []
+
     done = 0
     while done < args.count:
         i += 1
@@ -100,14 +117,19 @@ def main():
         if board.is_check():
             continue
 
-        fen = board.fen()
-        fens.append(fen)
-        eval = eval_model(model, data_reader.transform(item))
-        model_evals.append(eval)
+        fens.append(board.fen())
+        results.append(int(round(item[2] * 2 - 1)))
+        scores.append(int(item[3]))
+        plies.append(1)
 
         done += 1
 
-    engine_evals = eval_engine_batch(args.engine, args.net, fens)
+        if done % 1024 == 0:
+            # don't do batches that are too big
+            commit_batch()
+
+    commit_batch()
+
     compute_correlation(engine_evals, model_evals)
 
 if __name__ == '__main__':

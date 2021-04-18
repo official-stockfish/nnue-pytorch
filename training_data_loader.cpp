@@ -490,6 +490,48 @@ private:
 
 extern "C" {
 
+    EXPORT SparseBatch* get_sparse_batch_from_fens(
+        const char* feature_set_c,
+        int num_fens,
+        const char* const* fens,
+        int* scores,
+        int* plies,
+        int* results
+    )
+    {
+        std::vector<TrainingDataEntry> entries;
+        entries.reserve(num_fens);
+        for (int i = 0; i < num_fens; ++i)
+        {
+            auto& e = entries.emplace_back();
+            e.pos = Position::fromFen(fens[i]);
+            movegen::forEachLegalMove(e.pos, [&](Move m){e.move = m;});
+            e.score = scores[i];
+            e.ply = plies[i];
+            e.result = results[i];
+        }
+
+        std::string_view feature_set(feature_set_c);
+        if (feature_set == "HalfKP")
+        {
+            return new SparseBatch(FeatureSet<HalfKP>{}, entries);
+        }
+        else if (feature_set == "HalfKP^")
+        {
+            return new SparseBatch(FeatureSet<HalfKPFactorized>{}, entries);
+        }
+        else if (feature_set == "HalfKA")
+        {
+            return new SparseBatch(FeatureSet<HalfKA>{}, entries);
+        }
+        else if (feature_set == "HalfKA^")
+        {
+            return new SparseBatch(FeatureSet<HalfKAFactorized>{}, entries);
+        }
+        fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
+        return nullptr;
+    }
+
     EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping)
     {
         std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr;
