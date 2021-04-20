@@ -1,12 +1,26 @@
 # Setup
+
+#### Install PyTorch
 ```
 python3 -m venv env
 source env/bin/activate
 pip install python-chess==0.31.4 pytorch-lightning torch matplotlib
 ```
 
-# Build the fast DataLoader
-This requires a C++17 compiler.
+#### Install CuPy
+First check what version of cuda is being used by pytorch.
+```
+import torch
+torch.version.cuda
+```
+Then install CuPy with the matching CUDA version.
+```
+pip install cupy-cudaXXX
+```
+where XXX corresponds to the first 3 digits of the CUDA version. For example `cupy-cuda112` for CUDA 11.2.
+
+#### Build the fast DataLoader
+This requires a C++17 compiler and cmake.
 
 Windows:
 ```
@@ -50,7 +64,7 @@ python train.py ... --features="HalfKP^"
 ## Current recommended training invocation
 
 ```
-python train.py --smart-fen-skipping --random-fen-skipping 10 --batch-size 16384 --threads 8 --num-workers 8 --gpus 1 trainingdata validationdata 
+python train.py --smart-fen-skipping --random-fen-skipping 10 --batch-size 16384 --threads 8 --num-workers 8 --gpus 1 trainingdata validationdata
 ```
 best nets have been trained with 16B d9-scored nets, training runs >200 epochs
 

@@ -73,9 +73,9 @@ class NNUEWriter():
   def coalesce_ft_weights(self, model, layer):
     weight = layer.weight.data
     indices = model.feature_set.get_virtual_to_real_features_gather_indices()
-    weight_coalesced = weight.new_zeros((weight.shape[0], model.feature_set.num_real_features))
+    weight_coalesced = weight.new_zeros((model.feature_set.num_real_features, weight.shape[1]))
     for i_real, is_virtual in enumerate(indices):
-      weight_coalesced[:, i_real] = sum(weight[:, i_virtual] for i_virtual in is_virtual)
+      weight_coalesced[i_real, :] = sum(weight[i_virtual, :] for i_virtual in is_virtual)
 
     return weight_coalesced
 
@@ -91,8 +91,8 @@ class NNUEWriter():
     weight = self.coalesce_ft_weights(model, layer)
     weight = weight.mul(127).round().to(torch.int16)
     ascii_hist('ft weight:', weight.numpy())
-    # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
-    self.buf.extend(weight.transpose(0, 1).flatten().numpy().tobytes())
+    # weights stored as [41024][256]
+    self.buf.extend(weight.flatten().numpy().tobytes())
 
   def write_fc_layer(self, layer, is_output=False):
     # FC layers are stored as int8 weights, and int32 biases
@@ -160,9 +160,9 @@ class NNUEReader():
 
   def read_feature_transformer(self, layer):
     layer.bias.data = self.tensor(numpy.int16, layer.bias.shape).divide(127.0)
-    # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
-    weights = self.tensor(numpy.int16, layer.weight.shape[::-1])
-    layer.weight.data = weights.divide(127.0).transpose(0, 1)
+    # weights stored as [41024][256]
+    weights = self.tensor(numpy.int16, layer.weight.shape)
+    layer.weight.data = weights.divide(127.0)
 
   def read_fc_layer(self, layer, is_output=False):
     # FC layers are stored as int8 weights, and int32 biases

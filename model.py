@@ -4,6 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
+from feature_transformer import DoubleFeatureTransformerSlice
 
 # 3 layer fully connected network
 L1 = 256
@@ -21,7 +22,7 @@ class NNUE(pl.LightningModule):
   """
   def __init__(self, feature_set, lambda_=1.0):
     super(NNUE, self).__init__()
-    self.input = nn.Linear(feature_set.num_features, L1)
+    self.input = DoubleFeatureTransformerSlice(feature_set.num_features, L1)
     self.feature_set = feature_set
     self.l1 = nn.Linear(2 * L1, L2)
     self.l2 = nn.Linear(L2, L3)
@@ -42,7 +43,7 @@ class NNUE(pl.LightningModule):
     weights = self.input.weight
     with torch.no_grad():
       for a, b in self.feature_set.get_virtual_feature_ranges():
-        weights[:, a:b] = 0.0
+        weights[a:b, :] = 0.0
     self.input.weight = nn.Parameter(weights)
 
   '''
@@ -77,16 +78,15 @@ class NNUE(pl.LightningModule):
     if old_feature_block.name == next(iter(new_feature_block.factors)):
       # We can just extend with zeros since it's unfactorized -> factorized
       weights = self.input.weight
-      padding = weights.new_zeros((weights.shape[0], new_feature_block.num_virtual_features))
-      weights = torch.cat([weights, padding], dim=1)
+      padding = weights.new_zeros((new_feature_block.num_virtual_features, weights.shape[1]))
+      weights = torch.cat([weights, padding], dim=0)
       self.input.weight = nn.Parameter(weights)
       self.feature_set = new_feature_set
     else:
       raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
 
-  def forward(self, us, them, w_in, b_in):
-    w = self.input(w_in)
-    b = self.input(b_in)
+  def forward(self, us, them, white_indices, white_values, black_indices, black_values):
+    w, b = self.input(white_indices, white_values, black_indices, black_values)
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
     # clamp here is used as a clipped relu to (0.0, 1.0)
     l0_ = torch.clamp(l0_, 0.0, 1.0)
@@ -96,14 +96,14 @@ class NNUE(pl.LightningModule):
     return x
 
   def step_(self, batch, batch_idx, loss_type):
-    us, them, white, black, outcome, score = batch
+    us, them, white_indices, white_values, black_indices, black_values, outcome, score = batch
 
     # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
     # This needs to match the value used in the serializer
     nnue2score = 600
     scaling = 361
 
-    q = self(us, them, white, black) * nnue2score / scaling
+    q = self(us, them, white_indices, white_values, black_indices, black_values) * nnue2score / scaling
     t = outcome
     p = (score / scaling).sigmoid()
 
@@ -152,7 +152,6 @@ class NNUE(pl.LightningModule):
     """
     for i in self.children():
       if filt(i):
-        if isinstance(i, nn.Linear):
-          for p in i.parameters():
-            if p.requires_grad:
-              yield p
+        for p in i.parameters():
+          if p.requires_grad:
+            yield p
