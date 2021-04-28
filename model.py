@@ -268,19 +268,14 @@ class NNUE(pl.LightningModule):
     in_scaling = 410
     out_scaling = 361
 
-    q = self(us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices) * nnue2score / scaling
+    q = (self(us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices) * nnue2score / out_scaling).sigmoid()
     t = outcome
     p = (score / in_scaling).sigmoid()
 
-    epsilon = 1e-12
-    teacher_entropy = -(p * (p + epsilon).log() + (1.0 - p) * (1.0 - p + epsilon).log())
-    outcome_entropy = -(t * (t + epsilon).log() + (1.0 - t) * (1.0 - t + epsilon).log())
-    teacher_loss = -(p * F.logsigmoid(q) + (1.0 - p) * F.logsigmoid(-q))
-    outcome_loss = -(t * F.logsigmoid(q) + (1.0 - t) * F.logsigmoid(-q))
-    result  = self.lambda_ * teacher_loss    + (1.0 - self.lambda_) * outcome_loss
-    entropy = self.lambda_ * teacher_entropy + (1.0 - self.lambda_) * outcome_entropy
-    loss = result.mean() - entropy.mean()
+    loss = (p - q).square().mean()
+
     self.log(loss_type, loss)
+
     return loss
 
     # MSE Loss function for debugging
