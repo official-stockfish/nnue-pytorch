@@ -1,6 +1,9 @@
 # Setup
 
 #### Install PyTorch
+
+[PyTorch installation guide](https://pytorch.org/get-started/locally/)
+
 ```
 python3 -m venv env
 source env/bin/activate
@@ -18,6 +21,8 @@ Then install CuPy with the matching CUDA version.
 pip install cupy-cudaXXX
 ```
 where XXX corresponds to the first 3 digits of the CUDA version. For example `cupy-cuda112` for CUDA 11.2.
+
+CuPy might use the PyTorch's private installation of CUDA, but it is better to install the matching version of CUDA separately. [CUDA Downloads](https://developer.nvidia.com/cuda-downloads)
 
 #### Build the fast DataLoader
 This requires a C++17 compiler and cmake.
