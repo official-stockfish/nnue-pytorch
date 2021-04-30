@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Usage:
-#    ./delete_bad_nets.sh EXPERIMENT_ID [PRESERVE_N]
+#    ./delete_bad_nets.sh [PRESERVE_N]
 # Preserves PRESERVE_N best nets by ordo.out. Default: 16.
 
 # Get the directory of the script file being executed. Resolves links.
@@ -11,9 +11,14 @@ BASEDIR=$(dirname $(readlink -f "$0"))
 # the configuration is trusted.
 source "$BASEDIR/config.sh"
 
-EXPERIMENT_ID="$1"
-EXPERIMENT_DIR="$EXPERIMENTS_DIR/experiment_$EXPERIMENT_ID"
-PRESERVE_N="${2:-16}"
+EXPERIMENT_DIR="$BASEDIR/.."
+PRESERVE_N="${1:-16}"
+
+if [ ! -f "$EXPERIMENT_DIR/.experiment" ]
+then
+    echo "Run setup_experiment.sh before running training."
+    exit
+fi
 
 echo "Executing..."
 python3 "$BASEDIR/delete_bad_nets.py" \

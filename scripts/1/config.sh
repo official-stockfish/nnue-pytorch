@@ -6,9 +6,22 @@
 # https://github.com/glinscott/nnue-pytorch
 NNUE_PYTORCH_DIR="C:/dev/nnue-pytorch"
 
-# The path to the Stockfish cloned repository
+# The path to a directory containing the base stockfish
+# It needs to have a ./src/ directory inside.
+# This will be built on experiment setup and used
+# as a base engine during testing.
+# A normal build (not PGO) is made to be consistent.
 # https://github.com/official-stockfish/Stockfish
-STOCKFISH_DIR="C:/dev/stockfish-master"
+STOCKFISH_BASE_DIR="C:/dev/stockfish-base"
+
+# The path to a directory containing the test stockfish
+# It needs to have a ./src/ directory inside.
+# This will be built on experiment setup and used
+# as a test engine during testing. Sometimes you may
+# want this to be a different directory than the base
+# stockfish. The state of the directory at the point of running
+# the experiment setup defines the version that will be compiled.
+STOCKFISH_TEST_DIR="C:/dev/stockfish-test"
 
 # The ARCH={} to use for compiling stockfish.
 # (make build ARCH={} -j will be executed when setting up an experiment)

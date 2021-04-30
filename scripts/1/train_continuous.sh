@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Usage:
-#    ./train_continuous.sh EXPERIMENT_ID [RUN_ID] [GPU_ID]
+#    ./train_continuous.sh [RUN_ID] [GPU_ID]
 # if GPU_ID is not specified it will be the same as RUN_ID
 # if RUN_ID is not specified it is assumed to be 0
 
@@ -16,60 +16,16 @@ source "$BASEDIR/config.sh"
 # Separate runs into separate directories within.
 # Each run contains the pytorch logs, checkpoints, and when games are ran
 # it will also contain the respective .nnue files, ordo.out, and out.pgn.
-EXPERIMENT_ID="$1"
-RUN_ID="${2:-0}"
-GPU_ID="${3:-$RUN_ID}"
-EXPERIMENT_DIR="$EXPERIMENTS_DIR/experiment_$EXPERIMENT_ID"
+RUN_ID="${1:-0}"
+GPU_ID="${2:-$RUN_ID}"
+EXPERIMENT_DIR="$BASEDIR/.."
 BASE_RUN_DIR="$EXPERIMENT_DIR/run_$RUN_ID"
 ITERATION=0
 
-if [ ! -d "$EXPERIMENTS_DIR" ]
+if [ ! -f "$EXPERIMENT_DIR/.experiment" ]
 then
-    mkdir "$EXPERIMENTS_DIR"
-fi
-
-if [ ! -d "$EXPERIMENT_DIR" ]
-then
-    # We prepare the directory layout.
-    # Each experiment directory contains the copies of the
-    # pytorch trainer and the version of Stockfish that will
-    # use these nets. This is to ensure the setup is consistent
-    # and persistent and the original copy can be modified during the run.
-    echo "Experiment does not yet exists. Creating directory structure..."
-    mkdir "$EXPERIMENT_DIR"
-    mkdir "$EXPERIMENT_DIR/nnue-pytorch"
-    mkdir "$EXPERIMENT_DIR/Stockfish"
-
-    echo "Copying the trainer..."
-    cp -R "$NNUE_PYTORCH_DIR/." "$EXPERIMENT_DIR/nnue-pytorch/"
-
-    echo "Copying stockfish..."
-    cp -R "$STOCKFISH_DIR/." "$EXPERIMENT_DIR/Stockfish/"
-
-    echo "Copying scripts..."
-    cp -R "$BASEDIR/." "$EXPERIMENT_DIR/scripts/"
-
-    # Always compile the data loader and stockfish after copying
-    # to ensure the correct versions
-    echo "Compiling stockfish..."
-    if (cd "$EXPERIMENT_DIR/Stockfish/src/" && make "build" "ARCH=$ARCH" "-j")
-    then
-        echo "Stockfish compilation successful."
-    else
-        echo "Stockfish compilation failed."
-        exit
-    fi
-
-    echo "Compiling the data loader..."
-    if (cd "$EXPERIMENT_DIR/nnue-pytorch/" && "./compile_data_loader.bat")
-    then
-        echo "Data loader compilation successful."
-    else
-        echo "Data loader compilation failed."
-        exit
-    fi
-else
-    echo "Experiment already set up."
+    echo "Run setup_experiment.sh before running training."
+    exit
 fi
 
 while true
