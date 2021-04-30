@@ -45,6 +45,9 @@ then
     echo "Copying stockfish..."
     cp -R "$STOCKFISH_DIR/." "$EXPERIMENT_DIR/Stockfish/"
 
+    echo "Copying scripts..."
+    cp -R "$BASEDIR/." "$EXPERIMENT_DIR/scripts/"
+
     # Always compile the data loader and stockfish after copying
     # to ensure the correct versions
     echo "Compiling stockfish..."

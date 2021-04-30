@@ -7,6 +7,7 @@ The basic principles are the following:
 - each experiment is self contained
     - contains the code of the trainer used
     - contains the code of the player used
+    - contains the scripts
 - this script directory is self contained
     - it doesn't require anything from outside to be under a specific path
 - only copied files are executed
