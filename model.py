@@ -136,7 +136,8 @@ class NNUE(pl.LightningModule):
     # Train with a lower LR on the output layer
     LR = 1e-3
     train_params = [
-      {'params': self.get_layers(lambda x: self.output != x), 'lr': LR},
+      {'params': self.get_layers(lambda x: self.output != x and self.input != x), 'lr': LR},
+      {'params': self.get_layers(lambda x: self.input == x), 'lr': LR, 'gc_dim' : 0},
       {'params': self.get_layers(lambda x: self.output == x), 'lr': LR / 10},
     ]
     # increasing the eps leads to less saturated nets with a few dead neurons
