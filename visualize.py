@@ -30,26 +30,15 @@ class NNUEVisualizer():
             print("Saving {}".format(destname))
             plt.savefig(destname)
 
-    def coalesce_ft_weights(self, model, layer):
-        weight = layer.weight.data
-        indices = model.feature_set.get_virtual_to_real_features_gather_indices()
-        weight_coalesced = weight.new_zeros(
-            (weight.shape[0], model.feature_set.num_real_features))
-        for i_real, is_virtual in enumerate(indices):
-            weight_coalesced[:, i_real] = sum(
-                weight[:, i_virtual] for i_virtual in is_virtual)
-
-        return weight_coalesced
-
     def plot_input_weights(self):
         # Coalesce weights and transform them to Numpy domain.
-        weights = self.coalesce_ft_weights(self.model, self.model.input)
-        weights = weights.transpose(0, 1).flatten().numpy()
+        weights = M.coalesce_ft_weights(self.model, self.model.input)
+        weights = weights.flatten().numpy()
 
         if self.args.ref_model:
-            ref_weights = self.coalesce_ft_weights(
+            ref_weights = M.coalesce_ft_weights(
                 self.ref_model, self.ref_model.input)
-            ref_weights = ref_weights.transpose(0, 1).flatten().numpy()
+            ref_weights = ref_weights.flatten().numpy()
             weights -= ref_weights
 
         hd = M.L1  # Number of input neurons.
