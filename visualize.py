@@ -33,11 +33,13 @@ class NNUEVisualizer():
     def plot_input_weights(self):
         # Coalesce weights and transform them to Numpy domain.
         weights = M.coalesce_ft_weights(self.model, self.model.input)
+        weights = weights[:, :M.L1]
         weights = weights.flatten().numpy()
 
         if self.args.ref_model:
             ref_weights = M.coalesce_ft_weights(
                 self.ref_model, self.ref_model.input)
+            ref_weights = ref_weights[:, :M.L1]
             ref_weights = ref_weights.flatten().numpy()
             weights -= ref_weights
 
@@ -75,7 +77,7 @@ class NNUEVisualizer():
         # Derived/fixed constants.
         numy = hd//numx
         widthx = 128
-        widthy = 304
+        widthy = 400
         totalx = numx * widthx
         totaly = numy * widthy
         totaldim = totalx*totaly
@@ -88,13 +90,13 @@ class NNUEVisualizer():
             weights_mask = []
             for j in range(0, weights.size, hd):
                 # Calculate piece and king placement.
-                pi = (j // hd - 1) % 641
-                ki = (j // hd - 1) // 641
+                pi = (j // hd) % 704
+                ki = (j // hd) // 704
                 piece = pi // 64
                 rank = (pi % 64) // 8
 
-                if pi == 640 or ((rank == 0 or rank == 7) and (piece == 0 or piece == 1)):
-                    # Ignore unused weights for "Shogi piece drop" and pawns on first/last rank.
+                if ((rank == 0 or rank == 7) and (piece == 0 or piece == 1)):
+                    # Ignore unused weights for pawns on first/last rank.
                     continue
 
                 kipos = [ki % 8, ki // 8]
@@ -457,7 +459,7 @@ def main():
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
-    supported_features = ('HalfKP', 'HalfKP^')
+    supported_features = ('HalfKAv2', 'HalfKAv2^')
     assert args.features in supported_features
     feature_set = features.get_feature_set_from_name(args.features)
 
@@ -491,8 +493,8 @@ def main():
     visualizer = NNUEVisualizer(model, ref_model, args)
 
     visualizer.plot_input_weights()
-    visualizer.plot_fc_weights()
-    visualizer.plot_biases()
+    #visualizer.plot_fc_weights()
+    #visualizer.plot_biases()
 
     if not args.dont_show:
         plt.show()
