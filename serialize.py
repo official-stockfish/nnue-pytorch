@@ -70,15 +70,6 @@ class NNUEWriter():
     self.int32(len(description)) # Network definition
     self.buf.extend(description)
 
-  def coalesce_ft_weights(self, model, layer):
-    weight = layer.weight.data
-    indices = model.feature_set.get_virtual_to_real_features_gather_indices()
-    weight_coalesced = weight.new_zeros((model.feature_set.num_real_features, weight.shape[1]))
-    for i_real, is_virtual in enumerate(indices):
-      weight_coalesced[i_real, :] = sum(weight[i_virtual, :] for i_virtual in is_virtual)
-
-    return weight_coalesced
-
   def write_feature_transformer(self, model):
     # int16 bias = round(x * 127)
     # int16 weight = round(x * 127)
@@ -88,7 +79,7 @@ class NNUEWriter():
     ascii_hist('ft bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
 
-    weight = self.coalesce_ft_weights(model, layer)
+    weight = M.coalesce_ft_weights(model, layer)
     weight = weight.mul(127).round().to(torch.int16)
     ascii_hist('ft weight:', weight.numpy())
     # weights stored as [41024][256]
