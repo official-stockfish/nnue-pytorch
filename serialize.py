@@ -192,25 +192,28 @@ def main():
 
   print('Converting %s to %s' % (args.source, args.target))
 
-  if args.source.endswith(".pt") or args.source.endswith(".ckpt"):
-    if not args.target.endswith(".nnue"):
-      raise Exception("Target file must end with .nnue")
-    if args.source.endswith(".pt"):
-      nnue = torch.load(args.source)
-    else:
-      nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set)
+  if args.source.endswith('.ckpt'):
+    nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set)
     nnue.eval()
+  elif args.source.endswith('.pt'):
+    nnue = torch.load(args.source)
+  elif args.source.endswith('.nnue'):
+    with open(args.source, 'rb') as f:
+      reader = NNUEReader(f, feature_set)
+      nnue = reader.model
+  else:
+    raise Exception('Invalid network input format.')
+
+  if args.target.endswith('.ckpt'):
+    raise Exception('Cannot convert into .ckpt')
+  elif args.target.endswith('.pt'):
+    torch.save(nnue, args.target)
+  elif args.target.endswith('.nnue'):
     writer = NNUEWriter(nnue)
     with open(args.target, 'wb') as f:
       f.write(writer.buf)
-  elif args.source.endswith(".nnue"):
-    if not args.target.endswith(".pt"):
-      raise Exception("Target file must end with .pt")
-    with open(args.source, 'rb') as f:
-      reader = NNUEReader(f, feature_set)
-    torch.save(reader.model, args.target)
   else:
-    raise Exception('Invalid filetypes: ' + str(args))
+    raise Exception('Invalid network output format.')
 
 if __name__ == '__main__':
   main()
