@@ -1180,7 +1180,11 @@ float* crelu32(,
 
 ### Accounting for quantization in the trainer
 
-Adding (quite aggressive) quantization has reduced the possible range of values for the weights and biases. We can, however, ignore the feature transformer and all biases, as they use large integer types and we don't ever expect to hit the limit. The problematic case are the int8 weights of the linear layer, which for example in Stockfish can only go to about 2 (activation range in 0..1). This is a potentially big problem as the training can diverge from the quantized representation by more than just rounding. To prevent this from happening it is necessary to somehow limit the range for these parameters inside the trainer. So far the easiest way of doing it is to modify the optimizer to clamp the values to the available range after each optimization step. These minimum and maximum values can be passed for example when registering the optimizable parameters in the optimizer. For example:
+Adding (quite aggressive) quantization has reduced the possible range of values for the weights and biases. We can, however, ignore the feature transformer and all biases, as they use large integer types and we don't ever expect to hit the limit. The problematic case are the int8 weights of the linear layer, which for example in Stockfish can only go to about 2 (activation range in 0..1). This is a potentially big problem as the training can diverge from the quantized representation by more than just rounding. To prevent this from happening it is necessary to somehow limit the range for these parameters inside the trainer. So far the easiest way of doing it is to modify the optimizer to clamp the values to the available range after each optimization step. These minimum and maximum values can be passed for example when registering the optimizable parameters in the optimizer.
+
+#### Inside the optimizer
+
+One way to account for this is directly in the optimizer. This is nice because the clipping is applied directly after the step, but requires having access to the optimizer's source. For example:
 
 ```
 # The min/max constants are specific for the Stockfish quantization scheme.
@@ -1215,6 +1219,66 @@ def step(self, closure=None):
             max_weight = group['max_weight']
             if min_weight is not None and max_weight is not None:
                 p_data_fp32.clamp_(min_weight, max_weight)
+```
+
+#### Outside the optimizer
+
+Alternatively one can do it outside the optimizer for more flexibility:
+
+```
+# The min/max constants are specific for the Stockfish quantization scheme.
+self.weight_clipping = [
+    {'params' : [self.l1.weight], 'min_weight' : -127/64, 'max_weight' : 127/64 },
+    {'params' : [self.l2.weight], 'min_weight' : -127/64, 'max_weight' : 127/64 },
+    {'params' : [self.output.weight], 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
+]
+```
+
+```
+# and call this in some step function
+def _clip_weights(self):
+    for group in self.weight_clipping:
+        for p in group['params']:
+            p_data_fp32 = p.data
+            min_weight = group['min_weight']
+            max_weight = group['max_weight']
+            p_data_fp32.clamp_(min_weight, max_weight)
+            p.data.copy_(p_data_fp32)
+```
+
+#### Accounting for virtual layers (factorization)
+
+Sometimes more complex architectures make some layers' parameters be a sum of two layers during training. Just like feature factorization but for whole layers (see for example [this](#multiple-psqt-outputs-and-multiple-subnetworks)). We can account for example like this:
+
+```
+# The min/max constants are specific for the Stockfish quantization scheme.
+self.weight_clipping = [
+    {'params' : [self.l1.weight], 'min_weight' : -127/64, 'max_weight' : 127/64, 'virtual_params' : self.some_virtual_factor.weight },
+    {'params' : [self.l2.weight], 'min_weight' : -127/64, 'max_weight' : 127/64 },
+    {'params' : [self.output.weight], 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
+]
+```
+
+```
+def _clip_weights(self):
+    for group in self.weight_clipping:
+        for p in group['params']:
+            p_data_fp32 = p.data
+            min_weight = group['min_weight']
+            max_weight = group['max_weight']
+            if 'virtual_params' in group:
+                virtual_params = group['virtual_params']
+                # The virtual layer is usually N times smaller
+                xs = p_data_fp32.shape[0] // virtual_params.shape[0]
+                ys = p_data_fp32.shape[1] // virtual_params.shape[1]
+                expanded_virtual_layer = virtual_params.repeat(xs, ys)
+                min_weight_t = p_data_fp32.new_full(p_data_fp32.shape, min_weight) - expanded_virtual_layer
+                max_weight_t = p_data_fp32.new_full(p_data_fp32.shape, max_weight) - expanded_virtual_layer
+                p_data_fp32 = torch.max(p_data_fp32, min_weight_t)
+                p_data_fp32 = torch.min(p_data_fp32, max_weight_t)
+            else:
+                p_data_fp32.clamp_(min_weight, max_weight)
+            p.data.copy_(p_data_fp32)
 ```
 
 ## Optimizing the trainer (CUDA)
