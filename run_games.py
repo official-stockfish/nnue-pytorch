@@ -4,9 +4,10 @@ import subprocess
 import sys
 import time
 import argparse
+import features
 
 
-def convert_ckpt(root_dir):
+def convert_ckpt(root_dir,features):
     """ Find the list of checkpoints that are available, and convert those that have no matching .nnue """
     # run96/run0/default/version_0/checkpoints/epoch=3.ckpt, or epoch=3-step=321151.ckpt
     p = re.compile("epoch.*\.ckpt")
@@ -23,7 +24,7 @@ def convert_ckpt(root_dir):
         nnue_file_name = re.sub("default/version_[0-9]+/checkpoints/", "", ckpt)
         nnue_file_name = re.sub(r"epoch\=([0-9]+).*\.ckpt", r"nn-epoch\1.nnue", nnue_file_name)
         if not os.path.exists(nnue_file_name):
-            command = "{} serialize.py {} {} ".format(sys.executable, ckpt, nnue_file_name)
+            command = "{} serialize.py {} {} --features={} ".format(sys.executable, ckpt, nnue_file_name, features)
             ret = os.system(command)
             if ret != 0:
                 print("Error serializing!")
@@ -128,11 +129,12 @@ def run_round(
     stockfish_test,
     book_file_name,
     concurrency,
+    features,
 ):
     """ run a round of games, finding existing nets, analyze an ordo file to pick most suitable ones, run a round, and run ordo """
 
     # find and convert checkpoints to .nnue
-    convert_ckpt(root_dir)
+    convert_ckpt(root_dir, features)
 
     # find a list of networks to test
     nnues = find_nnue(root_dir)
@@ -236,6 +238,7 @@ def main():
         default="./noob_3moves.epd",
         help="Path to a suitable book, see https://github.com/official-stockfish/books",
     )
+    features.add_argparse_args(parser)
     args = parser.parse_args()
 
     while True:
@@ -248,6 +251,7 @@ def main():
             args.stockfish_test,
             args.book_file_name,
             args.concurrency,
+            args.features,
         )
 
 
