@@ -44,6 +44,8 @@ This document describes in detail what NNUE is, how it works in theory, how the 
     + [Feature factorization](#feature-factorization)
         - [Virtual feature coalescing](#virtual-feature-coalescing)
         - [Other factors](#other-factors)
+            * ["K" factors](#-k--factors)
+            * ["HalfRelativeKP" factors](#-halfrelativekp--factors)
         - [Real effect of the factorizer](#real-effect-of-the-factorizer)
     + [Loss functions and how to apply them](#loss-functions-and-how-to-apply-them)
         - [The Goal](#the-goal)
@@ -682,10 +684,27 @@ So the relation is very simple. We just need to add the weights of each `P` feat
 
 #### Other factors
 
-Sometimes it's possible to add even more factors. For `HalfKP` we can also consider the following (though they don't seem to gain anything).
+Sometimes it's possible to add even more factors. It should be noted howerver, that just adding more factors doesn't necessarily improve the training and may even cause it to regress. In general, whether using some factors helps or not depends on the training setup and the net being trained. It's always good to experiment with this stuff. With that said however, we can consider for example the following factors for `HalfKP`.
 
-1. `K` - the king position, 64 features. This one requires some careful handling as a single position has this feature multiple times - the number of pieces on the board. This means that the input for this feature is no longer 1, but the number of position on the board instead.
-2. `HalfRelativeKP` - in `HalfKP` we use the absolute piece position, but what if we encoded the position as relative to the king? There's 15x15 such relative position possible, and most of them correspond 1:1 to some `HalfKP` feature.
+##### "K" factors
+
+The king position, 64 features. This one requires some careful handling as a single position has this feature multiple times - the number of pieces on the board. This means that the input for this feature is no longer 1, but the number of position on the board instead. This is needed purely because with HalfKP the king feature is not encoded anywhere. HalfKA doesn't need it for example because it specifically has the feature for the king's position. Handling this is tricky in general, it may even require reducing the gradient for these features (otherwise the gradient is `input*weight`, but input is large compared to others).
+
+##### "HalfRelativeKP" factors
+
+In `HalfKP` we use the absolute piece position, but what if we encoded the position as relative to the king? There's 15x15 such relative position possible, and most of them correspond 1:many to some `HalfKP` feature. The HalfRelativeKP feature index could be calculated for example like this:
+```
+int get_half_relative_kp_index(Color perspective, Square king_sq, Square piece_sq, Piece piece)
+{
+    const int p_idx = static_cast<int>(piece.type()) * 2 + (piece.color() != perspective);
+    const Square oriented_king_sq = orient_flip(perspective, king_sq);
+    const Square oriented_piece_sq = orient_flip(perspective, piece_sq);
+    // The file/rank difference is always in range -7..7, and we need to map it to 0..15
+    const int relative_file = oriented_piece_sq.file() - oriented_king_sq.file() + 7;
+    const int relative_rank = oriented_piece_sq.rank() - oriented_king_sq.rank() + 7;
+    return (p_idx * 15 * 15) + (relative_file * 15) + relative_rank;
+}
+```
 
 #### Real effect of the factorizer
 
