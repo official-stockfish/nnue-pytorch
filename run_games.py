@@ -23,7 +23,7 @@ def convert_ckpt(root_dir,features):
     for ckpt in ckpts:
         nnue_file_name = re.sub("default/version_[0-9]+/checkpoints/", "", ckpt)
         nnue_file_name = re.sub(r"epoch\=([0-9]+).*\.ckpt", r"nn-epoch\1.nnue", nnue_file_name)
-        if not os.path.exists(nnue_file_name):
+        if not os.path.exists(nnue_file_name) and os.path.exists(ckpt):
             command = "{} serialize.py {} {} --features={} ".format(sys.executable, ckpt, nnue_file_name, features)
             ret = os.system(command)
             if ret != 0:
