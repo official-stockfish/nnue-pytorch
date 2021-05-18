@@ -66,9 +66,7 @@ class NNUEWriter():
   def write_header(self, model, fc_hash):
     self.int32(VERSION) # version
     self.int32(fc_hash ^ model.feature_set.hash ^ (M.L1*2)) # halfkp network hash
-    description = b"Features=HalfKA(Friend)[49216->256x2],"
-    description += b"Network=AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
-    description += b"(ClippedReLU[32](AffineTransform[32<-512](InputSlice[512(0:512)])))))"
+    description = b"Network trained with the https://github.com/glinscott/nnue-pytorch trainer."
     self.int32(len(description)) # Network definition
     self.buf.extend(description)
 
