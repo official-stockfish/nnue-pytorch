@@ -54,11 +54,11 @@ python train.py --resume_from_checkpoint <path> ...
 python train.py --gpus 1 ...
 ```
 ## Feature set selection
-By default the trainer uses a factorized HalfKP feature set (named "HalfKP^")
+By default the trainer uses a factorized HalfKAv2 feature set (named "HalfKAv2^")
 If you wish to change the feature set used then you can use the `--features=NAME` option. For the list of available features see `--help`
 The default is:
 ```
-python train.py ... --features="HalfKP^"
+python train.py ... --features="HalfKAv2^"
 ```
 
 ## Skipping certain fens in the training
@@ -69,7 +69,7 @@ python train.py ... --features="HalfKP^"
 ## Current recommended training invocation
 
 ```
-python train.py --smart-fen-skipping --random-fen-skipping 10 --batch-size 16384 --threads 8 --num-workers 8 --gpus 1 trainingdata validationdata
+python train.py --smart-fen-skipping --random-fen-skipping 3 --batch-size 16384 --threads 8 --num-workers 8 --gpus 1 trainingdata validationdata
 ```
 best nets have been trained with 16B d9-scored nets, training runs >200 epochs
 
@@ -96,13 +96,13 @@ python serialize.py nn.nnue converted.pt
 Visualize a network from either a checkpoint (`.ckpt`), a serialized model (`.pt`)
 or a SF NNUE file (`.nnue`).
 ```
-python visualize.py nn.nnue --features="HalfKP"
+python visualize.py nn.nnue --features="HalfKAv2"
 ```
 
 Visualize the difference between two networks from either a checkpoint (`.ckpt`), a serialized model (`.pt`)
 or a SF NNUE file (`.nnue`).
 ```
-python visualize.py nn.nnue  --features="HalfKP" --ref-model nn.cpkt --ref-features="HalfKP^"
+python visualize.py nn.nnue  --features="HalfKAv2" --ref-model nn.cpkt --ref-features="HalfKAv2^"
 ```
 
 # Logging

@@ -189,6 +189,7 @@ class Ranger(Optimizer):
                     G_grad = centralized_gradient(G_grad, use_gc=self.use_gc, gc_conv_only=self.gc_conv_only, dim=group['gc_dim'])
 
                 p_data_fp32.add_(G_grad, alpha=-step_size * group['lr'])
+
                 p.data.copy_(p_data_fp32)
 
                 # integrated look ahead...
