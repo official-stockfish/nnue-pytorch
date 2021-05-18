@@ -56,10 +56,12 @@ def main():
 
   if args.resume_from_model is None:
     nnue = M.NNUE(feature_set=feature_set, lambda_=args.lambda_)
+    nnue.cuda()
   else:
     nnue = torch.load(args.resume_from_model)
     nnue.set_feature_set(feature_set)
     nnue.lambda_ = args.lambda_
+    nnue.cuda()
 
   print("Feature set: {}".format(feature_set.name))
   print("Num real features: {}".format(feature_set.num_real_features))
