@@ -75,7 +75,7 @@ def main():
 
   batch_size = args.batch_size
   if batch_size <= 0:
-    batch_size = 128 if args.gpus == 0 else 8192
+    batch_size = 16384
   print('Using batch size {}'.format(batch_size))
 
   print('Smart fen skipping: {}'.format(args.smart_fen_skipping))
