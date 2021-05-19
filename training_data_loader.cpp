@@ -231,7 +231,8 @@ struct HalfKAv2 {
 
 struct HalfKAv2Factorized {
     // Factorized features
-    static constexpr int PIECE_INPUTS = HalfKAv2::NUM_SQ * HalfKAv2::NUM_PT;
+    static constexpr int NUM_PT = 12;
+    static constexpr int PIECE_INPUTS = HalfKAv2::NUM_SQ * NUM_PT;
     static constexpr int INPUTS = HalfKAv2::INPUTS + PIECE_INPUTS;
 
     static constexpr int MAX_PIECE_FEATURES = 32;
