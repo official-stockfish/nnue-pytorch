@@ -26,16 +26,20 @@ def ascii_hist(name, x, bins=6):
 
 # hardcoded for now
 VERSION = 0x7AF32F20
+DEFAULT_DESCRIPTION = "Network trained with the https://github.com/glinscott/nnue-pytorch trainer."
 
 class NNUEWriter():
   """
   All values are stored in little endian.
   """
-  def __init__(self, model):
+  def __init__(self, model, description=None):
+    if description is None:
+        description = DEFAULT_DESCRIPTION
+
     self.buf = bytearray()
 
     fc_hash = self.fc_hash(model)
-    self.write_header(model, fc_hash)
+    self.write_header(model, fc_hash, description)
     self.int32(model.feature_set.hash ^ (M.L1*2)) # Feature transformer hash
     self.write_feature_transformer(model)
     for l1, l2, output in model.layer_stacks.get_coalesced_layer_stacks():
@@ -63,12 +67,12 @@ class NNUEWriter():
       prev_hash = layer_hash
     return layer_hash
 
-  def write_header(self, model, fc_hash):
+  def write_header(self, model, fc_hash, description):
     self.int32(VERSION) # version
     self.int32(fc_hash ^ model.feature_set.hash ^ (M.L1*2)) # halfkp network hash
-    description = b"Network trained with the https://github.com/glinscott/nnue-pytorch trainer."
-    self.int32(len(description)) # Network definition
-    self.buf.extend(description)
+    encoded_description = description.encode('utf-8')
+    self.int32(len(encoded_description)) # Network definition
+    self.buf.extend(encoded_description)
 
   def write_feature_transformer(self, model):
     # int16 bias = round(x * 127)
@@ -79,7 +83,7 @@ class NNUEWriter():
     ascii_hist('ft bias:', bias.numpy())
     self.buf.extend(bias.flatten().numpy().tobytes())
 
-    weight = self.coalesce_ft_weights(model, layer)
+    weight = M.coalesce_ft_weights(model, layer)
     weight0 = weight[:, :M.L1]
     psqtweight0 = weight[:, M.L1:]
     weight = weight0.mul(127).round().to(torch.int16)
@@ -204,6 +208,7 @@ def main():
   parser = argparse.ArgumentParser(description="Converts files between ckpt and nnue format.")
   parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
   parser.add_argument("target", help="Target file (can be .pt or .nnue)")
+  parser.add_argument("--description", default=None, type=str, dest='description', help="The description string to include in the network. Only works when serializing into a .nnue file.")
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
@@ -228,7 +233,7 @@ def main():
   elif args.target.endswith('.pt'):
     torch.save(nnue, args.target)
   elif args.target.endswith('.nnue'):
-    writer = NNUEWriter(nnue)
+    writer = NNUEWriter(nnue, args.description)
     with open(args.target, 'wb') as f:
       f.write(writer.buf)
   else:
