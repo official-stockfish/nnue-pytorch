@@ -40,20 +40,7 @@ class FeatureSet:
         return self.get_psqt_index(board)
 
     def get_psqt_index(self, board: chess.Board):
-        all_pieces = \
-            board.pieces(chess.PAWN, chess.WHITE) | \
-            board.pieces(chess.KNIGHT, chess.WHITE) | \
-            board.pieces(chess.BISHOP, chess.WHITE) | \
-            board.pieces(chess.ROOK, chess.WHITE) | \
-            board.pieces(chess.QUEEN, chess.WHITE) | \
-            board.pieces(chess.KING, chess.WHITE) | \
-            board.pieces(chess.PAWN, chess.BLACK) | \
-            board.pieces(chess.KNIGHT, chess.BLACK) | \
-            board.pieces(chess.BISHOP, chess.BLACK) | \
-            board.pieces(chess.ROOK, chess.BLACK) | \
-            board.pieces(chess.QUEEN, chess.BLACK) | \
-            board.pieces(chess.KING, chess.BLACK)
-        return (len(all_pieces) - 1) // 4
+        return (chess.popcount(board.occupied) - 1) // 4
 
     '''
     This method returns the feature ranges for the virtual factors of the
