@@ -1,10 +1,10 @@
 import argparse
 import features
 import serialize
-import nnue_bin_dataset
 import nnue_dataset
 import subprocess
 import re
+import chess
 from model import NNUE
 
 def read_model(nnue_path, feature_set):
@@ -12,8 +12,8 @@ def read_model(nnue_path, feature_set):
         reader = serialize.NNUEReader(f, feature_set)
         return reader.model
 
-def make_data_reader(data_path, feature_set):
-    return nnue_bin_dataset.NNUEBinData(data_path, feature_set)
+def make_fen_batch_provider(data_path, batch_size):
+    return nnue_dataset.FenBatchProvider(data_path, True, 1, batch_size, False, 10)
 
 def eval_model_batch(model, batch):
     us, them, white_indices, white_values, black_indices, black_values, outcome, score, psqt_indices, layer_stack_indices = batch.contents.get_tensors('cuda')
@@ -64,72 +64,52 @@ def eval_engine_batch(engine_path, net_path, fens):
     evals = re.findall(re_nnue_eval, out)
     return [int(float(v)*208) for v in evals]
 
+def filter_fens(fens):
+    # We don't want fens where a king is in check, as these cannot be evaluated by the engine.
+    filtered_fens = []
+    for fen in fens:
+        board = chess.Board(fen=fen)
+        if not board.is_check():
+            filtered_fens.append(fen)
+    return filtered_fens
+
 def main():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--net", type=str, help="path to a .nnue net")
     parser.add_argument("--engine", type=str, help="path to stockfish")
-    parser.add_argument("--data", type=str, help="path to .bin dataset")
+    parser.add_argument("--data", type=str, help="path to a .bin or .binpack dataset")
     parser.add_argument("--checkpoint", type=str, help="Optional checkpoint (used instead of nnue for local eval)")
     parser.add_argument("--count", type=int, default=100, help="number of datapoints to process")
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
+    batch_size = 1000
+
     feature_set = features.get_feature_set_from_name(args.features)
     if args.checkpoint:
-      model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set)
+        model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set)
     else:
-      model = read_model(args.net, feature_set)
+        model = read_model(args.net, feature_set)
     model.eval()
     model.cuda()
-    data_reader = make_data_reader(args.data, feature_set)
+    fen_batch_provider = make_fen_batch_provider(args.data, batch_size)
 
-    fens = []
-    results = []
-    scores = []
-    plies = []
     model_evals = []
     engine_evals = []
-    i = -1
-
-    def commit_batch():
-        nonlocal fens
-        nonlocal results
-        nonlocal scores
-        nonlocal plies
-        nonlocal model_evals
-        nonlocal engine_evals
-        if len(fens) == 0:
-            return
-        b = nnue_dataset.make_sparse_batch_from_fens(feature_set, fens, scores, plies, results)
-        model_evals += eval_model_batch(model, b)
-        nnue_dataset.destroy_sparse_batch(b)
-        engine_evals += eval_engine_batch(args.engine, args.net, fens)
-        fens = []
-        results = []
-        scores = []
-        plies = []
 
     done = 0
+    print('Processed {} positions.'.format(done))
     while done < args.count:
-        i += 1
+        fens = filter_fens(next(fen_batch_provider))
 
-        item = data_reader.get_raw(i)
-        board = item[0]
-        if board.is_check():
-            continue
+        b = nnue_dataset.make_sparse_batch_from_fens(feature_set, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens))
+        model_evals += eval_model_batch(model, b)
+        nnue_dataset.destroy_sparse_batch(b)
 
-        fens.append(board.fen())
-        results.append(int(round(item[2] * 2 - 1)))
-        scores.append(int(item[3]))
-        plies.append(1)
+        engine_evals += eval_engine_batch(args.engine, args.net, fens)
 
-        done += 1
-
-        if done % 1024 == 0:
-            # don't do batches that are too big
-            commit_batch()
-
-    commit_batch()
+        done += len(fens)
+        print('Processed {} positions.'.format(done))
 
     compute_correlation(engine_evals, model_evals)
 

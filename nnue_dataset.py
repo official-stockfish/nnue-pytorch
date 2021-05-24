@@ -46,6 +46,77 @@ class SparseBatch(ctypes.Structure):
 
 SparseBatchPtr = ctypes.POINTER(SparseBatch)
 
+class Fen(ctypes.Structure):
+    _fields_ = [
+        ('size', ctypes.c_int),
+        ('fen', ctypes.c_char_p)
+    ]
+
+FenPtr = ctypes.POINTER(Fen)
+
+class FenBatch(ctypes.Structure):
+    _fields_ = [
+        ('size', ctypes.c_int),
+        ('fens', FenPtr)
+    ]
+
+    def get_fens(self):
+        strings = []
+        for i in range(self.size):
+            strings.append(self.fens[i].fen.decode('utf-8'))
+        return strings
+
+FenBatchPtr = ctypes.POINTER(FenBatch)
+
+create_fen_batch_stream = dll.create_fen_batch_stream
+create_fen_batch_stream.restype = ctypes.c_void_p
+create_fen_batch_stream.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_bool, ctypes.c_bool]
+destroy_fen_batch_stream = dll.destroy_fen_batch_stream
+destroy_fen_batch_stream.argtypes = [ctypes.c_void_p]
+
+fetch_next_fen_batch = dll.fetch_next_fen_batch
+fetch_next_fen_batch.restype = FenBatchPtr
+fetch_next_fen_batch.argtypes = [ctypes.c_void_p]
+destroy_fen_batch = dll.destroy_fen_batch
+
+class FenBatchProvider:
+    def __init__(
+        self,
+        filename,
+        cyclic,
+        num_workers,
+        batch_size=None,
+        filtered=False,
+        random_fen_skipping=0):
+
+        self.filename = filename.encode('utf-8')
+        self.cyclic = cyclic
+        self.num_workers = num_workers
+        self.batch_size = batch_size
+        self.filtered = filtered
+        self.random_fen_skipping = random_fen_skipping
+
+        if batch_size:
+            self.stream = create_fen_batch_stream(self.num_workers, self.filename, batch_size, cyclic, filtered, random_fen_skipping)
+        else:
+            self.stream = create_fen_batch_stream(self.num_workers, self.filename, cyclic, filtered, random_fen_skipping)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        v = fetch_next_fen_batch(self.stream)
+
+        if v:
+            fens = v.contents.get_fens()
+            destroy_fen_batch(v)
+            return fens
+        else:
+            raise StopIteration
+
+    def __del__(self):
+        destroy_fen_batch_stream(self.stream)
+
 class TrainingDataProvider:
     def __init__(
         self,
