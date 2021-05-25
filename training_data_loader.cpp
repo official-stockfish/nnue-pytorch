@@ -536,6 +536,219 @@ private:
     std::vector<std::thread> m_workers;
 };
 
+// Very simple fixed size string wrapper with a stable ABI to pass to python.
+struct Fen
+{
+    Fen() :
+        m_fen(nullptr)
+    {
+    }
+
+    Fen(const std::string& fen) :
+        m_size(fen.size()),
+        m_fen(new char[fen.size() + 1])
+    {
+        std::memcpy(m_fen, fen.c_str(), fen.size() + 1);
+    }
+
+    Fen& operator=(const std::string& fen)
+    {
+        if (m_fen != nullptr)
+        {
+            delete m_fen;
+        }
+
+        m_size = fen.size();
+        m_fen = new char[fen.size() + 1];
+        std::memcpy(m_fen, fen.c_str(), fen.size() + 1);
+
+        return *this;
+    }
+
+    ~Fen()
+    {
+        delete[] m_fen;
+    }
+
+private:
+    int m_size;
+    char* m_fen;
+};
+
+struct FenBatch
+{
+    FenBatch(const std::vector<TrainingDataEntry>& entries) :
+        m_size(entries.size()),
+        m_fens(new Fen[entries.size()])
+    {
+        for (int i = 0; i < m_size; ++i)
+        {
+            m_fens[i] = entries[i].pos.fen();
+        }
+    }
+
+    ~FenBatch()
+    {
+        delete[] m_fens;
+    }
+
+private:
+    int m_size;
+    Fen* m_fens;
+};
+
+struct FenBatchStream : Stream<FenBatch>
+{
+    static constexpr int num_feature_threads_per_reading_thread = 2;
+
+    using BaseType = Stream<FenBatch>;
+
+    FenBatchStream(int concurrency, const char* filename, int batch_size, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate) :
+        BaseType(
+            std::max(
+                1,
+                concurrency / num_feature_threads_per_reading_thread
+            ),
+            filename,
+            cyclic,
+            skipPredicate
+        ),
+        m_concurrency(concurrency),
+        m_batch_size(batch_size)
+    {
+        m_stop_flag.store(false);
+
+        auto worker = [this]()
+        {
+            std::vector<TrainingDataEntry> entries;
+            entries.reserve(m_batch_size);
+
+            while(!m_stop_flag.load())
+            {
+                entries.clear();
+
+                {
+                    std::unique_lock lock(m_stream_mutex);
+                    BaseType::m_stream->fill(entries, m_batch_size);
+                    if (entries.empty())
+                    {
+                        break;
+                    }
+                }
+
+                auto batch = new FenBatch(entries);
+
+                {
+                    std::unique_lock lock(m_batch_mutex);
+                    m_batches_not_full.wait(lock, [this]() { return m_batches.size() < m_concurrency + 1 || m_stop_flag.load(); });
+
+                    m_batches.emplace_back(batch);
+
+                    lock.unlock();
+                    m_batches_any.notify_one();
+                }
+
+            }
+            m_num_workers.fetch_sub(1);
+            m_batches_any.notify_one();
+        };
+
+        const int num_feature_threads = std::max(
+            1,
+            concurrency - std::max(1, concurrency / num_feature_threads_per_reading_thread)
+        );
+
+        for (int i = 0; i < num_feature_threads; ++i)
+        {
+            m_workers.emplace_back(worker);
+
+            // This cannot be done in the thread worker. We need
+            // to have a guarantee that this is incremented, but if
+            // we did it in the worker there's no guarantee
+            // that it executed.
+            m_num_workers.fetch_add(1);
+        }
+    }
+
+    FenBatch* next()
+    {
+        std::unique_lock lock(m_batch_mutex);
+        m_batches_any.wait(lock, [this]() { return !m_batches.empty() || m_num_workers.load() == 0; });
+
+        if (!m_batches.empty())
+        {
+            auto batch = m_batches.front();
+            m_batches.pop_front();
+
+            lock.unlock();
+            m_batches_not_full.notify_one();
+
+            return batch;
+        }
+        return nullptr;
+    }
+
+    ~FenBatchStream()
+    {
+        m_stop_flag.store(true);
+        m_batches_not_full.notify_all();
+
+        for (auto& worker : m_workers)
+        {
+            if (worker.joinable())
+            {
+                worker.join();
+            }
+        }
+
+        for (auto& batch : m_batches)
+        {
+            delete batch;
+        }
+    }
+
+private:
+    int m_batch_size;
+    int m_concurrency;
+    std::deque<FenBatch*> m_batches;
+    std::mutex m_batch_mutex;
+    std::mutex m_stream_mutex;
+    std::condition_variable m_batches_not_full;
+    std::condition_variable m_batches_any;
+    std::atomic_bool m_stop_flag;
+    std::atomic_int m_num_workers;
+
+    std::vector<std::thread> m_workers;
+};
+
+std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered, int random_fen_skipping)
+{
+    if (filtered || random_fen_skipping)
+    {
+        return [
+            random_fen_skipping,
+            prob = double(random_fen_skipping) / (random_fen_skipping + 1),
+            filtered
+            ](const TrainingDataEntry& e){
+
+            auto do_skip = [&]() {
+                std::bernoulli_distribution distrib(prob);
+                auto& prng = rng::get_thread_local_rng();
+                return distrib(prng);
+            };
+
+            auto do_filter = [&]() {
+                return (e.isCapturingMove() || e.isInCheck());
+            };
+
+            static thread_local std::mt19937 gen(std::random_device{}());
+            return (random_fen_skipping && do_skip()) || (filtered && do_filter());
+        };
+    }
+
+    return nullptr;
+}
+
 extern "C" {
 
     EXPORT SparseBatch* get_sparse_batch_from_fens(
@@ -588,31 +801,21 @@ extern "C" {
         return nullptr;
     }
 
+    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping)
+    {
+        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping);
+
+        return new FenBatchStream(concurrency, filename, batch_size, cyclic, skipPredicate);
+    }
+
+    EXPORT void CDECL destroy_fen_batch_stream(FenBatchStream* stream)
+    {
+        delete stream;
+    }
+
     EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping)
     {
-        std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr;
-        if (filtered || random_fen_skipping)
-        {
-            skipPredicate = [
-                random_fen_skipping,
-                prob = double(random_fen_skipping) / (random_fen_skipping + 1),
-                filtered
-                ](const TrainingDataEntry& e){
-
-                auto do_skip = [&]() {
-                    std::bernoulli_distribution distrib(prob);
-                    auto& prng = rng::get_thread_local_rng();
-                    return distrib(prng);
-                };
-
-                auto do_filter = [&]() {
-                    return (e.isCapturingMove() || e.isInCheck());
-                };
-
-                static thread_local std::mt19937 gen(std::random_device{}());
-                return (random_fen_skipping && do_skip()) || (filtered && do_filter());
-            };
-        }
+        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping);
 
         std::string_view feature_set(feature_set_c);
         if (feature_set == "HalfKP")
@@ -653,7 +856,17 @@ extern "C" {
         return stream->next();
     }
 
+    EXPORT FenBatch* CDECL fetch_next_fen_batch(Stream<FenBatch>* stream)
+    {
+        return stream->next();
+    }
+
     EXPORT void CDECL destroy_sparse_batch(SparseBatch* e)
+    {
+        delete e;
+    }
+
+    EXPORT void CDECL destroy_fen_batch(FenBatch* e)
     {
         delete e;
     }
