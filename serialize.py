@@ -3,7 +3,6 @@ import features
 import math
 import model as M
 import numpy
-import nnue_bin_dataset
 import struct
 import torch
 from torch import nn
