@@ -5,6 +5,7 @@ import sys
 import time
 import argparse
 import features
+import shutil
 
 
 def convert_ckpt(root_dir,features):
@@ -65,9 +66,6 @@ def parse_ordo(root_dir, nnues):
 
 def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_base, stockfish_test):
     """ Run a match using c-chess-cli adding pgns to a file to be analysed with ordo """
-    if stockfish_test is None:
-        stockfish_test = stockfish_base
-
     pgn_file_name = os.path.join(root_dir, "out.pgn")
     command = "{} -each tc=4+0.04 option.Hash=8 option.Threads=1 -gauntlet -games 200 -rounds 1 -concurrency {}".format(
         c_chess_exe, concurrency
@@ -241,14 +239,34 @@ def main():
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
+    stockfish_base = args.stockfish_base
+    stockfish_test = args.stockfish_test
+    if stockfish_test is None:
+        stockfish_test = stockfish_base
+
+    if not shutil.which(stockfish_base):
+       sys.exit("Stockfish base is not executable !")
+
+    if not shutil.which(stockfish_test):
+       sys.exit("Stockfish test is not executable!")
+
+    if not shutil.which(args.ordo_exe):
+       sys.exit("ordo is not executable!")
+
+    if not shutil.which(args.c_chess_exe):
+       sys.exit("c_chess_cli is not executable!")
+
+    if not os.path.exists(args.book_file_name):
+       sys.exit("book does not exist!")
+
     while True:
         run_round(
             args.root_dir,
             args.explore_factor,
             args.ordo_exe,
             args.c_chess_exe,
-            args.stockfish_base,
-            args.stockfish_test,
+            stockfish_base,
+            stockfish_test,
             args.book_file_name,
             args.concurrency,
             args.features,
