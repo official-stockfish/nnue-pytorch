@@ -96,7 +96,7 @@ This document describes in detail what NNUE is, how it works in theory, how the 
 
 ### What is NNUE?
 
-NNUE (ƎUИИ Efficiently Updatable Neural Network) is, broadly speaking, a neural network architecture that takes advantage of having minimal changes in the network inputs between subsequent evaluations. It was invented for Shogi by Yu Nasu and later ported to chess for use in Stockfish, but is applicable to many other board games and perhaps even in other domains. NNUE operates on the following principles:
+NNUE (ƎUИИ Efficiently Updatable Neural Network) is, broadly speaking, a neural network architecture that takes advantage of having minimal changes in the network inputs between subsequent evaluations. It was invented for Shogi by Yu Nasu, integrated into [YaneuraOu](https://github.com/yaneurao/YaneuraOu) developed by Motohiro Isozaki in May 2018, and later ported to chess for use in Stockfish by Hisayori Noda in June 2019, but is applicable to many other board games and perhaps even in other domains. NNUE operates on the following principles:
 
 1. The network should have relatively low amount of non-zero inputs.
 2. The inputs should change as little as possible between subsequent evaluations.
