@@ -22,13 +22,16 @@ class NNUEVisualizer():
             self.args.default_width//self.dpi, self.args.default_height//self.dpi)
         mpl.rcParams["figure.dpi"] = self.dpi
 
-    def _process_fig(self, name):
+    def _process_fig(self, name, fig=None):
         if self.args.save_dir:
             from os.path import join
             destname = join(
                 self.args.save_dir, "{}{}.jpg".format("" if self.args.label is None else self.args.label + "_", name))
             print("Saving {}".format(destname))
-            plt.savefig(destname)
+            if fig is not None:
+                fig.savefig(destname)
+            else:
+                plt.savefig(destname)
 
     def plot_input_weights(self):
         # Coalesce weights and transform them to Numpy domain.
@@ -47,7 +50,7 @@ class NNUEVisualizer():
         self.M = hd
 
         # Preferred ratio of number of input neurons per row/col.
-        preferred_ratio = 4
+        preferred_ratio = 8
 
         # Number of input neurons per row.
         # Find a factor of hd such that the aspect ratio
@@ -77,7 +80,7 @@ class NNUEVisualizer():
         # Derived/fixed constants.
         numy = hd//numx
         widthx = 128
-        widthy = 400
+        widthy = 368
         totalx = numx * widthx
         totaly = numy * widthy
         totaldim = totalx*totaly
@@ -92,6 +95,8 @@ class NNUEVisualizer():
                 # Calculate piece and king placement.
                 pi = (j // hd) % 704
                 ki = (j // hd) // 704
+                if pi // 64 == 10 and ki != pi % 64:
+                    pi += 64
                 piece = pi // 64
                 rank = (pi % 64) // 8
 
@@ -229,7 +234,6 @@ class NNUEVisualizer():
             ax.format_coord = format_coord
 
             self._process_fig("input-weights")
-
             if not self.args.no_hist:
                 # Input weights histogram.
                 plt.figure()
@@ -240,21 +244,43 @@ class NNUEVisualizer():
                 self._process_fig("input-weights-histogram")
 
     def plot_fc_weights(self):
+
         if not self.args.no_fc_weights:
-            # L1 weights.
-            l1_weights_ = self.model.l1.weight.data.numpy()
+            num_buckets = self.model.feature_set.num_ls_buckets
+            fig, axs = plt.subplots(3, num_buckets, dpi=self.dpi)
+
+            extra_info = ""
+            if self.args.sort_input_neurons:
+                extra_info += "; sorted input neurons"
+            title_template = "weights [{LABEL}" + extra_info + "]"
+            fig.suptitle(title_template.format(LABEL=self.args.label))
 
             if self.args.ref_model:
-                l1_weights_ -= self.ref_model.l1.weight.data.numpy()
+                ref_layers = list(self.ref_model.layer_stacks.get_coalesced_layer_stacks())
 
-            N = l1_weights_.size // (2*self.M)
+            def get_l1_weights(bucket_id, l1):
+                l1_weights_ = l1.weight.data.numpy()
 
-            l1_weights = np.zeros((2*N, self.M))
+                if self.args.ref_model:
+                    l1_weights_ -= ref_layers[bucket_id][0].weight.data.numpy()
 
-            for i in range(N):
-                l1_weights[2*i] = l1_weights_[i][self.sorted_input_neurons]
-                l1_weights[2*i+1] = l1_weights_[i][self.M +
-                                                   self.sorted_input_neurons]
+                N = l1_weights_.size // (2*self.M)
+
+                l1_weights = np.zeros((2*N, self.M))
+
+                for i in range(N):
+                    l1_weights[2*i] = l1_weights_[i][self.sorted_input_neurons]
+                    l1_weights[2*i+1] = l1_weights_[i][self.M +
+                                                       self.sorted_input_neurons]
+                return l1_weights, N
+
+            def get_l2_weights(bucket_id, l2):
+                l2_weights = l2.weight.data.numpy()
+
+                if self.args.ref_model:
+                    l2_weights -= ref_layers[bucket_id][1].weight.data.numpy()
+
+                return l2_weights
 
             if self.args.fc_weights_auto_scale:
                 vmin = None
@@ -263,117 +289,144 @@ class NNUEVisualizer():
                 vmin = self.args.fc_weights_vmin
                 vmax = self.args.fc_weights_vmax
 
-            extra_info_l1 = ""
-            if self.args.sort_input_neurons:
-                extra_info_l1 += "; sorted input neurons"
-
             if self.args.fc_weights_auto_scale or self.args.fc_weights_vmin < 0:
-                l1_title_template = "L1 weights [{LABEL}" + extra_info_l1 + "]"
-                l2_title_template = "L2 weights [{LABEL}]"
-                output_title_template = "output weights [{LABEL}]"
                 plot_abs = False
                 cmap = 'coolwarm'
             else:
-                l1_title_template = "abs(L1 weights) [{LABEL}" + \
-                    extra_info_l1 + "]"
-                l2_title_template = "abs(L2 weights) [{LABEL}]"
-                output_title_template = "abs(output weights) [{LABEL}]"
                 plot_abs = True
                 cmap = 'viridis'
 
-            plt.figure()
-            gs = GridSpec(100, 100)
-            plt.subplot(gs[:50, :])
-            plt.matshow(np.abs(l1_weights) if plot_abs else l1_weights,
-                        fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
-            plt.colorbar(fraction=0.046, pad=0.04)
-            plt.axis('off')
-            plt.title(l1_title_template.format(LABEL=self.args.label))
-
             line_options = {'color': 'gray', 'linewidth': 0.5}
 
-            for j in range(1, N):
-                plt.axhline(y=2*j-0.5, **line_options)
+            for bucket_id, (l1, l2, output) in enumerate(self.model.layer_stacks.get_coalesced_layer_stacks()):
+                l1_weights, N = get_l1_weights(bucket_id, l1)
+                l2_weights = get_l2_weights(bucket_id, l2)
+                output_weights = output.weight.data.numpy()
 
-            # L2 weights.
-            l2_weights = self.model.l2.weight.data.numpy()
+                if self.args.ref_model:
+                    output_weights -= ref_layers[bucket_id][2].weight.data.numpy()
 
-            if self.args.ref_model:
-                l2_weights -= self.ref_model.l2.weight.data.numpy()
+                ax = axs[0, bucket_id]
+                im = ax.matshow(np.abs(l1_weights) if plot_abs else l1_weights,
+                                vmin=vmin, vmax=vmax, cmap=cmap)
 
-            plt.subplot(gs[55:75, 40:60])
-            plt.matshow(np.abs(l2_weights) if plot_abs else l2_weights,
-                        fignum=0, vmin=None if vmin == float(
-                "-inf") else vmin, vmax=vmax, cmap=cmap)
-            plt.colorbar(fraction=0.046, pad=0.04)
-            plt.axis('off')
-            plt.title(l2_title_template.format(LABEL=self.args.label))
+                for j in range(1, N):
+                    ax.axhline(y=2*j-0.5, **line_options)
 
-            # Output weights.
-            output_weights = self.model.output.weight.data.numpy()
+                ax = axs[1, bucket_id]
+                im = ax.matshow(np.abs(l2_weights) if plot_abs else l2_weights,
+                                vmin=None if vmin == float("-inf") else vmin,
+                                vmax=vmax, cmap=cmap)
 
-            if self.args.ref_model:
-                output_weights -= self.ref_model.output.weight.data.numpy()
+                ax = axs[2, bucket_id]
+                im = ax.matshow(np.abs(output_weights) if plot_abs else output_weights,
+                                vmin=vmin, vmax=vmax, cmap=cmap)
 
-            plt.subplot(gs[75:, :])
-            plt.matshow(np.abs(output_weights) if plot_abs else output_weights,
-                        fignum=0, vmin=vmin, vmax=vmax, cmap=cmap)
-            plt.colorbar(fraction=0.046, pad=0.04)
-            plt.axis('off')
-            plt.title(output_title_template.format(LABEL=self.args.label))
-            self._process_fig("fc-weights")
+            row_names = ['bucket {}'.format(i) for i in range(num_buckets)]
+            col_names = ['l1', 'l2', 'output']
+            for i in range(3):
+                for j in range(num_buckets):
+                    ax = axs[i, j]
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    if i == 0 and row_names[j]:
+                        ax.set_xlabel(row_names[j])
+                        ax.xaxis.set_label_position('top')
+                    if j == 0 and col_names[i]:
+                        ax.set_ylabel(col_names[i])
+
+                fig.colorbar(im, fraction=0.046, pad=0.04, ax=axs[i, :].ravel().tolist())
+
+            self._process_fig("fc-weights", fig)
 
             if not self.args.no_hist:
-                # L1 weights histogram.
-                plt.figure()
+                fig, axs = plt.subplots(num_buckets, 1, sharex=True, dpi=self.dpi)
                 title_template = "L1 weights histogram [{LABEL}]"
-                plt.hist(l1_weights.flatten(), log=True, bins=(
-                    np.arange(int(np.min(l1_weights)*64)-1, int(np.max(l1_weights)*64)+3)-0.5)/64)
-                plt.title(title_template.format(LABEL=self.args.label))
-                plt.tight_layout()
-                self._process_fig("l1-weights-histogram")
+                fig.suptitle(title_template.format(LABEL=self.args.label))
+                for bucket_id, (l1, l2, output) in enumerate(self.model.layer_stacks.get_coalesced_layer_stacks()):
+                    # L1 weights histogram.
+                    ax = axs[bucket_id]
+                    l1_weights, N = get_l1_weights(bucket_id, l1)
+                    ax.hist(l1_weights.flatten(), log=True, bins=(
+                        np.arange(int(np.min(l1_weights)*64)-1, int(np.max(l1_weights)*64)+3)-0.5)/64)
+                self._process_fig("l1-weights-histogram", fig)
 
-                # L2 weights histogram.
-                plt.figure()
+                fig, axs = plt.subplots(num_buckets, 1, sharex=True, dpi=self.dpi)
                 title_template = "L2 weights histogram [{LABEL}]"
-                plt.hist(l2_weights.flatten(), log=True, bins=(
-                    np.arange(int(np.min(l2_weights)*64)-1, int(np.max(l2_weights)*64)+3)-0.5)/64)
-                plt.title(title_template.format(LABEL=self.args.label))
-                plt.tight_layout()
-                self._process_fig("l2-weights-histogram")
+                fig.suptitle(title_template.format(LABEL=self.args.label))
+                for bucket_id, (l1, l2, output) in enumerate(self.model.layer_stacks.get_coalesced_layer_stacks()):
+                    # L2 weights histogram.
+                    ax = axs[bucket_id]
+                    l2_weights = get_l2_weights(bucket_id, l2)
+                    ax.hist(l2_weights.flatten(), log=True, bins=(
+                        np.arange(int(np.min(l2_weights)*64)-1, int(np.max(l2_weights)*64)+3)-0.5)/64)
+                self._process_fig("l2-weights-histogram", fig)
 
-    def plot_biases(self):
+    def plot_fc_biases(self):
         if not self.args.no_biases:
-            input_biases = self.model.input.bias.data.numpy()[
-                self.sorted_input_neurons]
-            l1_biases = self.model.l1.bias.data.numpy()
-            l2_biases = self.model.l2.bias.data.numpy()
-            output_bias = self.model.output.bias.data.numpy()
-
             if self.args.ref_model:
-                input_biases -= self.ref_model.input.bias.data.numpy()[
-                    self.sorted_input_neurons]
-                l1_biases -= self.ref_model.l1.bias.data.numpy()
-                l2_biases -= self.ref_model.l2.bias.data.numpy()
-                output_bias -= self.ref_model.output.bias.data.numpy()
+                ref_layers = list(self.ref_model.layer_stacks.get_coalesced_layer_stacks())
 
+            num_buckets = self.model.feature_set.num_ls_buckets
+            fig, axs = plt.subplots(3, num_buckets, dpi=self.dpi)
             extra_info = ""
             if self.args.sort_input_neurons:
                 extra_info += "; sorted input neurons"
-
-            plt.figure()
             title_template = "biases [{LABEL}" + extra_info + "]"
-            plt.subplot(2, 1, 1)
-            plt.plot(input_biases, '+', label='input')
-            plt.title(title_template.format(LABEL=self.args.label))
-            plt.legend()
-            plt.subplot(2, 1, 2)
-            plt.plot(l1_biases, 'x', label='L1')
-            plt.plot(l2_biases, '+', label='L2')
-            plt.plot(output_bias, 'o', label='output')
-            plt.legend()
-            plt.tight_layout()
-            self._process_fig("biases")
+            fig.suptitle(title_template.format(LABEL=self.args.label))
+
+            if self.args.fc_weights_auto_scale:
+                vmin = None
+                vmax = None
+            else:
+                vmin = self.args.fc_weights_vmin
+                vmax = self.args.fc_weights_vmax
+
+            if self.args.fc_weights_auto_scale or self.args.fc_weights_vmin < 0:
+                plot_abs = False
+                cmap = 'coolwarm'
+            else:
+                plot_abs = True
+                cmap = 'viridis'
+
+            for bucket_id, (l1, l2, output) in enumerate(self.model.layer_stacks.get_coalesced_layer_stacks()):
+                l1_biases = l1.bias.data.numpy()
+                l2_biases = l2.bias.data.numpy()
+                output_bias = output.bias.data.numpy()
+
+                if self.args.ref_model:
+                    l1_biases -= ref_layers[bucket_id][0].bias.data.numpy()
+                    l2_biases -= ref_layers[bucket_id][1].bias.data.numpy()
+                    output_bias -= ref_layers[bucket_id][2].bias.data.numpy()
+
+                ax = axs[0, bucket_id]
+                im = ax.matshow(np.expand_dims(l1_biases, axis=0),
+                                vmin=vmin, vmax=vmax, cmap=cmap)
+
+                ax = axs[1, bucket_id]
+                im = ax.matshow(np.expand_dims(l2_biases, axis=0),
+                                vmin=vmin, vmax=vmax, cmap=cmap)
+
+                ax = axs[2, bucket_id]
+                im = ax.matshow(np.expand_dims(output_bias, axis=0),
+                                vmin=vmin, vmax=vmax, cmap=cmap)
+
+            row_names = ['bucket {}'.format(i) for i in range(num_buckets)]
+            col_names = ['l1', 'l2', 'output']
+            for i in range(3):
+                for j in range(num_buckets):
+                    ax = axs[i, j]
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    if i == 0 and row_names[j]:
+                        ax.set_xlabel(row_names[j])
+                        ax.xaxis.set_label_position('top')
+                    if j == 0 and col_names[i]:
+                        ax.set_ylabel(col_names[i])
+
+                fig.colorbar(im, fraction=0.046, pad=0.04, ax=axs[i, :].ravel().tolist())
+
+            self._process_fig("biases", fig)
 
 
 def load_model(filename, feature_set):
@@ -493,8 +546,8 @@ def main():
     visualizer = NNUEVisualizer(model, ref_model, args)
 
     visualizer.plot_input_weights()
-    #visualizer.plot_fc_weights()
-    #visualizer.plot_biases()
+    visualizer.plot_fc_weights()
+    visualizer.plot_fc_biases()
 
     if not args.dont_show:
         plt.show()
