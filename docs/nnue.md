@@ -71,6 +71,8 @@ This document describes in detail what NNUE is, how it works in theory, how the 
         - [Linear layer](#linear-layer-4)
             * [m256_add_dpbusd_epi32](#m256_add_dpbusd_epi32)
             * [m256_haddx4](#m256_haddx4)
+        - [Linear layer with sparse input](#linear-layer-with-sparse-input)
+        - [Linear layer with sparse input and blocked sparse output](#linear-layer-with-sparse-input-and-blocked-sparse-output)
         - [ClippedReLU](#clippedrelu-2)
             * [int16 -> int8](#int16---int8)
             * [int32 -> int8](#int32---int8)
@@ -1032,18 +1034,17 @@ int32_t* linear(
         __m256i sum3 = _mm256_setzero_si256();
 
         // Each innermost loop processes a 32x4 chunk of weights, so 128 weights at a time!
-        for (int j = 0; j < num_in_chunks; ++j)
-        {
+        for (int j = 0; j < num_in_chunks; ++j) {
             // We unroll by 4 so that we can reuse this value, reducing the number of
             // memory operations required.
             const __m256i in = _mm256_load_si256(&input[j * register_width]);
 
             // This function processes a 32x1 chunk of int8 and produces a 8x1 chunk of int32.
             // For definition see below.
-            m256_add_dpbusd_epi32(sum0, in, _mm256_load_si256(&weights_[offset0 + j * register_width]);
-            m256_add_dpbusd_epi32(sum1, in, _mm256_load_si256(&weights_[offset1 + j * register_width]);
-            m256_add_dpbusd_epi32(sum2, in, _mm256_load_si256(&weights_[offset2 + j * register_width]);
-            m256_add_dpbusd_epi32(sum3, in, _mm256_load_si256(&weights_[offset3 + j * register_width]);
+            m256_add_dpbusd_epi32(sum0, in, _mm256_load_si256(&layer.weights[offset0 + j * register_width]);
+            m256_add_dpbusd_epi32(sum1, in, _mm256_load_si256(&layer.weights[offset1 + j * register_width]);
+            m256_add_dpbusd_epi32(sum2, in, _mm256_load_si256(&layer.weights[offset2 + j * register_width]);
+            m256_add_dpbusd_epi32(sum3, in, _mm256_load_si256(&layer.weights[offset3 + j * register_width]);
         }
 
         const __m128i bias = _mm256_load_si256(&layer.bias[i * 4]);
@@ -1107,6 +1108,287 @@ __m128i m256_haddx4(__m256i sum0, __m256i sum1, __m256i sum2, __m256i sum3, __m1
 
     return _mm_add_epi32(_mm_add_epi32(sum128lo, sum128hi), bias);
 };
+```
+
+#### Linear layer with sparse input
+
+In the previous part we described the generic dense matrix multiplication, but let's try to delve a little bit deeper. The case we will be considering here is similar to how our feature transformer operates, but here we always need to perform the full operation instead and the matrices are smaller. But why are we even considering this? Well, it turns out that the feature transformer output, after being passed through ClippedReLU, can have quite significant sparsity. Here is some data presenting the density of the inputs to the first dense fully connected layer, for networks with different feature transformer size:
+![](img/fc_input_density.png)
+(boxes corresponds to the [25%, 75%] interval, whiskers correspond to the [1%, 99%] interval)
+
+That's already <=15% density for the common sizes, and it's consistent between different networks! However we cannot make it as much faster, there is some cost related to the changed access patterns and more required preprocessing, so whether this approach works for your particular case needs to be thoroughly tested.
+
+Let's see the code that can take advantage of it.
+
+```
+int lsb(std::uint32_t v) {
+    // returns the least significant set bit in v
+    // implementation detail
+    // can be implemented for example using compiler intrinsics
+    // https://www.chessprogramming.org/BitScan#Leading_Zero_Count
+}
+
+// This implementation requires changing the layout and expanding the weights to int16.
+// We will transpose the weights as now we'll be going through the columns instead of rows.
+void load_weights(
+    const LinearLayer& layer,
+    const int8_t* data
+) {
+    static_assert(is_same_v<LinearLayer::WeightType, int16_t>,
+        "This approach requires weights to be 16 bit. Otherwise it's hard to widen the multiplication output to 32 bits.");
+
+    for (int i = 0; i < layer.num_outputs; ++i) {
+        for (int j = 0; j < layer.num_inputs; ++j) {
+            layer.weights[j*layer.num_outputs + i] = data[i*layer.num_inputs + j];
+        }
+    }
+
+    // For AVX2 we must also swap some lanes in the weights. This is
+    // because AVX2 registers functions as two 128 bit ones, and
+    // therefore some data is interleaved in the inference process.
+    // This makes it so that they end up where we want.
+    // Will be more apparent in the visualization.
+    // This effectively swaps out the middle 2 64-bit chunks in each 256-bit chunk.
+    for (int i = 0; i < layer.num_outputs; ++i) {
+        for (int j = 0; j < layer.num_inputs; ++j) {
+            const int simd_lane = j % 16;
+            const int simd_lane_64 = simd_lane / 4;
+            if (simd_lane_64 == 1) {
+                swap(
+                    layer.weights[i*layer.num_outputs + j + 0],
+                    layer.weights[i*layer.num_outputs + j + 4]
+                );
+            }
+        }
+    }
+}
+
+int32_t* linear_sparse_input(
+    const LinearLayer& layer,
+    int32_t*           output,
+    const int8_t*      input
+) {
+    static_assert(is_same_v<LinearLayer::WeightType, int16_t>,
+        "This approach requires weights to be 16 bit. Otherwise it's hard to widen the multiplication output to 32 bits.");
+
+    constexpr int register_width = 256 / 8;
+    constexpr int input_register_width = register_width; // uint8_t
+    constexpr int output_register_width = register_width / 4; // int32_t
+    constexpr int output_chunk_size = output_register_width * 2; // we will be processing 2 registers at a time
+    assert(layer.num_outputs % output_chunk_size == 0, "We're processing 16 output elements at a time");
+    assert(layer.num_inputs % input_register_width == 0);
+
+    // We need to find out the indices of the input values that are non-zero
+    uint16_t nnz_input_indices[layer.num_inputs];
+    int num_nnz_input_indices = 0;
+
+    for (int i = 0; i < layer.num_inputs; i += input_register_width) {
+        const __m256i input_chunk = _mm256_load_si256(input + i);
+        // Find out where the values are greater than 0 and set the corresponding bits in nnz
+        uint32_t nnz =
+            _mm256_movemask_epi8(
+                _mm256_cmpgt_epi8(input_chunk, _mm256_setzero_si256())
+            );
+
+        // Extract the indices of the set bits in nnz
+        while (nnz) {
+            const int lsb_index = lsb(nnz);
+            nnz &= nnz - 1; // reset the least significant set bit in nnz
+            nnz_input_indices[num_nnz_input_indices++] = i + lsb_index;
+        }
+    }
+
+    // First we just copy the biases. Compilers are good at vectorizing this.
+    // Could also use memcpy
+    for (int i = 0; i < layer.num_outputs; ++i) {
+        output[i] = layer.biases[i];
+    }
+
+    const int num_chunks = layer.num_outputs / output_chunk_size;
+    int i = 0;
+    for (; i + 1 < num_nnz_input_indices; i += 2) {
+        // We will try to process 2 at a time as much as possible,
+        // as we can utilize the available intrinsics better.
+        // Will become more apparant on the visualization.
+        const int input_id0 = nnz_input_indices[i+0];
+        const int input_id1 = nnz_input_indices[i+1];
+        const __m256i factor = _mm256_set1_epi32(
+            input[input_id0] | (input[input_id1] << 16)
+        );
+
+        for (int j = 0; j < num_chunks; ++j) {
+            const int output_offset0 = (j*2 + 0)*output_register_width;
+            const int output_offset1 = (j*2 + 1)*output_register_width;
+
+            // Weights are packed 2 times as densely as the output.
+            const int weight_offset  = (j*1 + 0)*output_register_width;
+
+            // Each chunk requires a load+store.
+            // However, if the output is small enough it can be unrolled and
+            // all outputs might fit into the registers.
+            // Though the compiler probably is not allowed to do it by itself.
+            __m256i sum0 = _mm256_load_si256(output + output_offset0);
+            __m256i sum1 = _mm256_load_si256(output + output_offset1);
+
+            // Remember, weights are 16 bit here, so one __m256i can hold 16 of them.
+            const __m256i col0 = _mm256_load_si256(
+                layer.weights + input_id0 * layer.num_outputs + weight_offset
+            );
+            const __m256i col1 = _mm256_load_si256(
+                layer.weights + input_id1 * layer.num_outputs + weight_offset
+            );
+
+            // See next below for visualization
+            m256_process_chunk(sum0, sum1, col0, col1, factor);
+
+            _mm256_store_si256(output + output_offset0, sum0);
+            _mm256_store_si256(output + output_offset1, sum1);
+        }
+    }
+
+    // Process the remaining single input
+    for (; i < num_nnz_input_indices; ++i) {
+        const int input_id = nnz_input_indices[i];
+        const __m256i factor = _mm256_set1_epi32(input[input_id]);
+
+        for (int j = 0; j < num_chunks; ++j) {
+            const int output_offset0 = (j*2 + 0)*output_register_width;
+            const int output_offset1 = (j*2 + 1)*output_register_width;
+
+            const int weight_offset  = (j*1 + 0)*output_register_width;
+
+            __m256i sum0 = _mm256_load_si256(output + output_offset0);
+            __m256i sum1 = _mm256_load_si256(output + output_offset1);
+
+            const __m256i col0 = _mm256_load_si256(
+                layer.weights + input_id * layer.num_outputs + weight_offset
+            );
+
+            m256_process_chunk(sum0, sum1, col0, _mm256_setzero_si256(), factor);
+
+            _mm256_store_si256(output + output_offset0, sum0);
+            _mm256_store_si256(output + output_offset1, sum1);
+        }
+    }
+
+    return output + layer.num_outputs;
+}
+```
+
+##### m256_process_chunk
+
+This function takes int16 weights, a factor being a composition of 2 int8 inputs broadcasted as int32, and produces int32 outputs.
+
+![](img/m256_process_chunk.png)
+
+```
+void m256_process_chunk(__m256i& sum0, __m256i& sum1, __m256i col0, __m256i col1, __m256i factor) {
+    // We interleave the two columns, because madd adds adjacent values.
+    // This way we effectively add the results from both columns.
+    sum0 = _mm256_add_epi32(
+        sum0, _mm256_madd_epi16(factor, _mm256_unpacklo_epi16(col0, col1))
+    );
+    sum1 = _mm256_add_epi32(
+        sum1, _mm256_madd_epi16(factor, _mm256_unpackhi_epi16(col0, col1))
+    );
+}
+```
+
+#### Linear layer with sparse input and blocked sparse output
+
+Let's go one step further. For now all linear layers had dense outputs, but we can consider a layer where each input is connected only to a subset of outputs. We can consider the weights to be 0 where no connection is present. To make it possible to implement efficiently with vectorization in mind we have to zero out whole blocks of weights. A 16x128 Weight matrix with 2 non-zero 1x16 blocks per input may look like this for example:
+
+![](img/m256_block_sparse_weight_matrix.png)
+
+For AVX2 such blocks must be at least 8 int32s (type of the output values) wide, but we will consider only 16-wide blocks because it's more convenient. With this approach one can have for example a linear layer with 256 outputs, but only 4 (this being constant is quite important for being able to write optimized code) non-zero weight blocks of size 16 per input, effectively having each input only affect 64 outputs.
+
+There is some additional workload in the forward pass to support it, and it doesn't vectorize as nicely as previous cases, but it might still be a win for some architectures.
+
+However, with this approach the training needs to be aware of this and try to create those blocks of 0 weights without harming the network too much. This can be achieved with weight pruning, which will be described later. The inference code will be very similar to the linear layer with sparse inputs case.
+
+
+```
+void load_weights(
+    const LinearLayer& layer,
+    const int8_t* data
+) {
+    // This goes the same as in the case with sparse inputs, however
+    // the weights matrix is no longer continuous and we need to fill
+    // some block indices to know which weights correspond to which ouputs.
+    // This can be done either by discovering the zero blocks during loading,
+    // or with a different serialized format with the block indices precomputed.
+    // We will omit this here and just assume that layer.nnz_block_ids[input_id][4]
+    // contains non-zero weight block indices corresponding to each input.
+}
+
+int32_t* linear_sparse_input_block_sparse_output(
+    const LinearLayer& layer,
+    int32_t*           output,
+    const int8_t*      input
+) {
+    static_assert(is_same_v<LinearLayer::WeightType, int16_t>,
+        "This approach requires weights to be 16 bit. Otherwise it's hard to widen the multiplication output to 32 bits.");
+
+    constexpr int register_width = 256 / 8;
+    constexpr int input_register_width = register_width; // uint8_t
+    constexpr int output_register_width = register_width / 4; // int32_t
+    constexpr int output_chunk_size = output_register_width * 2; // we will be processing 2 registers at a time
+    assert(layer.num_outputs % output_chunk_size == 0, "We're processing 16 output elements at a time");
+    assert(layer.num_inputs % input_register_width == 0);
+
+    uint16_t nnz_input_indices[layer.num_inputs];
+    int num_nnz_input_indices = 0;
+
+    for (int i = 0; i < layer.num_inputs; i += input_register_width) {
+        const __m256i input_chunk = _mm256_load_si256(input + i);
+        uint32_t nnz =
+            _mm256_movemask_epi8(
+                _mm256_cmpgt_epi8(input_chunk, _mm256_setzero_si256())
+            );
+
+        while (nnz) {
+            const int lsb_index = lsb(nnz);
+            nnz &= nnz - 1; // reset the least significant set bit in nnz
+            nnz_input_indices[num_nnz_input_indices++] = i + lsb_index;
+        }
+    }
+
+    for (int i = 0; i < layer.num_outputs; ++i) {
+        output[i] = layer.biases[i];
+    }
+
+    const int num_chunks = layer.num_outputs / output_chunk_size;
+    // There are always tradeoffs. We cannot process two inputs at a time, because
+    // they might have different non-zero weight blocks. Makes it visibly slower.
+    // There might be some tricks with AVX512, but AVX2 is fairly limited for this use case.
+    for (int i = 0; i < num_nnz_input_indices; ++i) {
+        const int input_id = nnz_input_indices[i]
+        const __m256i factor = _mm256_set1_epi32(input[input_id]);
+
+        // We have hardcoded 4 16-wide non-zero weight blocks per input.
+        for (int j = 0; j < 4; ++j) {
+            const int block_id = layer.nnz_block_ids[input_id][j];
+            const int output_offset0 = (block_id*2 + 0)*output_register_width;
+            const int output_offset1 = (block_id*2 + 1)*output_register_width;
+
+            const int weight_offset  = (block_id*1 + 0)*output_register_width;
+
+            __m256i sum0 = _mm256_load_si256(output + output_offset0);
+            __m256i sum1 = _mm256_load_si256(output + output_offset1);
+
+            const __m256i col0 = _mm256_load_si256(
+                layer.weights + input_id * layer.num_outputs + weight_offset
+            );
+
+            m256_process_chunk(sum0, sum1, col0, _mm256_setzero_si256(), factor);
+
+            _mm256_store_si256(output + output_offset0, sum0);
+            _mm256_store_si256(output + output_offset1, sum1);
+        }
+    }
+
+    return output + layer.num_outputs;
+}
 ```
 
 #### ClippedReLU
