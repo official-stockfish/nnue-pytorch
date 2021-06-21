@@ -271,9 +271,7 @@ class NNUE(pl.LightningModule):
     t = outcome
     p = (score / in_scaling).sigmoid()
 
-    loss_eval = (p - q).square().mean()
-    loss_result = (q - t).square().mean()
-    loss = self.lambda_ * loss_eval + (1.0 - self.lambda_) * loss_result
+    loss = torch.pow(torch.abs(p - q), 2.6).mean()
 
     self.log(loss_type, loss)
 
@@ -295,7 +293,9 @@ class NNUE(pl.LightningModule):
 
   def configure_optimizers(self):
     # Train with a lower LR on the output layer
-    LR = 1.5e-3
+    LR = 8.75e-4
+    gamma=0.992
+
     train_params = [
       {'params' : get_parameters([self.input]), 'lr' : LR, 'gc_dim' : 0 },
       {'params' : [self.layer_stacks.l1_fact.weight], 'lr' : LR },
