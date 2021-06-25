@@ -36,12 +36,6 @@ class FeatureSet:
         self.num_psqt_buckets = PSQT_BUCKETS
         self.num_ls_buckets = LS_BUCKETS
 
-    def get_ls_index(self, board: chess.Board):
-        return self.get_psqt_index(board)
-
-    def get_psqt_index(self, board: chess.Board):
-        return (chess.popcount(board.occupied) - 1) // 4
-
     '''
     This method returns the feature ranges for the virtual factors of the
     underlying feature blocks. This is useful to know during initialization,
