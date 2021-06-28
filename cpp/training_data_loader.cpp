@@ -12,19 +12,7 @@
 #include "lib/nnue_training_data_formats.h"
 #include "lib/nnue_training_data_stream.h"
 #include "lib/rng.h"
-
-#if defined (__x86_64__)
-#define EXPORT
-#define CDECL
-#else
-#if defined (_MSC_VER)
-#define EXPORT __declspec(dllexport)
-#define CDECL __cdecl
-#else
-#define EXPORT
-#define CDECL __attribute__ ((__cdecl__))
-#endif
-#endif
+#include "lib/export.h"
 
 using namespace binpack;
 using namespace chess;

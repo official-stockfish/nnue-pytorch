@@ -29,12 +29,12 @@ This requires a C++17 compiler and cmake.
 
 Windows:
 ```
-compile_data_loader.bat
+build_native_bits.bat
 ```
 
 Linux/Mac:
 ```
-sh compile_data_loader.bat
+sh build_native_bits.bat
 ```
 
 # Train a network
