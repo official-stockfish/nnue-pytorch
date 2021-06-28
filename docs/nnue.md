@@ -193,7 +193,7 @@ When using quantization this is no longer a problem, but now there is a possibil
 ### HalfKP
 
 HalfKP is the most common feature set and other successful ones build on top of it. It fits in a sweet spot of being just the right size, and requiring very few updates per move on average. Each feature is a tuple `(our_king_square, piece_square, piece_type, piece_color)`, where `piece_type` is not a king (in HalfKA feature set kings are included). This means that for each king position there is a set of features `P`, which are `(piece_square, piece_type, piece_color)`. This allows the net to better understand the pieces in relation to the king. The total number of features is `64*64*5*2=40960`. (Note that there is a leftover from Shogi in the current Stockfish implementation and there are 64 additional features that are unused, but we will disregard them for the purposes of this document). The feature index can be calculated as
-```
+```cpp
 p_idx = piece_type * 2 + piece_color
 halfkp_idx = piece_square + (p_idx + king_square * 10) * 64
 ```
@@ -264,7 +264,7 @@ The code will be pseudo-c++.
 
 The accumulator can be represented by an array that is stored along other position state information on the search stack.
 
-```
+```cpp
 struct NnueAccumulator {
     // Two vectors of size N. v[0] for white's, and v[1] for black's perspectives.
     float v[2][N];
@@ -283,7 +283,7 @@ The accumulator can either be updated lazily on evaluation, or on each move. It 
 
 #### Refreshing the accumulator
 
-```
+```cpp
 void refresh_accumulator(
     const LinearLayer&      layer,            // this will always be L_0
     NnueAccumulator&        new_acc,          // storage for the result
@@ -306,7 +306,7 @@ void refresh_accumulator(
 
 #### Updating the accumulator
 
-```
+```cpp
 void update_accumulator(
     const LinearLayer&      layer,            // this will always be L_0
     NnueAccumulator&        new_acc,          // it's nice to have already provided storage for
@@ -346,7 +346,7 @@ And that's it! Pretty simple, isn't it?
 
 This is simple matrix-vector multiplication, what could be complicated about it you ask? Nothing for now, but it will get hairy further into this document. Right now we won't optimize, but we will at least write a version that uses the fact that the weight matrix has column-major layout.
 
-```
+```cpp
 float* linear(
     const LinearLayer& layer,  // the layer to use. We have two: L_1, L_2
     float*             output, // the already allocated storage for the result
@@ -372,7 +372,7 @@ float* linear(
 
 ### ClippedReLu
 
-```
+```cpp
 float* crelu(,
     int          size,   // no need to have any layer structure, we just need the number of elements
     float*       output, // the already allocated storage for the result
@@ -390,7 +390,7 @@ float* crelu(,
 
 In a crude pseudo code. The feature gathering is left as an exercise for the reader :P.
 
-```
+```cpp
 void Position::do_move(...) {
     ... // do the movey stuff
 
@@ -482,7 +482,7 @@ Let's continue using the architecture from the forward pass implementation.
 
 Pytorch has built in types for linear layers, so defining the model is pretty simple.
 
-```
+```python
 class NNUE(nn.Module):
     def __init__(self):
         super(NNUE, self).__init__()
@@ -532,7 +532,7 @@ Because of that we also cannot simply use the pytorch's `DataLoader`, and need t
 
 The minimum that's needed are the features (from both perspectives), the side to move (for accumulator slice ordering), and the position evaluation (the score). Let's see how they are represented.
 
-```
+```cpp
 struct SparseBatch {
     SparseBatch(const std::vector<TrainingDataEntry>& entries) {
 
@@ -593,7 +593,7 @@ struct SparseBatch {
 
 and in python
 
-```
+```python
 class SparseBatch(ctypes.Structure):
     _fields_ = [
         ('size', ctypes.c_int),
@@ -606,48 +606,48 @@ class SparseBatch(ctypes.Structure):
     ]
 
     def get_tensors(self, device):
-        // This is illustrative. In reality you might need to transfer these
-        // to the GPU. You can also do it asynchronously, but remember to make
-        // sure the source lives long enough for the copy to finish.
+        # This is illustrative. In reality you might need to transfer these
+        # to the GPU. You can also do it asynchronously, but remember to make
+        # sure the source lives long enough for the copy to finish.
 
-        // This is a nice way to convert a pointer to a pytorch tensor.
-        // Shape needs to be passed, remember we're forming the whole batch, the first
-        // dimension is always the batch size.
+        # This is a nice way to convert a pointer to a pytorch tensor.
+        # Shape needs to be passed, remember we're forming the whole batch, the first
+        # dimension is always the batch size.
         stm_t = torch.from_numpy(np.ctypeslib.as_array(self.stm, shape=(self.size, 1)))
         score_t = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1)))
 
-        // As we said, the indices need to be transposed such that position indices come first
+        # As we said, the indices need to be transposed such that position indices come first
         white_features_indices_t = torch.transpose(torch.from_numpy(np.ctypeslib.as_array(self.white_features_indices, shape=(self.num_active_white_features, 2))), 0, 1).long()
         black_features_indices_t = torch.transpose(torch.from_numpy(np.ctypeslib.as_array(self.black_features_indices, shape=(self.num_active_white_features, 2))), 0, 1).long()
 
-        // The values are all ones, so we can create these tensors in place easily.
-        // No need to go through a copy.
+        # The values are all ones, so we can create these tensors in place easily.
+        # No need to go through a copy.
         white_features_values_t = torch.ones(self.num_active_white_features)
         black_features_values_t = torch.ones(self.num_active_black_features)
 
-        // Now the magic. We construct a sparse tensor by giving the indices of
-        // non-zero values (active feature indices) and these values (ones!).
-        // The size of the tensor is batch_size*NUM_FEATURES, which would
-        // normally be insanely large, but since the density is ~0.1% it takes
-        // very little space and allows for faster forward pass.
-        // For maximum performance we do cheat somewhat though. Normally pytorch
-        // checks the correctness, which is an expensive O(n) operation.
-        // By using _sparse_coo_tensor_unsafe we avoid that.
+        # Now the magic. We construct a sparse tensor by giving the indices of
+        # non-zero values (active feature indices) and these values (ones!).
+        # The size of the tensor is batch_size*NUM_FEATURES, which would
+        # normally be insanely large, but since the density is ~0.1% it takes
+        # very little space and allows for faster forward pass.
+        # For maximum performance we do cheat somewhat though. Normally pytorch
+        # checks the correctness, which is an expensive O(n) operation.
+        # By using _sparse_coo_tensor_unsafe we avoid that.
         white_features_t = torch._sparse_coo_tensor_unsafe(white_features_indices_t, white_features_values_t, (self.size, NUM_FEATURES))
         black_features_t = torch._sparse_coo_tensor_unsafe(black_features_indices_t, black_features_values_t, (self.size, NUM_FEATURES))
 
-        // What is coalescing?! It makes sure the indices are unique and ordered.
-        // Now you probably see why we said the inputs must be ordered from the start.
-        // This is normally a O(n log n) operation and takes a significant amount of
-        // time. But here we **know** that the tensor is already in a coalesced form,
-        // therefore we can just tell pytorch that it can use that assumption.
+        # What is coalescing?! It makes sure the indices are unique and ordered.
+        # Now you probably see why we said the inputs must be ordered from the start.
+        # This is normally a O(n log n) operation and takes a significant amount of
+        # time. But here we **know** that the tensor is already in a coalesced form,
+        # therefore we can just tell pytorch that it can use that assumption.
         white_features_t._coalesced_(True)
         black_features_t._coalesced_(True)
 
-        // Now this is what the forward() required!
+        # Now this is what the forward() required!
         return white_features_t, black_features_t, stm_t, score_t
 
-// Let's also tell ctypes how to understand this type.
+# Let's also tell ctypes how to understand this type.
 SparseBatchPtr = ctypes.POINTER(SparseBatch)
 ```
 
@@ -671,14 +671,14 @@ So how can we coalesce them? Let's look how matrix and vector multiplication is 
 
 Let's focus on the feature `(A1, C3, pawn, white)`. Now, we're also gonna add a `P` feature `(C3, pawn, white)`. What happens when the input goes through the first layer?
 
-```
+```cpp
 accumulator += weights[(A1, C3, pawn, white)];
 accumulator += weights[(C3, pawn, white)];
 ```
 
 which is equivalent to
 
-```
+```cpp
 accumulator += weights[(A1, C3, pawn, white)] + weights[(C3, pawn, white)];
 ```
 
@@ -695,7 +695,7 @@ The king position, 64 features. This one requires some careful handling as a sin
 ##### "HalfRelativeKP" factors
 
 In `HalfKP` we use the absolute piece position, but what if we encoded the position as relative to the king? There's 15x15 such relative position possible, and most of them correspond 1:many to some `HalfKP` feature. The HalfRelativeKP feature index could be calculated for example like this:
-```
+```cpp
 int get_half_relative_kp_index(Color perspective, Square king_sq, Square piece_sq, Piece piece)
 {
     const int p_idx = static_cast<int>(piece.type()) * 2 + (piece.color() != perspective);
@@ -727,7 +727,7 @@ It's of course possible to apply the loss function directly on the evaluation va
 ![](img/sigmoid_wdl_fit.png)
 
 so in the code we may do the following:
-```
+```python
 scaling_factor = 410 # this depends on the engine, and maybe even on the data
 wdl_space_eval = torch.sigmoid(cp_space_eval / scaling_factor)
 ```
@@ -736,17 +736,17 @@ This transformation also has the nice effect that large evaluations become "clos
 
 #### Using results along the evaluation
 
-With the values for which we will compute loss being in WDL-space, we may now interpolate them with game results. We will introduce a `lambda` parameter that governs the interpolation.
-```
+With the values for which we will compute loss being in WDL-space, we may now interpolate them with game results. We will introduce a `lambda_` parameter that governs the interpolation.
+```python
 # game_result is in WDL-space
-wdl_value = lambda * wdl_space_eval + (1 - lambda) * game_result
+wdl_value = lambda_ * wdl_space_eval + (1 - lambda_) * game_result
 ```
 
 The interpolation can also be applied to the loss.
-```
+```python
 loss_eval = ... # loss between model eval and position eval
 loss_result = ... # loss between model eval and game result
-loss = lambda * loss_eval + (1 - lambda) * loss_result
+loss = lambda_ * loss_eval + (1 - lambda_) * loss_result
 ```
 
 Which way works better depends on your case :)
@@ -758,24 +758,24 @@ Now we know what we're trying to fit; let's look at how we will fit them.
 This is a very simple loss function that just takes a square of the difference between the predicted value and the target. This results in a nice linear gradient.
 
 With interpolation applied before:
-```
+```python
 scaling = ... # depends on the engine and data. Determines the shape of
               # the sigmoid that transforms the evaluation to WDL space
               # Stockfish uses values around 400
 wdl_eval_model = sigmoid(model(...) / scaling)
 wdl_eval_target = sigmoid(target / scaling)
-wdl_value_target = lambda * wdl_eval_target + (1 - lambda) * game_result
+wdl_value_target = lambda_ * wdl_eval_target + (1 - lambda_) * game_result
 loss = (wdl_eval_model - wdl_value_target)**2
 ```
 
 With interpolation applied after:
-```
+```python
 scaling = ...
 wdl_eval_model = sigmoid(model(...) / scaling)
 wdl_eval_target = sigmoid(target / scaling)
 loss_eval   = (wdl_eval_model - wdl_eval_target)**2
 loss_result = (wdl_eval_model - game_result)**2
-loss = lambda * loss_eval + (1 - lambda) * loss_result
+loss = lambda_ * loss_eval + (1 - lambda_) * loss_result
 ```
 
 ##### loss
@@ -795,12 +795,12 @@ This loss function is usually used for continuous classification problems, and o
 Care must be taken around domain boundaries. Usually a very small value (epsilon) is added such that the values never reach 0 under the logarithm.
 
 With interpolation applied before:
-```
+```python
 epsilon = 1e-12 # to prevent log(0)
 scaling = ...
 wdl_eval_model = sigmoid(model(...) / scaling)
 wdl_eval_target = sigmoid(target / scaling)
-wdl_value_target = lambda * wdl_eval_target + (1 - lambda) * game_result
+wdl_value_target = lambda_ * wdl_eval_target + (1 - lambda_) * game_result
 
 # The first term in the loss has 0 gradient, because we always
 # differentiate with respect to `wdl_eval_model`, but it makes the loss nice
@@ -810,7 +810,7 @@ loss = (wdl_value_target * log(wdl_value_target + epsilon) + (1 - wdl_value_targ
 ```
 
 With interpolation applied after:
-```
+```python
 epsilon = 1e-12 # to prevent log(0)
 scaling = ...
 wdl_eval_model = sigmoid(model(...) / scaling)
@@ -823,7 +823,7 @@ loss_eval   = (wdl_eval_target * log(wdl_eval_target + epsilon) + (1 - wdl_eval_
              -(wdl_eval_target * log(wdl_eval_model  + epsilon) + (1 - wdl_eval_target) * log(1 - wdl_eval_model  + epsilon))
 loss_result = (game_result     * log(wdl_eval_target + epsilon) + (1 - game_result)     * log(1 - wdl_eval_target + epsilon))
              -(game_result     * log(wdl_eval_model  + epsilon) + (1 - game_result)     * log(1 - wdl_eval_model  + epsilon))
-loss = lambda * loss_eval + (1 - lambda) * loss_result
+loss = lambda_ * loss_eval + (1 - lambda_) * loss_result
 ```
 
 ##### loss
@@ -907,7 +907,7 @@ The benefit from SIMD for the feature transformer is two-fold:
 2. large total register size means we don't need to write to memory as often
 
 Our accumulation structure doesn't change much, we just change float to int16:
-```
+```cpp
 // We now also make sure that the accumulator structure is aligned to the cache line.
 // This is not strictly required by AVX2 instructions but may improve performance.
 struct alignas(64) NnueAccumulator {
@@ -923,7 +923,7 @@ struct alignas(64) NnueAccumulator {
 
 Now let's look at the refresh function. For simplicity we will assume that there is enough registers so that spills don't happen, but in reality (`M > 256`) it is required to do multiple passes over the active features, each time considering a part of the accumulator only. A single AVX2 register can fit 16 int16 values and there is 16 AVX2 registers (32 since AVX-512).
 
-```
+```cpp
 void refresh_accumulator(
     const LinearLayer&      layer,            // this will always be L_0
     NnueAccumulator&        new_acc,          // storage for the result
@@ -958,7 +958,7 @@ void refresh_accumulator(
 
 similarily for the update:
 
-```
+```cpp
 void update_accumulator(
     const LinearLayer&      layer,            // this will always be L_0
     NnueAccumulator&        new_acc,          // it's nice to have already provided storage for
@@ -1007,7 +1007,7 @@ void update_accumulator(
 
 Matrix multiplication is hard to optimize in general, and there are many approaches depending on the size of the matrices. Since we expect the layers to be small, we will not delve into any fancy blocked algorithms. And just rely on manual unrolling and trying to process multiple values at a time. This is not optimal, but it's simple and very close. We will only describe the case where the number of outputs is divisible by 4. The output layer has 1 output but it's also very small and doesn't require anything clever. We will also require the input size to be a multiple of 32, otherwise adding 0 padding is required.
 
-```
+```cpp
 int32_t* linear(
     const LinearLayer& layer,  // the layer to use. We have two: L_1, L_2
     int32_t*           output, // the already allocated storage for the result
@@ -1041,10 +1041,10 @@ int32_t* linear(
 
             // This function processes a 32x1 chunk of int8 and produces a 8x1 chunk of int32.
             // For definition see below.
-            m256_add_dpbusd_epi32(sum0, in, _mm256_load_si256(&layer.weights[offset0 + j * register_width]);
-            m256_add_dpbusd_epi32(sum1, in, _mm256_load_si256(&layer.weights[offset1 + j * register_width]);
-            m256_add_dpbusd_epi32(sum2, in, _mm256_load_si256(&layer.weights[offset2 + j * register_width]);
-            m256_add_dpbusd_epi32(sum3, in, _mm256_load_si256(&layer.weights[offset3 + j * register_width]);
+            m256_add_dpbusd_epi32(sum0, in, _mm256_load_si256(&layer.weights[offset0 + j * register_width]));
+            m256_add_dpbusd_epi32(sum1, in, _mm256_load_si256(&layer.weights[offset1 + j * register_width]));
+            m256_add_dpbusd_epi32(sum2, in, _mm256_load_si256(&layer.weights[offset2 + j * register_width]));
+            m256_add_dpbusd_epi32(sum3, in, _mm256_load_si256(&layer.weights[offset3 + j * register_width]));
         }
 
         const __m128i bias = _mm256_load_si256(&layer.bias[i * 4]);
@@ -1068,7 +1068,7 @@ The output needs to be horizontally accumulated further, but it's faster to do i
 
 This function can benefit from VNNI extension, here controlled by `USE_VNNI`.
 
-```
+```cpp
 void m256_add_dpbusd_epi32(__m256i& acc, __m256i a, __m256i b) {
 #if defined (USE_VNNI)
 
@@ -1096,7 +1096,7 @@ This function takes 4 \_\_m256i registers containing 8 int32 values each, accumu
 
 ![](img/m256_haddx4.png)
 
-```
+```cpp
 __m128i m256_haddx4(__m256i sum0, __m256i sum1, __m256i sum2, __m256i sum3, __m128i bias) {
     sum0 = _mm256_hadd_epi32(sum0, sum1);
     sum2 = _mm256_hadd_epi32(sum2, sum3);
@@ -1120,7 +1120,7 @@ That's already <=15% density for the common sizes, and it's consistent between d
 
 Let's see the code that can take advantage of it.
 
-```
+```cpp
 int lsb(std::uint32_t v) {
     // returns the least significant set bit in v
     // implementation detail
@@ -1281,7 +1281,7 @@ This function takes int16 weights, a factor being a composition of 2 int8 inputs
 
 ![](img/m256_process_chunk.png)
 
-```
+```cpp
 void m256_process_chunk(__m256i& sum0, __m256i& sum1, __m256i col0, __m256i col1, __m256i factor) {
     // We interleave the two columns, because madd adds adjacent values.
     // This way we effectively add the results from both columns.
@@ -1307,7 +1307,7 @@ There is some additional workload in the forward pass to support it, and it does
 However, with this approach the training needs to be aware of this and try to create those blocks of 0 weights without harming the network too much. This can be achieved with weight pruning, which will be described later. The inference code will be very similar to the linear layer with sparse inputs case.
 
 
-```
+```cpp
 void load_weights(
     const LinearLayer& layer,
     const int8_t* data
@@ -1399,7 +1399,7 @@ The clipping is not hard, the more complicated part is conversion. We also need 
 
 ![](img/crelu16.png)
 
-```
+```cpp
 float* crelu16(,
     int            size,   // no need to have any layer structure, we just need the number of elements
     int8_t*        output, // the already allocated storage for the result
@@ -1440,7 +1440,7 @@ float* crelu16(,
 
 ![](img/crelu32.png)
 
-```
+```cpp
 float* crelu32(,
     int            size,   // no need to have any layer structure, we just need the number of elements
     int8_t*        output, // the already allocated storage for the result
@@ -1490,7 +1490,7 @@ Adding (quite aggressive) quantization has reduced the possible range of values 
 
 One way to account for this is directly in the optimizer. This is nice because the clipping is applied directly after the step, but requires having access to the optimizer's source. For example:
 
-```
+```python
 # The min/max constants are specific for the Stockfish quantization scheme.
 train_params = [
     {'params' : [self.ft.weight, self.ft.bias], 'lr' : LR },
@@ -1506,7 +1506,7 @@ optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
 
 and then in the optimizer:
 
-```
+```python
 class Ranger(Optimizer):
     def __init__([...]):
         [...]
@@ -1529,7 +1529,7 @@ def step(self, closure=None):
 
 Alternatively one can do it outside the optimizer for more flexibility:
 
-```
+```python
 # The min/max constants are specific for the Stockfish quantization scheme.
 self.weight_clipping = [
     {'params' : [self.l1.weight], 'min_weight' : -127/64, 'max_weight' : 127/64 },
@@ -1538,7 +1538,7 @@ self.weight_clipping = [
 ]
 ```
 
-```
+```python
 # and call this in some step function
 def _clip_weights(self):
     for group in self.weight_clipping:
@@ -1554,7 +1554,7 @@ def _clip_weights(self):
 
 Sometimes more complex architectures make some layers' parameters be a sum of two layers during training. Just like feature factorization but for whole layers (see for example [this](#multiple-psqt-outputs-and-multiple-subnetworks)). We can account for example like this:
 
-```
+```python
 # The min/max constants are specific for the Stockfish quantization scheme.
 self.weight_clipping = [
     {'params' : [self.l1.weight], 'min_weight' : -127/64, 'max_weight' : 127/64, 'virtual_params' : self.some_virtual_factor.weight },
@@ -1563,7 +1563,7 @@ self.weight_clipping = [
 ]
 ```
 
-```
+```python
 def _clip_weights(self):
     for group in self.weight_clipping:
         for p in group['params']:
@@ -1591,7 +1591,7 @@ def _clip_weights(self):
 
 How to run our own kernel? Don't we need a complicated setup with the CUDA compiler and all that? CuPy to the rescue. CuPy is a python library that allows easy creation of CUDA kernels using plain python strings containing the CUDA code. CuPy handles compilation and everything else for us. For example:
 
-```
+```python
 import cupy as cp
 
 # Create the kernel
@@ -1610,9 +1610,9 @@ kernel(
     block=(num_threads,), # The block shape
     args=(...) # The arguments that are passed to the kernel
 )
+```
 
 PyTorch tensors can be easly passed to the kernel by using `.data_ptr()`, which results the pointer to the tensor. One must however ensure that the memory is contiguous.
-```
 
 ### Feature transformer
 
@@ -1625,7 +1625,7 @@ We can therefore replace the feature indices from a 2d tensor of shape `[total_n
 
 #### Data loader
 
-```
+```cpp
 struct SparseBatch {
     SparseBatch(const std::vector<TrainingDataEntry>& entries) {
         size = entries.size();
@@ -1668,7 +1668,7 @@ struct SparseBatch {
 
 and in python
 
-```
+```python
 class SparseBatch(ctypes.Structure):
     _fields_ = [
         ('size', ctypes.c_int),
@@ -1680,27 +1680,27 @@ class SparseBatch(ctypes.Structure):
     ]
 
     def get_tensors(self, device):
-        // This is illustrative. In reality you might need to transfer these
-        // to the GPU. You can also do it asynchronously, but remember to make
-        // sure the source lives long enough for the copy to finish.
+        # This is illustrative. In reality you might need to transfer these
+        # to the GPU. You can also do it asynchronously, but remember to make
+        # sure the source lives long enough for the copy to finish.
 
         stm_t = torch.from_numpy(np.ctypeslib.as_array(self.stm, shape=(self.size, 1)))
         score_t = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1)))
 
-        // Now we don't have to bother with the sparse pytorch tensors!
-        // And no transpositions required too because we have control over the layout!
+        # Now we don't have to bother with the sparse pytorch tensors!
+        # And no transpositions required too because we have control over the layout!
         white_features_indices_t = torch.from_numpy(np.ctypeslib.as_array(self.white_features_indices, shape=(self.size, self.max_active_features)))
         black_features_indices_t = torch.from_numpy(np.ctypeslib.as_array(self.black_features_indices, shape=(self.size, self.max_active_features)))
 
-        // The values are all ones, so we can create these tensors in place easly.
-        // No need to go through a copy.
+        # The values are all ones, so we can create these tensors in place easly.
+        # No need to go through a copy.
         white_features_values_t = torch.ones(self.num_active_white_features)
         black_features_values_t = torch.ones(self.num_active_black_features)
 
-        // No more coalescing! Our implementation will be fast regardless of whether the inputs are sorted or not!
+        # No more coalescing! Our implementation will be fast regardless of whether the inputs are sorted or not!
         return white_features_indices_t, white_features_values_t, black_features_indices_t, black_features_values_t, stm_t, score_t
 
-// Let's also tell ctypes how to understand this type.
+# Let's also tell ctypes how to understand this type.
 SparseBatchPtr = ctypes.POINTER(SparseBatch)
 ```
 
@@ -1708,7 +1708,7 @@ SparseBatchPtr = ctypes.POINTER(SparseBatch)
 
 Now let's try to write a custom CUDA kernel. At this point you should have a good understanding of how the feature transformer works and how to implement it. We will need two kernels, one for forward, and one for backward pass. We'll write these kernels in a generic way that uses values, but for some uses it can of course be assumed that all values are 1. It'll be the easiest to present the kernels with notes in the comments:
 
-```
+```Cuda
 typedef unsigned int uint32_t;
 typedef int int32_t;
 
@@ -1854,7 +1854,7 @@ void feature_transformer_slice_forward(
 
 #### Backward
 
-```
+```Cuda
 typedef unsigned int uint32_t;
 typedef int int32_t;
 
@@ -1966,7 +1966,7 @@ void feature_transformer_slice_backward(
 
 #### FeatureTransformerSlice layer
 
-```
+```python
 class FeatureTransformerSliceFunction(autograd.Function):
 
     @staticmethod
@@ -2100,7 +2100,7 @@ HalfKA feature set was briefly mentioned in this document as a brother of HalfKP
 
 Normally the nets have hard time learning high material imbalance, or even representing high evaluations at all. But we can help it with that. We already accumulate some 256 values for each piece on the board, does this ring a bell? What if we added one more and designated it to mean "PSQT"? That's what we will do. We will simply make the feature transformer weight row have 257 values, and use the last one as "PSQT". We can help it during training by initializing it to something that resembles good PSQT values (but remember to scale it according to quantization!). But we have two perspectives? What about that? Right, we do, but we can average them, like `(our - their) / 2` (keeping in mind that their must be negated). Handling it in the trainer is quite easy.
 
-```
+```python
 wp = self.ft(w_in)
 bp = self.ft(b_in)
 w, wpsqt = torch.split(wp, wp.shape[1]-1, dim=1)
@@ -2121,7 +2121,7 @@ Until now all networks have been using one PSQT output and one layer stack (that
 
 But how to implement it in the trainer? "Choosing stuff" is not very GPU friendly, and we're doing batching too, right? It's not indeed, but thankfully the layers are very small, so we can just evaluate all of them and only choose the results! Moreover, multiple `N` linear layers can just be emulated by a single one with `N` times as many outputs. Let's see how it could be implemented in PyTorch:
 
-```
+```python
 # Numbers of hidden neurons
 L1 = 256
 L2 = 32
@@ -2180,7 +2180,7 @@ class LayerStacks(nn.Module):
 
 Handling of the PSQT outputs is easier since the is in fact, a simple way of gathering individual values (we couldn't use it above because we were gathering whole rows):
 
-```
+```python
 wp = self.input(w_in)
 bp = self.input(b_in)
 w, wpsqt = torch.split(wp, wp.shape[1]-8, dim=1)
