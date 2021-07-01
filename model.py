@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 import copy
 from feature_transformer import DoubleFeatureTransformerSlice
+from optimizer import NnueOptimizer
 
 # 3 layer fully connected network
 L1 = 512
@@ -307,7 +308,7 @@ class NNUE(pl.LightningModule):
       {'params' : [self.layer_stacks.output.bias], 'lr' : LR / 10 },
     ]
     # increasing the eps leads to less saturated nets with a few dead neurons
-    optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7, gc_loc=False, use_gc=False)
+    optimizer = NnueOptimizer(ranger.Ranger, train_params, betas=(.9, 0.999), eps=1.0e-7, gc_loc=False, use_gc=False)
     # Drop learning rate after 75 epochs
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.987)
     return [optimizer], [scheduler]
