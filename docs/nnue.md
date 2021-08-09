@@ -72,6 +72,9 @@ This document describes in detail what NNUE is, how it works in theory, how the 
             * [m256_add_dpbusd_epi32](#m256_add_dpbusd_epi32)
             * [m256_haddx4](#m256_haddx4)
         - [Linear layer with sparse input](#linear-layer-with-sparse-input)
+            * [m256_process_chunk](#m256_process_chunk)
+        - [Linear layer with sparse input, alternative approach](#linear-layer-with-sparse-input-alternative-approach)
+            * [m256_process_chunk_alternative](#m256_process_chunk_alternative)
         - [Linear layer with sparse input and blocked sparse output](#linear-layer-with-sparse-input-and-blocked-sparse-output)
         - [ClippedReLU](#clippedrelu-2)
             * [int16 -> int8](#int16---int8)
@@ -1282,7 +1285,7 @@ This function takes int16 weights, a factor being a composition of 2 int8 inputs
 ![](img/m256_process_chunk.png)
 
 ```cpp
-void m256_process_chunk(__m256i& sum0, __m256i& sum1, __m256i col0, __m256i col1, __m256i factor) {
+inline void m256_process_chunk(__m256i& sum0, __m256i& sum1, __m256i col0, __m256i col1, __m256i factor) {
     // We interleave the two columns, because madd adds adjacent values.
     // This way we effectively add the results from both columns.
     sum0 = _mm256_add_epi32(
@@ -1291,6 +1294,242 @@ void m256_process_chunk(__m256i& sum0, __m256i& sum1, __m256i col0, __m256i col1
     sum1 = _mm256_add_epi32(
         sum1, _mm256_madd_epi16(factor, _mm256_unpackhi_epi16(col0, col1))
     );
+}
+```
+
+#### Linear layer with sparse input, alternative approach
+
+In the first approach we used 16-bit weights, but it's possible to use 8-bit weights with slightly more unpacking fun. We'll also see an alternative way of computing the indices on non-zero inputs by using a lookup table. For some more approaches and measurements to the latter see [here](https://github.com/syzygy1/Cfish/issues/204#issue-944790893).
+
+```cpp
+// This implementation requires changing the layout and expanding the weights to int16.
+// We will transpose the weights as now we'll be going through the columns instead of rows.
+void load_weights(
+    const LinearLayer& layer,
+    const int8_t* data
+) {
+    static_assert(is_same_v<LinearLayer::WeightType, int8_t>,
+        "This approach requires weights to be 8 bit.");
+
+    for (int i = 0; i < layer.num_outputs; ++i) {
+        for (int j = 0; j < layer.num_inputs; ++j) {
+            layer.weights[j*layer.num_outputs + i] = data[i*layer.num_inputs + j];
+        }
+    }
+
+    // No need for clever tricks with shuffling the weights now.
+    // However, we will require one more zero weight column. We assume enough space is allocated.
+    for (int i = 0; i < layer.num_outputs; ++i) {
+        layer.weights[layer.num_inputs*layer.num_outputs + i] = 0;
+    }
+}
+
+// A constexpr version of least significant bit computation.
+static constexpr int lsb_constexpr(std::uint32_t v)
+{
+    int c = 0;
+    if (!v) return 32;
+    while (!(v & 1))
+    {
+        v >>= 1;
+        ++c;
+    }
+    return c;
+}
+
+// A lookup table of indices of non-zero bits in the input.
+// Each entry of std::array<std::uint16_t, 8> can be interpreted as __m128i.
+alignas(64) static constexpr std::array<std::array<std::uint16_t, 8>, 256> LookupTableIndices = [](){
+    std::array<std::array<std::uint16_t, 8>, 256> v{};
+    for (int i = 0; i < 256; ++i)
+    {
+        int j = i;
+        int k = 0;
+        while(j)
+        {
+            const IndexType lsbIndex = lsb_constexpr(std::uint32_t(j));
+            j &= j - 1;
+            v[i][k] = lsbIndex;
+            ++k;
+        }
+    }
+    return v;
+}();
+
+// A lookup table for popcount of a byte.
+// Using the dedicated popcnt instruction might or might not work better.
+static constexpr std::array<std::uint8_t, 256> LookupTableCounts = [](){
+    std::array<std::uint8_t, 256> v{};
+    for (int i = 0; i < 256; ++i)
+    {
+        int j = i;
+        int k = 0;
+        while(j)
+        {
+            j &= j - 1;
+            ++k;
+        }
+        v[i] = k;
+    }
+    return v;
+}();
+
+int32_t* linear_sparse_input(
+    const LinearLayer& layer,
+    int32_t*           output,
+    const int8_t*      input
+) {
+    // We will take a tiled approach with accumulators in registers.
+    // Similar to how the feature transformer is best implemented.
+    constexpr int input_register_width = 256 / 8;
+    constexpr int chunk_size = 256 / 32;
+    constexpr int num_chunks_per_tile = 8;
+    constexpr int tile_size = chunk_size * num_chunks_per_tile;
+    assert(layer.num_outputs % tile_size == 0, "We're processing 64 output elements at a time. Though it's easy to change it.");
+    assert(num_chunks_per_tile % 4 == 0, "We're processing 4 chunks at a time.");
+    constexpr int num_tiles = layer.num_outputs / tile_size;
+
+    // We need to find out the indices of the input values that are non-zero
+    // We'll use a lookup table approach. Overallocate 16 elements
+    // so that stores are always valid (we will be using larger stores)
+    uint16_t nnz_input_indices[layer.num_inputs + 16];
+    int num_nnz_input_indices = 0;
+
+    {
+        // These will be used for offseting the looked up indices.
+        // A variation with int16 lookup is also possible (see the link above)
+        // and is faster in isolation, but requires more memory and may trash the cache.
+        __m128i base = _mm_set1_epi16(0);
+        __m128i increment = _mm_set1_epi16(8);
+        for (int i = 0; i < layer.num_inputs; i += input_register_width) {
+            const __m256i input_chunk = _mm256_load_si256(input + i);
+            unsigned nnz = _mm256_movemask_epi8(_mm256_cmpgt_epi8(input_chunk, _mm256_setzero_si256()));
+
+            unsigned b0 = (nnz) & 0xFF;
+            unsigned b1 = (nnz >> 8) & 0xFF;
+            unsigned b2 = (nnz >> 16) & 0xFF;
+            unsigned b3 = (nnz >> 24) & 0xFF;
+
+            unsigned c0 = LookupTableCounts[b0];
+            unsigned c1 = LookupTableCounts[b1];
+            unsigned c2 = LookupTableCounts[b2];
+            unsigned c3 = LookupTableCounts[b3];
+
+            // These stores can reach above layer.num_inputs in extreme cases. That's why we preallocate.
+            // Only the first c0 values matter.
+            _mm_storeu_si128(
+                reinterpret_cast<__m128i*>(nnz_input_indices + num_nnz_input_indices),
+                _mm_add_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&LookupTableIndices[b0])), base)
+            );
+            num_nnz_input_indices += c0;
+            base = _mm_add_epi32(base, increment);
+
+            _mm_storeu_si128(
+                reinterpret_cast<__m128i*>(nnz_input_indices + num_nnz_input_indices),
+                _mm_add_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&LookupTableIndices[b1])), base)
+            );
+            num_nnz_input_indices += c1;
+            base = _mm_add_epi32(base, increment);
+
+            _mm_storeu_si128(
+                reinterpret_cast<__m128i*>(nnz_input_indices + num_nnz_input_indices),
+                _mm_add_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&LookupTableIndices[b2])), base)
+            );
+            num_nnz_input_indices += c2;
+            base = _mm_add_epi32(base, increment);
+
+            _mm_storeu_si128(
+                reinterpret_cast<__m128i*>(nnz_input_indices + num_nnz_input_indices),
+                _mm_add_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&LookupTableIndices[b3])), base)
+            );
+            num_nnz_input_indices += c3;
+            base = _mm_add_epi32(base, increment);
+        }
+    }
+
+    // We will be processing 4 inputs at a time, and to avoid having two similar loops
+    // we pad the input indices to a multiple of 4. For the added ones we use a dummy input
+    // with all weights set to 0.
+    while (num_nnz_input_indices % 4 != 0)
+      nnz_input_indices[num_nnz_input_indices++] = layer.num_inputs;
+
+    // Hopefully will fit in the register file.
+    __m256i acc[num_chunks_per_tile];
+
+    for (int i = 0; i < num_tiles; ++i)
+    {
+        const __m256i* biases_tile = reinterpret_cast<const __m256i*>(&layer.biases[i * tile_size]);
+              __m256i* output_tile = reinterpret_cast<      __m256i*>(&      output[i * tile_size]);
+
+        for (int k = 0; k < num_chunks_per_tile; ++k)
+            acc[k] = _mm256_setzero_si256();
+
+        for (int j = 0; j < num_nnz_input_indices; j += 4)
+        {
+            const __m256i  mul0 = _mm256_set1_epi16(input[nnz_input_indices[j+0]] | (input[nnz_input_indices[j+1]] << 8));
+            const __m256i  mul2 = _mm256_set1_epi16(input[nnz_input_indices[j+2]] | (input[nnz_input_indices[j+3]] << 8));
+            const __m256i* col0 = reinterpret_cast<const __m256i*>(&layer.weights[nnz_input_indices[j+0] * layer.num_outputs + i * tile_size]);
+            const __m256i* col1 = reinterpret_cast<const __m256i*>(&layer.weights[nnz_input_indices[j+1] * layer.num_outputs + i * tile_size]);
+            const __m256i* col2 = reinterpret_cast<const __m256i*>(&layer.weights[nnz_input_indices[j+2] * layer.num_outputs + i * tile_size]);
+            const __m256i* col3 = reinterpret_cast<const __m256i*>(&layer.weights[nnz_input_indices[j+3] * layer.num_outputs + i * tile_size]);
+            for (int k = 0; k < num_chunks_per_tile / 4; ++k)
+            {
+                // Due to AVX2 interpreting the 256-bit registers as 2 128-bit ones the unpacking
+                // shuffles the lanes. We will have to account for that when getting the final result.
+                m256_process_chunk_alternative(
+                    acc[k*4 + 0], acc[k*4 + 1], acc[k*4 + 2], acc[k*4 + 3],
+                         col0[k],      col1[k],      col2[k],      col3[k],
+                            mul0,                       mul2
+                );
+            }
+        }
+
+        for (int k = 0; k < num_chunks_per_tile / 4; ++k)
+        {
+            // We have to unshuffle the lanes. See the visualization to get a better picture.
+            const __m128i acc00 = _mm256_extracti128_si256(acc[k*4 + 0], 0);
+            const __m128i acc01 = _mm256_extracti128_si256(acc[k*4 + 0], 1);
+            const __m128i acc10 = _mm256_extracti128_si256(acc[k*4 + 1], 0);
+            const __m128i acc11 = _mm256_extracti128_si256(acc[k*4 + 1], 1);
+            const __m128i acc20 = _mm256_extracti128_si256(acc[k*4 + 2], 0);
+            const __m128i acc21 = _mm256_extracti128_si256(acc[k*4 + 2], 1);
+            const __m128i acc30 = _mm256_extracti128_si256(acc[k*4 + 3], 0);
+            const __m128i acc31 = _mm256_extracti128_si256(acc[k*4 + 3], 1);
+
+            output_tile[k*4 + 0] = _mm256_add_epi32(_mm256_setr_m128i(acc00, acc10), biases_tile[k*4 + 0]);
+            output_tile[k*4 + 1] = _mm256_add_epi32(_mm256_setr_m128i(acc20, acc30), biases_tile[k*4 + 1]);
+            output_tile[k*4 + 2] = _mm256_add_epi32(_mm256_setr_m128i(acc01, acc11), biases_tile[k*4 + 2]);
+            output_tile[k*4 + 3] = _mm256_add_epi32(_mm256_setr_m128i(acc21, acc31), biases_tile[k*4 + 3]);
+        }
+    }
+
+    return output + layer.num_outputs;
+}
+```
+
+##### m256_process_chunk_alternative
+
+This function takes int8 weights corresponding to 4 inputs, 2 factors being a composition of 4 int8 inputs broadcasted as int16, and produces int32 outputs.
+
+![](img/m256_process_chunk_alternative.png)
+
+```cpp
+inline void m256_process_chunk_alternative(
+    __m256i& acc0, __m256i& acc1, __m256i& acc2, __m256i& acc3,
+    __m256i  col0, __m256i  col1, __m256i  col2, __m256i  col3,
+    __m256i  mul0,                __m256i  mul2
+) {
+    // For madd.
+    const __m256i ones = _mm256_set1_epi16(1);
+
+    const __m256i prod0 = _mm256_maddubs_epi16(mul0, _mm256_unpacklo_epi8(col0, col1));
+    const __m256i prod1 = _mm256_maddubs_epi16(mul0, _mm256_unpackhi_epi8(col0, col1));
+    const __m256i prod2 = _mm256_maddubs_epi16(mul2, _mm256_unpacklo_epi8(col2, col3));
+    const __m256i prod3 = _mm256_maddubs_epi16(mul2, _mm256_unpackhi_epi8(col2, col3));
+    acc0 = _mm256_add_epi32(acc0, _mm256_madd_epi16(ones, _mm256_unpacklo_epi16(prod0, prod2)));
+    acc1 = _mm256_add_epi32(acc1, _mm256_madd_epi16(ones, _mm256_unpackhi_epi16(prod0, prod2)));
+    acc2 = _mm256_add_epi32(acc2, _mm256_madd_epi16(ones, _mm256_unpacklo_epi16(prod1, prod3)));
+    acc3 = _mm256_add_epi32(acc3, _mm256_madd_epi16(ones, _mm256_unpackhi_epi16(prod1, prod3)));
 }
 ```
 
