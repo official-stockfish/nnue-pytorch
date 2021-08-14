@@ -24,7 +24,7 @@ def eval_model_batch(model, batch):
             evals[i] = -evals[i]
     return evals
 
-re_nnue_eval = re.compile(r'NNUE evaluation:\s*?(-?\d*?\.\d*)')
+re_nnue_eval = re.compile(r'NNUE evaluation:?\s*?([-+]?\d*?\.\d*)')
 
 def compute_basic_eval_stats(evals):
     min_engine_eval = min(evals)
