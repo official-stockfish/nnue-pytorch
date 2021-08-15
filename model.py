@@ -7,8 +7,8 @@ import copy
 from feature_transformer import DoubleFeatureTransformerSlice
 
 # 3 layer fully connected network
-L1 = 512
-L2 = 16
+L1 = 1024
+L2 = 8
 L3 = 32
 
 def coalesce_ft_weights(model, layer):
@@ -271,9 +271,9 @@ class NNUE(pl.LightningModule):
     t = outcome
     p = (score / in_scaling).sigmoid()
 
-    loss_eval = (p - q).square().mean()
-    loss_result = (q - t).square().mean()
-    loss = self.lambda_ * loss_eval + (1.0 - self.lambda_) * loss_result
+    pt = p * self.lambda_ + t * (1.0 - self.lambda_)
+
+    loss = torch.pow(torch.abs(pt - q), 2.6).mean()
 
     self.log(loss_type, loss)
 
@@ -295,7 +295,7 @@ class NNUE(pl.LightningModule):
 
   def configure_optimizers(self):
     # Train with a lower LR on the output layer
-    LR = 1.5e-3
+    LR = 8.75e-4
     train_params = [
       {'params' : get_parameters([self.input]), 'lr' : LR, 'gc_dim' : 0 },
       {'params' : [self.layer_stacks.l1_fact.weight], 'lr' : LR },
@@ -303,11 +303,11 @@ class NNUE(pl.LightningModule):
       {'params' : [self.layer_stacks.l1.bias], 'lr' : LR },
       {'params' : [self.layer_stacks.l2.weight], 'lr' : LR },
       {'params' : [self.layer_stacks.l2.bias], 'lr' : LR },
-      {'params' : [self.layer_stacks.output.weight], 'lr' : LR / 10 },
-      {'params' : [self.layer_stacks.output.bias], 'lr' : LR / 10 },
+      {'params' : [self.layer_stacks.output.weight], 'lr' : LR },
+      {'params' : [self.layer_stacks.output.bias], 'lr' : LR },
     ]
     # increasing the eps leads to less saturated nets with a few dead neurons
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7, gc_loc=False, use_gc=False)
     # Drop learning rate after 75 epochs
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.987)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.992)
     return [optimizer], [scheduler]
