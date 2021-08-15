@@ -24,7 +24,7 @@ def eval_model_batch(model, batch):
             evals[i] = -evals[i]
     return evals
 
-re_nnue_eval = re.compile(r'NNUE evaluation:\s*?(-?\d*?\.\d*)')
+re_nnue_eval = re.compile(r'NNUE evaluation:?\s*?([-+]?\d*?\.\d*)')
 
 def compute_basic_eval_stats(evals):
     min_engine_eval = min(evals)
@@ -48,9 +48,13 @@ def compute_correlation(engine_evals, model_evals):
 
     relative_model_error = sum(abs(model - engine) / (abs(engine)+0.001) for model, engine in zip(model_evals, engine_evals)) / len(engine_evals)
     relative_engine_error = sum(abs(model - engine) / (abs(model)+0.001) for model, engine in zip(model_evals, engine_evals)) / len(engine_evals)
+    min_diff = min(abs(model - engine) for model, engine in zip(model_evals, engine_evals))
+    max_diff = max(abs(model - engine) for model, engine in zip(model_evals, engine_evals))
     print('Relative engine error: {}'.format(relative_engine_error))
     print('Relative model error: {}'.format(relative_model_error))
     print('Avg abs difference: {}'.format(sum(abs(model - engine) for model, engine in zip(model_evals, engine_evals)) / len(engine_evals)))
+    print('Min difference: {}'.format(min_diff))
+    print('Max difference: {}'.format(max_diff))
 
 def eval_engine_batch(engine_path, net_path, fens):
     engine = subprocess.Popen([engine_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE, universal_newlines=True)
