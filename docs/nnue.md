@@ -94,6 +94,7 @@ This document describes in detail what NNUE is, how it works in theory, how the 
 * [Architectures and new directions](#architectures-and-new-directions)
     + [Simple HalfKP Stockfish architecture](#simple-halfkp-stockfish-architecture)
     + [HalfKAv2 feature set.](#halfkav2-feature-set)
+    + [HalfKAv2_hm feature set.](#halfkav2_hm-feature-set)
     + [A part of the feature transformer directly forwarded to the output.](#a-part-of-the-feature-transformer-directly-forwarded-to-the-output)
     + [Multiple PSQT outputs and multiple subnetworks](#multiple-psqt-outputs-and-multiple-subnetworks)
 
@@ -2334,6 +2335,12 @@ This is the first architecture used in Stockfish. The only thing that is differe
 ### HalfKAv2 feature set.
 
 HalfKA feature set was briefly mentioned in this document as a brother of HalfKP. It initially had a small drawback that wasted some space. HalfKAv2 is the improved version that uses 8% less space, but otherwise is identical. What's the difference? Let's consider a subset of features for a given our king square `S`. Normally in HalfKA there are 768 possible features, that is `64*12`, as there is 64 squares and 12 pieces (type + color). But we can notice that with the our king square fixed at `S` we know that the opponent's king is not at `S` - our king uses just 1 feature from the 64 given for it, and the other king only uses 63 (minus our king ring, but it doesn't matter) from its 64 given features, and the two sets are disjoint! So we can merge the two pieces "into one", and reduce the number of buckets from 12 into 11, reducing the size by about 8%. However, care must be taken when applying factorization, as this compression needs to be reverted and a whole `A` subset with 768 features must be used. Otherwise it's possible to mix up king positions, as while the compression is valid for a single `64*11` bucket, it doesn't hold when we try to mix the buckets, as it happens when we factorize the features.
+
+### HalfKAv2_hm feature set.
+
+"hm" here stands for "horizontally mirrored". This feature set is basically HalfKAv2, but the board is assumed to have horizontal symmetry. While this assumption obviously doesn't hold in chess it works well in practice. The idea behind this feature set is to, for each perspective, transform the board such that our king is on the e..h files (by convention, could also be a..d file). Knowing that only half of the king squares will be used allows us to cut the number of input features in half, effectively halving the size of the feature transformer. Stockfish uses this feature set since early august 2021 to support large feature transformers without the need for inconveniently large nets. This has also been used in Scorpio, along other ways of minimizing the network size.
+
+Let's consider an example where the white king is on a1 and the black king on g1. The board will have to be mirrored horizontally for the white's perspetctive to put the king within the e..h files; for black's perspective the king is already within the e..h files. On first sight it may appear that this creates discrepancies between the perspective in cases where the board is mirrored only for one perspective, but it works out remarkably well in practice - the strength difference is hardly measurable.
 
 ### A part of the feature transformer directly forwarded to the output.
 
