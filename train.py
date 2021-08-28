@@ -50,12 +50,10 @@ def main():
 
   if args.resume_from_model is None:
     nnue = M.NNUE(feature_set=feature_set, lambda_=args.lambda_)
-    nnue.cuda()
   else:
     nnue = torch.load(args.resume_from_model)
     nnue.set_feature_set(feature_set)
     nnue.lambda_ = args.lambda_
-    nnue.cuda()
 
   print("Feature set: {}".format(feature_set.name))
   print("Num real features: {}".format(feature_set.num_real_features))
@@ -87,6 +85,8 @@ def main():
   trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback], logger=tb_logger)
 
   main_device = trainer.root_device if trainer.root_gpu is None else 'cuda:' + str(trainer.root_gpu)
+
+  nnue.to(device=main_device)
 
   print('Using c++ data loader')
   train, val = make_data_loaders(args.train, args.val, feature_set, args.num_workers, batch_size, not args.no_smart_fen_skipping, args.random_fen_skipping, main_device)
