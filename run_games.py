@@ -67,7 +67,7 @@ def parse_ordo(root_dir, nnues):
 def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_base, stockfish_test):
     """ Run a match using c-chess-cli adding pgns to a file to be analysed with ordo """
     pgn_file_name = os.path.join(root_dir, "out.pgn")
-    command = "{} -each tc=4+0.04 option.Hash=8 option.Threads=1 -gauntlet -games 200 -rounds 1 -concurrency {}".format(
+    command = "{} -each tc=1000+1 nodes=20000 option.Hash=8 option.Threads=1 -gauntlet -games 1000 -rounds 1 -concurrency {}".format(
         c_chess_exe, concurrency
     )
     command = (
