@@ -50,7 +50,7 @@ class NNUEVisualizer():
         self.M = hd
 
         # Preferred ratio of number of input neurons per row/col.
-        preferred_ratio = 8
+        preferred_ratio = 4
 
         # Number of input neurons per row.
         # Find a factor of hd such that the aspect ratio
@@ -77,6 +77,28 @@ class NNUEVisualizer():
         else:
             self.sorted_input_neurons = np.arange(hd, dtype=int)
 
+        KingBuckets = [
+          -1, -1, -1, -1, 31, 30, 29, 28,
+          -1, -1, -1, -1, 27, 26, 25, 24,
+          -1, -1, -1, -1, 23, 22, 21, 20,
+          -1, -1, -1, -1, 19, 18, 17, 16,
+          -1, -1, -1, -1, 15, 14, 13, 12,
+          -1, -1, -1, -1, 11, 10, 9, 8,
+          -1, -1, -1, -1, 7, 6, 5, 4,
+          -1, -1, -1, -1, 3, 2, 1, 0
+        ]
+
+        BucketToSquare = [
+            0, 1, 2, 3,
+            8, 9, 10, 11,
+            16, 17, 18, 19,
+            24, 25, 26, 27,
+            32, 33, 34, 35,
+            40, 41, 42, 43,
+            48, 49, 50, 51,
+            56, 57, 58, 59
+        ]
+
         # Derived/fixed constants.
         numy = hd//numx
         widthx = 128
@@ -95,10 +117,11 @@ class NNUEVisualizer():
                 # Calculate piece and king placement.
                 pi = (j // hd) % 704
                 ki = (j // hd) // 704
-                if pi // 64 == 10 and ki != pi % 64:
+                if pi // 64 == 10 and ki != KingBuckets[pi % 64]:
                     pi += 64
                 piece = pi // 64
                 rank = (pi % 64) // 8
+                ki = BucketToSquare[ki]
 
                 if ((rank == 0 or rank == 7) and (piece == 0 or piece == 1)):
                     # Ignore unused weights for pawns on first/last rank.
@@ -111,23 +134,23 @@ class NNUEVisualizer():
                     # Piece centric, but with flipped king position.
                     # Same order as used by https://github.com/hxim/Stockfish-Evaluation-Guide.
                     # See also https://github.com/glinscott/nnue-pytorch/issues/42#issuecomment-753604393.
-                    inpos = [(7-kipos[0])+pipos[0]*8,
-                             kipos[1]+(7-pipos[1])*8]
+                    inpos = [[(7- kipos[0])   + pipos[0]   *8, kipos[1]+(7-pipos[1])*8],
+                             [(7-(kipos[0]^7))+(pipos[0]^7)*8, kipos[1]+(7-pipos[1])*8]]
                     d = - 8 if piece < 2 else 48 + (piece // 2 - 1) * 64
                 else:
                     # King centric.
-                    inpos = [8*kipos[0]+pipos[0],
-                             8*(7-kipos[1])+(7-pipos[1])]
-                    d = -2*(7-kipos[1]) - 1 if piece < 2 else 48 + \
-                        (piece // 2 - 1) * 64
+                    inpos = [[8* kipos[0]   + pipos[0],    8*(7-kipos[1])+(7-pipos[1])],
+                             [8*(kipos[0]^7)+(pipos[0]^7), 8*(7-kipos[1])+(7-pipos[1])]]
+                    d = -2*(7-kipos[1]) - 1 if piece < 2 else 48 + (piece // 2 - 1) * 64
 
                 jhd = j % hd
-                x = inpos[0] + widthx * (jhd % numx) + (piece % 2)*64
-                y = inpos[1] + d + widthy * (jhd // numx)
-                ii = x + y * totalx
+                for k in range(2):
+                    x = inpos[k][0] + widthx * (jhd % numx) + (piece % 2)*64
+                    y = inpos[k][1] + d + widthy * (jhd // numx)
+                    ii = x + y * totalx
 
-                img_mask.append(ii)
-                weights_mask.append(j)
+                    img_mask.append(ii)
+                    weights_mask.append(j)
 
             img_mask = np.array(img_mask, dtype=int)
             weights_mask = np.array(weights_mask, dtype=int)
@@ -512,7 +535,7 @@ def main():
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
-    supported_features = ('HalfKAv2', 'HalfKAv2^')
+    supported_features = ('HalfKAv2_hm', 'HalfKAv2_hm^')
     assert args.features in supported_features
     feature_set = features.get_feature_set_from_name(args.features)
 
