@@ -27,13 +27,13 @@ class LayerStacks(nn.Module):
     super(LayerStacks, self).__init__()
 
     self.count = count
-    self.l1 = nn.Linear(2 * L1, L2 * count)
+    self.l1 = nn.Linear(2 * L1, (L2 + 1) * count)
     # Factorizer only for the first layer because later
     # there's a non-linearity and factorization breaks.
     # It breaks the min/max weight clipping but hopefully it's not bad.
     # TODO: try solving it
     #       one potential solution would be to coalesce the weights on each step.
-    self.l1_fact = nn.Linear(2 * L1, L2, bias=False)
+    self.l1_fact = nn.Linear(2 * L1, L2 + 1, bias=False)
     self.l2 = nn.Linear(L2, L3 * count)
     self.output = nn.Linear(L3, 1 * count)
 
@@ -56,8 +56,8 @@ class LayerStacks(nn.Module):
       for i in range(1, self.count):
         # Make all layer stacks have the same initialization.
         # Basically copy the first to all other layer stacks.
-        l1_weight[i*L2:(i+1)*L2, :] = l1_weight[0:L2, :]
-        l1_bias[i*L2:(i+1)*L2] = l1_bias[0:L2]
+        l1_weight[i*(L2+1):(i+1)*(L2+1), :] = l1_weight[0:(L2+1), :]
+        l1_bias[i*(L2+1):(i+1)*(L2+1)] = l1_bias[0:(L2+1)]
         l2_weight[i*L3:(i+1)*L3, :] = l2_weight[0:L3, :]
         l2_bias[i*L3:(i+1)*L3] = l2_bias[0:L3]
         output_weight[i:i+1, :] = output_weight[0:1, :]
@@ -77,12 +77,14 @@ class LayerStacks(nn.Module):
 
     indices = ls_indices.flatten() + self.idx_offset
 
-    l1s_ = self.l1(x).reshape((-1, self.count, L2))
+    l1s_ = self.l1(x).reshape((-1, self.count, L2 + 1))
     l1f_ = self.l1_fact(x)
     # https://stackoverflow.com/questions/55881002/pytorch-tensor-indexing-how-to-gather-rows-by-tensor-containing-indices
     # basically we present it as a list of individual results and pick not only based on
     # the ls index but also based on batch (they are combined into one index)
-    l1c_ = l1s_.view(-1, L2)[indices]
+    l1c_ = l1s_.view(-1, L2 + 1)[indices]
+    l1c_, l1c_out = l1c_.split(L2, dim=1)
+    l1f_, l1f_out = l1f_.split(L2, dim=1)
     l1x_ = torch.clamp(l1c_ + l1f_, 0.0, 1.0)
 
     l2s_ = self.l2(l1x_).reshape((-1, self.count, L3))
@@ -91,7 +93,7 @@ class LayerStacks(nn.Module):
 
     l3s_ = self.output(l2x_).reshape((-1, self.count, 1))
     l3c_ = l3s_.view(-1, 1)[indices]
-    l3x_ = l3c_
+    l3x_ = l3c_ + l1f_out + l1c_out
 
     return l3x_
 
