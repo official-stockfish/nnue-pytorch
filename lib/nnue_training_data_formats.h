@@ -6867,6 +6867,10 @@ namespace binpack
            double a = (((as[0] * m + as[1]) * m + as[2]) * m) + as[3];
            double b = (((bs[0] * m + bs[1]) * m + bs[2]) * m) + bs[3];
 
+           // tweak wdl model, deviating from fishtest results,
+           // but yielding improved training results
+           b *= 1.5;
+
            // Transform eval to centipawns with limited range
            double x = std::clamp(double(100 * score) / 208, -2000.0, 2000.0);
            double w = 1.0 / (1 + std::exp((a - x) / b));
