@@ -8,7 +8,7 @@ from feature_transformer import DoubleFeatureTransformerSlice
 
 # 3 layer fully connected network
 L1 = 1024
-L2 = 7
+L2 = 15
 L3 = 32
 
 def coalesce_ft_weights(model, layer):
@@ -27,13 +27,13 @@ class LayerStacks(nn.Module):
     super(LayerStacks, self).__init__()
 
     self.count = count
-    self.l1 = nn.Linear(2 * L1, (L2 + 1) * count)
+    self.l1 = nn.Linear(2 * L1 // 2, (L2 + 1) * count)
     # Factorizer only for the first layer because later
     # there's a non-linearity and factorization breaks.
     # It breaks the min/max weight clipping but hopefully it's not bad.
     # TODO: try solving it
     #       one potential solution would be to coalesce the weights on each step.
-    self.l1_fact = nn.Linear(2 * L1, L2 + 1, bias=False)
+    self.l1_fact = nn.Linear(2 * L1 // 2, L2 + 1, bias=False)
     self.l2 = nn.Linear(L2, L3 * count)
     self.output = nn.Linear(L3, 1 * count)
 
@@ -100,7 +100,7 @@ class LayerStacks(nn.Module):
   def get_coalesced_layer_stacks(self):
     for i in range(self.count):
       with torch.no_grad():
-        l1 = nn.Linear(2*L1, L2+1)
+        l1 = nn.Linear(2*L1 // 2, L2+1)
         l2 = nn.Linear(L2, L3)
         output = nn.Linear(L3, 1)
         l1.weight.data = self.l1.weight[i*(L2+1):(i+1)*(L2+1), :] + self.l1_fact.weight.data
@@ -250,6 +250,10 @@ class NNUE(pl.LightningModule):
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
     # clamp here is used as a clipped relu to (0.0, 1.0)
     l0_ = torch.clamp(l0_, 0.0, 1.0)
+
+    l0_s = torch.split(l0_, L1 // 2, dim=1)
+    l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
+    l0_ = torch.cat(l0_s1, dim=1) * (127/128)
 
     psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
     wpsqt = wpsqt.gather(1, psqt_indices_unsq)
