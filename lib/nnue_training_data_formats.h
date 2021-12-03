@@ -26,11 +26,13 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
+#include <algorithm>
 #include <cstdio>
 #include <cassert>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <cmath>
 #include <memory>
 #include <fstream>
 #include <cstring>
@@ -6848,6 +6850,41 @@ namespace binpack
         {
             return pos.pieceAt(move.to) != chess::Piece::none() &&
                    pos.pieceAt(move.to).color() != pos.pieceAt(move.from).color(); // Exclude castling
+        }
+
+        // The win rate model returns the probability (per mille) of winning given an eval
+        // and a game-ply. The model fits rather accurately the LTC fishtest statistics.
+        std::tuple<double, double, double> win_rate_model() const {
+
+           // The model captures only up to 240 plies, so limit input (and rescale)
+           double m = std::min(240, int(ply)) / 64.0;
+
+           // Coefficients of a 3rd order polynomial fit based on fishtest data
+           // for two parameters needed to transform eval to the argument of a
+           // logistic function.
+           double as[] = {-3.68389304,  30.07065921, -60.52878723, 149.53378557};
+           double bs[] = {-2.0181857,   15.85685038, -29.83452023,  47.59078827};
+           double a = (((as[0] * m + as[1]) * m + as[2]) * m) + as[3];
+           double b = (((bs[0] * m + bs[1]) * m + bs[2]) * m) + bs[3];
+
+           // Transform eval to centipawns with limited range
+           double x = std::clamp(double(100 * score) / 208, -2000.0, 2000.0);
+           double w = 1.0 / (1 + std::exp((a - x) / b));
+           double l = 1.0 / (1 + std::exp((a + x) / b));
+           double d = 1.0 - w - l;
+
+           // Return win, loss, draw rate in per mille (rounded to nearest)
+           return std::make_tuple(w, l, d);
+        }
+
+        // how likely is end-game result with the current score?
+        double score_result_prob() const {
+           auto [w, l, d] = win_rate_model();
+           if (result > 0)
+               return w;
+           if (result < 0)
+               return l;
+           return d;
         }
 
         [[nodiscard]] bool isInCheck() const

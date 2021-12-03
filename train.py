@@ -9,15 +9,15 @@ from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
-def make_data_loaders(train_filename, val_filename, feature_set, num_workers, batch_size, filtered, random_fen_skipping, main_device):
+def make_data_loaders(train_filename, val_filename, feature_set, num_workers, batch_size, filtered, random_fen_skipping, wld_filtered, main_device):
   # Epoch and validation sizes are arbitrary
   epoch_size = 100000000
   val_size = 1000000
   features_name = feature_set.name
   train_infinite = nnue_dataset.SparseBatchDataset(features_name, train_filename, batch_size, num_workers=num_workers,
-                                                   filtered=filtered, random_fen_skipping=random_fen_skipping, device=main_device)
+                                                   filtered=filtered, random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, device=main_device)
   val_infinite = nnue_dataset.SparseBatchDataset(features_name, val_filename, batch_size, filtered=filtered,
-                                                   random_fen_skipping=random_fen_skipping, device=main_device)
+                                                   random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, device=main_device)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
   train = DataLoader(nnue_dataset.FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
@@ -36,6 +36,7 @@ def main():
   parser.add_argument("--seed", default=42, type=int, dest='seed', help="torch seed to use.")
   parser.add_argument("--smart-fen-skipping", action='store_true', dest='smart_fen_skipping_deprecated', help="If enabled positions that are bad training targets will be skipped during loading. Default: True, kept for backwards compatibility. This option is ignored")
   parser.add_argument("--no-smart-fen-skipping", action='store_true', dest='no_smart_fen_skipping', help="If used then no smart fen skipping will be done. By default smart fen skipping is done.")
+  parser.add_argument("--no-wld-fen-skipping", action='store_true', dest='no_wld_fen_skipping', help="If used then no wld fen skipping will be done. By default wld fen skipping is done.")
   parser.add_argument("--random-fen-skipping", default=3, type=int, dest='random_fen_skipping', help="skip fens randomly on average random_fen_skipping before using one.")
   parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
   features.add_argparse_args(parser)
@@ -71,6 +72,7 @@ def main():
   print('Using batch size {}'.format(batch_size))
 
   print('Smart fen skipping: {}'.format(not args.no_smart_fen_skipping))
+  print('WLD fen skipping: {}'.format(not args.no_wld_fen_skipping))
   print('Random fen skipping: {}'.format(args.random_fen_skipping))
 
   if args.threads > 0:
@@ -89,7 +91,7 @@ def main():
   nnue.to(device=main_device)
 
   print('Using c++ data loader')
-  train, val = make_data_loaders(args.train, args.val, feature_set, args.num_workers, batch_size, not args.no_smart_fen_skipping, args.random_fen_skipping, main_device)
+  train, val = make_data_loaders(args.train, args.val, feature_set, args.num_workers, batch_size, not args.no_smart_fen_skipping, args.random_fen_skipping, not args.no_wld_fen_skipping, main_device)
 
   trainer.fit(nnue, train, val)
 
