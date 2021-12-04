@@ -100,11 +100,11 @@ class LayerStacks(nn.Module):
   def get_coalesced_layer_stacks(self):
     for i in range(self.count):
       with torch.no_grad():
-        l1 = nn.Linear(2*L1, L2)
+        l1 = nn.Linear(2*L1, L2+1)
         l2 = nn.Linear(L2, L3)
         output = nn.Linear(L3, 1)
-        l1.weight.data = self.l1.weight[i*L2:(i+1)*L2, :] + self.l1_fact.weight.data
-        l1.bias.data = self.l1.bias[i*L2:(i+1)*L2]
+        l1.weight.data = self.l1.weight[i*(L2+1):(i+1)*(L2+1), :] + self.l1_fact.weight.data
+        l1.bias.data = self.l1.bias[i*(L2+1):(i+1)*(L2+1)]
         l2.weight.data = self.l2.weight[i*L3:(i+1)*L3, :]
         l2.bias.data = self.l2.bias[i*L3:(i+1)*L3]
         output.weight.data = self.output.weight[i:(i+1), :]
