@@ -295,7 +295,7 @@ class NNUE(pl.LightningModule):
 
   def configure_optimizers(self):
     # Train with a lower LR on the output layer
-    LR = 8.75e-4
+    LR = 4.375e-4
     train_params = [
       {'params' : get_parameters([self.input]), 'lr' : LR, 'gc_dim' : 0 },
       {'params' : [self.layer_stacks.l1_fact.weight], 'lr' : LR },
