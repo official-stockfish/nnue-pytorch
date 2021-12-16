@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 import copy
 from feature_transformer import DoubleFeatureTransformerSlice
+from optimizer import NnueOptimizer
 
 # 3 layer fully connected network
 L1 = 1024
@@ -95,6 +96,14 @@ class LayerStacks(nn.Module):
 
     return l3x_
 
+  def disable_l1_factorization(self, optimizer):
+    with torch.no_grad():
+      for i in range(self.count):
+        self.l1.weight[i*L2:(i+1)*L2, :].add_(self.l1_fact.weight.data)
+      self.l1_fact.weight.data.fill_(0.0)
+      self.l1_fact.weight.requires_grad = False
+
+
   def get_coalesced_layer_stacks(self):
     for i in range(self.count):
       with torch.no_grad():
@@ -127,6 +136,9 @@ class NNUE(pl.LightningModule):
     self.feature_set = feature_set
     self.layer_stacks = LayerStacks(self.num_ls_buckets)
     self.lambda_ = lambda_
+
+    self.disable_ft_factorization_after_steps = -1
+    self.disable_l1_factorization_after_steps = -1
 
     self.weight_clipping = [
       {'params' : [self.layer_stacks.l1.weight], 'min_weight' : -127/64, 'max_weight' : 127/64, 'virtual_params' : self.layer_stacks.l1_fact.weight },
@@ -293,11 +305,35 @@ class NNUE(pl.LightningModule):
   def test_step(self, batch, batch_idx):
     self.step_(batch, batch_idx, 'test_loss')
 
+  def post_optimizer_step(self, optimizer):
+    num_finished_steps = optimizer.get_num_finished_steps()
+
+    if num_finished_steps == self.disable_l1_factorization_after_steps:
+      self.disable_l1_factorization(optimizer)
+
+    if num_finished_steps == self.disable_ft_factorization_after_steps:
+      self.disable_ft_factorization(optimizer)
+
+  def disable_l1_factorization(self, optimizer):
+    self.layer_stacks.disable_l1_factorization(optimizer)
+
+  def disable_ft_factorization(self, optimizer):
+    with torch.no_grad():
+      weight = self.input.weight.data
+      indices = self.feature_set.get_virtual_to_real_features_gather_indices()
+      for i_real, is_virtual in enumerate(indices):
+        weight[i_real, :] = sum(weight[i_virtual, :] for i_virtual in is_virtual)
+
+    for a, b in self.feature_set.get_virtual_feature_ranges():
+      weight[a:b, :].fill_(0.0)
+      optimizer.freeze_parameter_region(self.input.weight, (slice(a, b), slice(None, None)))
+
   def configure_optimizers(self):
     # Train with a lower LR on the output layer
     LR = 8.75e-4
     train_params = [
-      {'params' : get_parameters([self.input]), 'lr' : LR, 'gc_dim' : 0 },
+      {'params' : [self.input.weight], 'lr' : LR, 'gc_dim' : 0, 'maskable' : (self.disable_ft_factorization_after_steps != -1) },
+      {'params' : [self.input.bias], 'lr' : LR },
       {'params' : [self.layer_stacks.l1_fact.weight], 'lr' : LR },
       {'params' : [self.layer_stacks.l1.weight], 'lr' : LR },
       {'params' : [self.layer_stacks.l1.bias], 'lr' : LR },
@@ -307,7 +343,8 @@ class NNUE(pl.LightningModule):
       {'params' : [self.layer_stacks.output.bias], 'lr' : LR },
     ]
     # increasing the eps leads to less saturated nets with a few dead neurons
-    optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7, gc_loc=False, use_gc=False)
+    optimizer = NnueOptimizer(ranger.Ranger, train_params, betas=(.9, 0.999), eps=1.0e-7, gc_loc=False, use_gc=False)
+    optimizer.set_post_step_callback(lambda opt: self.post_optimizer_step(opt))
     # Drop learning rate after 75 epochs
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.992)
     return [optimizer], [scheduler]
