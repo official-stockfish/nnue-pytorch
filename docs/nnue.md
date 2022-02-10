@@ -97,7 +97,7 @@ This document describes in detail what NNUE is, how it works in theory, how the 
     + [HalfKAv2_hm feature set.](#halfkav2_hm-feature-set)
     + [A part of the feature transformer directly forwarded to the output.](#a-part-of-the-feature-transformer-directly-forwarded-to-the-output)
     + [Multiple PSQT outputs and multiple subnetworks](#multiple-psqt-outputs-and-multiple-subnetworks)
-    + ["SF15a" architecture](#sf15a-architecture)
+    + ["SFNNv4" architecture](#sfnnv4-architecture)
 
 ## Basics
 
@@ -2439,6 +2439,6 @@ bpsqt = bpsqt.gather(1, psqt_indices_unsq)
 y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 ```
 
-### "SF15a" architecture
+### "SFNNv4" architecture
 
-![](img/SF15a_architecture.png)
+![](img/SFNNv4_architecture.png)
