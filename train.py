@@ -30,6 +30,8 @@ def main():
   parser.add_argument("val", help="Validation data (.bin or .binpack)")
   parser = pl.Trainer.add_argparse_args(parser)
   parser.add_argument("--lambda", default=1.0, type=float, dest='lambda_', help="lambda=1.0 = train on evaluations, lambda=0.0 = train on game results, interpolates between (default=1.0).")
+  parser.add_argument("--gamma", default=0.992, type=float, dest='gamma', help="Multiplicative factor applied to the learning rate after every epoch.")
+  parser.add_argument("--lr", default=8.75e-4, type=float, dest='lr', help="Initial learning rate.")
   parser.add_argument("--num-workers", default=1, type=int, dest='num_workers', help="Number of worker threads to use for data loading. Currently only works well for binpack.")
   parser.add_argument("--batch-size", default=-1, type=int, dest='batch_size', help="Number of positions per batch / per iteration. Default on GPU = 8192 on CPU = 128.")
   parser.add_argument("--threads", default=-1, type=int, dest='threads', help="Number of torch threads to use. Default automatic (cores) .")
@@ -50,11 +52,15 @@ def main():
   feature_set = features.get_feature_set_from_name(args.features)
 
   if args.resume_from_model is None:
-    nnue = M.NNUE(feature_set=feature_set, lambda_=args.lambda_)
+    nnue = M.NNUE(feature_set=feature_set, lambda_=args.lambda_, gamma=args.gamma, lr=args.lr)
   else:
     nnue = torch.load(args.resume_from_model)
     nnue.set_feature_set(feature_set)
     nnue.lambda_ = args.lambda_
+    # we can set the following here just like that because when resuming
+    # from .pt the optimizer is only created after the training is started
+    nnue.gamma = args.gamma
+    nnue.lr = args.lr
 
   print("Feature set: {}".format(feature_set.name))
   print("Num real features: {}".format(feature_set.num_real_features))
