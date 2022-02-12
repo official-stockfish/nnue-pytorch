@@ -140,15 +140,15 @@ class NNUEReader():
     self.read_int32(feature_set.hash ^ (M.L1*2)) # Feature transformer hash
     self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
     for i in range(self.model.num_ls_buckets):
-      l1 = nn.Linear(2*M.L1, M.L2)
+      l1 = nn.Linear(2*M.L1//2, M.L2+1)
       l2 = nn.Linear(M.L2, M.L3)
       output = nn.Linear(M.L3, 1)
       self.read_int32(fc_hash) # FC layers hash
       self.read_fc_layer(l1)
       self.read_fc_layer(l2)
       self.read_fc_layer(output, is_output=True)
-      self.model.layer_stacks.l1.weight.data[i*M.L2:(i+1)*M.L2, :] = l1.weight
-      self.model.layer_stacks.l1.bias.data[i*M.L2:(i+1)*M.L2] = l1.bias
+      self.model.layer_stacks.l1.weight.data[i*(M.L2+1):(i+1)*(M.L2+1), :] = l1.weight
+      self.model.layer_stacks.l1.bias.data[i*(M.L2+1):(i+1)*(M.L2+1)] = l1.bias
       self.model.layer_stacks.l2.weight.data[i*M.L3:(i+1)*M.L3, :] = l2.weight
       self.model.layer_stacks.l2.bias.data[i*M.L3:(i+1)*M.L3] = l2.bias
       self.model.layer_stacks.output.weight.data[i:(i+1), :] = output.weight
