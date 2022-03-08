@@ -30,13 +30,14 @@ class LayerStacks(nn.Module):
     self.l1 = nn.Linear(2 * L1 // 2, (L2 + 1) * count)
     # Factorizer only for the first layer because later
     # there's a non-linearity and factorization breaks.
-    # It breaks the min/max weight clipping but hopefully it's not bad.
-    # TODO: try solving it
-    #       one potential solution would be to coalesce the weights on each step.
+    # This is by design. The weights in the further layers should be
+    # able to diverge a lot.
     self.l1_fact = nn.Linear(2 * L1 // 2, L2 + 1, bias=False)
     self.l2 = nn.Linear(L2, L3 * count)
     self.output = nn.Linear(L3, 1 * count)
 
+    # Cached helper tensor for choosing outputs by bucket indices.
+    # Initialized lazily in forward.
     self.idx_offset = None
 
     self._init_layers()
@@ -54,8 +55,7 @@ class LayerStacks(nn.Module):
       output_bias.fill_(0.0)
 
       for i in range(1, self.count):
-        # Make all layer stacks have the same initialization.
-        # Basically copy the first to all other layer stacks.
+        # Force all layer stacks to be initialized in the same way.
         l1_weight[i*(L2+1):(i+1)*(L2+1), :] = l1_weight[0:(L2+1), :]
         l1_bias[i*(L2+1):(i+1)*(L2+1)] = l1_bias[0:(L2+1)]
         l2_weight[i*L3:(i+1)*L3, :] = l2_weight[0:L3, :]
@@ -71,7 +71,7 @@ class LayerStacks(nn.Module):
     self.output.bias = nn.Parameter(output_bias)
 
   def forward(self, x, ls_indices):
-    # precompute and cache the offset for gathers
+    # Precompute and cache the offset for gathers
     if self.idx_offset == None or self.idx_offset.shape[0] != x.shape[0]:
       self.idx_offset = torch.arange(0,x.shape[0]*self.count,self.count, device=ls_indices.device)
 
@@ -98,6 +98,9 @@ class LayerStacks(nn.Module):
     return l3x_
 
   def get_coalesced_layer_stacks(self):
+    # During training the buckets are represented by a single, wider, layer.
+    # This representation needs to be transformed into individual layers
+    # for the serializer, because the buckets are interpreted as separate layers.
     for i in range(self.count):
       with torch.no_grad():
         l1 = nn.Linear(2*L1 // 2, L2+1)
@@ -114,12 +117,15 @@ class LayerStacks(nn.Module):
 
 class NNUE(pl.LightningModule):
   """
-  This model attempts to directly represent the nodchip Stockfish trainer methodology.
+  feature_set - an instance of FeatureSet defining the input features
 
   lambda_ = 0.0 - purely based on game results
+  0.0 < lambda_ < 1.0 - interpolated score and result
   lambda_ = 1.0 - purely based on search scores
 
-  It is not ideal for training a Pytorch quantized model directly.
+  gamma - the multiplicative factor applied to the learning rate after each epoch
+
+  lr - the initial learning rate
   """
   def __init__(self, feature_set, lambda_=1.0, gamma=0.992, lr=8.75e-4, num_psqt_buckets=8, num_ls_buckets=8):
     super(NNUE, self).__init__()
@@ -141,8 +147,8 @@ class NNUE(pl.LightningModule):
     self._init_layers()
 
   '''
-  We zero all real feature weights because we want to start the training
-  with fewest differences between correlated features.
+  We zero all virtual feature weights because there's not need for them
+  to be initialized; they only aid the training of correlated features.
   '''
   def _zero_virtual_feature_weights(self):
     weights = self.input.weight
@@ -151,23 +157,13 @@ class NNUE(pl.LightningModule):
         weights[a:b, :] = 0.0
     self.input.weight = nn.Parameter(weights)
 
-  '''
-  Pytorch initializes biases around 0, but we want them
-  to be around activation range. Also the bias for the output
-  layer should always be 0.
-  '''
   def _init_layers(self):
-    input_bias = self.input.bias
-    with torch.no_grad():
-      for i in range(self.num_psqt_buckets):
-        input_bias[L1 + i] = 0.0
-    self.input.bias = nn.Parameter(input_bias)
-
     self._zero_virtual_feature_weights()
     self._init_psqt()
 
   def _init_psqt(self):
     input_weights = self.input.weight
+    input_bias = self.input.bias
     # 1.0 / kPonanzaConstant
     scale = 1 / 600
     with torch.no_grad():
@@ -175,7 +171,13 @@ class NNUE(pl.LightningModule):
       assert len(initial_values) == self.feature_set.num_features
       for i in range(self.num_psqt_buckets):
         input_weights[:, L1 + i] = torch.FloatTensor(initial_values) * scale
+        # Bias doesn't matter because it cancels out during
+        # inference during perspective averaging. We set it to 0
+        # just for the sake of it. It might still diverge away from 0
+        # due to gradient imprecision but it won't change anything.
+        input_bias[L1 + i] = 0.0
     self.input.weight = nn.Parameter(input_weights)
+    self.input.bias = nn.Parameter(input_bias)
 
   '''
   Clips the weights of the model based on the min/max values allowed
@@ -208,7 +210,7 @@ class NNUE(pl.LightningModule):
 
   '''
   This method attempts to convert the model from using the self.feature_set
-  to new_feature_set.
+  to new_feature_set. Currently only works for adding virtual features.
   '''
   def set_feature_set(self, new_feature_set):
     if self.feature_set.name == new_feature_set.name:
@@ -250,21 +252,28 @@ class NNUE(pl.LightningModule):
     w, wpsqt = torch.split(wp, L1, dim=1)
     b, bpsqt = torch.split(bp, L1, dim=1)
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-    # clamp here is used as a clipped relu to (0.0, 1.0)
     l0_ = torch.clamp(l0_, 0.0, 1.0)
 
     l0_s = torch.split(l0_, L1 // 2, dim=1)
     l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
+    # We multiply by 127/128 because in the quantized network 1.0 is represented by 127
+    # and it's more efficient to divide by 128 instead.
     l0_ = torch.cat(l0_s1, dim=1) * (127/128)
 
     psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
     wpsqt = wpsqt.gather(1, psqt_indices_unsq)
     bpsqt = bpsqt.gather(1, psqt_indices_unsq)
+    # The PSQT values are averaged over perspectives. "Their" perspective
+    # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
+    # which does both the averaging and sign flip for black to move)
     x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
     return x
 
   def step_(self, batch, batch_idx, loss_type):
+    # We clip weights at the start of each step. This means that after
+    # the last step the weights might be outside of the desired range.
+    # They should be also clipped accordingly in the serializer.
     self._clip_weights()
 
     us, them, white_indices, white_values, black_indices, black_values, outcome, score, psqt_indices, layer_stack_indices = batch
@@ -287,11 +296,6 @@ class NNUE(pl.LightningModule):
 
     return loss
 
-    # MSE Loss function for debugging
-    # Scale score by 600.0 to match the expected NNUE scaling factor
-    # output = self(us, them, white, black) * 600.0
-    # loss = F.mse_loss(output, score)
-
   def training_step(self, batch, batch_idx):
     return self.step_(batch, batch_idx, 'train_loss')
 
@@ -302,7 +306,6 @@ class NNUE(pl.LightningModule):
     self.step_(batch, batch_idx, 'test_loss')
 
   def configure_optimizers(self):
-    # Train with a lower LR on the output layer
     LR = self.lr
     train_params = [
       {'params' : get_parameters([self.input]), 'lr' : LR, 'gc_dim' : 0 },
@@ -314,8 +317,8 @@ class NNUE(pl.LightningModule):
       {'params' : [self.layer_stacks.output.weight], 'lr' : LR },
       {'params' : [self.layer_stacks.output.bias], 'lr' : LR },
     ]
-    # increasing the eps leads to less saturated nets with a few dead neurons
+    # Increasing the eps leads to less saturated nets with a few dead neurons.
+    # Gradient localisation appears slightly harmful.
     optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7, gc_loc=False, use_gc=False)
-    # Drop learning rate after 75 epochs
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=self.gamma)
     return [optimizer], [scheduler]
