@@ -138,10 +138,17 @@ class NNUE(pl.LightningModule):
     self.gamma = gamma
     self.lr = lr
 
+    self.nnue2score = 600.0
+    self.weight_scale_hidden = 64.0
+    self.weight_scale_out = 16.0
+    self.quantized_one = 127.0
+
+    max_hidden_weight = self.quantized_one / self.weight_scale_hidden
+    max_out_weight = (self.quantized_one * self.quantized_one) / (self.nnue2score * self.weight_scale_out)
     self.weight_clipping = [
-      {'params' : [self.layer_stacks.l1.weight], 'min_weight' : -127/64, 'max_weight' : 127/64, 'virtual_params' : self.layer_stacks.l1_fact.weight },
-      {'params' : [self.layer_stacks.l2.weight], 'min_weight' : -127/64, 'max_weight' : 127/64 },
-      {'params' : [self.layer_stacks.output.weight], 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
+      {'params' : [self.layer_stacks.l1.weight], 'min_weight' : -max_hidden_weight, 'max_weight' : max_hidden_weight, 'virtual_params' : self.layer_stacks.l1_fact.weight },
+      {'params' : [self.layer_stacks.l2.weight], 'min_weight' : -max_hidden_weight, 'max_weight' : max_hidden_weight },
+      {'params' : [self.layer_stacks.output.weight], 'min_weight' : -max_out_weight, 'max_weight' : max_out_weight },
     ]
 
     self._init_layers()
@@ -165,7 +172,7 @@ class NNUE(pl.LightningModule):
     input_weights = self.input.weight
     input_bias = self.input.bias
     # 1.0 / kPonanzaConstant
-    scale = 1 / 600
+    scale = 1 / self.nnue2score
     with torch.no_grad():
       initial_values = self.feature_set.get_initial_psqt_features()
       assert len(initial_values) == self.feature_set.num_features
@@ -280,11 +287,10 @@ class NNUE(pl.LightningModule):
 
     # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
     # This needs to match the value used in the serializer
-    nnue2score = 600
     in_scaling = 410
     out_scaling = 361
 
-    q = (self(us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices) * nnue2score / out_scaling).sigmoid()
+    q = (self(us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices) * self.nnue2score / out_scaling).sigmoid()
     t = outcome
     p = (score / in_scaling).sigmoid()
 
