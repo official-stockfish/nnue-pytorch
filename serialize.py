@@ -37,6 +37,9 @@ class NNUEWriter():
 
     self.buf = bytearray()
 
+    # NOTE: model._clip_weights() should probably be called here. It's not necessary now
+    # because it doesn't have more restrictive bounds than these defined by quantization,
+    # but it might be necessary in the future.
     fc_hash = self.fc_hash(model)
     self.write_header(model, fc_hash, description)
     self.int32(model.feature_set.hash ^ (M.L1*2)) # Feature transformer hash
@@ -74,8 +77,6 @@ class NNUEWriter():
     self.buf.extend(encoded_description)
 
   def write_feature_transformer(self, model):
-    # int16 bias = round(x * 127)
-    # int16 weight = round(x * 127)
     layer = model.input
     bias = layer.bias.data[:M.L1]
     bias = bias.mul(127).round().to(torch.int16)
@@ -88,7 +89,7 @@ class NNUEWriter():
     weight = weight0.mul(127).round().to(torch.int16)
     psqtweight = psqtweight0.mul(9600).round().to(torch.int32) # kPonanzaConstant * FV_SCALE = 9600
     ascii_hist('ft weight:', weight.numpy())
-    # weights stored as [41024][256]
+    # Weights stored as [num_features][outputs]
     self.buf.extend(weight.flatten().numpy().tobytes())
     self.buf.extend(psqtweight.flatten().numpy().tobytes())
 
@@ -103,8 +104,6 @@ class NNUEWriter():
     kWeightScale = kBiasScale / kActivationScale # = 64.0 for normal layers
     kMaxWeight = 127.0 / kWeightScale # roughly 2.0
 
-    # int32 bias = round(x * kBiasScale)
-    # int8 weight = round(x * kWeightScale)
     bias = layer.bias.data
     bias = bias.mul(kBiasScale).round().to(torch.int32)
     ascii_hist('fc bias:', bias.numpy())
@@ -116,14 +115,14 @@ class NNUEWriter():
     print("layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(clipped, total_elements, clipped_max, kMaxWeight))
     weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
     ascii_hist('fc weight:', weight.numpy())
-    # FC inputs are padded to 32 elements for simd.
+    # FC inputs are padded to 32 elements by spec.
     num_input = weight.shape[1]
     if num_input % 32 != 0:
       num_input += 32 - (num_input % 32)
       new_w = torch.zeros(weight.shape[0], num_input, dtype=torch.int8)
       new_w[:, :weight.shape[1]] = weight
       weight = new_w
-    # Stored as [outputs][inputs], so we can flatten
+    # Weights stored as [outputs][inputs], so we can flatten
     self.buf.extend(weight.flatten().numpy().tobytes())
 
   def int32(self, v):
@@ -156,8 +155,8 @@ class NNUEReader():
 
   def read_header(self, feature_set, fc_hash):
     self.read_int32(VERSION) # version
-    self.read_int32(fc_hash ^ feature_set.hash ^ (M.L1*2)) # halfkp network hash
-    desc_len = self.read_int32() # Network definition
+    self.read_int32(fc_hash ^ feature_set.hash ^ (M.L1*2))
+    desc_len = self.read_int32()
     description = self.f.read(desc_len)
 
   def tensor(self, dtype, shape):
@@ -169,7 +168,7 @@ class NNUEReader():
   def read_feature_transformer(self, layer, num_psqt_buckets):
     bias = self.tensor(numpy.int16, [layer.bias.shape[0]-num_psqt_buckets]).divide(127.0)
     layer.bias.data = torch.cat([bias, torch.tensor([0]*num_psqt_buckets)])
-    # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
+    # weights stored as [num_features][outputs]
     shape = layer.weight.shape
     weights = self.tensor(numpy.int16, [shape[0], shape[1]-num_psqt_buckets])
     psqtweights = self.tensor(numpy.int32, [shape[0], num_psqt_buckets])
@@ -187,7 +186,7 @@ class NNUEReader():
       kBiasScale = 9600.0 # kPonanzaConstant * FV_SCALE = 600 * 16 = 9600
     kWeightScale = kBiasScale / kActivationScale # = 64.0 for normal layers
 
-    # FC inputs are padded to 32 elements for simd.
+    # FC inputs are padded to 32 elements by spec.
     non_padded_shape = layer.weight.shape
     padded_shape = (non_padded_shape[0], ((non_padded_shape[1]+31)//32)*32)
 
