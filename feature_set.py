@@ -3,9 +3,6 @@ from feature_block import *
 import torch
 import chess
 
-PSQT_BUCKETS = 8
-LS_BUCKETS = 8
-
 def _calculate_features_hash(features):
     if len(features) == 1:
         return features[0].hash
@@ -33,8 +30,6 @@ class FeatureSet:
         self.num_real_features = sum(feature.num_real_features for feature in features)
         self.num_virtual_features = sum(feature.num_virtual_features for feature in features)
         self.num_features = sum(feature.num_features for feature in features)
-        self.num_psqt_buckets = PSQT_BUCKETS
-        self.num_ls_buckets = LS_BUCKETS
 
     '''
     This method returns the feature ranges for the virtual factors of the

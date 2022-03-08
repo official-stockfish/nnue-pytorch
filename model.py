@@ -121,10 +121,10 @@ class NNUE(pl.LightningModule):
 
   It is not ideal for training a Pytorch quantized model directly.
   """
-  def __init__(self, feature_set, lambda_=1.0, gamma=0.992, lr=8.75e-4):
+  def __init__(self, feature_set, lambda_=1.0, gamma=0.992, lr=8.75e-4, num_psqt_buckets=8, num_ls_buckets=8):
     super(NNUE, self).__init__()
-    self.num_psqt_buckets = feature_set.num_psqt_buckets
-    self.num_ls_buckets = feature_set.num_ls_buckets
+    self.num_psqt_buckets = num_psqt_buckets
+    self.num_ls_buckets = num_ls_buckets
     self.input = DoubleFeatureTransformerSlice(feature_set.num_features, L1 + self.num_psqt_buckets)
     self.feature_set = feature_set
     self.layer_stacks = LayerStacks(self.num_ls_buckets)
@@ -159,7 +159,7 @@ class NNUE(pl.LightningModule):
   def _init_layers(self):
     input_bias = self.input.bias
     with torch.no_grad():
-      for i in range(8):
+      for i in range(self.num_psqt_buckets):
         input_bias[L1 + i] = 0.0
     self.input.bias = nn.Parameter(input_bias)
 
@@ -173,7 +173,7 @@ class NNUE(pl.LightningModule):
     with torch.no_grad():
       initial_values = self.feature_set.get_initial_psqt_features()
       assert len(initial_values) == self.feature_set.num_features
-      for i in range(8):
+      for i in range(self.num_psqt_buckets):
         input_weights[:, L1 + i] = torch.FloatTensor(initial_values) * scale
     self.input.weight = nn.Parameter(input_weights)
 
