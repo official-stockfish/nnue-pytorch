@@ -46,9 +46,9 @@ class NNUEWriter():
     self.write_feature_transformer(model)
     for l1, l2, output in model.layer_stacks.get_coalesced_layer_stacks():
       self.int32(fc_hash) # FC layers hash
-      self.write_fc_layer(l1)
-      self.write_fc_layer(l2)
-      self.write_fc_layer(output, is_output=True)
+      self.write_fc_layer(model, l1)
+      self.write_fc_layer(model, l2)
+      self.write_fc_layer(model, output, is_output=True)
 
   @staticmethod
   def fc_hash(model):
@@ -78,43 +78,50 @@ class NNUEWriter():
 
   def write_feature_transformer(self, model):
     layer = model.input
-    bias = layer.bias.data[:M.L1]
-    bias = bias.mul(127).round().to(torch.int16)
-    ascii_hist('ft bias:', bias.numpy())
-    self.buf.extend(bias.flatten().numpy().tobytes())
 
-    weight = M.coalesce_ft_weights(model, layer)
-    weight0 = weight[:, :M.L1]
-    psqtweight0 = weight[:, M.L1:]
-    weight = weight0.mul(127).round().to(torch.int16)
-    psqtweight = psqtweight0.mul(9600).round().to(torch.int32) # kPonanzaConstant * FV_SCALE = 9600
+    bias = layer.bias.data[:M.L1]
+    bias = bias.mul(model.quantized_one).round().to(torch.int16)
+
+    all_weight = M.coalesce_ft_weights(model, layer)
+    weight = all_weight[:, :M.L1]
+    psqt_weight = all_weight[:, M.L1:]
+
+    weight = weight.mul(model.quantized_one).round().to(torch.int16)
+    psqt_weight = psqt_weight.mul(model.nnue2score * model.weight_scale_out).round().to(torch.int32)
+
+    ascii_hist('ft bias:', bias.numpy())
     ascii_hist('ft weight:', weight.numpy())
+    ascii_hist('ft psqt weight:', psqt_weight.numpy())
+
+    self.buf.extend(bias.flatten().numpy().tobytes())
     # Weights stored as [num_features][outputs]
     self.buf.extend(weight.flatten().numpy().tobytes())
-    self.buf.extend(psqtweight.flatten().numpy().tobytes())
+    self.buf.extend(psqt_weight.flatten().numpy().tobytes())
 
-  def write_fc_layer(self, layer, is_output=False):
+  def write_fc_layer(self, model, layer, is_output=False):
     # FC layers are stored as int8 weights, and int32 biases
-    kWeightScaleBits = 6
-    kActivationScale = 127.0
-    if not is_output:
-      kBiasScale = (1 << kWeightScaleBits) * kActivationScale # = 8128
-    else:
-      kBiasScale = 9600.0 # kPonanzaConstant * FV_SCALE = 600 * 16 = 9600
-    kWeightScale = kBiasScale / kActivationScale # = 64.0 for normal layers
-    kMaxWeight = 127.0 / kWeightScale # roughly 2.0
+    kWeightScaleHidden = model.weight_scale_hidden
+    kWeightScaleOut = model.nnue2score * model.weight_scale_out / model.quantized_one
+    kWeightScale = kWeightScaleOut if is_output else kWeightScaleHidden
+    kBiasScaleOut = model.weight_scale_out * model.nnue2score
+    kBiasScaleHidden = model.weight_scale_hidden * model.quantized_one
+    kBiasScale = kBiasScaleOut if is_output else kBiasScaleHidden
+    kMaxWeight = model.quantized_one / kWeightScale
 
     bias = layer.bias.data
     bias = bias.mul(kBiasScale).round().to(torch.int32)
-    ascii_hist('fc bias:', bias.numpy())
-    self.buf.extend(bias.flatten().numpy().tobytes())
+
     weight = layer.weight.data
     clipped = torch.count_nonzero(weight.clamp(-kMaxWeight, kMaxWeight) - weight)
     total_elements = torch.numel(weight)
     clipped_max = torch.max(torch.abs(weight.clamp(-kMaxWeight, kMaxWeight) - weight))
-    print("layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(clipped, total_elements, clipped_max, kMaxWeight))
+
     weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
+
+    ascii_hist('fc bias:', bias.numpy())
+    print("layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(clipped, total_elements, clipped_max, kMaxWeight))
     ascii_hist('fc weight:', weight.numpy())
+
     # FC inputs are padded to 32 elements by spec.
     num_input = weight.shape[1]
     if num_input % 32 != 0:
@@ -122,6 +129,8 @@ class NNUEWriter():
       new_w = torch.zeros(weight.shape[0], num_input, dtype=torch.int8)
       new_w[:, :weight.shape[1]] = weight
       weight = new_w
+
+    self.buf.extend(bias.flatten().numpy().tobytes())
     # Weights stored as [outputs][inputs], so we can flatten
     self.buf.extend(weight.flatten().numpy().tobytes())
 
@@ -142,10 +151,12 @@ class NNUEReader():
       l1 = nn.Linear(2*M.L1//2, M.L2+1)
       l2 = nn.Linear(M.L2, M.L3)
       output = nn.Linear(M.L3, 1)
+
       self.read_int32(fc_hash) # FC layers hash
       self.read_fc_layer(l1)
       self.read_fc_layer(l2)
       self.read_fc_layer(output, is_output=True)
+
       self.model.layer_stacks.l1.weight.data[i*(M.L2+1):(i+1)*(M.L2+1), :] = l1.weight
       self.model.layer_stacks.l1.bias.data[i*(M.L2+1):(i+1)*(M.L2+1)] = l1.bias
       self.model.layer_stacks.l2.weight.data[i*M.L3:(i+1)*M.L3, :] = l2.weight
@@ -166,25 +177,22 @@ class NNUEReader():
     return d
 
   def read_feature_transformer(self, layer, num_psqt_buckets):
-    bias = self.tensor(numpy.int16, [layer.bias.shape[0]-num_psqt_buckets]).divide(127.0)
-    layer.bias.data = torch.cat([bias, torch.tensor([0]*num_psqt_buckets)])
-    # weights stored as [num_features][outputs]
     shape = layer.weight.shape
+
+    bias = self.tensor(numpy.int16, [layer.bias.shape[0]-num_psqt_buckets]).divide(self.model.quantized_one)
+    # weights stored as [num_features][outputs]
     weights = self.tensor(numpy.int16, [shape[0], shape[1]-num_psqt_buckets])
-    psqtweights = self.tensor(numpy.int32, [shape[0], num_psqt_buckets])
-    weights = weights.divide(127.0)
-    psqtweights = psqtweights.divide(9600.0)
-    layer.weight.data = torch.cat([weights, psqtweights], dim=1)
+    weights = weights.divide(self.model.quantized_one)
+    psqt_weights = self.tensor(numpy.int32, [shape[0], num_psqt_buckets])
+    psqt_weights = psqt_weights.divide(self.model.nnue2score * self.model.weight_scale_out)
+
+    layer.bias.data = torch.cat([bias, torch.tensor([0]*num_psqt_buckets)])
+    layer.weight.data = torch.cat([weights, psqt_weights], dim=1)
 
   def read_fc_layer(self, layer, is_output=False):
-    # FC layers are stored as int8 weights, and int32 biases
-    kWeightScaleBits = 6
-    kActivationScale = 127.0
-    if not is_output:
-      kBiasScale = (1 << kWeightScaleBits) * kActivationScale # = 8128
-    else:
-      kBiasScale = 9600.0 # kPonanzaConstant * FV_SCALE = 600 * 16 = 9600
-    kWeightScale = kBiasScale / kActivationScale # = 64.0 for normal layers
+    kWeightScale = self.model.weight_scale_out if is_output else self.model.weight_scale_hidden
+    kBiasScale = self.model.weight_scale_out * self.model.nnue2score if is_output else self.model.weight_scale_hidden * self.model.quantized_one
+    kMaxWeight = self.model.quantized_one / kWeightScale
 
     # FC inputs are padded to 32 elements by spec.
     non_padded_shape = layer.weight.shape
