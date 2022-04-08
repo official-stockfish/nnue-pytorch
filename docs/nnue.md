@@ -2,7 +2,24 @@
 
 ## Preface
 
-This document describes in detail what NNUE is, how it works in theory, how the inference is implemented and how to make it efficient, how to train it with pytorch, and describes some architectural enhancements possible.
+What this document DOES contain:
+
+- technical content
+- detailed description of NNUE and its principles
+- a quick linear algebra refresher
+- input definition and factorization
+- components (layers) applicable to NNUE networks
+- inference code and optimizations
+- quantization math and implementation
+- almost-production-ready optimized code
+- pytorch trainer implementation (+ important CUDA kernels)
+- architectural considerations and history
+
+What this document DOES NOT contain:
+
+- a tutorial for training networks (for that see [the wiki](https://github.com/glinscott/nnue-pytorch/wiki))
+- datasets, optimizers, hyperparameters
+- a log of experimental results
 
 ## Table of contents
 
@@ -10,18 +27,22 @@ This document describes in detail what NNUE is, how it works in theory, how the 
 * [Table of contents](#table-of-contents)
 * [Basics](#basics)
     + [What is NNUE?](#what-is-nnue)
-    + [Quantization 101](#quantization-101)
+        + [Quantization 101 and its importance](#quantization-101-and-its-importance)
     + [What layers are used in NNUE?](#what-layers-are-used-in-nnue)
         - [Linear layer](#linear-layer)
         - [Linear layer with sparse inputs](#linear-layer-with-sparse-inputs)
         - [Clipped ReLU layer](#clipped-relu-layer)
     + [A simple input feature set.](#a-simple-input-feature-set)
     + [A simple NNUE network](#a-simple-nnue-network)
+    + [Consideration of networks size and cost.](#consideration-of-networks-size-and-cost)
+        - [Feature set](#feature-set)
+        - [First set of hidden neurons](#first-set-of-hidden-neurons)
+        - [Further layers](#further-layers)
     + [Accumulator](#accumulator)
     + [HalfKP](#halfkp)
         - [Multiple perspectives, multiple accumulators](#multiple-perspectives-multiple-accumulators)
-            * [How to combine them?](#how-to-combine-them)
-            * [Which weights to use?](#which-weights-to-use)
+            * [How to combine multiple accumulator perspectives?](#how-to-combine-multiple-accumulator-perspectives)
+            * [Which set of weights to use for each perspective?](#which-set-of-weights-to-use-for-each-perspective)
         - [HalfKP example and network diagram](#halfkp-example-and-network-diagram)
 * [Forward pass implementation](#forward-pass-implementation)
     + [Example network](#example-network)
@@ -32,15 +53,11 @@ This document describes in detail what NNUE is, how it works in theory, how the 
     + [Linear layer](#linear-layer-1)
     + [ClippedReLu](#clippedrelu)
     + [Putting it together](#putting-it-together)
-    + [Consideration of networks size and cost.](#consideration-of-networks-size-and-cost)
-        - [Feature set](#feature-set)
-        - [First set of hidden neurons](#first-set-of-hidden-neurons)
-        - [Further layers](#further-layers)
 * [Training a net with pytorch](#training-a-net-with-pytorch)
     + [Model specification](#model-specification)
     + [Preparing the inputs](#preparing-the-inputs)
         - [Parsing the training data sets and moving them to the python side](#parsing-the-training-data-sets-and-moving-them-to-the-python-side)
-        - [But what is actually sent, how, and how it's made into tensors?](#but-what-is-actually-sent-how-and-how-its-made-into-tensors)
+        - [Training batch structure and communication?](#training-batch-structure-and-communication)
     + [Feature factorization](#feature-factorization)
         - [Virtual feature coalescing](#virtual-feature-coalescing)
         - [Other factors](#other-factors)
@@ -86,11 +103,10 @@ This document describes in detail what NNUE is, how it works in theory, how the 
 * [Optimizing the trainer (CUDA)](#optimizing-the-trainer-cuda)
     + [Using custom CUDA kernels](#using-custom-cuda-kernels)
     + [Feature transformer](#feature-transformer)
-        - [Data loader](#data-loader)
-        - [Forward](#forward)
-        - [Backward](#backward)
+        - [New data loader](#new-data-loader)
+        - [Feature transformer forward kernel](#feature-transformer-forward-kernel)
+        - [Feature transformer backward kernel](#feature-transformer-backward-kernel)
         - [FeatureTransformerSlice layer](#featuretransformerslice-layer)
-        - [Results](#results)
 * [Architectures and new directions](#architectures-and-new-directions)
     + [Simple HalfKP Stockfish architecture](#simple-halfkp-stockfish-architecture)
     + [HalfKAv2 feature set.](#halfkav2-feature-set)
@@ -103,26 +119,29 @@ This document describes in detail what NNUE is, how it works in theory, how the 
 
 ### What is NNUE?
 
-NNUE (ƎUИИ Efficiently Updatable Neural Network) is, broadly speaking, a neural network architecture that takes advantage of having minimal changes in the network inputs between subsequent evaluations. It was invented for Shogi by Yu Nasu, integrated into [YaneuraOu](https://github.com/yaneurao/YaneuraOu) developed by Motohiro Isozaki in May 2018, and later ported to chess for use in Stockfish by Hisayori Noda in June 2019, but is applicable to many other board games and perhaps even in other domains. NNUE operates on the following principles:
+NNUE (ƎUИИ Efficiently Updatable Neural Network) is, broadly speaking, a neural network architecture that takes advantage of having minimal changes in the network inputs between subsequent evaluations. It was invented for Shogi by ![Yu Nasu](https://www.chessprogramming.org/Yu_Nasu), integrated into [YaneuraOu](https://github.com/yaneurao/YaneuraOu) developed by Motohiro Isozaki in May 2018, and later ported to chess for use in Stockfish by ![Hisayori Noda](https://www.chessprogramming.org/Hisayori_Noda) in June 2019, but is applicable to many other board games and perhaps even in other domains. NNUE operates on the following principles:
 
 1. The network should have relatively low amount of non-zero inputs.
 2. The inputs should change as little as possible between subsequent evaluations.
+3. The network should be simple enough to facilitate low-precision inference in integer domain.
 
-The principle 1. means that when the network is scaled in size the inputs must become sparse. Current best architectures have input sparsity in the order of 0.1%. Small amount of non-zero inputs places a low upper bound on the time required to evaluate the network in cases where it has to be evaluated in its entirety. This is the primary reason why NNUE networks can be large while still being very fast to evaluate.
+Following the 1st principle means that when the network is scaled in size the inputs must become sparse. Current best architectures have input sparsity in the order of 0.1%. Small amount of non-zero inputs places a low upper bound on the time required to evaluate the network in cases where it has to be evaluated in its entirety. This is the primary reason why NNUE networks can be large while still being very fast to evaluate.
 
-The principle 2. means that in most turn based games it can take advantage from the fact that a single move changes the board state only slightly. This is of lower importance than the first principle and completely optional for the implementations to take advantage of, but nevertheless gives a measurable improvement in implementations that do care to utilize this assumption.
+Following the 2nd principle (provided the first is being followed) creates a way to efficiently update the network (or at least a costly part of it) instead of reevaluating it in its entirety. This takes advantage of the fact that a single move changes the board state only slightly. This is of lower importance than the first principle and completely optional for the implementations to take advantage of, but nevertheless gives a measurable improvement in implementations that do care to utilize this.
 
-Overall the NNUE principles are applicable also to expensive deep networks, but they shine in fast shallow networks, which are suitable for low-latency CPU inference without the need for batching. The target performance is million(s) of evaluations per second per thread. This is an extreme use case that requires extreme solutions.
+Following the 3rd principle allows achieving maximum performance on common hardware and makes the model especially suited for low-latency CPU inference which is necessary for conventional chess engines.
 
-### Quantization 101
+Overall the NNUE principles are applicable also to expensive deep networks, but they shine in fast shallow networks, which are suitable for low-latency CPU inference without the need for batching and accelerators. The target performance is million(s) of evaluations per second per thread. This is an extreme use case that requires extreme solutions, and most importantly **quantization**.
 
-Quantization is the process of changing the domain of the neural network from floating point values to integer values. NNUE networks are designed to be evaluated fast, therefore they utilize available int8 performance to the fullest extent. With some int16 and int32 sprinkled where necessary. Floating point is not an option for achieving maximum engine strength as it sacrifices too much speed for too little accuracy gains, though it is used by some others. This limits the range of values representable by the network and introduces error that prevents the network from getting too complicated, or else the error would accumulate too much. Quantization will be described in more detail further into this document. Until then this document will be using floats instead of ints, it won't be important until we get to actual code optimization.
+#### Quantization 101 and its importance
+
+Quantization is the process of changing the domain of the neural network model from floating point to integer. NNUE networks are designed to be evaluated fast in low-precision integer domain, and can utilize available int8/int16 performance of modern CPUs to the fullest extent. Floating point is not an option for achieving maximum engine strength as it sacrifices too much speed for too little accuracy gains (though floating point representation is used by some engines due to its simplicity). Quantization inevitably introduces error that accumulates more the deeper the network is, however in the case of NNUE networks, which are relatively shallow, this error is neglibible. Quantization will be described in more detail later in this document. Until then this document will be using floats instead of ints, it won't be important until we get to actual code optimization. The purpose of this interjection is to make the reader aware of the ultimate goal of NNUE, as it is the biggest factor that shapes the NNUE models and dictates what is possible and what is not.
 
 ### What layers are used in NNUE?
 
-NNUE currently relies on Linear (fully connected) and ClippedReLU (clamp(0, 1)) layers.
+NNUE relies on simple layers that can be implemented in low-precision environments using simple arithmetic. This means Linear (fully connected, basically matrix multiplication) and ClippedReLU (clamp(0, 1)) layers are particularly suitable for it. Pooling layers (mul/avg/max) or approximations of more complex activation functions (like sigmoid) are also suitable but not commonly used.
 
-Usually such networks are kept shallow (2-4 layers), due to usage of quantization which introduces some error, and the small number of hidden neurons. The first layer is usually a few magnitudes larger compared to the later layers, simply because knowledge has to be stored *somewhere* and it's the best candidate since the inputs can be made sparse.
+Usually such networks are kept shallow (2-4 layers), because most knowledge is kept in the first layer (which takes advantage of input sparsity to remain performant) and after that first layer the network needs to sharply reduce its width (the benefits of a deeper section in the later parts of the net would be dominated by the impact of the large first layers) to maintain performance requirements.
 
 #### Linear layer
 
@@ -156,9 +175,7 @@ ClippedReLU would ideally be replaced with ReLU, but aggressive quantization req
 
 ### A simple input feature set.
 
-Most successful engines use so called "HalfKP" features, or a variation thereof. This will be described in detail later on, but for now let's focus on a simpler example to get a basic understanding of how NNUE actually works.
-
-For the purpose of illustration we will consider a simple set of inputs based on piece placement. We will call it "A" features, because they will represent "All pieces" with no relations to anything else but the square they are on.
+For the purpose of illustration we will consider a simple set of inputs based on piece placement. We will call it "A" features, because they will represent "All pieces".
 
 There is 64 squares on the board, 6 piece types (pawn, knight, bishop, rook, queen, king), and 2 colors (white, black). What we want to encode as inputs are the positions of pieces, so each input will correspond to some (square, piece_type, color) tuple. There is `64*6*2=768` such tuples. If there is a piece `P` of color `C` on the square `S` we set the input `(S, P, C)` to 1, otherwise we set it to 0. Even though the total number of inputs is 768 there can only be 32 non-zero inputs in any given legal chess position, because there are only at most 32 pieces on the board. Moreover, any move can only change at most 4 inputs (castling), and the average should be below 3.
 
@@ -178,9 +195,29 @@ Now let's consider the move cxd4 - the pawn moved, so like before we remove `(C3
 
 We will use our "A" feature set from the previous paragraph, so we have 768 inputs. The layers for the purpose of this illustration will be the 3 linear layers, 768->8, 8->8, 8->1. All layers are linear, and all hidden neurons use ClippedReLU activation function. The image below illustrates the architecture:
 
+<span style="display:block;text-align:center">
 ![A[768]->8->8->1 architecture diagram](img/A-768-8-8-1.png)
+</span>
 
-The flow is from the left to the right. The first layer is a large fully connected layer with 768 inputs, but only a small fraction of them is non-zero for each position - sparse matrix vector multiplication can be utilized. Hidden layers are much smaller and always computed with dense matrix vector multiplication. At the end we get 1 output, which is usually trained to be the centipawn evaluation of the position.
+The flow is from the left to the right. The first layer is a large fully connected layer with 768 inputs, but only a small fraction of them is non-zero for each position - sparse matrix vector multiplication can be utilized. Hidden layers are much smaller and always computed with dense matrix vector multiplication. At the end we get 1 output, which is usually trained to be the centipawn evaluation of the position (or proportional to it).
+
+### Consideration of networks size and cost.
+
+Choosing the right architecture is tricky as it's an accuracy/performance trade-off. Large networks provide more accurate evaluation, but the speed impact might completely negate the gains in real play. For example stockfish slowly transitioned from `256x2->32->32->1` to `1024x2->8->32->1`.
+
+#### Feature set
+
+When choosing a feature set it might be tempting to go into complicated domain specific knowledge, but the costs associated make simpler solutions more attractive. HalfKP, explained in detail earlier, is very simple, fast, and good enough. More sophisticated feature sets have been tried but they usually cannot combat the hit on performance. HalfKP features are easy to calculate, and change little from position to position.
+
+Size also has to be considered. For the `256x2->32->32->1` architecture HalfKP inputs require about 10 million parameters in the first layer, which amounts to 20MB after quantization. For some uses it might not be an issue to have a very large set of features, with possibly hundreds of millions of parameters, but for a typical user it's inconvenient. Moreover, increasing the feature set size may reduce the training speed for some implementations, and certainly will require more time to converge.
+
+#### First set of hidden neurons
+
+The number of outputs in the first layer is the most crucial parameter, and also has the highest impact on speed and size. The costs associated with this parameter are two-fold. For one, it increases the number of operations required when updating the accumulator. Second, for optimized implementations, one must consider the number of available registers - in Stockfish going past 256 neurons requires multiple passes over the feature indices as AVX2 doesn't have enough registers. It also partially determines the size of the first dense linear layer, which also greatly contributes to the total cost.
+
+#### Further layers
+
+Unlike in typical networks considered in machine learning here most of the knowledge is stored in the first layer, and because of that adding further small layers near the output adds little to accuracy, and may even be harmful if quantization is employed due to error accumulation. NNUE networks are kept unusually shallow, and keeping the size of the later layers small increases performance.
 
 ### Accumulator
 
@@ -191,39 +228,39 @@ Even though we observed that few inputs change from position to position we have
 
 For a single move it's trivial to find which "A" features changed - we know what piece we're moving, from where, and where to. Captures and promotions can be considered as a piece disappearing or appearing from nowhere.
 
-However, care must taken when using floating point values. Repeatedly adding and subtracting floats results in error that accumulates with each move. It requires careful evaluation whether the error is small enough for the net to still produce good results. Thankfully, it is best implemented such that the accumulator is not updated when undoing a move. Instead, it is simply stored on the stack, so the error is bounded by `O(MAX_DEPTH)` and can mostly be ignored.
+However, care must taken when using floating point values. Repeatedly adding and subtracting floats results in error that accumulates with each move. It requires careful evaluation whether the error is small enough for the net to still produce good results. Thankfully, it is best implemented such that the accumulator is not updated when undoing a move. Instead, it is simply stored on the search stack, so the error is bounded by `O(MAX_DEPTH)` and can mostly be ignored.
 
-When using quantization this is no longer a problem, but now there is a possibility of overflowing the accumulator. This, however, is much less of an issue and would come up even without these incremental updates. Quantization must ensure that no combination of possible active features can exceed the maximum value.
+When using quantization this is no longer a problem, the incremental implementation is consistent, but now there is a possibility of overflowing the accumulator (regardless of whether incremental updates are used or not). The quantization scheme must be chosen such that no combination of possible active features can exceed the maximum value.
 
 ### HalfKP
 
-HalfKP is the most common feature set and other successful ones build on top of it. It fits in a sweet spot of being just the right size, and requiring very few updates per move on average. Each feature is a tuple `(our_king_square, piece_square, piece_type, piece_color)`, where `piece_type` is not a king (in HalfKA feature set kings are included). This means that for each king position there is a set of features `P`, which are `(piece_square, piece_type, piece_color)`. This allows the net to better understand the pieces in relation to the king. The total number of features is `64*64*5*2=40960`. (Note that there is a leftover from Shogi in the current Stockfish implementation and there are 64 additional features that are unused, but we will disregard them for the purposes of this document). The feature index can be calculated as
+HalfKP is the most common feature set and other successful ones build on top of it. It fits in a sweet spot of being just the right size, and requiring very few updates per move on average. Each feature is a tuple `(our_king_square, piece_square, piece_type, piece_color)`, where `piece_type` is not a king (in HalfKA feature set kings are included). This means that for each king position there is a set of features `P`, which are `(piece_square, piece_type, piece_color)`. This allows the net to better understand the pieces in relation to the king. The total number of features is `64*64*5*2=40960`. (Note that there is a leftover from Shogi in the current Stockfish implementation and there are 64 additional features that are unused, but we will disregard them in this document). The feature index can be calculated as
 ```cpp
 p_idx = piece_type * 2 + piece_color
 halfkp_idx = piece_square + (p_idx + king_square * 10) * 64
 ```
-The one special case that needs to be handled is when the king moves, because it is tied to all the features. All features are changed, so an accumulator refresh is executed.
+The one special case that needs to be handled is when the king moves, because it is tied to all the features. All features are changed, so an accumulator refresh is executed. This makes king moves more costly but on average it still keeps the number of updates per evaluation low.
 
 Now, you might ask, "but which king?!". The answer is both...
 
 #### Multiple perspectives, multiple accumulators
 
-This is where we need to start accounting for the features of both sides separately. The white side will keep its own accumulator, and the black side its own accumulator too. So now we have two accumulators for each position state. Effectively, it means that the maximum active number of features is twice as high as for a simple feature set with only one perspective. There will be twice as many updates, but overall it is a very good feature set and a basis for everything that is good. This creates some problems, options, and choices. Let's go through them one by one.
+This is where we need to start accounting for the features of both sides separately. The white side will keep its own accumulator, and the black side its own accumulator too. Effectively, it means that the maximum active number of features is twice as high as for a simple feature set with only one perspective. There will be twice as many updates and the accumulator will be twice as large in total, but overall this tradeoff between speed and accuracy is worth it. This approach inevitably creates some problems, options, and choices with regard to the exact model topology. Let's go through them one by one.
 
-##### How to combine them?
+##### How to combine multiple accumulator perspectives?
 
-Since we now have two accumulators, we need to somehow combine them into one vector that gets passed further into the network. This can be solved in two (three) ways. Let's denote the accumulator for white as `A_w`, and the accumulator for black as `A_b`
+Since we now have two accumulators, we need to somehow combine them into one vector that gets passed further into the network. This can be solved in two (three) ways. Let's denote the accumulator for white as `A_w`, and the accumulator for black as `A_b`.
 
-1. concatenate the `A_w` and `A_b`, placing `A_w` first and `A_b` second. This is the simplest option. It is fine, the output is always relative to the white's perspective.
-2. concatenate the `A_w` and `A_b`, placing `A_w` first if it's white to move, otherwise `A_b` first, and the other accumulator second. This approach has the advantage that the net can learn tempo. It now knows whose turn it is. The output is always relative to the side to move perspective
+1. concatenate the `A_w` and `A_b`, placing `A_w` first and `A_b` second. This is the simplest option. The output in this case is always relative to the white's perspective.
+2. concatenate the `A_w` and `A_b`, placing `A_w` first if it's white to move, otherwise `A_b` first, and the other accumulator second. This approach has the advantage that the net can learn tempo. It now knows whose turn it is, which is an important factor in chess and can have a huge impact on evaluation of some positions. The output in this case is always relative to the side to move perspective.
 3. Either 1 or 2, but instead of concatenating interleave. So `A_w[0], A_b[0], A_w[1], A_b[1], ...`. This might be advantageous in some exotic architectures where not always the whole combined accumulator is used, in which case interleaving means that the slice used always contains the same number of outputs from white's and from black's perspectives. This might become useful, for example when employing structured sparsity to the first hidden layer, which ultimately works on the subset of the accumulator.
 
-##### Which weights to use?
+##### Which set of weights to use for each perspective?
 
-So we compute the features for white and black the same, are their weights related? They can be, but it's not required. Engines differ in handling of this. Stockfish uses the same weights for white and black. Seer for example uses separate.
+So we compute the features for white and black the same, are their weights related? They can be, but it's not required. Engines differ in the handling of this.
 
-1. Use the same weights for both perspectives. This means the the board state needs to somehow be oriented. Otherwise white king on E1 would produce a different subset of features than a black king on E8, and white king on G4 would produce the same subset of features as a black king on G4. That's bad. The solution is to mirror the position and change the color of the pieces for black's perspective, then the piece placement to feature mapping is logical for both. White king on E1 from white's perspective should be the same as a black king on E8 from black's perspective. Now you may think that flip is the way to go, but while chess has vertical symmetry, Shogi has rotational symmetry. The initial implementation of HalfKP in Stockfish uses rotation to change the perspective, which is arguably incorrect for chess (for example due to castling), but that's a remnant from the past that will hopefully be resolved once a good network using mirror instead of flip will be produced.
-2. Use different weights for different perspectives. Is the white king on E1 actually equal to black king on E8? What about other pieces? Arguably one plays the game differently as black than as white, and it seems it makes sense to use different features for these perspectives. This is how some engines do it, and there's nothing wrong with this. The only downsides are larger size and slightly longer training time, but other than that it might even be better! It also completely removes the discussion about flip or rotate, and lends itself to a simpler, more performant implementation.
+1. Same weights for both perspectives. This means the the board state needs to somehow be oriented. Otherwise white king on E1 would produce a different subset of features than a black king on E8, and white king on G4 would produce the same subset of features as a black king on G4. That's bad. The solution is to mirror the position and swap the color of the pieces for black's perspective; then the piece placement to feature mapping is logical for both. White king on E1 from white's perspective should be the same as a black king on E8 from black's perspective. Now you may think that flip is the way to go, but while chess has vertical symmetry, Shogi has rotational symmetry. The initial implementation of HalfKP in Stockfish used rotation to change the perspective, which is arguably incorrect for chess, but it worked surprisingly well.
+2. Different weights for different perspectives. Is the white king on E1 actually equal to black king on E8? What about other pieces? Arguably one plays the game differently as black compared to as white, and it seems it makes sense to use different features for these perspectives. This is how some engines do it, and there's nothing wrong with this. The only downsides are larger size and slightly longer training time, but other than that it might even be better! It also completely removes the discussion about flip or rotate, which makes the implementation simpler.
 
 #### HalfKP example and network diagram
 
@@ -241,11 +278,13 @@ Blacks's perspective: `(B1, C6, pawn, black)`, `(B1, D5, rook, white)`
 
 The network diagram looks more interesting now.
 
+<span style="display:block;text-align:center">
 ![HalfKP[40960]->4x2->8->1](img/HalfKP-40960-4x2-8-1.png)
+</span>
 
 ## Forward pass implementation
 
-In this part we will present how the network is evaluated. Input generation will be omitted. Remember that we work with floats for now but that will change later.
+In this part we will look at model inference as it could be implemented in a simple chess engine. We will work with floating point values for simplicity here. Input generation is outside of the scope of this implementation.
 
 ### Example network
 
@@ -261,9 +300,9 @@ We will take a more generally defined network, with architecture `FeatureSet[N]-
 
 Linear layers have 2 parameters - weights and biases. We will refer to them as `L_0.weight` and `L_0.bias` respectively. The layers also contain the number of inputs and outputs, in `L_0.num_inputs` and `L_0.num_outputs` respectively.
 
-Here something has to be said about layout of the weight matrix. For the sparse multiplication, the column-major (a column is contiguous in memory) layout is favorable, as we're adding columns, but for dense multiplication this is not so clear and a row-major layout may be preferable. For now we will stick to the column-major layout, but we may revisit the row-major one when it comes to quantization and optimization. That means that `L_0.weight` allows access to the individual elements in the following form: `L_0.weight[column][row]`.
+Here something important has to be said about layout of the weight matrix. For the sparse multiplication, the column-major (a column is contiguous in memory) layout is favorable, as we're adding columns, but for dense multiplication this is not so clear and a row-major layout may be preferable. For now we will stick to the column-major layout, but we may revisit the row-major one when it comes to quantization and optimization. For now we assume `L_0.weight` allows access to the individual elements in the following form: `L_0.weight[column_index][row_index]`.
 
-The code will be pseudo-c++.
+The code presented is very close to C++ but technicalities might be ommited.
 
 ### Accumulator
 
@@ -281,7 +320,7 @@ struct NnueAccumulator {
 };
 ```
 
-The accumulator can either be updated lazily on evaluation, or on each move. It doesn't matter here, but it has to be updated *somehow*. There are two cases, as laid out before:
+The accumulator can either be updated lazily on evaluation, or on each move. It doesn't matter here, but it has to be updated *somehow*. Whether it's better to update lazily or eagerly depends on the number of evaluations done during search. For updates there are two cases, as laid out before:
 
 1. The accumulator has to be recomputed from scratch.
 2. The previous accumulator is reused and just updated with changed features
@@ -349,7 +388,7 @@ And that's it! Pretty simple, isn't it?
 
 ### Linear layer
 
-This is simple matrix-vector multiplication, what could be complicated about it you ask? Nothing for now, but it will get hairy further into this document. Right now we won't optimize, but we will at least write a version that uses the fact that the weight matrix has column-major layout.
+This is simple vector-matrix multiplication, what could be complicated about it you ask? Nothing for now, but it will get complicated once optimization starts. Right now we won't optimize, but we will at least write a version that uses the fact that the weight matrix has column-major layout.
 
 ```cpp
 float* linear(
@@ -393,7 +432,7 @@ float* crelu(,
 
 ### Putting it together
 
-In a crude pseudo code. The feature gathering is left as an exercise for the reader :P.
+In a crude pseudo code. The feature index generation is left as an exercise for the reader.
 
 ```cpp
 void Position::do_move(...) {
@@ -428,8 +467,8 @@ float nnue_evaluate(const Position& pos) {
     float input[2*M];
     Color stm = pos.side_to_move;
     for (int i = 0; i < M; ++i) {
-        input[i] = pos.accumulator[stm][i];
-        input[i+M] = pos.accumulator[!stm][i];
+        input[  i] = pos.accumulator[ stm][i];
+        input[M+i] = pos.accumulator[!stm][i];
     }
 
     float* curr_output = buffer;
@@ -458,24 +497,6 @@ float nnue_evaluate(const Position& pos) {
 ```
 
 And that's it! That's the whole network. What do you mean you can't use it?! OH RIGHT, you don't have a net trained, what a bummer.
-
-### Consideration of networks size and cost.
-
-Choosing the right architecture is tricky as it's a strength/performance trade-off. Large networks provide more accurate evaluation, but the speed impact might completely negate the gains in real play. Changing some parts impacts the performance and strength differently than others. The most battle-tested architecture is `HalfKP[40960]->256x2->32->32->1`, and it seems to provide near optimal strength/performance ratio.
-
-#### Feature set
-
-When choosing a feature set it might be tempting to go into complicated domain specific knowledge, but the costs associated make simpler solutions more attractive. HalfKP, explained in detail earlier, is very simple, fast, and good enough. More sophisticated feature sets have been tried but they usually cannot combat the hit on performance. HalfKP features are easy to calculate, and little changes from position to position.
-
-Size also has to be considered. For the architecture presented above HalfKP results in about 10 million parameters in the first layer, which is quite a lot. For some uses it might not be an issue to have a very large set of features, with possibly hundreds of millions of parameters, but for a typical user it's inconvenient. Moreover, increasing the feature set size may reduce the training speed for some implementations, and certainly will require more time to converge.
-
-#### First set of hidden neurons
-
-The number of hidden neurons after the first layer is the most crucial parameter, but also has the highest impact on speed and size. In the architecture presented above the number of neurons is 256 per perspective. The costs associated with this parameter are two-fold. It increases the number of operations required when updating the accumulator. For optimized implementations, one must consider the number of registers - in Stockfish going past 256 neurons requires multiple passes over the feature indices as AVX2 doesn't have enough registers. It also determines the size of the first dense linear layer, which is by far the largest.
-
-#### Further layers
-
-Unlike in typical networks considered in machine learning here most of the knowledge is stored in the first layer, and because of that adding further small layers near the output adds little to accuracy, and may even be harmful if quantization is employed due to error accumulation. NNUE networks are kept unusually shallow, and the size of the layers closer to the output can remain small to increase performance.
 
 ## Training a net with pytorch
 
@@ -512,7 +533,7 @@ class NNUE(nn.Module):
         return self.l2(l2_x)
 ```
 
-This bit is pretty simple, and pytorch obviously handles backpropagation automatically. Neat! The hard bit is, maybe surprisingly, feeding the data.
+Thankfully, Pytorch handles backpropagation automatically through automatic differentiation. Neat! The hard bit now is, maybe surprisingly, feeding the data.
 
 ### Preparing the inputs
 
@@ -523,19 +544,19 @@ There are two main bottlenecks in this part.
 
 #### Parsing the training data sets and moving them to the python side
 
-You might be tempted to implement this in python. It would work, but sadly, it would be orders of magnitude too slow. What we did in nnue-pytorch is we created a shared library in C++ that implements a very fast training data parser, and provides the data in a form that can be quickly turned into the input tensors. You can also look at the implementation in Seer as it is simpler.
+You might be tempted to implement this in python. It would work, but sadly, it would be orders of magnitude too slow. What we did in nnue-pytorch is we created a shared library in C++ that implements a very fast training data parser, and provides the data in a form that can be quickly turned into the input tensors.
 
-Ctypes is fairly simple for C and python interoperation, and is more than enough for this task. We're just passing pointers around, really. Just remember that only C has stable ABI, so all functions accessible from python need to be `extern "C"`.
+We will use [Ctypes](https://docs.python.org/3/library/ctypes.html) for interoperation between C and Python. [Seer's trainer](https://github.com/connormcmonigle/seer-training/tree/6077a044c596963a34c504df8450aceaaa2b3fb1) uses pybind11 for example if you want more examples. In practice anything that provides a way to pass pointers and call C functions from Python will work. Other languages can be used too, but keep in mind that only C has a stable ABI, which makes things easier and more portable. So for example if you want to use C++ (like we will here) it's important to mark exported functions as `extern "C"`.
 
-The architecture of the data reader is that it is passed a file on creation, and it spawns the requested number of worker threads that chew through it and prepare **whole batches** asynchronously, and then they are retrieved from the pytorch side. Going one by one is no option, corners need to be cut. You may ask why? Pytorch can turn multiple tensors into a batch so what's the problem? Let's see...
+The data reader is passed a file on creation, and then it spawns the requested number of worker threads that chew through the data and prepare **whole batches** asynchronously. The batches are then passed to the python side and turned into PyTorch tensors. Going one sample at a time by one is not a viable option, corners need to be cut by producing whole batches. You may ask why? PyTorch can turn multiple tensors into a batch so what's the problem? Let's see...
 
-Remember how the input is sparse? Now let's say our batch size is 8192. What would happen if we sent 8192 sparse tensors and tried to form a batch from them? Well, pytorch doesn't like doing that by itself, we need to help it. And the best way is to form one big 2d sparse input tensor that encompasses the whole batch. It has 2 sparse dimensions and the indices are `(position_index, feature_index)`, pretty simple, has great performance, and no need to create temporary tensors! If we're doing it for the sparse tensors, then we can also do it for all the others since it's easier. The fact that we're forming whole batches from the start also means that we can reduce the amount of allocations and use a better memory layout for the batch parts.
+Remember how the input is sparse? Now let's say our batch size is 8192. What would happen if we sent 8192 sparse tensors and tried to form a batch from them? Well, pytorch doesn't like doing that by itself, we need to help it. And the best way is to form one big 2d sparse input tensor that encompasses the whole batch. It has 2 sparse dimensions and the indices are `(position_index, feature_index)`, pretty simple, has great performance, and no need to create temporary tensors! The fact that we're forming whole batches from the start also means that we can reduce the amount of allocations and use a better memory layout for the batch parts.
 
-Because of that we also cannot simply use the pytorch's `DataLoader`, and need to use it a mere wrapper. But this effort is worth it. One worker thread can usually saturate even a high end GPU without any issues.
+Because of that we also cannot simply use the PyTorch's `DataLoader`, instead we need to use it as a mere wrapper. But this effort is worth it. One worker thread can usually saturate even a high end GPU without any issues.
 
-#### But what is actually sent, how, and how it's made into tensors?
+#### Training batch structure and communication
 
-The minimum that's needed are the features (from both perspectives), the side to move (for accumulator slice ordering), and the position evaluation (the score). Let's see how they are represented.
+The minimum that's needed are the features (from both perspectives), the side to move (for accumulator slice ordering), and the position evaluation (the score). Let's see how we can represent such a batch.
 
 ```cpp
 struct SparseBatch {
@@ -558,9 +579,7 @@ struct SparseBatch {
         // The indices of the active features.
         // Why is the size * 2?! The answer is that the indices are 2 dimensional
         // (position_index, feature_index). It's effectively a matrix of size
-        // (num_active_*_features, 2). We fill it in row major way and
-        // transpose it on the pytorch side because it wants it the other way
-        // around.
+        // (num_active_*_features, 2).
         // IMPORTANT: We must make sure that the indices are in ascending order.
         // That is first comes the first position, then second, then third,
         // and so on. And within features for one position the feature indices
@@ -614,16 +633,27 @@ class SparseBatch(ctypes.Structure):
         # This is illustrative. In reality you might need to transfer these
         # to the GPU. You can also do it asynchronously, but remember to make
         # sure the source lives long enough for the copy to finish.
+        # See torch.tensor.to(...) for more info.
 
         # This is a nice way to convert a pointer to a pytorch tensor.
         # Shape needs to be passed, remember we're forming the whole batch, the first
         # dimension is always the batch size.
-        stm_t = torch.from_numpy(np.ctypeslib.as_array(self.stm, shape=(self.size, 1)))
-        score_t = torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1)))
+        stm_t = torch.from_numpy(
+            np.ctypeslib.as_array(self.stm, shape=(self.size, 1)))
+        score_t = torch.from_numpy(
+            np.ctypeslib.as_array(self.score, shape=(self.size, 1)))
 
-        # As we said, the indices need to be transposed such that position indices come first
-        white_features_indices_t = torch.transpose(torch.from_numpy(np.ctypeslib.as_array(self.white_features_indices, shape=(self.num_active_white_features, 2))), 0, 1).long()
-        black_features_indices_t = torch.transpose(torch.from_numpy(np.ctypeslib.as_array(self.black_features_indices, shape=(self.num_active_white_features, 2))), 0, 1).long()
+        # As we said, the index tensor need to be transposed (not the whole sparse tensor!).
+        # This is just how pytorch stores indices in sparse tensors.
+        # It also requires the indices to be 64-bit ints.
+        white_features_indices_t = torch.transpose(
+            torch.from_numpy(
+                np.ctypeslib.as_array(self.white_features_indices, shape=(self.num_active_white_features, 2))
+            ), 0, 1).long()
+        black_features_indices_t = torch.transpose(
+            torch.from_numpy(
+                np.ctypeslib.as_array(self.black_features_indices, shape=(self.num_active_white_features, 2))
+            ), 0, 1).long()
 
         # The values are all ones, so we can create these tensors in place easily.
         # No need to go through a copy.
@@ -631,15 +661,17 @@ class SparseBatch(ctypes.Structure):
         black_features_values_t = torch.ones(self.num_active_black_features)
 
         # Now the magic. We construct a sparse tensor by giving the indices of
-        # non-zero values (active feature indices) and these values (ones!).
+        # non-zero values (active feature indices) and the values itself (all ones!).
         # The size of the tensor is batch_size*NUM_FEATURES, which would
         # normally be insanely large, but since the density is ~0.1% it takes
         # very little space and allows for faster forward pass.
         # For maximum performance we do cheat somewhat though. Normally pytorch
         # checks the correctness, which is an expensive O(n) operation.
         # By using _sparse_coo_tensor_unsafe we avoid that.
-        white_features_t = torch._sparse_coo_tensor_unsafe(white_features_indices_t, white_features_values_t, (self.size, NUM_FEATURES))
-        black_features_t = torch._sparse_coo_tensor_unsafe(black_features_indices_t, black_features_values_t, (self.size, NUM_FEATURES))
+        white_features_t = torch._sparse_coo_tensor_unsafe(
+            white_features_indices_t, white_features_values_t, (self.size, NUM_FEATURES))
+        black_features_t = torch._sparse_coo_tensor_unsafe(
+            black_features_indices_t, black_features_values_t, (self.size, NUM_FEATURES))
 
         # What is coalescing?! It makes sure the indices are unique and ordered.
         # Now you probably see why we said the inputs must be ordered from the start.
@@ -715,7 +747,7 @@ int get_half_relative_kp_index(Color perspective, Square king_sq, Square piece_s
 
 #### Real effect of the factorizer
 
-While the factorizer helps the net to generalize, it seems to only be relevant in the early stages, that is when the net doesn't really know anything yet and makes the net learn faster. But it quickly becomes unimportant and in later stages of the training can be removed to gain some training speed (after all it can add a lot of active features).
+While the factorizer helps the net to generalize, it seems to only be relevant in the early stages, that is when the net doesn't really know anything yet. It accelerates the early stages of training and reduces sparsity of the input (some inputs are very rare otherwise). But it quickly becomes unimportant and in later stages of the training can be removed to gain some training speed (after all it can add a lot of active features).
 
 ### Loss functions and how to apply them
 
@@ -725,11 +757,13 @@ Training a network is really just minimizing a loss function, which needs to be 
 
 #### Converting the evaluation from CP-space to WDL-space
 
-By CP-space we mean the centipawn scale (or engine's internal units). By WDL-space we mean 0=loss, 0.5=draw, 1=win.
+By CP-space we mean the centipawn scale (or something proportional, like engine's internal units). By WDL-space we mean 0=loss, 0.5=draw, 1=win.
 
-It's of course possible to apply the loss function directly on the evaluation value, but this can lead to large gradients (or a lot of hyperparameter tuning), restricts the set of loss functions available, and doesn't allow using results for loss. We will focus on evaluation in WDL-space. But how to convert between these spaces? Usually the evaluation to performance correspondence can be well fitted by a sigmoid. For example in some data generated by Stockfish we have:
+It's of course possible to apply the loss function directly on the evaluation value (in CP-space), but this can lead to large gradients (or a lot of hyperparameter tuning), restricts the set of loss functions available, and doesn't allow using results for loss. We will focus on evaluation in WDL-space. But how to convert between these spaces? Usually the evaluation to performance correspondence can be well fitted by a sigmoid. For example in some data generated by Stockfish we have:
 
+<span style="display:block;text-align:center">
 ![](img/sigmoid_wdl_fit.png)
+</span>
 
 so in the code we may do the following:
 ```python
@@ -783,15 +817,21 @@ loss_result = (wdl_eval_model - game_result)**2
 loss = lambda_ * loss_eval + (1 - lambda_) * loss_result
 ```
 
+Note: in practice the exponent can be >2. Higher exponents give more weight towards precision at a cost of accuracy. Stockfish networks had good training results with an exponent of 2.6 for example.
+
 ##### loss
 
+<span style="display:block;text-align:center">
 ![](img/mse_loss.png)
 ![](img/mse_loss_contour.png)
+</span>
 
 ##### grad
 
+<span style="display:block;text-align:center">
 ![](img/mse_loss_grad.png)
 ![](img/mse_loss_grad_contour.png)
+</span>
 
 #### Cross entropy
 
@@ -833,17 +873,21 @@ loss = lambda_ * loss_eval + (1 - lambda_) * loss_result
 
 ##### loss
 
+<span style="display:block;text-align:center">
 ![](img/cross_entropy_loss.png)
 ![](img/cross_entropy_loss_contour.png)
+</span>
 
 ##### grad
 
+<span style="display:block;text-align:center">
 ![](img/cross_entropy_loss_grad.png)
 ![](img/cross_entropy_loss_grad_contour.png)
+</span>
 
 ## Quantization
 
-At the start of this document it was briefly mentioned what quantization is and that it will be important. Now it's the time to understand it properly. The goals is that we want to use the smallest possible integers everywhere. Most CPU architectures provide instructions that can work on 8, 16, 32, or even 64 int8 values at a time, and we should take advantage of that. That means we need to use int8 values, with range -128..127, for weights and inputs; or int16, with range -65536..65535, where int8 is not possible.
+At the start of this document it was briefly mentioned what quantization is and that it will be important. Now it's the time to understand it properly. The goals is that we want to use the smallest possible integers everywhere. Most CPU architectures provide instructions that can work on 8, 16, 32, or even 64 int8 values at a time, and we should take advantage of that. That means we need to use int8 values, with range -128..127, for weights and inputs; or int16, with range -32768..32767, where int8 is not possible.
 
 Coming up with the right quantization scheme is not easy, so first we'll present the one currently used by Stockfish, and then we'll explain how to get there, how to code it, and finally how to optimize it.
 
@@ -1067,7 +1111,9 @@ int32_t* linear(
 
 ##### m256_add_dpbusd_epi32
 
+<span style="display:block;text-align:center">
 ![](img/m256_add_dpbusd_epi32.png)
+</span>
 
 The output needs to be horizontally accumulated further, but it's faster to do it with 4 sums (sum0, sum1, sum2, sum3) later.
 
@@ -1099,7 +1145,9 @@ void m256_add_dpbusd_epi32(__m256i& acc, __m256i a, __m256i b) {
 
 This function takes 4 \_\_m256i registers containing 8 int32 values each, accumulates them horizontally, and produces one \_\_m128i register containing 3 int32 values, each corresponding to one input sum. In the matrix multiplication above we keep one sum per weight row/input, so in the end we fill the output 4 values at a time.
 
+<span style="display:block;text-align:center">
 ![](img/m256_haddx4.png)
+</span>
 
 ```cpp
 __m128i m256_haddx4(__m256i sum0, __m256i sum1, __m256i sum2, __m256i sum3, __m128i bias) {
@@ -1118,7 +1166,9 @@ __m128i m256_haddx4(__m256i sum0, __m256i sum1, __m256i sum2, __m256i sum3, __m1
 #### Linear layer with sparse input
 
 In the previous part we described the generic dense matrix multiplication, but let's try to delve a little bit deeper. The case we will be considering here is similar to how our feature transformer operates, but here we always need to perform the full operation instead and the matrices are smaller. But why are we even considering this? Well, it turns out that the feature transformer output, after being passed through ClippedReLU, can have quite significant sparsity. Here is some data presenting the density of the inputs to the first dense fully connected layer, for networks with different feature transformer size:
+<span style="display:block;text-align:center">
 ![](img/fc_input_density.png)
+</span>
 (boxes corresponds to the [25%, 75%] interval, whiskers correspond to the [1%, 99%] interval)
 
 That's already <=15% density for the common sizes, and it's consistent between different networks! However we cannot make it as much faster, there is some cost related to the changed access patterns and more required preprocessing, so whether this approach works for your particular case needs to be thoroughly tested.
@@ -1284,7 +1334,9 @@ int32_t* linear_sparse_input(
 
 This function takes int16 weights, a factor being a composition of 2 int8 inputs broadcasted as int32, and produces int32 outputs.
 
+<span style="display:block;text-align:center">
 ![](img/m256_process_chunk.png)
+</span>
 
 ```cpp
 inline void m256_process_chunk(__m256i& sum0, __m256i& sum1, __m256i col0, __m256i col1, __m256i factor) {
@@ -1513,7 +1565,9 @@ int32_t* linear_sparse_input(
 
 This function takes int8 weights corresponding to 4 inputs, 2 factors being a composition of 4 int8 inputs broadcasted as int16, and produces int32 outputs.
 
+<span style="display:block;text-align:center">
 ![](img/m256_process_chunk_alternative.png)
+</span>
 
 ```cpp
 inline void m256_process_chunk_alternative(
@@ -1539,7 +1593,9 @@ inline void m256_process_chunk_alternative(
 
 Let's go one step further. For now all linear layers had dense outputs, but we can consider a layer where each input is connected only to a subset of outputs. We can consider the weights to be 0 where no connection is present. To make it possible to implement efficiently with vectorization in mind we have to zero out whole blocks of weights. A 16x128 Weight matrix with 2 non-zero 1x16 blocks per input may look like this for example:
 
+<span style="display:block;text-align:center">
 ![](img/m256_block_sparse_weight_matrix.png)
+</span>
 
 For AVX2 such blocks must be at least 8 int32s (type of the output values) wide, but we will consider only 16-wide blocks because it's more convenient. With this approach one can have for example a linear layer with 256 outputs, but only 4 (this being constant is quite important for being able to write optimized code) non-zero weight blocks of size 16 per input, effectively having each input only affect 64 outputs.
 
@@ -1638,7 +1694,9 @@ The clipping is not hard, the more complicated part is conversion. We also need 
 
 ##### int16 -> int8
 
+<span style="display:block;text-align:center">
 ![](img/crelu16.png)
+</span>
 
 ```cpp
 float* crelu16(,
@@ -1679,7 +1737,9 @@ float* crelu16(,
 
 ##### int32 -> int8
 
+<span style="display:block;text-align:center">
 ![](img/crelu32.png)
+</span>
 
 ```cpp
 float* crelu32(,
@@ -1734,15 +1794,15 @@ One way to account for this is directly in the optimizer. This is nice because t
 ```python
 # The min/max constants are specific for the Stockfish quantization scheme.
 train_params = [
-    {'params' : [self.ft.weight, self.ft.bias], 'lr' : LR },
-    {'params' : [self.l1.weight], 'lr' : LR, 'min_weight' : -127/64, 'max_weight' : 127/64 },
-    {'params' : [self.l1.bias], 'lr' : LR },
-    {'params' : [self.l2.weight], 'lr' : LR, 'min_weight' : -127/64, 'max_weight' : 127/64 },
-    {'params' : [self.l2.bias], 'lr' : LR },
-    {'params' : [self.output.weight], 'lr' : LR, 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
-    {'params' : [self.output.bias], 'lr' : LR },
+    {'params' : [self.ft.weight, self.ft.bias] },
+    {'params' : [self.l1.weight], 'min_weight' : -127/64, 'max_weight' : 127/64 },
+    {'params' : [self.l1.bias] },
+    {'params' : [self.l2.weight], 'min_weight' : -127/64, 'max_weight' : 127/64 },
+    {'params' : [self.l2.bias] },
+    {'params' : [self.output.weight], 'min_weight' : -127*127/9600, 'max_weight' : 127*127/9600 },
+    {'params' : [self.output.bias] },
 ]
-optimizer = ranger.Ranger(train_params, betas=(.9, 0.999), eps=1.0e-7)
+optimizer = ranger.Ranger(train_params, lr=LR, betas=(.9, 0.999), eps=1.0e-7)
 ```
 
 and then in the optimizer:
@@ -1862,9 +1922,11 @@ Up until now we've using pytorch's sparse matrix multiplication for the feature 
 1. We have an upper bound on the nnz elements for each position.
 2. We have large batches
 
-We can therefore replace the feature indices from a 2d tensor of shape `[total_num_active_features, 2]`, which contains the position index and feature index for each value, to a 2d tensor of shape `[batch_size, max_num_features]`, which contains one feature index per one values and the position index is known. We need to somehow handle positions where the number of features is lower than `max_num_features`, so we'll pad the rows with `-1`, these will be omitted by the kernel. This obviously also requires modifying the data loader, but it'll be simpler now.
+We can therefore replace the feature indices from a 2d tensor of shape `[total_num_active_features, 2]`, which contains the position index and feature index for each value, with a 2d tensor of shape `[batch_size, max_num_features]`, which contains one feature index per one values and the position index is known. We need to somehow handle positions where the number of features is lower than `max_num_features` now. One way to do it is to assign unused spots a feature index of `-1` and then omit such indices in the kernel.
 
-#### Data loader
+This approach obviously also requires modifying the data loader, but it'll end up being simpler now, as we won't have to work around pytorch's problematic sparse tensors. Let's looks at the modified data loader first.
+
+#### New data loader
 
 ```cpp
 struct SparseBatch {
@@ -1930,8 +1992,10 @@ class SparseBatch(ctypes.Structure):
 
         # Now we don't have to bother with the sparse pytorch tensors!
         # And no transpositions required too because we have control over the layout!
-        white_features_indices_t = torch.from_numpy(np.ctypeslib.as_array(self.white_features_indices, shape=(self.size, self.max_active_features)))
-        black_features_indices_t = torch.from_numpy(np.ctypeslib.as_array(self.black_features_indices, shape=(self.size, self.max_active_features)))
+        white_features_indices_t = torch.from_numpy(
+            np.ctypeslib.as_array(self.white_features_indices, shape=(self.size, self.max_active_features)))
+        black_features_indices_t = torch.from_numpy(
+            np.ctypeslib.as_array(self.black_features_indices, shape=(self.size, self.max_active_features)))
 
         # The values are all ones, so we can create these tensors in place easly.
         # No need to go through a copy.
@@ -1945,9 +2009,9 @@ class SparseBatch(ctypes.Structure):
 SparseBatchPtr = ctypes.POINTER(SparseBatch)
 ```
 
-#### Forward
+#### Feature transformer forward kernel
 
-Now let's try to write a custom CUDA kernel. At this point you should have a good understanding of how the feature transformer works and how to implement it. We will need two kernels, one for forward, and one for backward pass. We'll write these kernels in a generic way that uses values, but for some uses it can of course be assumed that all values are 1. It'll be the easiest to present the kernels with notes in the comments:
+Now let's try to write a custom CUDA kernel for the feature transformer. At this point you should have a good understanding of how the feature transformer works and how to implement it in C. Here we will need two kernels, one for the forward, and one for the backward pass. We'll write these kernels in a generic way that uses values, but for some uses it can of course be assumed that all values are 1 (depends on feature set and factorization scheme). It'll be the easiest to present the kernels with notes in the comments:
 
 ```Cuda
 typedef unsigned int uint32_t;
@@ -2093,7 +2157,7 @@ void feature_transformer_slice_forward(
 }
 ```
 
-#### Backward
+#### Feature transformer backward kernel
 
 ```Cuda
 typedef unsigned int uint32_t;
@@ -2206,6 +2270,8 @@ void feature_transformer_slice_backward(
 ```
 
 #### FeatureTransformerSlice layer
+
+Now we create a safe wrapper so that the kernels can be easily used from PyTorch.
 
 ```python
 class FeatureTransformerSliceFunction(autograd.Function):
@@ -2321,17 +2387,15 @@ class FeatureTransformerSlice(nn.Module):
         return FeatureTransformerSliceFunction.apply(feature_indices, feature_values, self.weight, self.bias)
 ```
 
-#### Results
-
-Using this custom kernel has improved performance by 2 to 4 times on some GPUs! Moreover, the slowdown from using outputs larger than 256 per slice is now much less!
-
 ## Architectures and new directions
 
 ### Simple HalfKP Stockfish architecture
 
 This is the first architecture used in Stockfish. The only thing that is different is that in this document, we use HalfKP that doesn't have these 64 additional unused features that are a leftover from Shogi. Other than that, there's nothing new, just using the primitives described earlier to put things into perspective.
 
+<span style="display:block;text-align:center">
 ![](img/HalfKP-40960-256x2-32-32-1.png)
+</span>
 
 ### HalfKAv2 feature set.
 
@@ -2358,13 +2422,17 @@ y = self.output(l2_) + (wpsqt - bpsqt) * (us - 0.5)
 
 We should also use a feature set that includes king features, as it provides additional PSQT values that may be important. So we will use HalfKAv2.
 
+<span style="display:block;text-align:center">
 ![](img/HalfKAv2-45056-256x2P1x2-32-32-1.png)
+</span>
 
 ### Multiple PSQT outputs and multiple subnetworks
 
 Until now all networks have been using one PSQT output and one layer stack (that -32-32-1 part in the Stockfish's network; whatever comes after the feature transformer). But what if we could use more? We need to find some easy-to-compute discriminator to choose the outputs/layer stacks by. One such good discriminator is the piece count, as it's cheap to compute, fairly well behaved during the game, and the number of pieces can dramatically change how we look at the position. So let's try 8 buckets for both, based on `(piece_count - 1) / 4`.
 
+<span style="display:block;text-align:center">
 ![](img/HalfKAv2-45056-256x2P8x2[-32-32-1]x8.png)
+</span>
 
 But how to implement it in the trainer? "Choosing stuff" is not very GPU friendly, and we're doing batching too, right? It's not indeed, but thankfully the layers are very small, so we can just evaluate all of them and only choose the results! Moreover, multiple `N` linear layers can just be emulated by a single one with `N` times as many outputs. Let's see how it could be implemented in PyTorch:
 
@@ -2441,4 +2509,6 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 ### "SFNNv4" architecture
 
+<span style="display:block;text-align:center">
 ![](img/SFNNv4_architecture.png)
+</span>
