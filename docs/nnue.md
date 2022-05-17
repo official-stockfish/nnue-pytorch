@@ -2487,7 +2487,7 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 [Commit c079acc26f93acc2eda08c7218c60559854f52f0](https://github.com/official-stockfish/Stockfish/commit/c079acc26f93acc2eda08c7218c60559854f52f0)
 
-![](img/SFNNv5_architecture.svg)
+![](img/SFNNv5_architecture_detailed_v2.svg)
 
 ### "SFNNv4" architecture
 
@@ -2495,7 +2495,7 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 [Commit cb9c2594fcedc881ae8f8bfbfdf130cf89840e4c](https://github.com/official-stockfish/Stockfish/commit/cb9c2594fcedc881ae8f8bfbfdf130cf89840e4c)
 
-![](img/SFNNv4_architecture.svg)
+![](img/SFNNv4_architecture_detailed_v2.svg)
 
 ### "SFNNv3" architecture
 
@@ -2503,7 +2503,7 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 [Commit d61d38586ee35fd4d93445eb547e4af27cc86e6b](https://github.com/official-stockfish/Stockfish/commit/d61d38586ee35fd4d93445eb547e4af27cc86e6b)
 
-![](img/SFNNv3_architecture.svg)
+![](img/SFNNv3_architecture_detailed_v2.svg)
 
 ### "SFNNv2" architecture
 
@@ -2511,7 +2511,7 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 [Commit e8d64af1230fdac65bb0da246df3e7abe82e0838](https://github.com/official-stockfish/Stockfish/commit/e8d64af1230fdac65bb0da246df3e7abe82e0838)
 
-![](img/SFNNv2_architecture.svg)
+![](img/SFNNv2_architecture_detailed_v2.svg)
 
 ### "SFNNv1" architecture
 
@@ -2521,5 +2521,5 @@ Also known as "Stockfish 12 architecture".
 
 [Commit 84f3e867903f62480c33243dd0ecbffd342796fc](https://github.com/official-stockfish/Stockfish/commit/84f3e867903f62480c33243dd0ecbffd342796fc)
 
-![](img/HalfKP-40960-256x2-32-32-1.svg)
+![](img/SFNNv1_architecture_detailed_v2.svg)
 
