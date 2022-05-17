@@ -113,7 +113,12 @@ What this document DOES NOT contain:
     + [HalfKAv2_hm feature set.](#halfkav2_hm-feature-set)
     + [A part of the feature transformer directly forwarded to the output.](#a-part-of-the-feature-transformer-directly-forwarded-to-the-output)
     + [Multiple PSQT outputs and multiple subnetworks](#multiple-psqt-outputs-and-multiple-subnetworks)
+* [Historical Stockfish evaluation network architectures](#historical-stockfish-evaluation-network-architectures)
+    + ["SFNNv1" architecture](#sfnnv1-architecture)
+    + ["SFNNv2" architecture](#sfnnv2-architecture)
+    + ["SFNNv3" architecture](#sfnnv3-architecture)
     + ["SFNNv4" architecture](#sfnnv4-architecture)
+    + ["SFNNv5" architecture](#sfnnv5-architecture)
 
 ## Basics
 
@@ -2474,6 +2479,37 @@ bpsqt = bpsqt.gather(1, psqt_indices_unsq)
 y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 ```
 
+## Historical Stockfish evaluation network architectures
+
+### "SFNNv1" architecture
+
+Also known as "Stockfish 12 architecture".
+
+[Commit 84f3e867903f62480c33243dd0ecbffd342796fc](https://github.com/official-stockfish/Stockfish/commit/84f3e867903f62480c33243dd0ecbffd342796fc)
+
+![](img/HalfKP-40960-256x2-32-32-1.png)
+
+### "SFNNv2" architecture
+
+[Commit e8d64af1230fdac65bb0da246df3e7abe82e0838](https://github.com/official-stockfish/Stockfish/commit/e8d64af1230fdac65bb0da246df3e7abe82e0838)
+
+![](img/SFNNv2_architecture.png)
+
+### "SFNNv3" architecture
+
+[Commit d61d38586ee35fd4d93445eb547e4af27cc86e6b](https://github.com/official-stockfish/Stockfish/commit/d61d38586ee35fd4d93445eb547e4af27cc86e6b)
+
+![](img/SFNNv3_architecture.png)
+
 ### "SFNNv4" architecture
 
+[Commit cb9c2594fcedc881ae8f8bfbfdf130cf89840e4c](https://github.com/official-stockfish/Stockfish/commit/cb9c2594fcedc881ae8f8bfbfdf130cf89840e4c)
+
 ![](img/SFNNv4_architecture.png)
+
+### "SFNNv5" architecture
+
+[Commit c079acc26f93acc2eda08c7218c60559854f52f0](https://github.com/official-stockfish/Stockfish/commit/c079acc26f93acc2eda08c7218c60559854f52f0)
+
+![](img/SFNNv5_architecture.png)
+
