@@ -200,7 +200,7 @@ Now let's consider the move cxd4 - the pawn moved, so like before we remove `(C3
 
 We will use our "A" feature set from the previous paragraph, so we have 768 inputs. The layers for the purpose of this illustration will be the 3 linear layers, 768->8, 8->8, 8->1. All layers are linear, and all hidden neurons use ClippedReLU activation function. The image below illustrates the architecture:
 
-![A[768]->8->8->1 architecture diagram](img/A-768-8-8-1.png)
+![A[768]->8->8->1 architecture diagram](img/A-768-8-8-1.svg)
 
 The flow is from the left to the right. The first layer is a large fully connected layer with 768 inputs, but only a small fraction of them is non-zero for each position - sparse matrix vector multiplication can be utilized. Hidden layers are much smaller and always computed with dense matrix vector multiplication. At the end we get 1 output, which is usually trained to be the centipawn evaluation of the position (or proportional to it).
 
@@ -281,7 +281,7 @@ Blacks's perspective: `(B1, C6, pawn, black)`, `(B1, D5, rook, white)`
 
 The network diagram looks more interesting now.
 
-![HalfKP[40960]->4x2->8->1](img/HalfKP-40960-4x2-8-1.png)
+![HalfKP[40960]->4x2->8->1](img/HalfKP-40960-4x2-8-1.svg)
 
 ## Forward pass implementation
 
@@ -1103,7 +1103,7 @@ int32_t* linear(
 
 ##### m256_add_dpbusd_epi32
 
-![](img/m256_add_dpbusd_epi32.png)
+![](img/m256_add_dpbusd_epi32.svg)
 
 The output needs to be horizontally accumulated further, but it's faster to do it with 4 sums (sum0, sum1, sum2, sum3) later.
 
@@ -1135,7 +1135,7 @@ void m256_add_dpbusd_epi32(__m256i& acc, __m256i a, __m256i b) {
 
 This function takes 4 \_\_m256i registers containing 8 int32 values each, accumulates them horizontally, and produces one \_\_m128i register containing 3 int32 values, each corresponding to one input sum. In the matrix multiplication above we keep one sum per weight row/input, so in the end we fill the output 4 values at a time.
 
-![](img/m256_haddx4.png)
+![](img/m256_haddx4.svg)
 
 ```cpp
 __m128i m256_haddx4(__m256i sum0, __m256i sum1, __m256i sum2, __m256i sum3, __m128i bias) {
@@ -1322,7 +1322,7 @@ int32_t* linear_sparse_input(
 
 This function takes int16 weights, a factor being a composition of 2 int8 inputs broadcasted as int32, and produces int32 outputs.
 
-![](img/m256_process_chunk.png)
+![](img/m256_process_chunk.svg)
 
 ```cpp
 inline void m256_process_chunk(__m256i& sum0, __m256i& sum1, __m256i col0, __m256i col1, __m256i factor) {
@@ -1551,7 +1551,7 @@ int32_t* linear_sparse_input(
 
 This function takes int8 weights corresponding to 4 inputs, 2 factors being a composition of 4 int8 inputs broadcasted as int16, and produces int32 outputs.
 
-![](img/m256_process_chunk_alternative.png)
+![](img/m256_process_chunk_alternative.svg)
 
 ```cpp
 inline void m256_process_chunk_alternative(
@@ -1577,7 +1577,7 @@ inline void m256_process_chunk_alternative(
 
 Let's go one step further. For now all linear layers had dense outputs, but we can consider a layer where each input is connected only to a subset of outputs. We can consider the weights to be 0 where no connection is present. To make it possible to implement efficiently with vectorization in mind we have to zero out whole blocks of weights. A 16x128 Weight matrix with 2 non-zero 1x16 blocks per input may look like this for example:
 
-![](img/m256_block_sparse_weight_matrix.png)
+![](img/m256_block_sparse_weight_matrix.svg)
 
 For AVX2 such blocks must be at least 8 int32s (type of the output values) wide, but we will consider only 16-wide blocks because it's more convenient. With this approach one can have for example a linear layer with 256 outputs, but only 4 (this being constant is quite important for being able to write optimized code) non-zero weight blocks of size 16 per input, effectively having each input only affect 64 outputs.
 
@@ -1676,7 +1676,7 @@ The clipping is not hard, the more complicated part is conversion. We also need 
 
 ##### int16 -> int8
 
-![](img/crelu16.png)
+![](img/crelu16.svg)
 
 ```cpp
 float* crelu16(,
@@ -1717,7 +1717,7 @@ float* crelu16(,
 
 ##### int32 -> int8
 
-![](img/crelu32.png)
+![](img/crelu32.svg)
 
 ```cpp
 float* crelu32(,
@@ -2371,7 +2371,7 @@ class FeatureTransformerSlice(nn.Module):
 
 This is the first architecture used in Stockfish. The only thing that is different is that in this document, we use HalfKP that doesn't have these 64 additional unused features that are a leftover from Shogi. Other than that, there's nothing new, just using the primitives described earlier to put things into perspective.
 
-![](img/HalfKP-40960-256x2-32-32-1.png)
+![](img/HalfKP-40960-256x2-32-32-1.svg)
 
 ### HalfKAv2 feature set.
 
@@ -2398,13 +2398,13 @@ y = self.output(l2_) + (wpsqt - bpsqt) * (us - 0.5)
 
 We should also use a feature set that includes king features, as it provides additional PSQT values that may be important. So we will use HalfKAv2.
 
-![](img/HalfKAv2-45056-256x2P1x2-32-32-1.png)
+![](img/HalfKAv2-45056-256x2P1x2-32-32-1.svg)
 
 ### Multiple PSQT outputs and multiple subnetworks
 
 Until now all networks have been using one PSQT output and one layer stack (that -32-32-1 part in the Stockfish's network; whatever comes after the feature transformer). But what if we could use more? We need to find some easy-to-compute discriminator to choose the outputs/layer stacks by. One such good discriminator is the piece count, as it's cheap to compute, fairly well behaved during the game, and the number of pieces can dramatically change how we look at the position. So let's try 8 buckets for both, based on `(piece_count - 1) / 4`.
 
-![](img/HalfKAv2-45056-256x2P8x2[-32-32-1]x8.png)
+![](img/HalfKAv2-45056-256x2P8x2[-32-32-1]x8.svg)
 
 But how to implement it in the trainer? "Choosing stuff" is not very GPU friendly, and we're doing batching too, right? It's not indeed, but thankfully the layers are very small, so we can just evaluate all of them and only choose the results! Moreover, multiple `N` linear layers can just be emulated by a single one with `N` times as many outputs. Let's see how it could be implemented in PyTorch:
 
@@ -2487,29 +2487,29 @@ Also known as "Stockfish 12 architecture".
 
 [Commit 84f3e867903f62480c33243dd0ecbffd342796fc](https://github.com/official-stockfish/Stockfish/commit/84f3e867903f62480c33243dd0ecbffd342796fc)
 
-![](img/HalfKP-40960-256x2-32-32-1.png)
+![](img/HalfKP-40960-256x2-32-32-1.svg)
 
 ### "SFNNv2" architecture
 
 [Commit e8d64af1230fdac65bb0da246df3e7abe82e0838](https://github.com/official-stockfish/Stockfish/commit/e8d64af1230fdac65bb0da246df3e7abe82e0838)
 
-![](img/SFNNv2_architecture.png)
+![](img/SFNNv2_architecture.svg)
 
 ### "SFNNv3" architecture
 
 [Commit d61d38586ee35fd4d93445eb547e4af27cc86e6b](https://github.com/official-stockfish/Stockfish/commit/d61d38586ee35fd4d93445eb547e4af27cc86e6b)
 
-![](img/SFNNv3_architecture.png)
+![](img/SFNNv3_architecture.svg)
 
 ### "SFNNv4" architecture
 
 [Commit cb9c2594fcedc881ae8f8bfbfdf130cf89840e4c](https://github.com/official-stockfish/Stockfish/commit/cb9c2594fcedc881ae8f8bfbfdf130cf89840e4c)
 
-![](img/SFNNv4_architecture.png)
+![](img/SFNNv4_architecture.svg)
 
 ### "SFNNv5" architecture
 
 [Commit c079acc26f93acc2eda08c7218c60559854f52f0](https://github.com/official-stockfish/Stockfish/commit/c079acc26f93acc2eda08c7218c60559854f52f0)
 
-![](img/SFNNv5_architecture.png)
+![](img/SFNNv5_architecture.svg)
 
