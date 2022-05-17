@@ -32,8 +32,8 @@ class LayerStacks(nn.Module):
     # there's a non-linearity and factorization breaks.
     # This is by design. The weights in the further layers should be
     # able to diverge a lot.
-    self.l1_fact = nn.Linear(2 * L1 // 2, L2 + 1, bias=False)
-    self.l2 = nn.Linear(L2, L3 * count)
+    self.l1_fact = nn.Linear(2 * L1 // 2, L2 + 1, bias=True)
+    self.l2 = nn.Linear(L2*2, L3 * count)
     self.output = nn.Linear(L3, 1 * count)
 
     # Cached helper tensor for choosing outputs by bucket indices.
@@ -46,12 +46,14 @@ class LayerStacks(nn.Module):
     l1_weight = self.l1.weight
     l1_bias = self.l1.bias
     l1_fact_weight = self.l1_fact.weight
+    l1_fact_bias = self.l1_fact.bias
     l2_weight = self.l2.weight
     l2_bias = self.l2.bias
     output_weight = self.output.weight
     output_bias = self.output.bias
     with torch.no_grad():
       l1_fact_weight.fill_(0.0)
+      l1_fact_bias.fill_(0.0)
       output_bias.fill_(0.0)
 
       for i in range(1, self.count):
@@ -65,6 +67,7 @@ class LayerStacks(nn.Module):
     self.l1.weight = nn.Parameter(l1_weight)
     self.l1.bias = nn.Parameter(l1_bias)
     self.l1_fact.weight = nn.Parameter(l1_fact_weight)
+    self.l1_fact.bias = nn.Parameter(l1_fact_bias)
     self.l2.weight = nn.Parameter(l2_weight)
     self.l2.bias = nn.Parameter(l2_bias)
     self.output.weight = nn.Parameter(output_weight)
@@ -85,7 +88,9 @@ class LayerStacks(nn.Module):
     l1c_ = l1s_.view(-1, L2 + 1)[indices]
     l1c_, l1c_out = l1c_.split(L2, dim=1)
     l1f_, l1f_out = l1f_.split(L2, dim=1)
-    l1x_ = torch.clamp(l1c_ + l1f_, 0.0, 1.0)
+    l1x_ = l1c_ + l1f_
+    # multiply sqr crelu result by (127/128) to match quantized version
+    l1x_ = torch.clamp(torch.cat([torch.pow(l1x_, 2.0) * (127/128), l1x_], dim=1), 0.0, 1.0)
 
     l2s_ = self.l2(l1x_).reshape((-1, self.count, L3))
     l2c_ = l2s_.view(-1, L3)[indices]
@@ -107,7 +112,7 @@ class LayerStacks(nn.Module):
         l2 = nn.Linear(L2, L3)
         output = nn.Linear(L3, 1)
         l1.weight.data = self.l1.weight[i*(L2+1):(i+1)*(L2+1), :] + self.l1_fact.weight.data
-        l1.bias.data = self.l1.bias[i*(L2+1):(i+1)*(L2+1)]
+        l1.bias.data = self.l1.bias[i*(L2+1):(i+1)*(L2+1)] + self.l1_fact.bias.data
         l2.weight.data = self.l2.weight[i*L3:(i+1)*L3, :]
         l2.bias.data = self.l2.bias[i*L3:(i+1)*L3]
         output.weight.data = self.output.weight[i:(i+1), :]
@@ -127,14 +132,16 @@ class NNUE(pl.LightningModule):
 
   lr - the initial learning rate
   """
-  def __init__(self, feature_set, lambda_=1.0, gamma=0.992, lr=8.75e-4, num_psqt_buckets=8, num_ls_buckets=8):
+  def __init__(self, feature_set, start_lambda=1.0, end_lambda=1.0, max_epoch=800, gamma=0.992, lr=8.75e-4, num_psqt_buckets=8, num_ls_buckets=8):
     super(NNUE, self).__init__()
     self.num_psqt_buckets = num_psqt_buckets
     self.num_ls_buckets = num_ls_buckets
     self.input = DoubleFeatureTransformerSlice(feature_set.num_features, L1 + self.num_psqt_buckets)
     self.feature_set = feature_set
     self.layer_stacks = LayerStacks(self.num_ls_buckets)
-    self.lambda_ = lambda_
+    self.start_lambda = start_lambda
+    self.end_lambda = end_lambda
+    self.max_epoch = max_epoch
     self.gamma = gamma
     self.lr = lr
 
@@ -294,7 +301,8 @@ class NNUE(pl.LightningModule):
     t = outcome
     p = (score / in_scaling).sigmoid()
 
-    pt = p * self.lambda_ + t * (1.0 - self.lambda_)
+    actual_lambda = self.start_lambda + (self.end_lambda - self.start_lambda) * (self.current_epoch / self.max_epoch)
+    pt = p * actual_lambda + t * (1.0 - actual_lambda)
 
     loss = torch.pow(torch.abs(pt - q), 2.6).mean()
 
@@ -316,6 +324,7 @@ class NNUE(pl.LightningModule):
     train_params = [
       {'params' : get_parameters([self.input]), 'lr' : LR, 'gc_dim' : 0 },
       {'params' : [self.layer_stacks.l1_fact.weight], 'lr' : LR },
+      {'params' : [self.layer_stacks.l1_fact.bias], 'lr' : LR },
       {'params' : [self.layer_stacks.l1.weight], 'lr' : LR },
       {'params' : [self.layer_stacks.l1.bias], 'lr' : LR },
       {'params' : [self.layer_stacks.l2.weight], 'lr' : LR },
