@@ -109,7 +109,7 @@ class LayerStacks(nn.Module):
     for i in range(self.count):
       with torch.no_grad():
         l1 = nn.Linear(2*L1 // 2, L2+1)
-        l2 = nn.Linear(L2, L3)
+        l2 = nn.Linear(L2*2, L3)
         output = nn.Linear(L3, 1)
         l1.weight.data = self.l1.weight[i*(L2+1):(i+1)*(L2+1), :] + self.l1_fact.weight.data
         l1.bias.data = self.l1.bias[i*(L2+1):(i+1)*(L2+1)] + self.l1_fact.bias.data
