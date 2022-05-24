@@ -4,15 +4,14 @@ import nnue_dataset
 import pytorch_lightning as pl
 import features
 import os
+import sys
 import torch
 from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
-def make_data_loaders(train_filename, val_filename, feature_set, num_workers, batch_size, filtered, random_fen_skipping, wld_filtered, main_device):
+def make_data_loaders(train_filename, val_filename, feature_set, num_workers, batch_size, filtered, random_fen_skipping, wld_filtered, main_device, epoch_size, val_size):
   # Epoch and validation sizes are arbitrary
-  epoch_size = 100000000
-  val_size = 1000000
   features_name = feature_set.name
   train_infinite = nnue_dataset.SparseBatchDataset(features_name, train_filename, batch_size, num_workers=num_workers,
                                                    filtered=filtered, random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, device=main_device)
@@ -23,6 +22,16 @@ def make_data_loaders(train_filename, val_filename, feature_set, num_workers, ba
   train = DataLoader(nnue_dataset.FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
   val = DataLoader(nnue_dataset.FixedNumBatchesDataset(val_infinite, (val_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
   return train, val
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def main():
   parser = argparse.ArgumentParser(description="Trains the network.")
@@ -43,6 +52,10 @@ def main():
   parser.add_argument("--no-wld-fen-skipping", action='store_true', dest='no_wld_fen_skipping', help="If used then no wld fen skipping will be done. By default wld fen skipping is done.")
   parser.add_argument("--random-fen-skipping", default=3, type=int, dest='random_fen_skipping', help="skip fens randomly on average random_fen_skipping before using one.")
   parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
+  parser.add_argument("--network-save-period", type=int, default=20, dest='network_save_period', help="Number of epochs between network snapshots. None to disable.")
+  parser.add_argument("--save-last-network", type=str2bool, default=True, dest='save_last_network', help="Whether to always save the last produced network.")
+  parser.add_argument("--epoch-size", type=int, default=100000000, dest='epoch_size', help="Number of positions per epoch.")
+  parser.add_argument("--validation-size", type=int, default=1000000, dest='validation_size', help="Number of positions per validation step.")
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
@@ -106,7 +119,7 @@ def main():
   print('Using log dir {}'.format(logdir), flush=True)
 
   tb_logger = pl_loggers.TensorBoardLogger(logdir)
-  checkpoint_callback = pl.callbacks.ModelCheckpoint(save_last=True, every_n_epochs=20, save_top_k=-1)
+  checkpoint_callback = pl.callbacks.ModelCheckpoint(save_last=args.save_last_network, every_n_epochs=args.network_save_period, save_top_k=-1)
   trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback], logger=tb_logger)
 
   main_device = trainer.root_device if trainer.root_gpu is None else 'cuda:' + str(trainer.root_gpu)
@@ -114,9 +127,25 @@ def main():
   nnue.to(device=main_device)
 
   print('Using c++ data loader')
-  train, val = make_data_loaders(args.train, args.val, feature_set, args.num_workers, batch_size, not args.no_smart_fen_skipping, args.random_fen_skipping, not args.no_wld_fen_skipping, main_device)
+  train, val = make_data_loaders(
+    args.train,
+    args.val,
+    feature_set,
+    args.num_workers,
+    batch_size,
+    not args.no_smart_fen_skipping,
+    args.random_fen_skipping,
+    not args.no_wld_fen_skipping,
+    main_device,
+    args.epoch_size,
+    args.validation_size)
 
   trainer.fit(nnue, train, val)
 
+  with open(os.path.join(logdir, 'training_finished'), 'w'):
+    pass
+
 if __name__ == '__main__':
   main()
+  if sys.platform == "win32":
+    os.system(f'wmic process where processid="{os.getpid()}" call terminate >nul')
