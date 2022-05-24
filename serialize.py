@@ -149,7 +149,7 @@ class NNUEReader():
     self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
     for i in range(self.model.num_ls_buckets):
       l1 = nn.Linear(2*M.L1//2, M.L2+1)
-      l2 = nn.Linear(M.L2, M.L3)
+      l2 = nn.Linear(M.L2*2, M.L3)
       output = nn.Linear(M.L3, 1)
 
       self.read_int32(fc_hash) # FC layers hash
