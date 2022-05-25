@@ -900,11 +900,11 @@ def setup_ordo(directory):
             lines = makefile.readlines()
             for i, line in enumerate(lines):
                 if line.startswith('CFLAGS'):
-                    lines.insert(i+1, 'CFLAGS += -DMINGW')
+                    lines.insert(i+1, 'CFLAGS += -DMINGW\n')
                     break
 
         with open(os.path.join(directory, 'Makefile'), 'w') as makefile:
-            makefile.write('\n'.join(lines))
+            makefile.write(''.join(lines))
 
     with subprocess.Popen(['make'], cwd=directory) as process:
         if process.wait():
@@ -936,6 +936,16 @@ def setup_c_chess_cli(directory):
 
     LOGGER.info(f'Setting up c-chess-cli in {directory}.')
     git_download_branch_or_commit(directory, *C_CHESS_CLI_GIT)
+
+    with open(os.path.join(directory, 'make.py'), 'r') as makefile:
+        lines = makefile.readlines()
+        for i, line in enumerate(lines):
+            if line.startswith('version = '):
+                lines[i] = f'version = \'easy_train_custom_{C_CHESS_CLI_GIT[1]}\'\n'
+
+    with open(os.path.join(directory, 'make.py'), 'w') as makefile:
+        makefile.write(''.join(lines))
+
     with subprocess.Popen([sys.executable, 'make.py'], cwd=directory) as process:
         if process.wait():
             raise Exception('c-chess-cli compilation failed.')
