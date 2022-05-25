@@ -719,6 +719,9 @@ class TrainingRun(Thread):
                         # Provide some output for the cli interface.
                         if self._current_step_in_epoch % 100 == 0:
                             LOGGER.info(line)
+                    else:
+                        # Actually this is where most of the errors from pytorch must be handled.
+                        LOGGER.info(line)
                 except:
                     # Usually errors. Aside from that all output should be catched above. We want these logged.
                     LOGGER.info(line)
