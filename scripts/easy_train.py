@@ -48,24 +48,6 @@ def run_for_version(name):
 
     return process.stdout.read()
 
-def validate_git():
-    success = True
-    try:
-        out = run_for_version('git')
-        parts = out.split('\n')[0].split()
-        version_str = parts[-1]
-        major_version = int(version_str.split('.')[0])
-        success = major_version >= 2
-        if success:
-            LOGGER.info(f'Found git executable version {version_str}. OK.')
-        else:
-            LOGGER.error(f'Found git executable version {version_str} but at least 2.0 required. Exiting.')
-    except:
-        success = False
-        LOGGER.error('No git executable found. Exiting.')
-
-    return success
-
 def validate_cmake():
     success = True
     try:
@@ -228,7 +210,6 @@ def validate_environment_requirements():
     success = True
     try:
         success &= validate_python_version()
-        success &= validate_git()
         success &= validate_make()
         success &= validate_cmake()
         success &= validate_gcc()
