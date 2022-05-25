@@ -1232,6 +1232,7 @@ class NetworkTesting(Thread):
                 try:
                     if not line.startswith('Score of'):
                        LOGGER.info(line)
+
                     if line.startswith('Finished running ordo.'):
                         self._update_results_from_ordo_file(self._get_ordo_file_path())
                     elif line.startswith('Score of'):
@@ -1258,6 +1259,8 @@ class NetworkTesting(Thread):
                         self._current_test = None
 
                     self._has_started = True
+                except:
+                    LOGGER.info(line)
                 finally:
                     self._mutex.release()
         except:
