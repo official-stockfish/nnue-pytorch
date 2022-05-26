@@ -102,8 +102,9 @@ def parse_ordo(root_dir, nnues):
     return ordo_scores
 
 
-def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_base, stockfish_test, game_params):
+def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_base, stockfish_test, game_params, tries=3):
     """ Run a match using c-chess-cli adding pgns to a file to be analysed with ordo """
+
     pgn_file_name = os.path.join(root_dir, "out_temp.pgn")
     command = []
     if sys.platform != "win32":
@@ -126,24 +127,32 @@ def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfis
         netname = PurePath(*PurePath(evalfile).parts[-2:])
         command += ['-engine', f'cmd={stockfish_test}', f'name={netname}', f'option.EvalFile={evalfile}']
 
-    print_atomic("Running match with c-chess-cli ... {}".format(pgn_file_name), flush=True)
-    c_chess_out = open(os.path.join(root_dir, "c_chess.out"), 'w')
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    seen = {}
-    for line in process.stdout:
-        line = line.decode('utf-8')
-        c_chess_out.write(line)
-        if 'Score' in line:
-            epoch_num = re.search(r'epoch(\d+)', line)
-            if epoch_num.group(1) not in seen:
-                sys.stdout.write('\n')
-            seen[epoch_num.group(1)] = True
-            sys.stdout.write('\r' + line.rstrip())
-            sys.stdout.flush()
-    sys.stdout.write('\n')
-    c_chess_out.close()
-    if process.wait() != 0:
-        print_atomic("Error running match!")
+    # Attempt to run the match multiple times in case of unforseen
+    # errors like engine hanging or c-chess-cli having an error...
+    for i in range(tries):
+        print_atomic("Running match with c-chess-cli ... {}".format(pgn_file_name), flush=True)
+        c_chess_out = open(os.path.join(root_dir, "c_chess.out"), 'w')
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        seen = {}
+        for line in process.stdout:
+            line = line.decode('utf-8')
+            c_chess_out.write(line)
+            if 'Score' in line:
+                epoch_num = re.search(r'epoch(\d+)', line)
+                if epoch_num.group(1) not in seen:
+                    sys.stdout.write('\n')
+                seen[epoch_num.group(1)] = True
+                sys.stdout.write('\r' + line.rstrip())
+                sys.stdout.flush()
+        sys.stdout.write('\n')
+        c_chess_out.close()
+        if process.wait() != 0:
+            if i == tries-1:
+                print_atomic("Error running match!")
+            else:
+                print_atomic("Retrying running match...")
+        else:
+            break
 
     print_atomic("Finished running match.")
 
