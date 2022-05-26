@@ -37,7 +37,8 @@ class GameParams:
 
         params += [
             f'option.Hash={self.hash}',
-            f'option.Threads={self.threads}'
+            f'option.Threads={self.threads}',
+            f'timeout=20'
         ]
 
         if self.nodes_per_move:
