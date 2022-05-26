@@ -316,6 +316,111 @@ def schedule_exit(timeout_seconds, errcode):
     thread.setDaemon(True)
     thread.start()
 
+if sys.platform == "win32":
+    import ctypes
+
+    WINAPI_CreateMutex = ctypes.windll.kernel32.CreateMutexA
+    WINAPI_CreateMutex.argtypes = [ctypes.wintypes.LPCVOID, ctypes.wintypes.BOOL, ctypes.c_char_p]
+    WINAPI_CreateMutex.restype = ctypes.wintypes.HANDLE
+
+    WINAPI_WaitForSingleObject = ctypes.windll.kernel32.WaitForSingleObject
+    WINAPI_WaitForSingleObject.argtypes = [ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD]
+    WINAPI_WaitForSingleObject.restype = ctypes.wintypes.DWORD
+
+    WINAPI_ReleaseMutex = ctypes.windll.kernel32.ReleaseMutex
+    WINAPI_ReleaseMutex.argtypes = [ctypes.wintypes.HANDLE]
+    WINAPI_ReleaseMutex.restype = ctypes.wintypes.BOOL
+
+    WINAPI_CloseHandle = ctypes.windll.kernel32.CloseHandle
+    WINAPI_CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+    WINAPI_CloseHandle.restype = ctypes.wintypes.BOOL
+
+    class SystemWideMutex:
+        def __init__(self, name):
+            # \ is a reserved character so we have to convert them to / to be recognized as
+            # directory delimiters
+            # encode as utf-8 because LPCSTR is bytes not str
+            self.name = str(os.path.abspath(name)).replace('\\', '/').encode('utf-8')
+            self.acquired = False
+            self.file = open(self.name, 'a+')
+            self.handle = WINAPI_CreateMutex(None, False, self.name)
+            if not self.handle:
+                raise ctypes.WinError()
+
+        def acquire(self):
+            ret = WINAPI_WaitForSingleObject(self.handle, 0xFFFFFFFF)
+            if ret in (0, 0x80):
+                # 0 - normally acquired
+                # 0x80 - acquired by other process terminating
+                self.acquired = True
+                return True
+            else:
+                raise ctypes.WinError()
+
+        def release(self):
+            ret = WINAPI_ReleaseMutex(self.handle)
+            if not ret:
+                raise ctypes.WinError()
+            self.acquired = False
+
+        def close(self):
+            if self.handle is None:
+                return
+
+            self.file.close()
+
+            ret = WINAPI_CloseHandle(self.handle)
+            if not ret:
+                raise ctypes.WinError()
+
+            try:
+                os.remove(self.name)
+            except:
+                pass
+
+            self.handle = None
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            self.release()
+            self.close()
+else:
+    import fcntl
+
+    class SystemWideMutex:
+        def __init__(self, name):
+            self.name = name
+            self.acquired = False
+            self.file = open(self.name, 'a+')
+
+        def acquire(self):
+            fcntl.lockf(self.file, fcntl.LOCK_EX)
+            self.acquired = True
+
+        def release(self):
+            fcntl.lockf(self.file, fcntl.LOCK_UN)
+            self.acquired = False
+
+        def close(self):
+            if self.file is None:
+                return
+            os.unlink(self.name)
+            self.file.close()
+            self.file = None
+
+        def __del__(self):
+            self.close()
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            self.release()
+
 class DecayingRunningAverage:
     '''
     Represents an average of a list of values with exponential decay of old values.
@@ -2263,56 +2368,59 @@ def main():
 
     absolute_workspace_path = os.path.abspath(args.workspace_path)
     experiment_directory = os.path.join(absolute_workspace_path, f'experiments/experiment_{args.experiment_name}')
-    try:
-        os.makedirs(experiment_directory, exist_ok=False)
-    except FileExistsError as e:
-        if args.fail_on_experiment_exists and os.listdir(experiment_directory):
-            LOGGER.error(f'Directory {experiment_directory} already exists. An experiment must use a new directory.')
-            LOGGER.error(f'Alternatively, override this with the option --resume-training=True or --fail-on-experiment-exists=False.')
-            return
 
-    ordo_directory = os.path.join(absolute_workspace_path, 'ordo')
-    c_chess_cli_directory = os.path.join(absolute_workspace_path, 'c-chess-cli')
-    books_directory = os.path.join(absolute_workspace_path, 'books')
+    with SystemWideMutex(os.path.join(experiment_directory, '.lock')) as mutex:
+        try:
+            os.makedirs(experiment_directory, exist_ok=False)
+        except FileExistsError as e:
+            if args.fail_on_experiment_exists and os.listdir(experiment_directory):
+                LOGGER.error(f'Directory {experiment_directory} already exists. An experiment must use a new directory.')
+                LOGGER.error(f'Alternatively, override this with the option --resume-training=True or --fail-on-experiment-exists=False.')
+                return
 
-    stockfish_base_directory = os.path.join(experiment_directory, 'stockfish_base')
-    stockfish_test_directory = os.path.join(experiment_directory, 'stockfish_test')
-    nnue_pytorch_directory = os.path.join(experiment_directory, 'nnue-pytorch')
-    logging_directory = os.path.join(experiment_directory, 'logging')
-    start_model_directory = os.path.join(experiment_directory, 'start_models')
+        ordo_directory = os.path.join(absolute_workspace_path, 'ordo')
+        c_chess_cli_directory = os.path.join(absolute_workspace_path, 'c-chess-cli')
+        books_directory = os.path.join(absolute_workspace_path, 'books')
 
-    log_args(logging_directory, args)
+        stockfish_base_directory = os.path.join(experiment_directory, 'stockfish_base')
+        stockfish_test_directory = os.path.join(experiment_directory, 'stockfish_test')
+        nnue_pytorch_directory = os.path.join(experiment_directory, 'nnue-pytorch')
+        logging_directory = os.path.join(experiment_directory, 'logging')
+        start_model_directory = os.path.join(experiment_directory, 'start_models')
 
-    if not args.do_approximate_ordo:
-        setup_ordo(ordo_directory)
+        log_args(logging_directory, args)
 
-    setup_c_chess_cli(c_chess_cli_directory)
+        if not args.do_approximate_ordo:
+            setup_ordo(ordo_directory)
 
-    do_network_testing = args.engine_base_branch and args.engine_test_branch and args.do_network_testing
-    do_network_training = args.do_network_training and args.training_dataset
+        setup_c_chess_cli(c_chess_cli_directory)
 
-    if do_network_testing:
-        LOGGER.info('Engines provided. Enabling network testing.')
+        do_network_testing = args.engine_base_branch and args.engine_test_branch and args.do_network_testing
+        do_network_training = args.do_network_training and args.training_dataset
 
-        setup_book(books_directory, args)
+        if do_network_testing:
+            LOGGER.info('Engines provided. Enabling network testing.')
 
-        stockfish_base_repo = '/'.join(args.engine_base_branch.split('/')[:2])
-        stockfish_test_repo = '/'.join(args.engine_test_branch.split('/')[:2])
-        stockfish_base_branch_or_commit = args.engine_base_branch.split('/')[2]
-        stockfish_test_branch_or_commit = args.engine_test_branch.split('/')[2]
-        setup_stockfish(stockfish_base_directory, stockfish_base_repo, stockfish_base_branch_or_commit, args.build_engine_arch, args.build_threads)
-        setup_stockfish(stockfish_test_directory, stockfish_test_repo, stockfish_test_branch_or_commit, args.build_engine_arch, args.build_threads)
-    else:
-        LOGGER.info('Not doing network testing. Either engines no provided or explicitely disabled.')
+            setup_book(books_directory, args)
 
-    nnue_pytorch_repo = '/'.join(args.nnue_pytorch_branch.split('/')[:2])
-    nnue_pytorch_branch_or_commit = args.nnue_pytorch_branch.split('/')[2]
-    setup_nnue_pytorch(nnue_pytorch_directory, nnue_pytorch_repo, nnue_pytorch_branch_or_commit)
+            stockfish_base_repo = '/'.join(args.engine_base_branch.split('/')[:2])
+            stockfish_test_repo = '/'.join(args.engine_test_branch.split('/')[:2])
+            stockfish_base_branch_or_commit = args.engine_base_branch.split('/')[2]
+            stockfish_test_branch_or_commit = args.engine_test_branch.split('/')[2]
+            setup_stockfish(stockfish_base_directory, stockfish_base_repo, stockfish_base_branch_or_commit, args.build_engine_arch, args.build_threads)
+            setup_stockfish(stockfish_test_directory, stockfish_test_repo, stockfish_test_branch_or_commit, args.build_engine_arch, args.build_threads)
+        else:
+            LOGGER.info('Not doing network testing. Either engines no provided or explicitely disabled.')
 
-    if args.features is None:
-        args.features = get_default_feature_set_from_nnue_pytorch(nnue_pytorch_directory)
+        nnue_pytorch_repo = '/'.join(args.nnue_pytorch_branch.split('/')[:2])
+        nnue_pytorch_branch_or_commit = args.nnue_pytorch_branch.split('/')[2]
+        setup_nnue_pytorch(nnue_pytorch_directory, nnue_pytorch_repo, nnue_pytorch_branch_or_commit)
 
-    LOGGER.info('Initialization completed.')
+        if args.features is None:
+            args.features = get_default_feature_set_from_nnue_pytorch(nnue_pytorch_directory)
+
+        LOGGER.info('Initialization completed.')
+
 
     # Directory layout:
     #     tmp/experiments/experiment_{name}/training/run_{i}
