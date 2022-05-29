@@ -2367,6 +2367,9 @@ def main():
        args.fail_on_experiment_exists = False
 
     absolute_workspace_path = os.path.abspath(args.workspace_path)
+
+    os.makedirs(absolute_workspace_path, exist_ok=True)
+
     experiment_directory = os.path.join(absolute_workspace_path, f'experiments/experiment_{args.experiment_name}')
 
     with SystemWideMutex(os.path.join(absolute_workspace_path, f'.lock_{args.experiment_name}')) as mutex:
