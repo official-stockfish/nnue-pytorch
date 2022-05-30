@@ -2206,6 +2206,16 @@ class TqdmDownloadProgressBar(tqdm):
             self.total = total_size
         return self.update(blocks_transferred * block_size - self.n)  # also sets self.n = b * bsize
 
+class TqdmToLogger(io.StringIO):
+    def __init__(self):
+        super(TqdmToLogger, self).__init__()
+
+    def write(self, buf):
+        self.buf = buf
+
+    def flush(self):
+        LOGGER.info(self.buf)
+
 def setup_book(directory, args):
     '''
     If the args.network_testing_book is a URL then it downloads the book
@@ -2235,8 +2245,21 @@ def setup_book(directory, args):
 
     if not os.path.exists(destination_file_path):
         if temp_filename != filename and not os.path.exists(destination_temp_file_path):
-            with TqdmDownloadProgressBar(unit='B', unit_scale=True, unit_divisor=1024, miniters=1, desc=temp_filename) as progress_bar:
-                urllib.request.urlretrieve(url, filename=destination_temp_file_path, reporthook=progress_bar.update_to, data=None)
+            with TqdmDownloadProgressBar(
+                unit='B',
+                unit_scale=True,
+                unit_divisor=1024,
+                miniters=1,
+                desc=temp_filename,
+                file=TqdmToLogger(),
+                mininterval=0.1 # at least 0.1s between update so the logfile doesn't get polluted.
+            ) as progress_bar:
+                urllib.request.urlretrieve(
+                    url,
+                    filename=destination_temp_file_path,
+                    reporthook=progress_bar.update_to,
+                    data=None
+                )
                 progress_bar.total = progress_bar.n
         if temp_filename.endswith('.zip'):
             zipped = zipfile.ZipFile(destination_temp_file_path, mode='r')
