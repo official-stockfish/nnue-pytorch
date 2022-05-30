@@ -4,7 +4,7 @@
 # https://github.com/Sopel97/Stockfish.git
 # commit d7d4ec211f7ef35ff39fe8aea54623a468b36c7d
 
-DEPTH=5
+DEPTH=6
 GAMES=128000000
 SEED=$RANDOM
  
@@ -12,7 +12,7 @@ options="
 uci
 setoption name PruneAtShallowDepth value false
 setoption name Use NNUE value pure
-setoption name Threads value 250
+setoption name Threads value 256
 setoption name Hash value 10240
 setoption name SyzygyPath value /dev/shm/vjoost/3-4-5-6/WDL/:/dev/shm/vjoost/3-4-5-6/DTZ/
 isready
