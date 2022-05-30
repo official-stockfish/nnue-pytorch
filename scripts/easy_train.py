@@ -12,6 +12,8 @@ import argparse
 import math
 import logging
 import time
+import platform
+import os
 
 EXITCODE_OK = 0
 EXITCODE_MISSING_DEPENDENCIES = 2
@@ -24,6 +26,8 @@ LOGGER.setLevel(logging.DEBUG)
 LOGGER.addHandler(logging.StreamHandler(stream=sys.stdout))
 LOGGER.propagate = False
 
+ENV = os.environ.copy()
+
 def validate_python_version():
     if sys.version_info >= (3, 7):
         LOGGER.info(f'Found python version {sys.version}. OK.')
@@ -32,6 +36,11 @@ def validate_python_version():
         LOGGER.error(f'Found python version {sys.version} but 3.7 is required. Exiting.')
         return False
 
+def is_windows_7_or_earlier():
+    if sys.platform != "win32":
+        raise Exception('Not windows.')
+
+    return platform.win32_ver()[0] in ['7', 'Vista', 'XP']
 
 # Functions for checking external dependencies.
 
@@ -43,7 +52,8 @@ def run_for_version(name):
         universal_newlines=True,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT
+        stderr=subprocess.STDOUT,
+        env=ENV
     )
 
     return process.stdout.read()
@@ -206,21 +216,29 @@ def validate_imports():
     success &= validate_gputil()
     return success
 
-def validate_environment_requirements():
+def validate_environment_requirements_pre_setup():
     success = True
     try:
         success &= validate_python_version()
-        success &= validate_make()
-        success &= validate_cmake()
-        success &= validate_gcc()
         success &= validate_imports()
     except Exception as e:
         LOGGER.error(e)
         return False
     return success
 
+def validate_environment_requirements_post_setup():
+    success = True
+    try:
+        success &= validate_make()
+        success &= validate_cmake()
+        success &= validate_gcc()
+    except Exception as e:
+        LOGGER.error(e)
+        return False
+    return success
+
 # Exit early if the requires packages have not been found
-if not validate_environment_requirements():
+if not validate_environment_requirements_pre_setup():
     sys.exit(EXITCODE_MISSING_DEPENDENCIES)
 
 # Only now import the rest of the required packages
@@ -235,7 +253,6 @@ from asciimatics.event import KeyboardEvent, MouseEvent
 from threading import Thread, Lock, Event
 import GPUtil
 import io
-import os
 import requests
 import zipfile
 import shutil
@@ -286,7 +303,8 @@ if %ERRORLEVEL%==0 (
         subprocess.Popen(
             ['.process_watchdog_helper.bat', str(os.getpid()), str(process.pid)],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
+            env=ENV
         )
     elif sys.platform == "linux":
         # TODO: this
@@ -778,6 +796,7 @@ class TrainingRun(Thread):
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            env=ENV
         )
         terminate_process_on_exit(self._process)
 
@@ -959,6 +978,106 @@ def git_download_branch_or_commit(directory, repo, branch_or_commit):
 
 # Utility functions for dependency setup and executable location.
 
+def is_chocolatey_setup():
+    try:
+        with subprocess.Popen(['choco', '--help'], env=ENV) as process:
+            if process.wait(timeout=TIMEOUT):
+                return False
+            return True
+    except:
+        return False
+
+def setup_chocolatey():
+    choco_bin_path = os.path.join(os.environ['ALLUSERSPROFILE'], 'chocolatey', 'bin')
+    ENV['PATH'] = ENV['PATH'] + ';' + choco_bin_path
+
+    if is_chocolatey_setup():
+        LOGGER.info(f'Chocolatey already setup.')
+        return
+
+    LOGGER.info('Setting up Chocolately.')
+    if is_windows_7_or_earlier():
+        LOGGER.warning(f'NOTE: TLS 1.2 and PowerShell v3.0 is REQUIRED to install Chocolatey. Windows 7 may need to be updated if this installation fails.')
+
+    with subprocess.Popen(
+        [
+            '%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+            '-NoProfile', '-InputFormat', 'None', '-ExecutionPolicy', 'Bypass',
+            '-Command', '[System.Net.ServicePointManager]::SecurityProtocol = 3072; iex ((New-Object System.Net.WebClient).DownloadString(\'https://community.chocolatey.org/install.ps1\'))'
+        ],
+        shell=True,
+        env=ENV
+    ) as process:
+        if process.wait():
+            raise Exception('Error installing Chocolatey.')
+
+    if not is_chocolatey_setup():
+        raise Exception('Chocolatey does not work.')
+
+def is_msys2_setup(directory):
+    try:
+        if not os.path.exists(os.path.join(directory, 'mingw64.exe')):
+            return False
+
+        with subprocess.Popen(['mingw64', '-c', 'gcc --version'], env=ENV) as process:
+            if process.wait(timeout=TIMEOUT):
+                return False
+
+        return True
+    except:
+        return False
+
+def setup_msys2_paths(directory):
+    mingw_bin_path = os.path.join(directory, 'mingw64', 'bin')
+    usr_bin_path = os.path.join(directory, 'usr', 'bin')
+    ENV['PATH'] = ENV['PATH'] + ';' + directory
+    ENV['PATH'] = ENV['PATH'] + ';' + mingw_bin_path
+    ENV['PATH'] = ENV['PATH'] + ';' + directory
+
+def setup_msys2_from_chocolatey(directory):
+    setup_msys2_paths(directory)
+
+    if is_msys2_setup():
+        LOGGER.info(f'MSYS2 already set up in {directory}.')
+        return
+
+    LOGGER.info(f'Setting up MSYS2 in {directory}.')
+    with subprocess.Popen([f'choco install msys2 -y --params "/InstallDir:{directory} /NoPath"'], shell=True, env=ENV) as process:
+        if process.wait():
+            raise Exception('Failed to install MSYS2 through Chocolatey.')
+
+    if not is_msys2_setup():
+        raise Exception('MSYS2 does not work.')
+
+def setup_environment(args):
+    if sys.platform != "win32":
+        return
+
+    # Currently we only use Chocolately for msys2.
+    # If we need it for more stuff in the future then the control
+    # flow will need a revision to only setup chocolatey
+    # when at least one of the required dependencies is not present.
+    if args.msys2_path:
+        LOGGER.info(f'Using msys2 from {args.msys2_path}.')
+
+        # Set up the environment just for safety.
+        setup_msys2_paths(args.msys2_path)
+
+        if not is_msys2_setup(args.msys2_path):
+            raise Exception('MSYS2 does not work.')
+
+        return
+
+    if not args.allow_choco:
+        LOGGER.info('Chocolatey setup not allowed. Relying on existing environment.')
+        return
+
+    setup_chocolatey()
+
+    absolute_workspace_path = os.path.abspath(args.workspace_path)
+    msys2_path = os.path.join(absolute_workspace_path, 'msys2')
+    setup_msys2_from_chocolatey(msys2_path)
+
 def make_ordo_executable_path(directory):
     path = os.path.join(directory, 'ordo')
     if sys.platform == "win32":
@@ -968,7 +1087,7 @@ def make_ordo_executable_path(directory):
 def is_ordo_setup(directory):
     try:
         ordo_path = make_ordo_executable_path(directory)
-        with subprocess.Popen([ordo_path, '--help'], stdout=subprocess.DEVNULL) as process:
+        with subprocess.Popen([ordo_path, '--help'], stdout=subprocess.DEVNULL, env=ENV) as process:
             if process.wait(timeout=TIMEOUT):
                 return False
             return True
@@ -995,7 +1114,7 @@ def setup_ordo(directory):
         with open(os.path.join(directory, 'Makefile'), 'w') as makefile:
             makefile.write(''.join(lines))
 
-    with subprocess.Popen(['make'], cwd=directory) as process:
+    with subprocess.Popen(['make'], cwd=directory, env=ENV) as process:
         if process.wait():
             raise Exception('Ordo compilation failed.')
 
@@ -1011,7 +1130,7 @@ def make_c_chess_cli_executable_path(directory):
 def is_c_chess_cli_setup(directory):
     try:
         path = make_c_chess_cli_executable_path(directory)
-        with subprocess.Popen([path, '-version'], stdout=subprocess.DEVNULL) as process:
+        with subprocess.Popen([path, '-version'], stdout=subprocess.DEVNULL, env=ENV) as process:
             if process.wait(timeout=TIMEOUT):
                 return False
             return True
@@ -1035,7 +1154,7 @@ def setup_c_chess_cli(directory):
     with open(os.path.join(directory, 'make.py'), 'w') as makefile:
         makefile.write(''.join(lines))
 
-    with subprocess.Popen([sys.executable, 'make.py', '-c', 'gcc'], cwd=directory) as process:
+    with subprocess.Popen([sys.executable, 'make.py', '-c', 'gcc'], cwd=directory, env=ENV) as process:
         if process.wait():
             raise Exception('c-chess-cli compilation failed.')
 
@@ -1051,7 +1170,7 @@ def make_stockfish_executable_path(directory):
 def is_stockfish_setup(directory):
     try:
         path = make_stockfish_executable_path(directory)
-        with subprocess.Popen([path, 'compiler'], stdout=subprocess.DEVNULL) as process:
+        with subprocess.Popen([path, 'compiler'], stdout=subprocess.DEVNULL, env=ENV) as process:
             if process.wait(timeout=TIMEOUT):
                 return False
             return True
@@ -1067,14 +1186,11 @@ def setup_stockfish(directory, repo, branch_or_commit, arch, threads=1):
     git_download_branch_or_commit(directory, repo, branch_or_commit)
 
     srcdir = os.path.join(directory, 'src')
-    env = os.environ.copy()
-    if sys.platform == 'win32':
-        env['MSYSTEM'] = 'MINGW64'
 
     with subprocess.Popen(
             ['make', 'build', f'ARCH={arch}', f'-j{threads}'],
             cwd=srcdir,
-            env=env
+            env=ENV
         ) as process:
         if process.wait():
             raise Exception(f'stockfish {repo}/{branch_or_commit} compilation failed')
@@ -1084,7 +1200,7 @@ def setup_stockfish(directory, repo, branch_or_commit, arch, threads=1):
 
 def is_nnue_pytorch_setup(directory):
     try:
-        with subprocess.Popen([sys.executable, 'nnue_dataset.py'], cwd=directory) as process:
+        with subprocess.Popen([sys.executable, 'nnue_dataset.py'], cwd=directory, env=ENV) as process:
             if process.wait(timeout=TIMEOUT):
                 return False
             return True
@@ -1105,7 +1221,7 @@ def setup_nnue_pytorch(directory, repo, branch_or_commit):
     # It's a .bat file made for windows but works on linux too.
     # Just needs to be called with sh.
     command += [os.path.join(directory, 'compile_data_loader.bat')]
-    with subprocess.Popen(command, cwd=directory) as process:
+    with subprocess.Popen(command, cwd=directory, env=ENV) as process:
         if process.wait():
             raise Exception(f'nnue-pytorch {repo}/{branch_or_commit} data loader compilation failed')
 
@@ -1323,6 +1439,7 @@ class NetworkTesting(Thread):
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            env=ENV
         )
         terminate_process_on_exit(self._process)
 
@@ -2149,6 +2266,23 @@ def parse_cli_args():
         dest='auto_exit_timeout_on_training_finished',
         help='Automatically exit the script after a specified time has passed after training finished. Duration format "h:m:s", "m:s", or "s"'
     )
+    if sys.platform == "win32":
+        parser.add_argument(
+            '--msys2-path',
+            default=None,
+            type=str,
+            metavar='PATH',
+            dest='msys2_path',
+            help='Path to an msys2 installation folder.'
+        )
+        parser.add_argument(
+            '--allow-choco',
+            default=False,
+            type=str2bool,
+            metavar='PATH',
+            dest='allow_choco',
+            help='Whether to allow chocolatey package manager installed and potentially large dependencies installed through it (msys2, cmake).'
+        )
     args = parser.parse_args()
 
     if not args.training_dataset:
@@ -2187,6 +2321,14 @@ def parse_cli_args():
 
     if args.start_from_experiment and not args.start_from_experiment.startswith('experiment_'):
         args.start_from_experiment = 'experiment_' + args.start_from_experiment
+
+    # if we ask to resume don't fail on existing directory
+    if args.resume_training:
+       args.fail_on_experiment_exists = False
+
+    if sys.platform == "win32":
+        if not args.msys2_path and not args.allow_choco:
+            raise Exception('Either --msys2-path must be specified or --allow-choco set to True.')
 
     return args
 
@@ -2309,7 +2451,8 @@ def prepare_start_model(directory, model_path, run_id, nnue_pytorch_directory, f
             ],
             cwd=nnue_pytorch_directory,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT
+            stderr=subprocess.STDOUT,
+            env=ENV
         ) as process:
             if process.wait():
                 raise Exception('Failed to run serialize.py for start model.')
@@ -2389,12 +2532,13 @@ def main():
 
     args = parse_cli_args()
 
-    # if we ask to resume don't fail on existing directory
-    if args.resume_training:
-       args.fail_on_experiment_exists = False
-
     absolute_workspace_path = os.path.abspath(args.workspace_path)
     os.makedirs(absolute_workspace_path, exist_ok=True)
+
+    setup_environment(args)
+
+    if not validate_environment_requirements_post_setup():
+        sys.exit(EXITCODE_MISSING_DEPENDENCIES)
 
     do_network_testing = args.engine_base_branch and args.engine_test_branch and args.do_network_testing
     do_network_training = args.do_network_training and args.training_dataset

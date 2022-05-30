@@ -9,6 +9,7 @@ python easy_train.py ^
     --max_epoch=10 ^
     --do-network-training=True ^
     --do-network-testing=True ^
+    --msys2-path=C:/programy/msys2 ^
     --tui=True ^
     --network-save-period=1 ^
     --random-fen-skipping=3 ^
