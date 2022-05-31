@@ -2364,7 +2364,7 @@ def spawn_training_watcher(training_runs, exit_timeout_after_finished):
             finished = True
             success = True
             for run in training_runs:
-                if run.is_running:
+                if not run.has_started or run.is_running:
                     finished = False
                 if not run.has_finished:
                     success = False
