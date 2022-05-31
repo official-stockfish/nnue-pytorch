@@ -1032,10 +1032,10 @@ def setup_c_chess_cli(directory):
             if line.startswith('version = '):
                 lines[i] = f'version = \'easy_train_custom_{C_CHESS_CLI_GIT[1]}\'\n'
 
-    with open(os.path.join(directory, 'make.py', '-c', 'gcc'), 'w') as makefile:
+    with open(os.path.join(directory, 'make.py'), 'w') as makefile:
         makefile.write(''.join(lines))
 
-    with subprocess.Popen([sys.executable, 'make.py'], cwd=directory) as process:
+    with subprocess.Popen([sys.executable, 'make.py', '-c', 'gcc'], cwd=directory) as process:
         if process.wait():
             raise Exception('c-chess-cli compilation failed.')
 
