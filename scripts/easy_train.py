@@ -1767,32 +1767,36 @@ def parse_cli_args():
     )
     parser.add_argument(
         '--workspace-path',
+        default='./easy_train_data',
         type=str,
         metavar='PATH',
-        default='./easy_train_data',
         dest='workspace_path',
         help='Specifies the directory in which the dependencies, training, and testing will be set up.'
     )
     parser.add_argument(
         '--experiment-name',
+        default=None,
         type=str,
         metavar='NAME',
         dest='experiment_name',
+        required=True,
         help='A name of the experiment is used to identify it. The experiment\'s directory will have the name experiment_[experiment_name].'
     )
     parser.add_argument(
         '--training-dataset',
+        default=None,
         type=str,
         metavar='PATH',
         dest='training_dataset',
+        required=True,
         help='Path to the training data. Must be a single file. Supports .bin and .binpack files. Binpack recommended for maximum performance.'
     )
     parser.add_argument(
         '--validation-dataset',
+        default=None,
         type=str,
         metavar='PATH',
         dest='validation_dataset',
-        default=None,
         help='Path fo the validation data. Must be a single file. Same support as for training data. If not set then defaults to training data.'
     )
     parser.add_argument(
