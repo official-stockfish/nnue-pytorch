@@ -2394,62 +2394,64 @@ def main():
        args.fail_on_experiment_exists = False
 
     absolute_workspace_path = os.path.abspath(args.workspace_path)
-
     os.makedirs(absolute_workspace_path, exist_ok=True)
 
-    experiment_directory = os.path.join(absolute_workspace_path, f'experiments/experiment_{args.experiment_name}')
+    do_network_testing = args.engine_base_branch and args.engine_test_branch and args.do_network_testing
+    do_network_training = args.do_network_training and args.training_dataset
 
-    with SystemWideMutex(os.path.join(absolute_workspace_path, f'.lock_{args.experiment_name}')) as mutex:
-        try:
-            os.makedirs(experiment_directory, exist_ok=False)
-        except FileExistsError as e:
-            if args.fail_on_experiment_exists and os.listdir(experiment_directory):
-                LOGGER.error(f'Directory {experiment_directory} already exists. An experiment must use a new directory.')
-                LOGGER.error(f'Alternatively, override this with the option --resume-training=True or --fail-on-experiment-exists=False.')
-                return
+    # Global (workspace) setup
 
+    with SystemWideMutex(os.path.join(absolute_workspace_path, f'.lock')) as mutex:
         ordo_directory = os.path.join(absolute_workspace_path, 'ordo')
         c_chess_cli_directory = os.path.join(absolute_workspace_path, 'c-chess-cli')
         books_directory = os.path.join(absolute_workspace_path, 'books')
-
-        stockfish_base_directory = os.path.join(experiment_directory, 'stockfish_base')
-        stockfish_test_directory = os.path.join(experiment_directory, 'stockfish_test')
-        nnue_pytorch_directory = os.path.join(experiment_directory, 'nnue-pytorch')
-        logging_directory = os.path.join(experiment_directory, 'logging')
-        start_model_directory = os.path.join(experiment_directory, 'start_models')
-
-        log_args(logging_directory, args)
 
         if not args.do_approximate_ordo:
             setup_ordo(ordo_directory)
 
         setup_c_chess_cli(c_chess_cli_directory)
 
-        do_network_testing = args.engine_base_branch and args.engine_test_branch and args.do_network_testing
-        do_network_training = args.do_network_training and args.training_dataset
-
         if do_network_testing:
-            LOGGER.info('Engines provided. Enabling network testing.')
-
             setup_book(books_directory, args)
 
-            stockfish_base_repo = '/'.join(args.engine_base_branch.split('/')[:2])
-            stockfish_test_repo = '/'.join(args.engine_test_branch.split('/')[:2])
-            stockfish_base_branch_or_commit = args.engine_base_branch.split('/')[2]
-            stockfish_test_branch_or_commit = args.engine_test_branch.split('/')[2]
-            setup_stockfish(stockfish_base_directory, stockfish_base_repo, stockfish_base_branch_or_commit, args.build_engine_arch, args.build_threads)
-            setup_stockfish(stockfish_test_directory, stockfish_test_repo, stockfish_test_branch_or_commit, args.build_engine_arch, args.build_threads)
-        else:
-            LOGGER.info('Not doing network testing. Either engines no provided or explicitely disabled.')
+    # Local (experiment) setup
 
-        nnue_pytorch_repo = '/'.join(args.nnue_pytorch_branch.split('/')[:2])
-        nnue_pytorch_branch_or_commit = args.nnue_pytorch_branch.split('/')[2]
-        setup_nnue_pytorch(nnue_pytorch_directory, nnue_pytorch_repo, nnue_pytorch_branch_or_commit)
+    experiment_directory = os.path.join(absolute_workspace_path, f'experiments/experiment_{args.experiment_name}')
+    try:
+        os.makedirs(experiment_directory, exist_ok=False)
+    except FileExistsError as e:
+        if args.fail_on_experiment_exists and os.listdir(experiment_directory):
+            LOGGER.error(f'Directory {experiment_directory} already exists. An experiment must use a new directory.')
+            LOGGER.error(f'Alternatively, override this with the option --resume-training=True or --fail-on-experiment-exists=False.')
+            return
 
-        if args.features is None:
-            args.features = get_default_feature_set_from_nnue_pytorch(nnue_pytorch_directory)
+    stockfish_base_directory = os.path.join(experiment_directory, 'stockfish_base')
+    stockfish_test_directory = os.path.join(experiment_directory, 'stockfish_test')
+    nnue_pytorch_directory = os.path.join(experiment_directory, 'nnue-pytorch')
+    logging_directory = os.path.join(experiment_directory, 'logging')
+    start_model_directory = os.path.join(experiment_directory, 'start_models')
 
-        LOGGER.info('Initialization completed.')
+    log_args(logging_directory, args)
+
+    if do_network_testing:
+        LOGGER.info('Engines provided. Enabling network testing.')
+        stockfish_base_repo = '/'.join(args.engine_base_branch.split('/')[:2])
+        stockfish_test_repo = '/'.join(args.engine_test_branch.split('/')[:2])
+        stockfish_base_branch_or_commit = args.engine_base_branch.split('/')[2]
+        stockfish_test_branch_or_commit = args.engine_test_branch.split('/')[2]
+        setup_stockfish(stockfish_base_directory, stockfish_base_repo, stockfish_base_branch_or_commit, args.build_engine_arch, args.build_threads)
+        setup_stockfish(stockfish_test_directory, stockfish_test_repo, stockfish_test_branch_or_commit, args.build_engine_arch, args.build_threads)
+    else:
+        LOGGER.info('Not doing network testing. Either engines no provided or explicitely disabled.')
+
+    nnue_pytorch_repo = '/'.join(args.nnue_pytorch_branch.split('/')[:2])
+    nnue_pytorch_branch_or_commit = args.nnue_pytorch_branch.split('/')[2]
+    setup_nnue_pytorch(nnue_pytorch_directory, nnue_pytorch_repo, nnue_pytorch_branch_or_commit)
+
+    if args.features is None:
+        args.features = get_default_feature_set_from_nnue_pytorch(nnue_pytorch_directory)
+
+    LOGGER.info('Initialization completed.')
 
 
     # Directory layout:
