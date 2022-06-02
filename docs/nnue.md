@@ -178,6 +178,35 @@ The purpose of this layer is to add non-linearity to the network. If it was just
 
 ClippedReLU would ideally be replaced with ReLU, but aggressive quantization requires reducing the dynamic range of hidden layer inputs, so capping the values at 1 becomes important for performance.
 
+#### Sigmoid
+
+This is an activation function that, contrary to [clipped] ReLU, is smooth. The formula is `y = 1/(1+e^-kx)`, where k is a parameter that determines how "stretched" the shape is.
+
+![Sigmoid](img/sigmoid.png)
+
+There are two main differences compared to clipped ReLU:
+
+1. sigmoid is smooth, meaning that it is differentiable everywhere, meaning that there is no situations (realistically speaking) where the gradient disappears.
+2. sigmoid is nonlinear, the output saturates towards 0 or 1 but never reaches it
+
+While this function generally allows the network to learn more than ReLU it is costly and unsuitable for evaluation in the integer domain. It is however a good starting point for improvements...
+
+#### Quantmoid4
+
+With sigmoid being too costly we need to look for alternatives. One such alternative is to use an approximation. And it just so happens that `sigmoid(4x)` (scaled to integer domain in a particular way) can be fairly well approximated by a simple piece-wise quadratic function that needs just addition, multiplication, and bit-shifts. Since the primary purpose for this approximation is to be used in a quantized implementation directly we will present a specific variant that outputs values in range `[0, 126]` (and with input scaled accordingly). The reason for the choice of the upper range being defined as 126 is that this is the largest even 8-bit integer, and want an even one to allow the value for `x=0` to be exactly in the middle. The equation is as follows:
+
+![Quantmoid4 Equation](img/quantmoid4_equation.png)
+
+Note, that the equation for both positive and negative `x` is almost identical. The similarity allows for a branchless implementation even though there are two cases.
+
+And the resulting graph is the following (with a scaled sigmoid(4x) for comparison):
+
+![Quantmoid4](img/quantmoid4.png)
+
+The disadvantage is that it loses the smoothness, and the output rounds to 0/1 quite early. This however doesn't appear to be an issue in practice, the actual error from this "rounding" is negligible.
+
+More cool stuff will happen once we implement and optimize it, so we will get back to this layer in the optimized quantized implementation section.
+
 ### A simple input feature set.
 
 For the purpose of illustration we will consider a simple set of inputs based on piece placement. We will call it "A" features, because they will represent "All pieces".
@@ -1679,9 +1708,9 @@ The clipping is not hard, the more complicated part is conversion. We also need 
 ![](img/crelu16.svg)
 
 ```cpp
-float* crelu16(,
-    int            size,   // no need to have any layer structure, we just need the number of elements
-    int8_t*        output, // the already allocated storage for the result
+int8_t* crelu16(,
+          int      size,   // no need to have any layer structure, we just need the number of elements
+          int8_t*  output, // the already allocated storage for the result
     const int16_t* input   // the input, which is the output of the previous linear layer
 ) {
     constexpr int in_register_width = 256 / 16;
@@ -1693,8 +1722,8 @@ float* crelu16(,
     const int     control = 0b11011000; // 3, 1, 2, 0; lane 0 is the rightmost one
 
     for (int i = 0; i < num_out_chunks; ++i) {
-        const __m256i in0 = _mm256_load_si256(&input[i * in_register_width * 2 + 0]);
-        const __m256i in1 = _mm256_load_si256(&input[i * in_register_width * 2 + 1]);
+        const __m256i in0 = _mm256_load_si256(&input[(i * 2 + 0) * in_register_width]);
+        const __m256i in1 = _mm256_load_si256(&input[(i * 2 + 1) * in_register_width]);
 
         const __m256i result =
             // packs changes the order, so we need to fix that with a permute
@@ -1720,9 +1749,9 @@ float* crelu16(,
 ![](img/crelu32.svg)
 
 ```cpp
-float* crelu32(,
-    int            size,   // no need to have any layer structure, we just need the number of elements
-    int8_t*        output, // the already allocated storage for the result
+int8_t* crelu32(,
+          int      size,   // no need to have any layer structure, we just need the number of elements
+          int8_t*  output, // the already allocated storage for the result
     const int32_t* input   // the input, which is the output of the previous linear layer
 ) {
     constexpr int in_register_width = 256 / 32;
@@ -1736,13 +1765,13 @@ float* crelu32(,
     for (int i = 0; i < num_out_chunks; ++i) {
         const __m256i in0 =
             _mm256_packs_epi32(
-                _mm256_load_si256(&input[i * in_register_width * 4 + 0]),
-                _mm256_load_si256(&input[i * in_register_width * 4 + 1])
+                _mm256_load_si256(&input[(i * 4 + 0) * in_register_width]),
+                _mm256_load_si256(&input[(i * 4 + 1) * in_register_width])
             );
         const __m256i in1 =
             _mm256_packs_epi32(
-                _mm256_load_si256(&input[i * in_register_width * 4 + 2]),
-                _mm256_load_si256(&input[i * in_register_width * 4 + 3])
+                _mm256_load_si256(&input[(i * 4 + 2) * in_register_width]),
+                _mm256_load_si256(&input[(i * 4 + 3) * in_register_width])
             );
 
         const __m256i result =
@@ -1758,6 +1787,152 @@ float* crelu32(,
     }
 
     return output + size;
+}
+```
+
+#### Quantmoid4
+
+As previously mentioned, we will be considering the variant with output in range `[0, 126]`. Let's remind ourselves about the equation we need to implement.
+
+![Quantmoid4 equation](img/quantmoid4_equation.png)
+
+First thing to notice is that `min(x, y) - y` can be replaced by `-subs(y, x)`, where `subs` is unsigned subtraction with saturation, in this case saturation to the range `[0, 255]`.
+
+For handling the "piece-wise" nature we can either use a copysign function, or a blend function. Since blending is available in AVX2 we will use this.
+
+The code can then be as simple as the following:
+
+```cpp
+// Since the output is always 0/1 outside of the int8 range the input could
+// in theory be (saturated) int8, BUT there is no int8 multiplication in AVX2 so we
+// will take int16 for convenience.
+int8_t* quantmoid4(
+          int      size,
+    const int16_t* input,
+          int8_t*  output
+) {
+    constexpr int in_register_width = 256 / 16;
+    constexpr int out_register_width = 256 / 8;
+    assert(size % out_register_width == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / out_register_width;
+
+    const __m256i cst_127_epi16 = _mm256_set1_epi16(127);
+    const __m256i cst_126_epi8 = _mm256_set1_epi8(126);
+
+    // Since AVX2 processes interleaves between 128-bit lanes we will have to
+    // revert this at the end, to combine two processed inputs into one output.
+    // This Control contains the information how to permute the 64-bit lanes
+    // of the result. Control = [0, 2, 1, 3].
+    constexpr int Control = 0b11011000;
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        __m256i v0 = _mm256_load_si256(&input[(i * 2 + 0) * in_register_width]);
+        __m256i v1 = _mm256_load_si256(&input[(i * 2 + 1) * in_register_width]);
+
+        // We will need the initial input sign for the blend later.
+        // Blend uses the highest bit only for the choice, and that
+        // happens to be the sign bit.
+        __m256i sign = _mm256_packs_epi16(v0, v1);
+
+        // From the identity stated earlier.
+        // v0 = min(abs(input[i]), 127) - 127;
+        v0 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v0));
+        v1 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v1));
+
+        // Since we use mulhi later we have to prepare the input such that
+        // the high part (16 highest bits, as the 16-bit multiplication produces
+        // a 32-bit result) after the multiplication land correctly. We want to
+        // divide by 256==2^8 later (right shift by 8), so we would have 8 spare
+        // bits that we would need to get rid of (from the full 32-bit result).
+        // So we can first shift left by 4 bits, which the multiplication (squaring)
+        // will double to 8, and so the 16-bit high part of the 32-bit result will
+        // exctract exactly what we want.
+        v0 = _mm256_slli_epi16(v0, 4);
+        v1 = _mm256_slli_epi16(v1, 4);
+
+        v0 = _mm256_mulhi_epi16(v0, v0);
+        v1 = _mm256_mulhi_epi16(v1, v1);
+
+        // Now we can convert to int8 after that for the rest.
+        v0 = _mm256_packs_epi16(v0, v1);
+
+        // Blend between v and 126-v, based on the input sign, so that we effectively
+        // evaluate the right part of the piece-wise function.
+        v0 = _mm256_blendv_epi8(_mm256_subs_epi8(cst_126_epi8, v0), v0, sign);
+
+        // Deinterleave the output due to AVX2 semantics.
+        _mm256_store_si256(&output[i * out_register_width], _mm256_permute4x64_epi64(v0, Control));
+    }
+
+    return output + size;
+}
+```
+
+#### Pooling Layers
+
+##### Average Pooling
+
+```cpp
+// Since the output is always 0/1 outside of the int8 range the input could
+// in theory be (saturated) int8, BUT there is no int8 multiplication in AVX2 so we
+// will take int16 for convenience.
+void activation_quantmoid4_avx2_v4(
+          int           size,
+    const std::int16_t* input,
+          std::int8_t*  output
+) {
+    constexpr int in_register_width = 256 / 16;
+    constexpr int out_register_width = 256 / 8;
+    assert(size % out_register_width == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / out_register_width;
+
+    const __m256i cst_127_epi16 = _mm256_set1_epi16(127);
+    const __m256i cst_126_epi8 = _mm256_set1_epi8(126);
+
+    // Since AVX2 processes interleaves between 128-bit lanes we will have to
+    // revert this at the end, to combine two processed inputs into one output.
+    // This Control contains the information how to permute the 64-bit lanes
+    // of the result. Control = [0, 2, 1, 3].
+    constexpr int Control = 0b11011000;
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        __m256i v0 = _mm256_load_si256(&input[(i * 2 + 0) * in_register_width]);
+        __m256i v1 = _mm256_load_si256(&input[(i * 2 + 1) * in_register_width]);
+
+        // We will need the initial input sign for the blend later.
+        // Blend uses the highest bit only for the choice, and that
+        // happens to be the sign bit.
+        __m256i sign = _mm256_packs_epi16(v0, v1);
+
+        // From the identity stated earlier.
+        // v0 = min(abs(input[i]), 127) - 127;
+        v0 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v0));
+        v1 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v1));
+
+        // Since we use mulhi later we have to prepare the input such that
+        // the high part (16 highest bits, as the 16-bit multiplication produces
+        // a 32-bit result) after the multiplication land correctly. We want to
+        // divide by 256==2^8 later (right shift by 8), so we would have 8 spare
+        // bits that we would need to get rid of (from the full 32-bit result).
+        // So we can first shift left by 4 bits, which the multiplication (squaring)
+        // will double to 8, and so the 16-bit high part of the 32-bit result will
+        // exctract exactly what we want.
+        v0 = _mm256_slli_epi16(v0, 4);
+        v1 = _mm256_slli_epi16(v1, 4);
+
+        v0 = _mm256_mulhi_epi16(v0, v0);
+        v1 = _mm256_mulhi_epi16(v1, v1);
+
+        // Now we can convert to int8 after that for the rest.
+        v0 = _mm256_packs_epi16(v0, v1);
+
+        // Blend between v and 126-v, based on the input sign, so that we effectively
+        // evaluate the right part of the piece-wise function.
+        v0 = _mm256_blendv_epi8(_mm256_subs_epi8(cst_126_epi8, v0), v0, sign);
+
+        // Deinterleave the output due to AVX2 semantics.
+        _mm256_store_si256(&output[i * out_register_width], _mm256_permute4x64_epi64(v0, Control));
+    }
 }
 ```
 
