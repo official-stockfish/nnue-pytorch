@@ -27,11 +27,14 @@ What this document DOES NOT contain:
 * [Table of contents](#table-of-contents)
 * [Basics](#basics)
     + [What is NNUE?](#what-is-nnue)
-        + [Quantization 101 and its importance](#quantization-101-and-its-importance)
+        - [Quantization 101 and its importance](#quantization-101-and-its-importance)
     + [What layers are useful in NNUE?](#what-layers-are-useful-in-nnue)
         - [Linear layer](#linear-layer)
         - [Linear layer with sparse inputs](#linear-layer-with-sparse-inputs)
         - [Clipped ReLU layer](#clipped-relu-layer)
+        - [Sigmoid](#sigmoid)
+        - [Quantmoid4](#quantmoid4)
+        - [Pooling layers](#pooling-layers)
     + [A simple input feature set.](#a-simple-input-feature-set)
     + [A simple NNUE network](#a-simple-nnue-network)
     + [Consideration of networks size and cost.](#consideration-of-networks-size-and-cost)
@@ -40,7 +43,7 @@ What this document DOES NOT contain:
         - [Further layers](#further-layers)
     + [Accumulator](#accumulator)
     + [HalfKP](#halfkp)
-        - [Multiple perspectives, multiple accumulators](#multiple-perspectives-multiple-accumulators)
+        - [Multiple perspectives, multiple accumulators](#multiple-perspectives--multiple-accumulators)
             * [How to combine multiple accumulator perspectives?](#how-to-combine-multiple-accumulator-perspectives)
             * [Which set of weights to use for each perspective?](#which-set-of-weights-to-use-for-each-perspective)
         - [HalfKP example and network diagram](#halfkp-example-and-network-diagram)
@@ -57,7 +60,7 @@ What this document DOES NOT contain:
     + [Model specification](#model-specification)
     + [Preparing the inputs](#preparing-the-inputs)
         - [Parsing the training data sets and moving them to the python side](#parsing-the-training-data-sets-and-moving-them-to-the-python-side)
-        - [Training batch structure and communication?](#training-batch-structure-and-communication)
+        - [Training batch structure and communication](#training-batch-structure-and-communication)
     + [Feature factorization](#feature-factorization)
         - [Virtual feature coalescing](#virtual-feature-coalescing)
         - [Other factors](#other-factors)
@@ -78,7 +81,7 @@ What this document DOES NOT contain:
     + [Stockfish quantization scheme](#stockfish-quantization-scheme)
         - [Feature Transformer](#feature-transformer)
         - [Linear layer](#linear-layer-2)
-        - [ClippedReLU](#clippedrelu-1)
+        - [ClippedReLU](#clippedrelu)
     + [The math of quantization and how to make it fit](#the-math-of-quantization-and-how-to-make-it-fit)
         - [Feature Transformer](#feature-transformer-1)
         - [Linear layer](#linear-layer-3)
@@ -93,13 +96,21 @@ What this document DOES NOT contain:
         - [Linear layer with sparse input, alternative approach](#linear-layer-with-sparse-input-alternative-approach)
             * [m256_process_chunk_alternative](#m256_process_chunk_alternative)
         - [Linear layer with sparse input and blocked sparse output](#linear-layer-with-sparse-input-and-blocked-sparse-output)
-        - [ClippedReLU](#clippedrelu-2)
+        - [ClippedReLU](#clippedrelu-1)
             * [int16 -> int8](#int16---int8)
             * [int32 -> int8](#int32---int8)
+        - [Quantmoid4](#quantmoid4-1)
+        - [Pooling Layers](#pooling-layers)
+            * [Average Pooling](#average-pooling)
+            * [Max Pooling](#max-pooling)
+            * [Product Pooling](#product-pooling)
     + [Accounting for quantization in the trainer](#accounting-for-quantization-in-the-trainer)
-        - [Inside the optimizer](#inside-the-optimizer)
-        - [Outside the optimizer](#outside-the-optimizer)
-        - [Accounting for virtual layers (factorization)](#accounting-for-virtual-layers-factorization)
+        - [Range](#range)
+            * [Inside the optimizer](#inside-the-optimizer)
+            * [Outside the optimizer](#outside-the-optimizer)
+            * [Accounting for virtual layers (factorization)](#accounting-for-virtual-layers-factorization)
+        - [Non-differentiable layers](#non-differentiable-layers)
+            * [Custom kernel for training-safe amalgamated Quantmoid4](#custom-kernel-for-training-safe-amalgamated-quantmoid4)
 * [Optimizing the trainer (CUDA)](#optimizing-the-trainer-cuda)
     + [Using custom CUDA kernels](#using-custom-cuda-kernels)
     + [Feature transformer](#feature-transformer)
@@ -1996,9 +2007,11 @@ void max_pooling_2(
 
 ### Accounting for quantization in the trainer
 
+#### Range
+
 Adding (quite aggressive) quantization has reduced the possible range of values for the weights and biases. We can, however, ignore the feature transformer and all biases, as they use large integer types and we don't ever expect to hit the limit. The problematic case are the int8 weights of the linear layer, which for example in Stockfish can only go to about 2 (activation range in 0..1). This is potentially a big problem, as the training can diverge from the quantized representation by more than just rounding. To prevent this from happening, it is necessary to somehow limit the range for these parameters inside the trainer. So far the easiest way of doing it is to modify the optimizer to clamp the values to the available range after each optimization step. These minimum and maximum values can be passed, for example when registering the optimizable parameters in the optimizer.
 
-#### Inside the optimizer
+##### Inside the optimizer
 
 One way to account for this is directly in the optimizer. This is nice because the clipping is applied directly after the step, but requires having access to the optimizer's source. For example:
 
@@ -2037,7 +2050,7 @@ def step(self, closure=None):
                 p_data_fp32.clamp_(min_weight, max_weight)
 ```
 
-#### Outside the optimizer
+##### Outside the optimizer
 
 Alternatively one can do it outside the optimizer for more flexibility:
 
@@ -2062,7 +2075,7 @@ def _clip_weights(self):
             p.data.copy_(p_data_fp32)
 ```
 
-#### Accounting for virtual layers (factorization)
+##### Accounting for virtual layers (factorization)
 
 Sometimes more complex architectures make some layers' parameters be a sum of two layers during training. Just like feature factorization but for whole layers (see for example [this](#multiple-psqt-outputs-and-multiple-subnetworks)). We can account for example like this:
 
@@ -2095,6 +2108,100 @@ def _clip_weights(self):
             else:
                 p_data_fp32.clamp_(min_weight, max_weight)
             p.data.copy_(p_data_fp32)
+```
+
+#### Non-differentiable layers
+
+One may want to use some non-differentiable layers that are made for quantized inference from the beginning. One such layer is Quantmoid4. In this case we have two options:
+
+1. Use the function as is in the float domain.
+2. Use some other function.
+
+The first option is the simplest, but may still result in issues on boundary points. For example Quantmoid4, uses non-smooth functions that will cause the gradient to disappear. This is an issue. Additionally it's often a lot of simple operations that may slow the trainer down (by bloating the backwards pass graph).
+
+The second option is very tempting, especially since usually the quantized function is an approximation to some other smooth function, in this case a `sigmoid(4x)`. In some cases it is enough to just replace the gradient, leaving the quantized version for the forward pass.
+
+##### Custom kernel for training-safe amalgamated Quantmoid4
+
+Quantmoid4 is a good enough approximation that we can just use it for the forward pass and use `sigmoid(4x)` gradient for the backward pass!
+
+```python
+import torch
+import cupy as cp
+
+# For lazy compilation.
+quantmoid_kernels = dict()
+def make_quantmoid4_forward_kernel():
+    key = 'quantmoid4_forward_kernel'
+    if not key in quantmoid_kernels:
+        # an approximation of sigmoid(x*4)
+        quantmoid4_forward_kernel = cp.RawKernel(r'''
+            extern "C" __global__
+            void quantmoid4_forward(
+                const float*   const input,
+                      float*   const output,
+                const int            total
+            ) {
+                const int i = blockIdx.x * blockDim.x + threadIdx.x;
+                if (i >= total)
+                   return;
+
+                // Remember that we want to scale the output to [0.0, 1.0]
+                const float x = input[i];
+                const float v = min(floor(abs(x * 127.0f)), 127.0f) - 127.0f;
+                const float vv = floor(v * v / 256.0f);
+                const float vvv = x > 0.0f ? 126.0f - vv : vv;
+                output[i] = vvv / 127.0f;
+            }
+        ''',
+            'quantmoid4_forward'
+        )
+        quantmoid4_forward_kernel.compile()
+        quantmoid_kernels[key] = quantmoid4_forward_kernel
+    return quantmoid_kernels[key]
+
+# Now we define a python function that will encapsulate that raw kernel.
+def _quantmoid4(x):
+    assert x.is_contiguous()
+    assert x.is_cuda
+    assert x.dtype == torch.float32
+
+    kernel = make_quantmoid4_forward_kernel()
+    device = x.device
+    count = x.numel()
+    output = torch.empty(*x.shape, dtype=torch.float32, device=device, requires_grad=False)
+
+    kernel(
+        grid=((count + 1023) // 1024,),
+        block=(1024,),
+        args=(
+            x.data_ptr(),
+            output.data_ptr(),
+            count
+        )
+    )
+    return output
+
+# And now we define a class that pytorch will understand.
+# Here we substitute the gradient by the gradient for sigmoid(4x).
+class Quantmoid4(torch.autograd.Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(torch.sigmoid(input * 4.0))
+    return _quantmoid4(input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    sigmoid_output, = ctx.saved_tensors
+    return grad_output * (1.0 - sigmoid_output) * 4.0 * sigmoid_output
+
+quantmoid4 = Quantmoid4.apply
+
+# Output for some verification
+if __name__ == '__main__':
+    for i in range(-255, 255):
+        x = i / 127.0
+        print(x, quantmoid4(torch.tensor([x]).cuda()), quantmoid4(torch.tensor([x]).cuda())-torch.sigmoid(torch.tensor([x]).cuda()*4.0))
 ```
 
 ## Optimizing the trainer (CUDA)
