@@ -28,7 +28,7 @@ What this document DOES NOT contain:
 * [Basics](#basics)
     + [What is NNUE?](#what-is-nnue)
         + [Quantization 101 and its importance](#quantization-101-and-its-importance)
-    + [What layers are used in NNUE?](#what-layers-are-used-in-nnue)
+    + [What layers are useful in NNUE?](#what-layers-are-useful-in-nnue)
         - [Linear layer](#linear-layer)
         - [Linear layer with sparse inputs](#linear-layer-with-sparse-inputs)
         - [Clipped ReLU layer](#clipped-relu-layer)
@@ -142,7 +142,7 @@ Overall the NNUE principles are applicable also to expensive deep networks, but 
 
 Quantization is the process of changing the domain of the neural network model from floating point to integer. NNUE networks are designed to be evaluated fast in low-precision integer domain, and can utilize available int8/int16 performance of modern CPUs to the fullest extent. Floating point is not an option for achieving maximum engine strength as it sacrifices too much speed for too little accuracy gains (though floating point representation is used by some engines due to its simplicity). Quantization inevitably introduces error that accumulates more the deeper the network is, however in the case of NNUE networks, which are relatively shallow, this error is neglibible. Quantization will be described in more detail later in this document. Until then this document will be using floats instead of ints, it won't be important until we get to actual code optimization. The purpose of this interjection is to make the reader aware of the ultimate goal of NNUE, as it is the biggest factor that shapes the NNUE models and dictates what is possible and what is not.
 
-### What layers are used in NNUE?
+### What layers are useful in NNUE?
 
 NNUE relies on simple layers that can be implemented in low-precision environments using simple arithmetic. This means Linear (fully connected, basically matrix multiplication) and ClippedReLU (clamp(0, 1)) layers are particularly suitable for it. Pooling layers (mul/avg/max) or approximations of more complex activation functions (like sigmoid) are also suitable but not commonly used.
 
