@@ -207,6 +207,18 @@ The disadvantage is that it loses the smoothness, and the output rounds to 0/1 q
 
 More cool stuff will happen once we implement and optimize it, so we will get back to this layer in the optimized quantized implementation section.
 
+#### Pooling layers
+
+Sometimes it is desirable to reduce the input dimensionality to make the size of the layer more approachable. For example instead of having a `1024->8` layer, which has a very narrow output, one may prefer `512->16`. Pooling layers can provide some flexibility by reducing the dimensionality.
+
+Pooling layers work by applying a function `F` over non-overlapping spans of the input, where `F` has more inputs than outputs. So for example one may have `F` take 2 consecutive inputs and produce one output, effectively halving the number of neurons.
+
+The following types of pooling layers can be considered:
+
+1. Average Pooling - outputs the average of inputs. Works well with any number of inputs.
+2. Max Pooling - outputs the maximum of inputs. Works well with any number of inputs.
+3. Product Pooling - outputs the product of inputs. Introduced by Stockfish, not common in machine learning in general. Only works well with 2 inputs. This one also appears to have similar benefits to sigmoid (quantmoid4); it increases the network's capacity, while other pooling layers only allow reducing dimensionality.
+
 ### A simple input feature set.
 
 For the purpose of illustration we will consider a simple set of inputs based on piece placement. We will call it "A" features, because they will represent "All pieces".
@@ -1872,66 +1884,112 @@ int8_t* quantmoid4(
 
 ##### Average Pooling
 
+The exact implementation will depend on how many inputs per output one wants to take. Here we will show an implementation which reduces 2 inputs into 1 output, and will work on uint8 input.
+
+Note, that it is often not optimal to take the neighbouring values. For example here we divide the input in half and average those halves, as there is no instruction in AVX2 that allows to do it well otherwise. Also, be aware of rounding differences - for example AVX2 avg rounds towards nearest integer, while a simple division will round towards 0.
+
 ```cpp
-// Since the output is always 0/1 outside of the int8 range the input could
-// in theory be (saturated) int8, BUT there is no int8 multiplication in AVX2 so we
-// will take int16 for convenience.
-void activation_quantmoid4_avx2_v4(
-          int           size,
-    const std::int16_t* input,
-          std::int8_t*  output
+void average_pooling_2(
+          int      size,
+    const uint8_t* input,
+          uint8_t*  output
+) {
+    constexpr int register_width = 256 / 8;
+    assert(size % (register_width * 2) == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / (register_width * 2);
+
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        __m256i v0 = _mm256_load_si256(&input[ i                   * register_width]);
+        __m256i v1 = _mm256_load_si256(&input[(i + num_out_chunks) * register_width]);
+
+        _mm256_store_si256(&output[i * register_width], _mm256_avg_epu8(v0, v1));
+    }
+}
+```
+
+##### Max Pooling
+
+Pretty much identical. Though there are more options for input/output types with `max` in AVX2.
+
+```cpp
+void max_pooling_2(
+          int      size,
+    const uint8_t* input,
+          uint8_t*  output
+) {
+    constexpr int register_width = 256 / 8;
+    assert(size % (register_width * 2) == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / (register_width * 2);
+
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        __m256i v0 = _mm256_load_si256(&input[ i                   * register_width]);
+        __m256i v1 = _mm256_load_si256(&input[(i + num_out_chunks) * register_width]);
+
+        _mm256_store_si256(&output[i * register_width], _mm256_max_epu8(v0, v1));
+    }
+}
+```
+
+##### Product Pooling
+
+This one is more complicated, since multiplication introduces a non-linearity that has to be accounted for in the quantization. We will consider a version that works on input range `[0, 127]`, where 0 corresponds to floating-point 0.0, and 127 corresponds to floating-point 1.0. We want the output to preserve this range, but to do that we would have to divide by 127 (because `127*127/127` would be the desired result for `1.0*1.0=1.0`). In practice we have to sacrifice some output range and divide by 128 instead, effectively producing output in range `[0, 126]` (1.0 point can still logically be at 127, but the output won't span the full `[0.0, 1.0]` range). This change has to be accounted for in the trainer, since we're effectively changing the function to not only multiply the inputs, but also scale the outputs. Anyway, here's how the optimized implementation may look like in C++ with AVX2:
+
+(In Stockfish this is applied after the feature transformer activation, hence int16->uint8 example)
+
+```cpp
+void product_pooling_2(
+          int      size,
+    const int16_t* input,
+          uint8_t* output
 ) {
     constexpr int in_register_width = 256 / 16;
     constexpr int out_register_width = 256 / 8;
-    assert(size % out_register_width == 0); // We won't bother with the remainder here
-    const int num_out_chunks = size / out_register_width;
+    assert(size % (out_register_width * 2) == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / (out_register_width * 2);
 
-    const __m256i cst_127_epi16 = _mm256_set1_epi16(127);
-    const __m256i cst_126_epi8 = _mm256_set1_epi8(126);
-
-    // Since AVX2 processes interleaves between 128-bit lanes we will have to
-    // revert this at the end, to combine two processed inputs into one output.
-    // This Control contains the information how to permute the 64-bit lanes
-    // of the result. Control = [0, 2, 1, 3].
+    // For deinterleave
     constexpr int Control = 0b11011000;
+
     for (int i = 0; i < num_out_chunks; ++i)
     {
-        __m256i v0 = _mm256_load_si256(&input[(i * 2 + 0) * in_register_width]);
-        __m256i v1 = _mm256_load_si256(&input[(i * 2 + 1) * in_register_width]);
+        // We process 4 input registers at a time and produce one output register.
+        // This is because we do 2->1 reduction and input type is twice the width of the output.
+        const __m256i v0a = _mm256_load_si256(&input[(i * 2 + 0)                  * in_register_width]);
+        const __m256i v0b = _mm256_load_si256(&input[(i * 2 + 1)                  * in_register_width]);
+        const __m256i v1a = _mm256_load_si256(&input[(i * 2 + 0 + num_out_chunks) * in_register_width]);
+        const __m256i v1b = _mm256_load_si256(&input[(i * 2 + 1 + num_out_chunks) * in_register_width]);
 
-        // We will need the initial input sign for the blend later.
-        // Blend uses the highest bit only for the choice, and that
-        // happens to be the sign bit.
-        __m256i sign = _mm256_packs_epi16(v0, v1);
+        // Multiply and divide by 128 (right shift by 7), rounding towards 0.
+        const __m256i pa = _mm256_srli_epi16(_mm256_mullo_epi16(v0a, v1a), 7);
+        const __m256i pb = _mm256_srli_epi16(_mm256_mullo_epi16(v0b, v1b), 7);
 
-        // From the identity stated earlier.
-        // v0 = min(abs(input[i]), 127) - 127;
-        v0 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v0));
-        v1 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v1));
+        // Deinterleave
+        out[j] = _mm256_permute4x64_epi64(_mm256_packs_epi16(pa, pb), Control);
+    }
+}
+```
 
-        // Since we use mulhi later we have to prepare the input such that
-        // the high part (16 highest bits, as the 16-bit multiplication produces
-        // a 32-bit result) after the multiplication land correctly. We want to
-        // divide by 256==2^8 later (right shift by 8), so we would have 8 spare
-        // bits that we would need to get rid of (from the full 32-bit result).
-        // So we can first shift left by 4 bits, which the multiplication (squaring)
-        // will double to 8, and so the 16-bit high part of the 32-bit result will
-        // exctract exactly what we want.
-        v0 = _mm256_slli_epi16(v0, 4);
-        v1 = _mm256_slli_epi16(v1, 4);
+This layer can also be nicely combined with Clipped ReLU but first clamping the input to a specific range (doing it in a fused way will reduce the number of loads/stores).
 
-        v0 = _mm256_mulhi_epi16(v0, v0);
-        v1 = _mm256_mulhi_epi16(v1, v1);
 
-        // Now we can convert to int8 after that for the rest.
-        v0 = _mm256_packs_epi16(v0, v1);
+```cpp
+void max_pooling_2(
+          int      size,
+    const uint8_t* input,
+          uint8_t*  output
+) {
+    constexpr int register_width = 256 / 8;
+    assert(size % (register_width * 2) == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / (register_width * 2);
 
-        // Blend between v and 126-v, based on the input sign, so that we effectively
-        // evaluate the right part of the piece-wise function.
-        v0 = _mm256_blendv_epi8(_mm256_subs_epi8(cst_126_epi8, v0), v0, sign);
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        __m256i v0 = _mm256_load_si256(&input[ i                   * register_width]);
+        __m256i v1 = _mm256_load_si256(&input[(i + num_out_chunks) * register_width]);
 
-        // Deinterleave the output due to AVX2 semantics.
-        _mm256_store_si256(&output[i * out_register_width], _mm256_permute4x64_epi64(v0, Control));
+        _mm256_store_si256(&output[i * register_width], _mm256_max_epu8(v0, v1));
     }
 }
 ```
