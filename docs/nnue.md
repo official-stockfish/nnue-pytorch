@@ -27,11 +27,14 @@ What this document DOES NOT contain:
 * [Table of contents](#table-of-contents)
 * [Basics](#basics)
     + [What is NNUE?](#what-is-nnue)
-        + [Quantization 101 and its importance](#quantization-101-and-its-importance)
-    + [What layers are used in NNUE?](#what-layers-are-used-in-nnue)
+        - [Quantization 101 and its importance](#quantization-101-and-its-importance)
+    + [What layers are useful in NNUE?](#what-layers-are-useful-in-nnue)
         - [Linear layer](#linear-layer)
         - [Linear layer with sparse inputs](#linear-layer-with-sparse-inputs)
         - [Clipped ReLU layer](#clipped-relu-layer)
+        - [Sigmoid](#sigmoid)
+        - [Quantmoid4](#quantmoid4)
+        - [Pooling layers](#pooling-layers)
     + [A simple input feature set.](#a-simple-input-feature-set)
     + [A simple NNUE network](#a-simple-nnue-network)
     + [Consideration of networks size and cost.](#consideration-of-networks-size-and-cost)
@@ -40,7 +43,7 @@ What this document DOES NOT contain:
         - [Further layers](#further-layers)
     + [Accumulator](#accumulator)
     + [HalfKP](#halfkp)
-        - [Multiple perspectives, multiple accumulators](#multiple-perspectives-multiple-accumulators)
+        - [Multiple perspectives, multiple accumulators](#multiple-perspectives--multiple-accumulators)
             * [How to combine multiple accumulator perspectives?](#how-to-combine-multiple-accumulator-perspectives)
             * [Which set of weights to use for each perspective?](#which-set-of-weights-to-use-for-each-perspective)
         - [HalfKP example and network diagram](#halfkp-example-and-network-diagram)
@@ -57,7 +60,7 @@ What this document DOES NOT contain:
     + [Model specification](#model-specification)
     + [Preparing the inputs](#preparing-the-inputs)
         - [Parsing the training data sets and moving them to the python side](#parsing-the-training-data-sets-and-moving-them-to-the-python-side)
-        - [Training batch structure and communication?](#training-batch-structure-and-communication)
+        - [Training batch structure and communication](#training-batch-structure-and-communication)
     + [Feature factorization](#feature-factorization)
         - [Virtual feature coalescing](#virtual-feature-coalescing)
         - [Other factors](#other-factors)
@@ -78,7 +81,7 @@ What this document DOES NOT contain:
     + [Stockfish quantization scheme](#stockfish-quantization-scheme)
         - [Feature Transformer](#feature-transformer)
         - [Linear layer](#linear-layer-2)
-        - [ClippedReLU](#clippedrelu-1)
+        - [ClippedReLU](#clippedrelu)
     + [The math of quantization and how to make it fit](#the-math-of-quantization-and-how-to-make-it-fit)
         - [Feature Transformer](#feature-transformer-1)
         - [Linear layer](#linear-layer-3)
@@ -93,13 +96,21 @@ What this document DOES NOT contain:
         - [Linear layer with sparse input, alternative approach](#linear-layer-with-sparse-input-alternative-approach)
             * [m256_process_chunk_alternative](#m256_process_chunk_alternative)
         - [Linear layer with sparse input and blocked sparse output](#linear-layer-with-sparse-input-and-blocked-sparse-output)
-        - [ClippedReLU](#clippedrelu-2)
+        - [ClippedReLU](#clippedrelu-1)
             * [int16 -> int8](#int16---int8)
             * [int32 -> int8](#int32---int8)
+        - [Quantmoid4](#quantmoid4-1)
+        - [Pooling Layers](#pooling-layers)
+            * [Average Pooling](#average-pooling)
+            * [Max Pooling](#max-pooling)
+            * [Product Pooling](#product-pooling)
     + [Accounting for quantization in the trainer](#accounting-for-quantization-in-the-trainer)
-        - [Inside the optimizer](#inside-the-optimizer)
-        - [Outside the optimizer](#outside-the-optimizer)
-        - [Accounting for virtual layers (factorization)](#accounting-for-virtual-layers-factorization)
+        - [Range](#range)
+            * [Inside the optimizer](#inside-the-optimizer)
+            * [Outside the optimizer](#outside-the-optimizer)
+            * [Accounting for virtual layers (factorization)](#accounting-for-virtual-layers-factorization)
+        - [Non-differentiable layers](#non-differentiable-layers)
+            * [Custom kernel for training-safe amalgamated Quantmoid4](#custom-kernel-for-training-safe-amalgamated-quantmoid4)
 * [Optimizing the trainer (CUDA)](#optimizing-the-trainer-cuda)
     + [Using custom CUDA kernels](#using-custom-cuda-kernels)
     + [Feature transformer](#feature-transformer)
@@ -142,7 +153,7 @@ Overall the NNUE principles are applicable also to expensive deep networks, but 
 
 Quantization is the process of changing the domain of the neural network model from floating point to integer. NNUE networks are designed to be evaluated fast in low-precision integer domain, and can utilize available int8/int16 performance of modern CPUs to the fullest extent. Floating point is not an option for achieving maximum engine strength as it sacrifices too much speed for too little accuracy gains (though floating point representation is used by some engines due to its simplicity). Quantization inevitably introduces error that accumulates more the deeper the network is, however in the case of NNUE networks, which are relatively shallow, this error is neglibible. Quantization will be described in more detail later in this document. Until then this document will be using floats instead of ints, it won't be important until we get to actual code optimization. The purpose of this interjection is to make the reader aware of the ultimate goal of NNUE, as it is the biggest factor that shapes the NNUE models and dictates what is possible and what is not.
 
-### What layers are used in NNUE?
+### What layers are useful in NNUE?
 
 NNUE relies on simple layers that can be implemented in low-precision environments using simple arithmetic. This means Linear (fully connected, basically matrix multiplication) and ClippedReLU (clamp(0, 1)) layers are particularly suitable for it. Pooling layers (mul/avg/max) or approximations of more complex activation functions (like sigmoid) are also suitable but not commonly used.
 
@@ -177,6 +188,47 @@ This an activation function based on normal ReLU, with a difference that it is b
 The purpose of this layer is to add non-linearity to the network. If it was just linear layers they could all be collapsed into one, because the matrices could be just multiplied together.
 
 ClippedReLU would ideally be replaced with ReLU, but aggressive quantization requires reducing the dynamic range of hidden layer inputs, so capping the values at 1 becomes important for performance.
+
+#### Sigmoid
+
+This is an activation function that, contrary to [clipped] ReLU, is smooth. The formula is `y = 1/(1+e^-kx)`, where k is a parameter that determines how "stretched" the shape is.
+
+![Sigmoid](img/sigmoid.png)
+
+There are two main differences compared to clipped ReLU:
+
+1. sigmoid is smooth, meaning that it is differentiable everywhere, meaning that there is no situations (realistically speaking) where the gradient disappears.
+2. sigmoid is nonlinear, the output saturates towards 0 or 1 but never reaches it
+
+While this function generally allows the network to learn more than ReLU it is costly and unsuitable for evaluation in the integer domain. It is however a good starting point for improvements...
+
+#### Quantmoid4
+
+With sigmoid being too costly we need to look for alternatives. One such alternative is to use an approximation. And it just so happens that `sigmoid(4x)` (scaled to integer domain in a particular way) can be fairly well approximated by a simple piece-wise quadratic function that needs just addition, multiplication, and bit-shifts. Since the primary purpose for this approximation is to be used in a quantized implementation directly we will present a specific variant that outputs values in range `[0, 126]` (and with input scaled accordingly). The reason for the choice of the upper range being defined as 126 is that this is the largest even 8-bit integer, and want an even one to allow the value for `x=0` to be exactly in the middle. The equation is as follows:
+
+![Quantmoid4 Equation](img/quantmoid4_equation.png)
+
+Note, that the equation for both positive and negative `x` is almost identical. The similarity allows for a branchless implementation even though there are two cases.
+
+And the resulting graph is the following (with a scaled sigmoid(4x) for comparison):
+
+![Quantmoid4](img/quantmoid4.png)
+
+The disadvantage is that it loses the smoothness, and the output rounds to 0/1 quite early. This however doesn't appear to be an issue in practice, the actual error from this "rounding" is negligible.
+
+More cool stuff will happen once we implement and optimize it, so we will get back to this layer in the optimized quantized implementation section.
+
+#### Pooling layers
+
+Sometimes it is desirable to reduce the input dimensionality to make the size of the layer more approachable. For example instead of having a `1024->8` layer, which has a very narrow output, one may prefer `512->16`. Pooling layers can provide some flexibility by reducing the dimensionality.
+
+Pooling layers work by applying a function `F` over non-overlapping spans of the input, where `F` has more inputs than outputs. So for example one may have `F` take 2 consecutive inputs and produce one output, effectively halving the number of neurons.
+
+The following types of pooling layers can be considered:
+
+1. Average Pooling - outputs the average of inputs. Works well with any number of inputs.
+2. Max Pooling - outputs the maximum of inputs. Works well with any number of inputs.
+3. Product Pooling - outputs the product of inputs. Introduced by Stockfish, not common in machine learning in general. Only works well with 2 inputs. This one also appears to have similar benefits to sigmoid (quantmoid4); it increases the network's capacity, while other pooling layers only allow reducing dimensionality.
 
 ### A simple input feature set.
 
@@ -1679,9 +1731,9 @@ The clipping is not hard, the more complicated part is conversion. We also need 
 ![](img/crelu16.svg)
 
 ```cpp
-float* crelu16(,
-    int            size,   // no need to have any layer structure, we just need the number of elements
-    int8_t*        output, // the already allocated storage for the result
+int8_t* crelu16(,
+          int      size,   // no need to have any layer structure, we just need the number of elements
+          int8_t*  output, // the already allocated storage for the result
     const int16_t* input   // the input, which is the output of the previous linear layer
 ) {
     constexpr int in_register_width = 256 / 16;
@@ -1693,8 +1745,8 @@ float* crelu16(,
     const int     control = 0b11011000; // 3, 1, 2, 0; lane 0 is the rightmost one
 
     for (int i = 0; i < num_out_chunks; ++i) {
-        const __m256i in0 = _mm256_load_si256(&input[i * in_register_width * 2 + 0]);
-        const __m256i in1 = _mm256_load_si256(&input[i * in_register_width * 2 + 1]);
+        const __m256i in0 = _mm256_load_si256(&input[(i * 2 + 0) * in_register_width]);
+        const __m256i in1 = _mm256_load_si256(&input[(i * 2 + 1) * in_register_width]);
 
         const __m256i result =
             // packs changes the order, so we need to fix that with a permute
@@ -1720,9 +1772,9 @@ float* crelu16(,
 ![](img/crelu32.svg)
 
 ```cpp
-float* crelu32(,
-    int            size,   // no need to have any layer structure, we just need the number of elements
-    int8_t*        output, // the already allocated storage for the result
+int8_t* crelu32(,
+          int      size,   // no need to have any layer structure, we just need the number of elements
+          int8_t*  output, // the already allocated storage for the result
     const int32_t* input   // the input, which is the output of the previous linear layer
 ) {
     constexpr int in_register_width = 256 / 32;
@@ -1736,13 +1788,13 @@ float* crelu32(,
     for (int i = 0; i < num_out_chunks; ++i) {
         const __m256i in0 =
             _mm256_packs_epi32(
-                _mm256_load_si256(&input[i * in_register_width * 4 + 0]),
-                _mm256_load_si256(&input[i * in_register_width * 4 + 1])
+                _mm256_load_si256(&input[(i * 4 + 0) * in_register_width]),
+                _mm256_load_si256(&input[(i * 4 + 1) * in_register_width])
             );
         const __m256i in1 =
             _mm256_packs_epi32(
-                _mm256_load_si256(&input[i * in_register_width * 4 + 2]),
-                _mm256_load_si256(&input[i * in_register_width * 4 + 3])
+                _mm256_load_si256(&input[(i * 4 + 2) * in_register_width]),
+                _mm256_load_si256(&input[(i * 4 + 3) * in_register_width])
             );
 
         const __m256i result =
@@ -1761,11 +1813,205 @@ float* crelu32(,
 }
 ```
 
+#### Quantmoid4
+
+As previously mentioned, we will be considering the variant with output in range `[0, 126]`. Let's remind ourselves about the equation we need to implement.
+
+![Quantmoid4 equation](img/quantmoid4_equation.png)
+
+First thing to notice is that `min(x, y) - y` can be replaced by `-subs(y, x)`, where `subs` is unsigned subtraction with saturation, in this case saturation to the range `[0, 255]`.
+
+For handling the "piece-wise" nature we can either use a copysign function, or a blend function. Since blending is available in AVX2 we will use this.
+
+The code can then be as simple as the following:
+
+```cpp
+// Since the output is always 0/1 outside of the int8 range the input could
+// in theory be (saturated) int8, BUT there is no int8 multiplication in AVX2 so we
+// will take int16 for convenience.
+int8_t* quantmoid4(
+          int      size,
+    const int16_t* input,
+          int8_t*  output
+) {
+    constexpr int in_register_width = 256 / 16;
+    constexpr int out_register_width = 256 / 8;
+    assert(size % out_register_width == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / out_register_width;
+
+    const __m256i cst_127_epi16 = _mm256_set1_epi16(127);
+    const __m256i cst_126_epi8 = _mm256_set1_epi8(126);
+
+    // Since AVX2 processes interleaves between 128-bit lanes we will have to
+    // revert this at the end, to combine two processed inputs into one output.
+    // This Control contains the information how to permute the 64-bit lanes
+    // of the result. Control = [0, 2, 1, 3].
+    constexpr int Control = 0b11011000;
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        __m256i v0 = _mm256_load_si256(&input[(i * 2 + 0) * in_register_width]);
+        __m256i v1 = _mm256_load_si256(&input[(i * 2 + 1) * in_register_width]);
+
+        // We will need the initial input sign for the blend later.
+        // Blend uses the highest bit only for the choice, and that
+        // happens to be the sign bit.
+        __m256i sign = _mm256_packs_epi16(v0, v1);
+
+        // From the identity stated earlier.
+        // v0 = min(abs(input[i]), 127) - 127;
+        v0 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v0));
+        v1 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v1));
+
+        // Since we use mulhi later we have to prepare the input such that
+        // the high part (16 highest bits, as the 16-bit multiplication produces
+        // a 32-bit result) after the multiplication land correctly. We want to
+        // divide by 256==2^8 later (right shift by 8), so we would have 8 spare
+        // bits that we would need to get rid of (from the full 32-bit result).
+        // So we can first shift left by 4 bits, which the multiplication (squaring)
+        // will double to 8, and so the 16-bit high part of the 32-bit result will
+        // exctract exactly what we want.
+        v0 = _mm256_slli_epi16(v0, 4);
+        v1 = _mm256_slli_epi16(v1, 4);
+
+        v0 = _mm256_mulhi_epi16(v0, v0);
+        v1 = _mm256_mulhi_epi16(v1, v1);
+
+        // Now we can convert to int8 after that for the rest.
+        v0 = _mm256_packs_epi16(v0, v1);
+
+        // Blend between v and 126-v, based on the input sign, so that we effectively
+        // evaluate the right part of the piece-wise function.
+        v0 = _mm256_blendv_epi8(_mm256_subs_epi8(cst_126_epi8, v0), v0, sign);
+
+        // Deinterleave the output due to AVX2 semantics.
+        _mm256_store_si256(&output[i * out_register_width], _mm256_permute4x64_epi64(v0, Control));
+    }
+
+    return output + size;
+}
+```
+
+#### Pooling Layers
+
+##### Average Pooling
+
+The exact implementation will depend on how many inputs per output one wants to take. Here we will show an implementation which reduces 2 inputs into 1 output, and will work on uint8 input.
+
+Note, that it is often not optimal to take the neighbouring values. For example here we divide the input in half and average those halves, as there is no instruction in AVX2 that allows to do it well otherwise. Also, be aware of rounding differences - for example AVX2 avg rounds towards nearest integer, while a simple division will round towards 0.
+
+```cpp
+void average_pooling_2(
+          int      size,
+    const uint8_t* input,
+          uint8_t*  output
+) {
+    constexpr int register_width = 256 / 8;
+    assert(size % (register_width * 2) == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / (register_width * 2);
+
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        __m256i v0 = _mm256_load_si256(&input[ i                   * register_width]);
+        __m256i v1 = _mm256_load_si256(&input[(i + num_out_chunks) * register_width]);
+
+        _mm256_store_si256(&output[i * register_width], _mm256_avg_epu8(v0, v1));
+    }
+}
+```
+
+##### Max Pooling
+
+Pretty much identical. Though there are more options for input/output types with `max` in AVX2.
+
+```cpp
+void max_pooling_2(
+          int      size,
+    const uint8_t* input,
+          uint8_t*  output
+) {
+    constexpr int register_width = 256 / 8;
+    assert(size % (register_width * 2) == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / (register_width * 2);
+
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        __m256i v0 = _mm256_load_si256(&input[ i                   * register_width]);
+        __m256i v1 = _mm256_load_si256(&input[(i + num_out_chunks) * register_width]);
+
+        _mm256_store_si256(&output[i * register_width], _mm256_max_epu8(v0, v1));
+    }
+}
+```
+
+##### Product Pooling
+
+This one is more complicated, since multiplication introduces a non-linearity that has to be accounted for in the quantization. We will consider a version that works on input range `[0, 127]`, where 0 corresponds to floating-point 0.0, and 127 corresponds to floating-point 1.0. We want the output to preserve this range, but to do that we would have to divide by 127 (because `127*127/127` would be the desired result for `1.0*1.0=1.0`). In practice we have to sacrifice some output range and divide by 128 instead, effectively producing output in range `[0, 126]` (1.0 point can still logically be at 127, but the output won't span the full `[0.0, 1.0]` range). This change has to be accounted for in the trainer, since we're effectively changing the function to not only multiply the inputs, but also scale the outputs. Anyway, here's how the optimized implementation may look like in C++ with AVX2:
+
+(In Stockfish this is applied after the feature transformer activation, hence int16->uint8 example)
+
+```cpp
+void product_pooling_2(
+          int      size,
+    const int16_t* input,
+          uint8_t* output
+) {
+    constexpr int in_register_width = 256 / 16;
+    constexpr int out_register_width = 256 / 8;
+    assert(size % (out_register_width * 2) == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / (out_register_width * 2);
+
+    // For deinterleave
+    constexpr int Control = 0b11011000;
+
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        // We process 4 input registers at a time and produce one output register.
+        // This is because we do 2->1 reduction and input type is twice the width of the output.
+        const __m256i v0a = _mm256_load_si256(&input[(i * 2 + 0)                  * in_register_width]);
+        const __m256i v0b = _mm256_load_si256(&input[(i * 2 + 1)                  * in_register_width]);
+        const __m256i v1a = _mm256_load_si256(&input[(i * 2 + 0 + num_out_chunks) * in_register_width]);
+        const __m256i v1b = _mm256_load_si256(&input[(i * 2 + 1 + num_out_chunks) * in_register_width]);
+
+        // Multiply and divide by 128 (right shift by 7), rounding towards 0.
+        const __m256i pa = _mm256_srli_epi16(_mm256_mullo_epi16(v0a, v1a), 7);
+        const __m256i pb = _mm256_srli_epi16(_mm256_mullo_epi16(v0b, v1b), 7);
+
+        // Deinterleave
+        out[j] = _mm256_permute4x64_epi64(_mm256_packs_epi16(pa, pb), Control);
+    }
+}
+```
+
+This layer can also be nicely combined with Clipped ReLU but first clamping the input to a specific range (doing it in a fused way will reduce the number of loads/stores).
+
+
+```cpp
+void max_pooling_2(
+          int      size,
+    const uint8_t* input,
+          uint8_t*  output
+) {
+    constexpr int register_width = 256 / 8;
+    assert(size % (register_width * 2) == 0); // We won't bother with the remainder here
+    const int num_out_chunks = size / (register_width * 2);
+
+    for (int i = 0; i < num_out_chunks; ++i)
+    {
+        __m256i v0 = _mm256_load_si256(&input[ i                   * register_width]);
+        __m256i v1 = _mm256_load_si256(&input[(i + num_out_chunks) * register_width]);
+
+        _mm256_store_si256(&output[i * register_width], _mm256_max_epu8(v0, v1));
+    }
+}
+```
+
 ### Accounting for quantization in the trainer
+
+#### Range
 
 Adding (quite aggressive) quantization has reduced the possible range of values for the weights and biases. We can, however, ignore the feature transformer and all biases, as they use large integer types and we don't ever expect to hit the limit. The problematic case are the int8 weights of the linear layer, which for example in Stockfish can only go to about 2 (activation range in 0..1). This is potentially a big problem, as the training can diverge from the quantized representation by more than just rounding. To prevent this from happening, it is necessary to somehow limit the range for these parameters inside the trainer. So far the easiest way of doing it is to modify the optimizer to clamp the values to the available range after each optimization step. These minimum and maximum values can be passed, for example when registering the optimizable parameters in the optimizer.
 
-#### Inside the optimizer
+##### Inside the optimizer
 
 One way to account for this is directly in the optimizer. This is nice because the clipping is applied directly after the step, but requires having access to the optimizer's source. For example:
 
@@ -1804,7 +2050,7 @@ def step(self, closure=None):
                 p_data_fp32.clamp_(min_weight, max_weight)
 ```
 
-#### Outside the optimizer
+##### Outside the optimizer
 
 Alternatively one can do it outside the optimizer for more flexibility:
 
@@ -1829,7 +2075,7 @@ def _clip_weights(self):
             p.data.copy_(p_data_fp32)
 ```
 
-#### Accounting for virtual layers (factorization)
+##### Accounting for virtual layers (factorization)
 
 Sometimes more complex architectures make some layers' parameters be a sum of two layers during training. Just like feature factorization but for whole layers (see for example [this](#multiple-psqt-outputs-and-multiple-subnetworks)). We can account for example like this:
 
@@ -1862,6 +2108,100 @@ def _clip_weights(self):
             else:
                 p_data_fp32.clamp_(min_weight, max_weight)
             p.data.copy_(p_data_fp32)
+```
+
+#### Non-differentiable layers
+
+One may want to use some non-differentiable layers that are made for quantized inference from the beginning. One such layer is Quantmoid4. In this case we have two options:
+
+1. Use the function as is in the float domain.
+2. Use some other function.
+
+The first option is the simplest, but may still result in issues on boundary points. For example Quantmoid4, uses non-smooth functions that will cause the gradient to disappear. This is an issue. Additionally it's often a lot of simple operations that may slow the trainer down (by bloating the backwards pass graph).
+
+The second option is very tempting, especially since usually the quantized function is an approximation to some other smooth function, in this case a `sigmoid(4x)`. In some cases it is enough to just replace the gradient, leaving the quantized version for the forward pass.
+
+##### Custom kernel for training-safe amalgamated Quantmoid4
+
+Quantmoid4 is a good enough approximation that we can just use it for the forward pass and use `sigmoid(4x)` gradient for the backward pass!
+
+```python
+import torch
+import cupy as cp
+
+# For lazy compilation.
+quantmoid_kernels = dict()
+def make_quantmoid4_forward_kernel():
+    key = 'quantmoid4_forward_kernel'
+    if not key in quantmoid_kernels:
+        # an approximation of sigmoid(x*4)
+        quantmoid4_forward_kernel = cp.RawKernel(r'''
+            extern "C" __global__
+            void quantmoid4_forward(
+                const float*   const input,
+                      float*   const output,
+                const int            total
+            ) {
+                const int i = blockIdx.x * blockDim.x + threadIdx.x;
+                if (i >= total)
+                   return;
+
+                // Remember that we want to scale the output to [0.0, 1.0]
+                const float x = input[i];
+                const float v = min(floor(abs(x * 127.0f)), 127.0f) - 127.0f;
+                const float vv = floor(v * v / 256.0f);
+                const float vvv = x > 0.0f ? 126.0f - vv : vv;
+                output[i] = vvv / 127.0f;
+            }
+        ''',
+            'quantmoid4_forward'
+        )
+        quantmoid4_forward_kernel.compile()
+        quantmoid_kernels[key] = quantmoid4_forward_kernel
+    return quantmoid_kernels[key]
+
+# Now we define a python function that will encapsulate that raw kernel.
+def _quantmoid4(x):
+    assert x.is_contiguous()
+    assert x.is_cuda
+    assert x.dtype == torch.float32
+
+    kernel = make_quantmoid4_forward_kernel()
+    device = x.device
+    count = x.numel()
+    output = torch.empty(*x.shape, dtype=torch.float32, device=device, requires_grad=False)
+
+    kernel(
+        grid=((count + 1023) // 1024,),
+        block=(1024,),
+        args=(
+            x.data_ptr(),
+            output.data_ptr(),
+            count
+        )
+    )
+    return output
+
+# And now we define a class that pytorch will understand.
+# Here we substitute the gradient by the gradient for sigmoid(4x).
+class Quantmoid4(torch.autograd.Function):
+  @staticmethod
+  def forward(ctx, input):
+    ctx.save_for_backward(torch.sigmoid(input * 4.0))
+    return _quantmoid4(input)
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    sigmoid_output, = ctx.saved_tensors
+    return grad_output * (1.0 - sigmoid_output) * 4.0 * sigmoid_output
+
+quantmoid4 = Quantmoid4.apply
+
+# Output for some verification
+if __name__ == '__main__':
+    for i in range(-255, 255):
+        x = i / 127.0
+        print(x, quantmoid4(torch.tensor([x]).cuda()), quantmoid4(torch.tensor([x]).cuda())-torch.sigmoid(torch.tensor([x]).cuda()*4.0))
 ```
 
 ## Optimizing the trainer (CUDA)
