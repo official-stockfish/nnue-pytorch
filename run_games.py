@@ -102,7 +102,7 @@ def parse_ordo(root_dir, nnues):
     return ordo_scores
 
 
-def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_base, stockfish_test, game_params, tries=3):
+def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfish_base, stockfish_test, game_params, tries=10):
     """ Run a match using c-chess-cli adding pgns to a file to be analysed with ordo """
 
     pgn_file_name = os.path.join(root_dir, "out_temp.pgn")
@@ -150,7 +150,8 @@ def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfis
             if i == tries-1:
                 print_atomic("Error running match!")
             else:
-                print_atomic("Retrying running match...")
+                print_atomic(f'Retrying running match ({i}/{tries}) in 10s ...')
+                time.sleep(10)
         else:
             break
 
