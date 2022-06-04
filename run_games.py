@@ -8,6 +8,7 @@ import features
 import shutil
 import threading
 import math
+import random
 from pathlib import Path, PurePath
 
 GLOBAL_LOCK = threading.Lock()
@@ -116,7 +117,7 @@ def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfis
     ]
     command += game_params.get_all_params()
     command += [
-        '-openings', f'file={book_file_name}', 'order=random', '-repeat',
+        '-openings', f'file={book_file_name}', 'order=random', f'srand={random.randint(0,100000000)}', '-repeat',
         '-resign', 'count=3', 'score=700',
         '-draw', 'count=8', 'score=10',
         '-pgn', f'{pgn_file_name}', '0'
@@ -130,6 +131,7 @@ def run_match(best, root_dir, c_chess_exe, concurrency, book_file_name, stockfis
     # Attempt to run the match multiple times in case of unforseen
     # errors like engine hanging or c-chess-cli having an error...
     for i in range(tries):
+        print_atomic(" ".join(command))
         print_atomic("Running match with c-chess-cli ... {}".format(pgn_file_name), flush=True)
         c_chess_out = open(os.path.join(root_dir, "c_chess.out"), 'w')
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -263,7 +265,10 @@ def run_approximate_ordo(root_dir):
                 ordo_file.write(f'   {i+1} {entry.name} : {entry.elo:0.1f} {entry.elo_error_95:0.1f} {entry.points:0.1f} {entry.total_games} {entry.performance*100:0.0f}\n')
         ordo_file.write('\n')
 
-    os.replace(ordo_file_name_temp, ordo_file_name)
+    if not os.path.exists(ordo_file_name):
+       os.rename(ordo_file_name_temp, ordo_file_name)
+    else:
+       os.replace(ordo_file_name_temp, ordo_file_name)
 
     print_atomic("Finished running ordo.")
 
@@ -388,6 +393,7 @@ def run_round(
             with open(curr_pgn_file_name, 'r') as file_from:
                 for line in file_from:
                     file_to.write(line)
+        os.remove(curr_pgn_file_name)
     except:
         print_atomic('Something went wrong when adding new games to the main file.')
 
@@ -499,6 +505,8 @@ def main():
 
     if not os.path.exists(args.book_file_name):
        sys.exit("book does not exist!")
+
+    random.seed()
 
     while True:
         run_round(
