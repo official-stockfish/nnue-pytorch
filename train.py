@@ -56,6 +56,7 @@ def main():
   parser.add_argument("--save-last-network", type=str2bool, default=True, dest='save_last_network', help="Whether to always save the last produced network.")
   parser.add_argument("--epoch-size", type=int, default=100000000, dest='epoch_size', help="Number of positions per epoch.")
   parser.add_argument("--validation-size", type=int, default=1000000, dest='validation_size', help="Number of positions per validation step.")
+  parser.add_argument("--param-index", type=int, default=0, dest='param_index', help="Indexing for parameter scans.")
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
@@ -79,7 +80,8 @@ def main():
       max_epoch=max_epoch,
       end_lambda=end_lambda,
       gamma=args.gamma,
-      lr=args.lr
+      lr=args.lr,
+      param_index=args.param_index
     )
   else:
     nnue = torch.load(args.resume_from_model)
@@ -91,6 +93,7 @@ def main():
     # from .pt the optimizer is only created after the training is started
     nnue.gamma = args.gamma
     nnue.lr = args.lr
+    nnue.param_index=args.param_index
 
   print("Feature set: {}".format(feature_set.name))
   print("Num real features: {}".format(feature_set.num_real_features))
@@ -110,6 +113,7 @@ def main():
   print('Smart fen skipping: {}'.format(not args.no_smart_fen_skipping))
   print('WLD fen skipping: {}'.format(not args.no_wld_fen_skipping))
   print('Random fen skipping: {}'.format(args.random_fen_skipping))
+  print('Param index: {}'.format(args.param_index))
 
   if args.threads > 0:
     print('limiting torch to {} threads.'.format(args.threads))

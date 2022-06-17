@@ -132,7 +132,7 @@ class NNUE(pl.LightningModule):
 
   lr - the initial learning rate
   """
-  def __init__(self, feature_set, start_lambda=1.0, end_lambda=1.0, max_epoch=800, gamma=0.992, lr=8.75e-4, num_psqt_buckets=8, num_ls_buckets=8):
+  def __init__(self, feature_set, start_lambda=1.0, end_lambda=1.0, max_epoch=800, gamma=0.992, lr=8.75e-4, param_index=0, num_psqt_buckets=8, num_ls_buckets=8):
     super(NNUE, self).__init__()
     self.num_psqt_buckets = num_psqt_buckets
     self.num_ls_buckets = num_ls_buckets
@@ -144,6 +144,7 @@ class NNUE(pl.LightningModule):
     self.max_epoch = max_epoch
     self.gamma = gamma
     self.lr = lr
+    self.param_index = param_index
 
     self.nnue2score = 600.0
     self.weight_scale_hidden = 64.0
@@ -292,19 +293,26 @@ class NNUE(pl.LightningModule):
 
     us, them, white_indices, white_values, black_indices, black_values, outcome, score, psqt_indices, layer_stack_indices = batch
 
-    # 600 is the kPonanzaConstant scaling factor needed to convert the training net output to a score.
-    # This needs to match the value used in the serializer
-    in_scaling = 410
-    out_scaling = 361
+    # convert the network and search scores to an estimate match result
+    # based on the win_rate_model, with scalings and offsets optimized
+    in_scaling = 340
+    out_scaling = 380
+    offset = 270
 
-    q = (self(us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices) * self.nnue2score / out_scaling).sigmoid()
+    scorenet = self(us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices) * self.nnue2score
+    q  = ( scorenet - offset) / in_scaling  # used to compute the chance of a win
+    qm = (-scorenet - offset) / in_scaling  # used to compute the chance of a loss
+    qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())  # estimated match result (using win, loss and draw probs).
+
+    p  = ( score - offset) / out_scaling
+    pm = (-score - offset) / out_scaling
+    pf = 0.5 * (1.0 + p.sigmoid() - pm.sigmoid())
+
     t = outcome
-    p = (score / in_scaling).sigmoid()
-
     actual_lambda = self.start_lambda + (self.end_lambda - self.start_lambda) * (self.current_epoch / self.max_epoch)
-    pt = p * actual_lambda + t * (1.0 - actual_lambda)
+    pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
-    loss = torch.pow(torch.abs(pt - q), 2.6).mean()
+    loss = torch.pow(torch.abs(pt - qf), 2.6).mean()
 
     self.log(loss_type, loss)
 
