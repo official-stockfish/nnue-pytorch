@@ -840,8 +840,17 @@ std::function<void(std::vector<TrainingDataEntry>&)> make_buffer_filter()
             1.996094, 1.984375, 1.964844, 1.937500, 1.902344, 1.859375, 1.808594, 1.750000,
             1.683594, 1.609375, 1.527344, 1.437500, 1.339844, 1.234375, 1.121094, 1.000000
         };
+
+        static constexpr double desired_piece_count_weights_total = [](){
+            double tot = 0;
+            for (auto w : desired_piece_count_weights)
+                tot += w;
+            return tot;
+        }();
+
         // Basically ignore n lower piece counts.
         static constexpr int nth_base = 3;
+        static constexpr int max_skipping_factor = 5;
 
         int pc_hist[33] = {0};
 
@@ -859,12 +868,14 @@ std::function<void(std::vector<TrainingDataEntry>&)> make_buffer_filter()
         std::sort(adjusted_hist_by_pc.begin(), adjusted_hist_by_pc.end(), [](const std::pair<int, double>& lhs, const std::pair<int, double>& rhs){
             return lhs.second < rhs.second;
         });
-        // not the smallest but some percentile
         const int base = adjusted_hist_by_pc[nth_base].second;
         int pc_hist_desired[33] = {0};
         for (int i = 2; i <= 32; ++i)
         {
-            pc_hist_desired[i] = static_cast<int>(base * desired_piece_count_weights[i]);
+            pc_hist_desired[i] = std::max(
+                static_cast<int>(base * desired_piece_count_weights[i]),
+                static_cast<int>(pc_hist[i] / max_skipping_factor)
+            );
         }
 
         auto begin = buffer.begin();
