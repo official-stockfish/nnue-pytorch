@@ -7587,7 +7587,7 @@ namespace binpack
 
                 while(!isEnd && !m_stopFlag.load())
                 {
-                    for (std::size_t i = 0; i < threadBufferSize; ++i)
+                    while (m_localBuffer.size() < threadBufferSize)
                     {
                         if (m_movelistReader.has_value())
                         {
