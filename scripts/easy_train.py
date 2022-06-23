@@ -656,6 +656,7 @@ class TrainingRun(Thread):
         features,
         lr,
         gamma,
+        lambda_,
         network_save_period,
         save_last_network,
         seed,
@@ -664,6 +665,8 @@ class TrainingRun(Thread):
         validation_size,
         start_from_model=None,
         resume_training=False,
+        start_lambda=None,
+        end_lambda=None,
         additional_args=[]
     ):
 
@@ -685,6 +688,9 @@ class TrainingRun(Thread):
         self._features = features
         self._lr = lr
         self._gamma = gamma
+        self._lambda = lambda_
+        self._start_lambda = start_lambda
+        self._end_lambda = end_lambda
         self._network_save_period = network_save_period
         self._save_last_network = save_last_network
         self._seed = seed
@@ -726,6 +732,7 @@ class TrainingRun(Thread):
             f'--features={self._features}',
             f'--lr={self._lr}',
             f'--gamma={self._gamma}',
+            f'--lambda={self._lambda}',
             f'--network-save-period={self._network_save_period}',
             f'--save-last-network={self._save_last_network}',
             f'--seed={self._seed}',
@@ -741,6 +748,12 @@ class TrainingRun(Thread):
 
         if not self._wld_fen_skipping:
             args.append('--no-wld-fen-skipping')
+
+        if self._start_lambda:
+            args.append(f'--start-lambda={self._start_lambda}')
+
+        if self._end_lambda:
+            args.append(f'--end-lambda={self._end_lambda}')
 
         resumed = False
         if self._resume_training:
@@ -1808,6 +1821,22 @@ def parse_cli_args():
         help='Interpolation coefficient for training on evaluation/result. lambda=1.0 means train on evaluations. lambda=0.0 means train on game results. Must be in range [0, 1].'
     )
     parser.add_argument(
+        '--start-lambda',
+        default=None,
+        type=float,
+        metavar='FLOAT',
+        dest='start_lambda',
+        help='Lambda to use at the first epoch. Defaults to --lambda if not specified.'
+    )
+    parser.add_argument(
+        '--end-lambda',
+        default=None,
+        type=float,
+        metavar='FLOAT',
+        dest='end_lambda',
+        help='Lambda to use at the last epoch. Defaults to --lambda if not specified.'
+    )
+    parser.add_argument(
         '--gamma',
         default=0.992,
         type=float,
@@ -2507,6 +2536,9 @@ def main():
                     features=args.features,
                     lr=args.lr,
                     gamma=args.gamma,
+                    lambda_=args.lambda_,
+                    start_lambda=args.start_lambda,
+                    end_lambda=args.end_lambda,
                     network_save_period=args.network_save_period,
                     save_last_network=args.save_last_network,
                     seed=args.seed + run_id,
