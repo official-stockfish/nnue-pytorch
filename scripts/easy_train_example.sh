@@ -30,4 +30,6 @@ python easy_train.py \
     --nnue-pytorch-branch=vondele/nnue-pytorch/easy_train \
     --workspace-path=./easy_train_data \
     --experiment-name=test \
+    --additional-training-arg="--auto_lr_find=False" \
+    --additional-training-arg="--detect_anomaly=False" \
     --features="HalfKAv2_hm^"

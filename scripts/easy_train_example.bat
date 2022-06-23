@@ -31,4 +31,6 @@ python easy_train.py ^
     --workspace-path=./easy_train_data ^
     --experiment-name=test ^
     --resume-training=True ^
+    --additional-training-arg="--auto_lr_find=False" ^
+    --additional-training-arg="--detect_anomaly=False" ^
     --features="HalfKAv2_hm%^" ^
