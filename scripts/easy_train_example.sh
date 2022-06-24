@@ -12,6 +12,8 @@ python easy_train.py \
     --tui=True \
     --network-save-period=1 \
     --random-fen-skipping=3 \
+    --start-lambda=1.0 \
+    --end-lambda=0.75 \
     --fail-on-experiment-exists=False \
     --build-engine-arch=x86-64-modern \
     --build-threads=2 \
@@ -28,4 +30,6 @@ python easy_train.py \
     --nnue-pytorch-branch=vondele/nnue-pytorch/easy_train \
     --workspace-path=./easy_train_data \
     --experiment-name=test \
+    --additional-training-arg="--auto_lr_find=False" \
+    --additional-training-arg="--detect_anomaly=False" \
     --features="HalfKAv2_hm^"
