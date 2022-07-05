@@ -7560,12 +7560,14 @@ namespace binpack
             int concurrency,
             std::string path,
             std::ios_base::openmode om = std::ios_base::app,
-            std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr
+            std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr,
+            std::function<void(std::vector<TrainingDataEntry>&)> bufferFilter = nullptr
         ) :
             m_concurrency(concurrency),
             m_inputFile(path, om),
             m_bufferOffset(0),
-            m_skipPredicate(std::move(skipPredicate))
+            m_skipPredicate(std::move(skipPredicate)),
+            m_bufferFilter(std::move(bufferFilter))
         {
             m_numRunningWorkers.store(0);
             if (!m_inputFile.hasNextChunk())
@@ -7639,6 +7641,11 @@ namespace binpack
                         // now shuffle the local buffer
                         auto& prng = rng::get_thread_local_rng();
                         std::shuffle(m_localBuffer.begin(), m_localBuffer.end(), prng);
+                        if (m_bufferFilter)
+                        {
+                            m_bufferFilter(m_localBuffer);
+                            std::shuffle(m_localBuffer.begin(), m_localBuffer.end(), prng);
+                        }
 
                         std::unique_lock lock(m_waitingBufferMutex);
                         m_waitingBufferEmpty.wait(lock, [this]() { return m_waitingBuffer.empty() || m_stopFlag.load(); });
@@ -7756,6 +7763,7 @@ namespace binpack
         std::condition_variable m_waitingBufferEmpty;
         std::condition_variable m_waitingBufferFull;
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
+        std::function<void(std::vector<TrainingDataEntry>&)> m_bufferFilter;
 
         std::vector<std::thread> m_workers;
 
