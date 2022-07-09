@@ -808,7 +808,7 @@ private:
     std::vector<std::thread> m_workers;
 };
 
-std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered, int random_fen_skipping, bool wld_filtered)
+std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered, int random_fen_skipping, bool wld_filtered, int param_index)
 {
     if (filtered || random_fen_skipping || wld_filtered)
     {
@@ -980,9 +980,9 @@ extern "C" {
     }
 
     // changing the signature needs matching changes in nnue_dataset.py
-    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered)
+    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int param_index)
     {
-        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered);
+        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, param_index);
 
         return new FenBatchStream(concurrency, filename, batch_size, cyclic, skipPredicate);
     }
@@ -994,9 +994,9 @@ extern "C" {
 
     // changing the signature needs matching changes in nnue_dataset.py
     EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic,
-                                                                 bool filtered, int random_fen_skipping, bool wld_filtered)
+                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int param_index)
     {
-        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered);
+        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, param_index);
 
         std::string_view feature_set(feature_set_c);
         if (feature_set == "HalfKP")
@@ -1067,7 +1067,7 @@ extern "C" {
 
 int main()
 {
-    auto stream = create_sparse_batch_stream("HalfKP", 4, "10m_d3_q_2.binpack", 8192, true, false, 0, false);
+    auto stream = create_sparse_batch_stream("HalfKP", 4, "10m_d3_q_2.binpack", 8192, true, false, 0, false, 0);
     auto t0 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < 1000; ++i)
     {
