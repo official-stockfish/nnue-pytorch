@@ -190,8 +190,12 @@ class NNUEReader():
     layer.weight.data = torch.cat([weights, psqt_weights], dim=1)
 
   def read_fc_layer(self, layer, is_output=False):
-    kWeightScale = self.model.weight_scale_out if is_output else self.model.weight_scale_hidden
-    kBiasScale = self.model.weight_scale_out * self.model.nnue2score if is_output else self.model.weight_scale_hidden * self.model.quantized_one
+    kWeightScaleHidden = self.model.weight_scale_hidden
+    kWeightScaleOut = self.model.nnue2score * self.model.weight_scale_out / self.model.quantized_one
+    kWeightScale = kWeightScaleOut if is_output else kWeightScaleHidden
+    kBiasScaleOut = self.model.weight_scale_out * self.model.nnue2score
+    kBiasScaleHidden = self.model.weight_scale_hidden * self.model.quantized_one
+    kBiasScale = kBiasScaleOut if is_output else kBiasScaleHidden
     kMaxWeight = self.model.quantized_one / kWeightScale
 
     # FC inputs are padded to 32 elements by spec.
