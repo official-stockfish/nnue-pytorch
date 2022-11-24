@@ -873,6 +873,9 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered,
             if (e.score == VALUE_NONE)
                 return true;
 
+            if (e.ply <= 28)  // TODO enable setting ply count via a runtime flag
+                return true;
+
             if (random_fen_skipping && do_skip())
                 return true;
 
