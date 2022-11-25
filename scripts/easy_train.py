@@ -313,7 +313,7 @@ def schedule_exit(timeout_seconds, errcode):
         os._exit(errcode)
 
     thread = Thread(target=f)
-    thread.setDaemon(True)
+    thread.daemon = True
     thread.start()
 
 if sys.platform == "win32":
@@ -499,7 +499,7 @@ class SystemResourcesMonitor(Thread):
         self._running = True
         self._update()
 
-        self.setDaemon(True)
+        self.daemon = True
         self.start()
 
     def _update(self):
@@ -2410,7 +2410,7 @@ def spawn_training_watcher(training_runs, exit_timeout_after_finished):
             time.sleep(1)
 
     thread = Thread(target=f)
-    thread.setDaemon(True)
+    thread.daemon = True
     thread.start()
 
 def main():
