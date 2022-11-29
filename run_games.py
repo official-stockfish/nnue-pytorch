@@ -257,12 +257,17 @@ def run_approximate_ordo(root_dir):
 
     with open(ordo_file_name_temp, 'w') as ordo_file:
         ordo_file.write('\n')
-        ordo_file.write('   # PLAYER                        :  RATING  ERROR  POINTS  PLAYED   (%)\n')
+        ordo_file.write('    # PLAYER                     :  RATING  ERROR    POINTS  PLAYED  (%)\n')
         for i, entry in enumerate(entries_ordered):
             if entry.name == 'master':
-                ordo_file.write(f'   {i+1} {entry.name} : 0.0 ---- {entry.points:0.1f} {entry.total_games} {entry.performance*100:0.0f}\n')
+                entry_elo = '  0.0'
+                entry_elo_error_95 = '----'
             else:
-                ordo_file.write(f'   {i+1} {entry.name} : {entry.elo:0.1f} {entry.elo_error_95:0.1f} {entry.points:0.1f} {entry.total_games} {entry.performance*100:0.0f}\n')
+                entry_elo = f'{entry.elo:0.1f}'
+                entry_elo_error_95 = f'{entry.elo_error_95:0.1f}'
+            entry_points = f'{entry.points:0.1f}'
+            entry_performance = f'{entry.performance*100:0.0f}'
+            ordo_file.write(f'   {i+1:2} {entry.name:<26} : {entry_elo:>7} {entry_elo_error_95:>6} {entry_points:>9} {entry.total_games:>7} {entry_performance:>4}\n')
         ordo_file.write('\n')
 
     if not os.path.exists(ordo_file_name):
