@@ -171,13 +171,13 @@ A linear (fully connected) layer is just a simple matrix multiplication. It can 
 
 `y` - the output column vector of size `out_features`
 
-![Matrix vector multiplication](img/mv.png)
+![Matrix vector multiplication](img/mv.svg)
 
 #### Linear layer with sparse inputs
 
 The multiplication `Ax` can be conceptually simplified to "if `x[i]` is not zero then take column `i` from `A`, multiply it by `x[i]` and add it to the result". Now it should be obvious that whenever an element of the input is zero we can skip processing the whole row of the weight matrix. This means that we have to only process as many columns of `A` as there are non-zero values in the input vector. Even though there may be tens of thousands of columns in the weight matrix, we're only concerned a few of them for each position! That's why the first layer can be so large.
 
-![Matrix and sparse vector multiplication](img/mvs.png)
+![Matrix and sparse vector multiplication](img/mvs.svg)
 
 #### Clipped ReLU layer
 
