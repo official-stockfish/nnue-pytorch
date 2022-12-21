@@ -820,6 +820,12 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered,
             wld_filtered
             ](const TrainingDataEntry& e){
 
+            // VALUE_NONE from Stockfish.
+            // We need to allow a way to skip predetermined positions without
+            // having to remove them from the dataset, as otherwise the we lose some
+            // compression ability.
+            static constexpr int VALUE_NONE = 32002;
+
             static constexpr double desired_piece_count_weights[33] = {
                 1.000000,
                 1.121094, 1.234375, 1.339844, 1.437500, 1.527344, 1.609375, 1.683594, 1.750000,
@@ -862,6 +868,10 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered,
             auto do_filter = [&]() {
                 return (e.isCapturingMove() || e.isInCheck());
             };
+
+            // Allow for predermined filtering without the need to remove positions from the dataset.
+            if (e.score == VALUE_NONE)
+                return true;
 
             if (random_fen_skipping && do_skip())
                 return true;
