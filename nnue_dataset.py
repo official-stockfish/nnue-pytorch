@@ -70,7 +70,7 @@ FenBatchPtr = ctypes.POINTER(FenBatch)
 # EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int param_index)
 create_fen_batch_stream = dll.create_fen_batch_stream
 create_fen_batch_stream.restype = ctypes.c_void_p
-create_fen_batch_stream.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_bool, ctypes.c_bool, ctypes.c_int, ctypes.c_bool, ctypes.c_int]
+create_fen_batch_stream.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_bool, ctypes.c_bool, ctypes.c_int, ctypes.c_bool, ctypes.c_int, ctypes.c_int]
 destroy_fen_batch_stream = dll.destroy_fen_batch_stream
 destroy_fen_batch_stream.argtypes = [ctypes.c_void_p]
 
@@ -103,9 +103,9 @@ class FenBatchProvider:
         self.param_index = param_index
 
         if batch_size:
-            self.stream = create_fen_batch_stream(self.num_workers, self.filename, batch_size, cyclic, filtered, random_fen_skipping, wld_filtered, param_index, skip_early_plies)
+            self.stream = create_fen_batch_stream(self.num_workers, self.filename, batch_size, cyclic, filtered, random_fen_skipping, wld_filtered, skip_early_plies, param_index)
         else:
-            self.stream = create_fen_batch_stream(self.num_workers, self.filename, cyclic, filtered, random_fen_skipping, wld_filtered, param_index, skip_early_plies)
+            self.stream = create_fen_batch_stream(self.num_workers, self.filename, cyclic, filtered, random_fen_skipping, wld_filtered, skip_early_plies, param_index)
 
     def __iter__(self):
         return self
@@ -229,7 +229,7 @@ class SparseBatchProvider(TrainingDataProvider):
             device)
 
 class SparseBatchDataset(torch.utils.data.IterableDataset):
-  def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1, filtered=False, random_fen_skipping=0, wld_filtered=False, param_index=0, skip_early_plies=0, device='cpu'):
+  def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1, filtered=False, random_fen_skipping=0, wld_filtered=False, skip_early_plies=0, param_index=0, device='cpu'):
     super(SparseBatchDataset).__init__()
     self.feature_set = feature_set
     self.filename = filename

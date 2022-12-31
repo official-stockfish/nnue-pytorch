@@ -14,7 +14,7 @@ def make_data_loaders(train_filename, val_filename, feature_set, num_workers, ba
   # Epoch and validation sizes are arbitrary
   features_name = feature_set.name
   train_infinite = nnue_dataset.SparseBatchDataset(features_name, train_filename, batch_size, num_workers=num_workers,
-                                                   filtered=filtered, random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered,skip_early_plies=skip_early_plies, param_index=param_index, device=main_device)
+                                                   filtered=filtered, random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, skip_early_plies=skip_early_plies, param_index=param_index, device=main_device)
   val_infinite = nnue_dataset.SparseBatchDataset(features_name, val_filename, batch_size, filtered=filtered,
                                                    random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, skip_early_plies=skip_early_plies, param_index=param_index, device=main_device)
   # num_workers has to be 0 for sparse, and 1 for dense

@@ -995,9 +995,9 @@ extern "C" {
     }
 
     // changing the signature needs matching changes in nnue_dataset.py
-    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int param_index)
+    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int skip_early_plies, int param_index)
     {
-        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, param_index);
+        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, skip_early_plies, param_index);
 
         return new FenBatchStream(concurrency, filename, batch_size, cyclic, skipPredicate);
     }
