@@ -155,12 +155,15 @@ def validate_asciimatics():
 def validate_pytorch():
     pkg = PackageInfo('torch')
     if pkg.exists:
-        if not 'cu' in pkg.version:
-            LOGGER.error(f'Found torch without CUDA but CUDA support required. Exiting')
-            return False
-        elif pkg.is_version_at_least((1, 7)):
+        if pkg.is_version_at_least((1, 7)):
             LOGGER.info(f'Found torch version {pkg.version}. OK.')
-            return True
+            from torch import cuda
+            if cuda.is_available() and cuda.device_count() > 0:
+                LOGGER.info(f'Found torch with CUDA. OK.')
+                return True
+            else:
+                LOGGER.error(f'Found torch without CUDA but CUDA support required. Exiting')
+                return False
         else:
             LOGGER.error(f'Found torch version {pkg.version} but at least 1.8 required. Exiting.')
             return False
