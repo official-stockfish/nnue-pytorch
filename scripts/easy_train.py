@@ -12,10 +12,6 @@ import argparse
 import math
 import logging
 import time
-try:
-   import torch
-except:
-   pass
 
 EXITCODE_OK = 0
 EXITCODE_MISSING_DEPENDENCIES = 2
@@ -161,12 +157,13 @@ def validate_pytorch():
     if pkg.exists:
         if pkg.is_version_at_least((1, 7)):
             LOGGER.info(f'Found torch version {pkg.version}. OK.')
-            if not (torch.cuda.is_available() and torch.cuda.device_count() > 0):
-                LOGGER.error(f'Found torch without CUDA but CUDA support required. Exiting')
-                return False
-            else:
+            from torch import cuda
+            if cuda.is_available() and cuda.device_count() > 0:
                 LOGGER.info(f'Found torch with CUDA. OK.')
                 return True
+            else:
+                LOGGER.error(f'Found torch without CUDA but CUDA support required. Exiting')
+                return False
         else:
             LOGGER.error(f'Found torch version {pkg.version} but at least 1.8 required. Exiting.')
             return False
