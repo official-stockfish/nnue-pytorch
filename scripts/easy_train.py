@@ -12,6 +12,10 @@ import argparse
 import math
 import logging
 import time
+try:
+   import torch
+except:
+   pass
 
 EXITCODE_OK = 0
 EXITCODE_MISSING_DEPENDENCIES = 2
@@ -155,12 +159,14 @@ def validate_asciimatics():
 def validate_pytorch():
     pkg = PackageInfo('torch')
     if pkg.exists:
-        if not 'cu' in pkg.version:
-            LOGGER.error(f'Found torch without CUDA but CUDA support required. Exiting')
-            return False
-        elif pkg.is_version_at_least((1, 7)):
+        if pkg.is_version_at_least((1, 7)):
             LOGGER.info(f'Found torch version {pkg.version}. OK.')
-            return True
+            if not (torch.cuda.is_available() and torch.cuda.device_count() > 0):
+                LOGGER.error(f'Found torch without CUDA but CUDA support required. Exiting')
+                return False
+            else:
+                LOGGER.info(f'Found torch with CUDA. OK.')
+                return True
         else:
             LOGGER.error(f'Found torch version {pkg.version} but at least 1.8 required. Exiting.')
             return False
