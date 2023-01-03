@@ -809,16 +809,16 @@ private:
     std::vector<std::thread> m_workers;
 };
 
-std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered, int random_fen_skipping, bool wld_filtered, int skip_early_plies, int param_index)
+std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int param_index)
 {
-    if (filtered || random_fen_skipping || wld_filtered || skip_early_plies)
+    if (filtered || random_fen_skipping || wld_filtered || early_fen_skipping)
     {
         return [
             random_fen_skipping,
             prob = double(random_fen_skipping) / (random_fen_skipping + 1),
             filtered,
             wld_filtered,
-            skip_early_plies
+            early_fen_skipping
             ](const TrainingDataEntry& e){
 
             // VALUE_NONE from Stockfish.
@@ -874,7 +874,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered,
             if (e.score == VALUE_NONE)
                 return true;
 
-            if (e.ply <= skip_early_plies)
+            if (e.ply <= early_fen_skipping)
                 return true;
 
             if (random_fen_skipping && do_skip())
@@ -995,9 +995,9 @@ extern "C" {
     }
 
     // changing the signature needs matching changes in nnue_dataset.py
-    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int skip_early_plies, int param_index)
+    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int param_index)
     {
-        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, skip_early_plies, param_index);
+        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index);
 
         return new FenBatchStream(concurrency, filename, batch_size, cyclic, skipPredicate);
     }
@@ -1009,9 +1009,9 @@ extern "C" {
 
     // changing the signature needs matching changes in nnue_dataset.py
     EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic,
-                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int skip_early_plies, int param_index)
+                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int param_index)
     {
-        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, skip_early_plies, param_index);
+        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index);
 
         std::string_view feature_set(feature_set_c);
         if (feature_set == "HalfKP")
