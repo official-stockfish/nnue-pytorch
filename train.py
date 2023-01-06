@@ -10,13 +10,13 @@ from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
-def make_data_loaders(train_filename, val_filename, feature_set, num_workers, batch_size, filtered, random_fen_skipping, wld_filtered, param_index, main_device, epoch_size, val_size):
+def make_data_loaders(train_filename, val_filename, feature_set, num_workers, batch_size, filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index, main_device, epoch_size, val_size):
   # Epoch and validation sizes are arbitrary
   features_name = feature_set.name
   train_infinite = nnue_dataset.SparseBatchDataset(features_name, train_filename, batch_size, num_workers=num_workers,
-                                                   filtered=filtered, random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, param_index=param_index, device=main_device)
+                                                   filtered=filtered, random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, early_fen_skipping=early_fen_skipping, param_index=param_index, device=main_device)
   val_infinite = nnue_dataset.SparseBatchDataset(features_name, val_filename, batch_size, filtered=filtered,
-                                                   random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, param_index=param_index, device=main_device)
+                                                   random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, early_fen_skipping=early_fen_skipping, param_index=param_index, device=main_device)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
   train = DataLoader(nnue_dataset.FixedNumBatchesDataset(train_infinite, (epoch_size + batch_size - 1) // batch_size), batch_size=None, batch_sampler=None)
@@ -57,6 +57,7 @@ def main():
   parser.add_argument("--epoch-size", type=int, default=100000000, dest='epoch_size', help="Number of positions per epoch.")
   parser.add_argument("--validation-size", type=int, default=1000000, dest='validation_size', help="Number of positions per validation step.")
   parser.add_argument("--param-index", type=int, default=0, dest='param_index', help="Indexing for parameter scans.")
+  parser.add_argument("--early-fen-skipping", type=int, default=0, dest='early_fen_skipping', help="Skip n plies from the start.")
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
@@ -113,6 +114,7 @@ def main():
   print('Smart fen skipping: {}'.format(not args.no_smart_fen_skipping))
   print('WLD fen skipping: {}'.format(not args.no_wld_fen_skipping))
   print('Random fen skipping: {}'.format(args.random_fen_skipping))
+  print('Skip early plies: {}'.format(args.early_fen_skipping))
   print('Param index: {}'.format(args.param_index))
 
   if args.threads > 0:
@@ -140,6 +142,7 @@ def main():
     not args.no_smart_fen_skipping,
     args.random_fen_skipping,
     not args.no_wld_fen_skipping,
+    args.early_fen_skipping,
     args.param_index,
     main_device,
     args.epoch_size,

@@ -70,7 +70,7 @@ FenBatchPtr = ctypes.POINTER(FenBatch)
 # EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, const char* filename, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int param_index)
 create_fen_batch_stream = dll.create_fen_batch_stream
 create_fen_batch_stream.restype = ctypes.c_void_p
-create_fen_batch_stream.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_bool, ctypes.c_bool, ctypes.c_int, ctypes.c_bool, ctypes.c_int]
+create_fen_batch_stream.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_bool, ctypes.c_bool, ctypes.c_int, ctypes.c_bool, ctypes.c_int, ctypes.c_int]
 destroy_fen_batch_stream = dll.destroy_fen_batch_stream
 destroy_fen_batch_stream.argtypes = [ctypes.c_void_p]
 
@@ -88,6 +88,7 @@ class FenBatchProvider:
         batch_size=None,
         filtered=False,
         random_fen_skipping=0,
+        early_fen_skipping=0,
         wld_filtered=False,
         param_index=0):
 
@@ -98,12 +99,13 @@ class FenBatchProvider:
         self.filtered = filtered
         self.wld_filtered = wld_filtered
         self.random_fen_skipping = random_fen_skipping
+        self.early_fen_skipping = early_fen_skipping
         self.param_index = param_index
 
         if batch_size:
-            self.stream = create_fen_batch_stream(self.num_workers, self.filename, batch_size, cyclic, filtered, random_fen_skipping, wld_filtered, param_index)
+            self.stream = create_fen_batch_stream(self.num_workers, self.filename, batch_size, cyclic, filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index)
         else:
-            self.stream = create_fen_batch_stream(self.num_workers, self.filename, cyclic, filtered, random_fen_skipping, wld_filtered, param_index)
+            self.stream = create_fen_batch_stream(self.num_workers, self.filename, cyclic, filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index)
 
     def __iter__(self):
         return self
@@ -175,11 +177,11 @@ class TrainingDataProvider:
     def __del__(self):
         self.destroy_stream(self.stream)
 
-#     EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic,
-#                                                                  bool filtered, int random_fen_skipping, bool wld_filtered, int param_index)
+#    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, const char* filename, int batch_size, bool cyclic,
+#                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int param_index)
 create_sparse_batch_stream = dll.create_sparse_batch_stream
 create_sparse_batch_stream.restype = ctypes.c_void_p
-create_sparse_batch_stream.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_bool, ctypes.c_bool, ctypes.c_int, ctypes.c_bool, ctypes.c_int]
+create_sparse_batch_stream.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_bool, ctypes.c_bool, ctypes.c_int, ctypes.c_bool, ctypes.c_int, ctypes.c_int]
 destroy_sparse_batch_stream = dll.destroy_sparse_batch_stream
 destroy_sparse_batch_stream.argtypes = [ctypes.c_void_p]
 
@@ -208,7 +210,7 @@ def make_sparse_batch_from_fens(feature_set, fens, scores, plies, results):
     return b
 
 class SparseBatchProvider(TrainingDataProvider):
-    def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1, filtered=False, random_fen_skipping=0, wld_filtered=False, param_index=0, device='cpu'):
+    def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1, filtered=False, random_fen_skipping=0, wld_filtered=False, early_fen_skipping=0, param_index=0, device='cpu'):
         super(SparseBatchProvider, self).__init__(
             feature_set,
             create_sparse_batch_stream,
@@ -222,11 +224,12 @@ class SparseBatchProvider(TrainingDataProvider):
             filtered,
             random_fen_skipping,
             wld_filtered,
+            early_fen_skipping,
             param_index,
             device)
 
 class SparseBatchDataset(torch.utils.data.IterableDataset):
-  def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1, filtered=False, random_fen_skipping=0, wld_filtered=False, param_index=0, device='cpu'):
+  def __init__(self, feature_set, filename, batch_size, cyclic=True, num_workers=1, filtered=False, random_fen_skipping=0, wld_filtered=False, early_fen_skipping=0, param_index=0, device='cpu'):
     super(SparseBatchDataset).__init__()
     self.feature_set = feature_set
     self.filename = filename
@@ -236,12 +239,13 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
     self.filtered = filtered
     self.random_fen_skipping = random_fen_skipping
     self.wld_filtered = wld_filtered
+    self.early_fen_skipping = early_fen_skipping
     self.param_index = param_index
     self.device = device
 
   def __iter__(self):
     return SparseBatchProvider(self.feature_set, self.filename, self.batch_size, cyclic=self.cyclic, num_workers=self.num_workers,
-                               filtered=self.filtered, random_fen_skipping=self.random_fen_skipping, wld_filtered=self.wld_filtered, param_index=self.param_index, device=self.device)
+                               filtered=self.filtered, random_fen_skipping=self.random_fen_skipping, wld_filtered=self.wld_filtered, early_fen_skipping = self.early_fen_skipping, param_index=self.param_index, device=self.device)
 
 class FixedNumBatchesDataset(Dataset):
   def __init__(self, dataset, num_batches):
