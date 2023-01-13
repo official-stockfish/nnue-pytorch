@@ -138,6 +138,7 @@ class TrainingDataProvider:
         filtered=False,
         random_fen_skipping=0,
         wld_filtered=False,
+        early_fen_skipping=-1,
         param_index=0,
         device='cpu'):
 
@@ -157,9 +158,9 @@ class TrainingDataProvider:
         self.device = device
 
         if batch_size:
-            self.stream = self.create_stream(self.feature_set, self.num_workers, self.filename, batch_size, cyclic, filtered, random_fen_skipping, wld_filtered, param_index)
+            self.stream = self.create_stream(self.feature_set, self.num_workers, self.filename, batch_size, cyclic, filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index)
         else:
-            self.stream = self.create_stream(self.feature_set, self.num_workers, self.filename, cyclic, filtered, random_fen_skipping, wld_filtered, param_index)
+            self.stream = self.create_stream(self.feature_set, self.num_workers, self.filename, cyclic, filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index)
 
     def __iter__(self):
         return self
