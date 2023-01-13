@@ -57,7 +57,7 @@ def main():
   parser.add_argument("--epoch-size", type=int, default=100000000, dest='epoch_size', help="Number of positions per epoch.")
   parser.add_argument("--validation-size", type=int, default=1000000, dest='validation_size', help="Number of positions per validation step.")
   parser.add_argument("--param-index", type=int, default=0, dest='param_index', help="Indexing for parameter scans.")
-  parser.add_argument("--early-fen-skipping", type=int, default=0, dest='early_fen_skipping', help="Skip n plies from the start.")
+  parser.add_argument("--early-fen-skipping", type=int, default=-1, dest='early_fen_skipping', help="Skip n plies from the start.")
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
