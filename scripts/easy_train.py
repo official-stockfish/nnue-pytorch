@@ -656,6 +656,7 @@ class TrainingRun(Thread):
         random_fen_skipping,
         smart_fen_skipping,
         wld_fen_skipping,
+        early_fen_skipping,
         features,
         lr,
         gamma,
@@ -688,6 +689,7 @@ class TrainingRun(Thread):
         self._random_fen_skipping = random_fen_skipping
         self._smart_fen_skipping = smart_fen_skipping
         self._wld_fen_skipping = wld_fen_skipping
+        self._early_fen_skipping = early_fen_skipping
         self._features = features
         self._lr = lr
         self._gamma = gamma
@@ -731,6 +733,7 @@ class TrainingRun(Thread):
             f'--max_epoch={self._num_epochs}',
             f'--batch-size={self._batch_size}',
             f'--random-fen-skipping={self._random_fen_skipping}',
+            f'--early-fen-skipping={self._early_fen_skipping}',
             f'--gpus={self._gpu_id},',
             f'--features={self._features}',
             f'--lr={self._lr}',
@@ -1911,6 +1914,14 @@ def parse_cli_args():
         help='Skip on average random_fen_skipping positions during training before using one. Increases diversity for data that is not fully shuffled.'
     )
     parser.add_argument(
+        '--early-fen-skipping',
+        default=-1,
+        type=int,
+        metavar='INTEGER',
+        dest='early_fen_skipping',
+        help='Skip all fens from training game plies <= the given number.'
+    )
+    parser.add_argument(
         '--start-from-model',
         default=None,
         type=str,
@@ -2536,6 +2547,7 @@ def main():
                     random_fen_skipping=args.random_fen_skipping,
                     smart_fen_skipping=args.smart_fen_skipping,
                     wld_fen_skipping=args.wld_fen_skipping,
+                    early_fen_skipping=args.early_fen_skipping,
                     features=args.features,
                     lr=args.lr,
                     gamma=args.gamma,
