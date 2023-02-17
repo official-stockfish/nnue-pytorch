@@ -1028,7 +1028,7 @@ void refresh_accumulator(
     constexpr int register_width = 256 / 16;
     static_assert(M % register_width == 0, "We're processing 16 elements at a time");
     constexpr int num_chunks = M / register_width;
-    __m128i regs[num_chunks];
+    __m256i regs[num_chunks];
 
     // Load bias to registers and operate on registers only.
     for (int i = 0; i < num_chunks; ++i) {
@@ -1068,7 +1068,7 @@ void update_accumulator(
     constexpr int register_width = 256 / 16;
     static_assert(M % register_width == 0, "We're processing 16 elements at a time");
     constexpr int num_chunks = M / register_width;
-    __m128i regs[num_chunks];
+    __m256i regs[num_chunks];
 
     // Load the previous values to registers and operate on registers only.
     for (int i = 0; i < num_chunks; ++i) {
