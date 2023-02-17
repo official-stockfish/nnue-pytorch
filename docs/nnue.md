@@ -1140,13 +1140,13 @@ int32_t* linear(
             m256_add_dpbusd_epi32(sum3, in, _mm256_load_si256(&layer.weights[offset3 + j * register_width]));
         }
 
-        const __m128i bias = _mm256_load_si256(&layer.bias[i * 4]);
+        const __m128i bias = _mm_load_si128(&layer.bias[i * 4]);
         // This function adds horizontally 8 values from each sum together, producing 4 int32 values.
         // For the definition see below.
         __m128i outval = m256_haddx4(sum0, sum1, sum2, sum3, bias);
         // Here we account for the weights scaling.
-        outval = _mm256_srai_epi32(outval, log2_weight_scale);
-        _mm256_store_si256(&output[i * 4], outval);
+        outval = _mm_srai_epi32(outval, log2_weight_scale);
+        _mm_store_si128(&output[i * 4], outval);
     }
 
     return output + layer.num_outputs;
