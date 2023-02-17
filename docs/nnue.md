@@ -1186,7 +1186,7 @@ void m256_add_dpbusd_epi32(__m256i& acc, __m256i a, __m256i b) {
 
 ##### m256_haddx4
 
-This function takes 4 \_\_m256i registers containing 8 int32 values each, accumulates them horizontally, and produces one \_\_m128i register containing 3 int32 values, each corresponding to one input sum. In the matrix multiplication above we keep one sum per weight row/input, so in the end we fill the output 4 values at a time.
+This function takes 4 \_\_m256i registers containing 8 int32 values each, accumulates them horizontally, and produces one \_\_m128i register containing 4 int32 values, each corresponding to one input sum. In the matrix multiplication above we keep one sum per weight row/input, so in the end we fill the output 4 values at a time.
 
 ![](img/m256_haddx4.svg)
 
