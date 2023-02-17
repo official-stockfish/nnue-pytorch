@@ -1038,7 +1038,7 @@ void refresh_accumulator(
     for (int a : active_features) {
         for (int i = 0; i < num_chunks; ++i) {
             // Now we do 1 memory operation instead of 2 per loop iteration.
-            regs[i] = _mm256_add_epi16(regs[i], &layer.weight[a][i * register_width]);
+            regs[i] = _mm256_add_epi16(regs[i], _mm256_load_si256(&layer.weight[a][i * register_width]));
         }
     }
 
@@ -1078,14 +1078,14 @@ void update_accumulator(
     // Then we subtract the weights of the removed features
     for (int r : removed_features) {
         for (int i = 0; i < num_chunks; ++i) {
-            regs[i] = _mm256_sub_epi16(regs[i], &layer.weight[r][i * register_width]);
+            regs[i] = _mm256_sub_epi16(regs[i], _mm256_load_si256(&layer.weight[r][i * register_width]));
         }
     }
 
     // Similar for the added features, but add instead of subtracting
     for (int a : added_features) {
         for (int i = 0; i < num_chunks; ++i) {
-            regs[i] = _mm256_add_epi16(regs[i], &layer.weight[a][i * register_width]);
+            regs[i] = _mm256_add_epi16(regs[i], _mm256_load_si256(&layer.weight[a][i * register_width]));
         }
     }
 
