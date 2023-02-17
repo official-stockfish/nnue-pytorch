@@ -1362,8 +1362,8 @@ int32_t* linear_sparse_input(
 
             m256_process_chunk(sum0, sum1, col0, _mm256_setzero_si256(), factor);
 
-            _mm256_store_si256(output + output_offset0, sum0);
-            _mm256_store_si256(output + output_offset1, sum1);
+            _mm256_store_si256(output + output_offset0, _mm256_srai_epi32(sum0, log2_weight_scale));
+            _mm256_store_si256(output + output_offset1, _mm256_srai_epi32(sum1, log2_weight_scale));
         }
     }
 
@@ -1589,10 +1589,10 @@ int32_t* linear_sparse_input(
             const __m128i acc30 = _mm256_extracti128_si256(acc[k*4 + 3], 0);
             const __m128i acc31 = _mm256_extracti128_si256(acc[k*4 + 3], 1);
 
-            output_tile[k*4 + 0] = _mm256_add_epi32(_mm256_setr_m128i(acc00, acc10), biases_tile[k*4 + 0]);
-            output_tile[k*4 + 1] = _mm256_add_epi32(_mm256_setr_m128i(acc20, acc30), biases_tile[k*4 + 1]);
-            output_tile[k*4 + 2] = _mm256_add_epi32(_mm256_setr_m128i(acc01, acc11), biases_tile[k*4 + 2]);
-            output_tile[k*4 + 3] = _mm256_add_epi32(_mm256_setr_m128i(acc21, acc31), biases_tile[k*4 + 3]);
+            output_tile[k*4 + 0] = _mm256_srai_epi32(_mm256_add_epi32(_mm256_setr_m128i(acc00, acc10), biases_tile[k*4 + 0]), log2_weight_scale);
+            output_tile[k*4 + 1] = _mm256_srai_epi32(_mm256_add_epi32(_mm256_setr_m128i(acc20, acc30), biases_tile[k*4 + 1]), log2_weight_scale);
+            output_tile[k*4 + 2] = _mm256_srai_epi32(_mm256_add_epi32(_mm256_setr_m128i(acc01, acc11), biases_tile[k*4 + 2]), log2_weight_scale);
+            output_tile[k*4 + 3] = _mm256_srai_epi32(_mm256_add_epi32(_mm256_setr_m128i(acc21, acc31), biases_tile[k*4 + 3]), log2_weight_scale);
         }
     }
 
@@ -1714,8 +1714,8 @@ int32_t* linear_sparse_input_block_sparse_output(
 
             m256_process_chunk(sum0, sum1, col0, _mm256_setzero_si256(), factor);
 
-            _mm256_store_si256(output + output_offset0, sum0);
-            _mm256_store_si256(output + output_offset1, sum1);
+            _mm256_store_si256(output + output_offset0, _mm256_srai_epi32(sum0, log2_weight_scale));
+            _mm256_store_si256(output + output_offset1, _mm256_srai_epi32(sum1, log2_weight_scale));
         }
     }
 
