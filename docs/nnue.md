@@ -1174,7 +1174,8 @@ void m256_add_dpbusd_epi32(__m256i& acc, __m256i a, __m256i b) {
     __m256i product0 = _mm256_maddubs_epi16(a, b);
 
     // Multiply product0 by 1 (idempotent) and accumulate neighbouring outputs into int32 values
-    product0 = _mm256_madd_epi16(product0, kOnes256);
+    __m256i one = _mm256_set1_epi16(1);
+    product0 = _mm256_madd_epi16(product0, one);
 
     // Add to the main int32 accumulator.
     acc = _mm256_add_epi32(acc, product0);
