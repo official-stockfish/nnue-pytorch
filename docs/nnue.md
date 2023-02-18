@@ -943,7 +943,7 @@ Let's start with the feature transformer. Recall that its purpose is to accumula
 
 #### Linear layer
 
-We wanted int8 inputs and we can get them without losing too much precision. The nature of matrix-purposed SIMD instructions is that, thankfully, the accumulation happens in int32. So we don't experience the same issue as in the feature transformer where we're manually adding rows, and we can utilize the int8 multiplication with int32 accumulation to the fullest extent, and only later go back to int8 in the ClippedReLU layer.
+We wanted int8 inputs and we can get them without losing too much precision. The nature of matrix-purposed SIMD instructions is that, thankfully, the accumulation happens in int32. So we don't experience the same issue as in the feature transformer where we're manually adding rows, and we can utilize the int8 multiplication with int32 accumulation to the fullest extent, and only later go back to int8 in the ClippedReLU layer. We will add the biases after the accumulation has happened, so they should be stored in int32.
 
 #### ClippedReLU
 
@@ -1028,7 +1028,7 @@ void refresh_accumulator(
     constexpr int register_width = 256 / 16;
     static_assert(M % register_width == 0, "We're processing 16 elements at a time");
     constexpr int num_chunks = M / register_width;
-    __m128i regs[num_chunks];
+    __m256i regs[num_chunks];
 
     // Load bias to registers and operate on registers only.
     for (int i = 0; i < num_chunks; ++i) {
@@ -1038,7 +1038,7 @@ void refresh_accumulator(
     for (int a : active_features) {
         for (int i = 0; i < num_chunks; ++i) {
             // Now we do 1 memory operation instead of 2 per loop iteration.
-            regs[i] = _mm256_add_epi16(regs[i], &layer.weight[a][i * register_width]);
+            regs[i] = _mm256_add_epi16(regs[i], _mm256_load_si256(&layer.weight[a][i * register_width]));
         }
     }
 
@@ -1068,7 +1068,7 @@ void update_accumulator(
     constexpr int register_width = 256 / 16;
     static_assert(M % register_width == 0, "We're processing 16 elements at a time");
     constexpr int num_chunks = M / register_width;
-    __m128i regs[num_chunks];
+    __m256i regs[num_chunks];
 
     // Load the previous values to registers and operate on registers only.
     for (int i = 0; i < num_chunks; ++i) {
@@ -1078,14 +1078,14 @@ void update_accumulator(
     // Then we subtract the weights of the removed features
     for (int r : removed_features) {
         for (int i = 0; i < num_chunks; ++i) {
-            regs[i] = _mm256_sub_epi16(regs[i], &layer.weight[r][i * register_width]);
+            regs[i] = _mm256_sub_epi16(regs[i], _mm256_load_si256(&layer.weight[r][i * register_width]));
         }
     }
 
     // Similar for the added features, but add instead of subtracting
     for (int a : added_features) {
         for (int i = 0; i < num_chunks; ++i) {
-            regs[i] = _mm256_add_epi16(regs[i], &layer.weight[a][i * register_width]);
+            regs[i] = _mm256_add_epi16(regs[i], _mm256_load_si256(&layer.weight[a][i * register_width]));
         }
     }
 
@@ -1140,13 +1140,13 @@ int32_t* linear(
             m256_add_dpbusd_epi32(sum3, in, _mm256_load_si256(&layer.weights[offset3 + j * register_width]));
         }
 
-        const __m128i bias = _mm256_load_si256(&layer.bias[i * 4]);
+        const __m128i bias = _mm_load_si128(&layer.bias[i * 4]);
         // This function adds horizontally 8 values from each sum together, producing 4 int32 values.
         // For the definition see below.
         __m128i outval = m256_haddx4(sum0, sum1, sum2, sum3, bias);
         // Here we account for the weights scaling.
-        outval = _mm256_srai_epi32(outval, log2_weight_scale);
-        _mm256_store_si256(&output[i * 4], outval);
+        outval = _mm_srai_epi32(outval, log2_weight_scale);
+        _mm_store_si128(&output[i * 4], outval);
     }
 
     return output + layer.num_outputs;
@@ -1174,7 +1174,8 @@ void m256_add_dpbusd_epi32(__m256i& acc, __m256i a, __m256i b) {
     __m256i product0 = _mm256_maddubs_epi16(a, b);
 
     // Multiply product0 by 1 (idempotent) and accumulate neighbouring outputs into int32 values
-    product0 = _mm256_madd_epi16(product0, kOnes256);
+    __m256i one = _mm256_set1_epi16(1);
+    product0 = _mm256_madd_epi16(product0, one);
 
     // Add to the main int32 accumulator.
     acc = _mm256_add_epi32(acc, product0);
@@ -1185,7 +1186,7 @@ void m256_add_dpbusd_epi32(__m256i& acc, __m256i a, __m256i b) {
 
 ##### m256_haddx4
 
-This function takes 4 \_\_m256i registers containing 8 int32 values each, accumulates them horizontally, and produces one \_\_m128i register containing 3 int32 values, each corresponding to one input sum. In the matrix multiplication above we keep one sum per weight row/input, so in the end we fill the output 4 values at a time.
+This function takes 4 \_\_m256i registers containing 8 int32 values each, accumulates them horizontally, and produces one \_\_m128i register containing 4 int32 values, each corresponding to one input sum. In the matrix multiplication above we keep one sum per weight row/input, so in the end we fill the output 4 values at a time.
 
 ![](img/m256_haddx4.svg)
 
@@ -1364,6 +1365,10 @@ int32_t* linear_sparse_input(
             _mm256_store_si256(output + output_offset0, sum0);
             _mm256_store_si256(output + output_offset1, sum1);
         }
+    }
+    
+    for (int j = 0; j < layer.num_outputs; j += output_register_width) {
+        _mm256_store_si256(output + j, _mm256_srai_epi32(_mm256_load_si256(output + j), log2_weight_scale));
     }
 
     return output + layer.num_outputs;
@@ -1588,10 +1593,10 @@ int32_t* linear_sparse_input(
             const __m128i acc30 = _mm256_extracti128_si256(acc[k*4 + 3], 0);
             const __m128i acc31 = _mm256_extracti128_si256(acc[k*4 + 3], 1);
 
-            output_tile[k*4 + 0] = _mm256_add_epi32(_mm256_setr_m128i(acc00, acc10), biases_tile[k*4 + 0]);
-            output_tile[k*4 + 1] = _mm256_add_epi32(_mm256_setr_m128i(acc20, acc30), biases_tile[k*4 + 1]);
-            output_tile[k*4 + 2] = _mm256_add_epi32(_mm256_setr_m128i(acc01, acc11), biases_tile[k*4 + 2]);
-            output_tile[k*4 + 3] = _mm256_add_epi32(_mm256_setr_m128i(acc21, acc31), biases_tile[k*4 + 3]);
+            output_tile[k*4 + 0] = _mm256_srai_epi32(_mm256_add_epi32(_mm256_setr_m128i(acc00, acc10), biases_tile[k*4 + 0]), log2_weight_scale);
+            output_tile[k*4 + 1] = _mm256_srai_epi32(_mm256_add_epi32(_mm256_setr_m128i(acc20, acc30), biases_tile[k*4 + 1]), log2_weight_scale);
+            output_tile[k*4 + 2] = _mm256_srai_epi32(_mm256_add_epi32(_mm256_setr_m128i(acc01, acc11), biases_tile[k*4 + 2]), log2_weight_scale);
+            output_tile[k*4 + 3] = _mm256_srai_epi32(_mm256_add_epi32(_mm256_setr_m128i(acc21, acc31), biases_tile[k*4 + 3]), log2_weight_scale);
         }
     }
 
@@ -1716,6 +1721,10 @@ int32_t* linear_sparse_input_block_sparse_output(
             _mm256_store_si256(output + output_offset0, sum0);
             _mm256_store_si256(output + output_offset1, sum1);
         }
+    }
+    
+    for (int i = 0; i < layer.num_outputs; i += output_register_width) {
+        _mm256_store_si256(output + i, _mm256_srai_epi32(_mm256_load_si256(output + i), log2_weight_scale));
     }
 
     return output + layer.num_outputs;
