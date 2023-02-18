@@ -1362,9 +1362,13 @@ int32_t* linear_sparse_input(
 
             m256_process_chunk(sum0, sum1, col0, _mm256_setzero_si256(), factor);
 
-            _mm256_store_si256(output + output_offset0, _mm256_srai_epi32(sum0, log2_weight_scale));
-            _mm256_store_si256(output + output_offset1, _mm256_srai_epi32(sum1, log2_weight_scale));
+            _mm256_store_si256(output + output_offset0, sum0);
+            _mm256_store_si256(output + output_offset1, sum1);
         }
+    }
+    
+    for (int j = 0; j < layer.num_outputs; j += output_register_width) {
+        _mm256_store_si256(output + j, _mm256_srai_epi32(_mm256_load_si256(output + j), log2_weight_scale));
     }
 
     return output + layer.num_outputs;
@@ -1714,9 +1718,13 @@ int32_t* linear_sparse_input_block_sparse_output(
 
             m256_process_chunk(sum0, sum1, col0, _mm256_setzero_si256(), factor);
 
-            _mm256_store_si256(output + output_offset0, _mm256_srai_epi32(sum0, log2_weight_scale));
-            _mm256_store_si256(output + output_offset1, _mm256_srai_epi32(sum1, log2_weight_scale));
+            _mm256_store_si256(output + output_offset0, sum0);
+            _mm256_store_si256(output + output_offset1, sum1);
         }
+    }
+    
+    for (int i = 0; i < layer.num_outputs; i += output_register_width) {
+        _mm256_store_si256(output + i, _mm256_srai_epi32(_mm256_load_si256(output + i), log2_weight_scale));
     }
 
     return output + layer.num_outputs;
