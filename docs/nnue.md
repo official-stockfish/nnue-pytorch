@@ -745,11 +745,11 @@ SparseBatchPtr = ctypes.POINTER(SparseBatch)
 
 Let's focus on the features again. We will take a closer look on the `HalfKP` feature set. Recall, that `HalfKP` features are indexed by tuples of form `(king_square, piece_square, piece_type, piece_color)`, where `piece_type != KING`.
 
-`HalfKP` feature set was formed by specialization of the `P` feature set for every single king square on the board. This in turn increased the feature set size, and caused the accesses to become much more sparse. This sparsity directly impacts how much each feature is seen during training, and that negatively impacts the learning of weights.
+The `HalfKP` feature set was formed by specialization of the `P` feature set for every single king square on the board. This in turn increased the feature set size, and caused the accesses to become much more sparse. This sparsity directly impacts how much each feature is seen during training, and that negatively impacts the learning of weights.
 
 Feature factorization effectively, and efficiently, relates features together during training, so that more features are affected during each step of training. This is particularly important during early stages of training, because it results in even the rarest of feature weights being populated quickly with reasonable values.
 
-Feature factorization works by introducting a "virtual" feature set (as opposed to the "real" feature set, here `HalfKP`) that contains denser features, each being directly related to (and, importantly, redundant with) one or more "real" feature. These "virtual" features are present only during the training process, and will learn the common factor for all "real" features they relate to. Let's see how it works in case of `HalfKP`.
+Feature factorization works by introducing a "virtual" feature set (as opposed to the "real" feature set, here `HalfKP`) that contains denser features, each being directly related to (and, importantly, redundant with) one or more "real" feature. These "virtual" features are present only during the training process, and will learn the common factor for all "real" features they relate to. Let's see how it works in case of `HalfKP`.
 
 `HalfKP` is just `P` taken 64 times, once for each king square, as mentioned previously. Each `P` feature is therefore related to 64 `HalfKP` features, and will learn the common factor for a `(piece_square, piece_type, piece_color)` feature for all possible king positions.
 
