@@ -2823,7 +2823,7 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 ### "SFNNv6" architecture
 
-Same as "SFNNv5", with L1 size increased from 1024 to 1536.
+Same as "SFNNv5" with L1 size increased from 1024 to 1536.
 
 2023-05-31 - *
 
