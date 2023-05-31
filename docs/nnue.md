@@ -2829,6 +2829,8 @@ Same as "SFNNv5", with L1 size increased from 1024 to 1536.
 
 [Commit c1fff71650e2f8bf5a2d63bdc043161cdfe8e460](https://github.com/official-stockfish/Stockfish/commit/c1fff71650e2f8bf5a2d63bdc043161cdfe8e460)
 
+![](img/SFNNv6_architecture_detailed_v2.svg)
+
 ### "SFNNv5" architecture
 
 2022-05-14 - 2023-05-31
