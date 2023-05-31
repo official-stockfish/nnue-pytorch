@@ -743,15 +743,17 @@ SparseBatchPtr = ctypes.POINTER(SparseBatch)
 
 ### Feature factorization
 
-Let's focus on the features again. We will take a closer look on the `HalfKP` feature set. Hmm... We took `P`, and did it 64 times, once for each square... Surely these 64 buckets are somehow related... How could we tell the net that they are? By introducing virtual features!
+Let's focus on the features again. We will take a closer look on the `HalfKP` feature set. Recall, that `HalfKP` features are indexed by tuples of form `(king_square, piece_square, piece_type, piece_color)`, where `piece_type != KING`.
 
-We have 40960 `HalfKP` features and 640 `P` features. How to they map to each other? The exact computation will depend on your indexing scheme, but we can lay it out in simple terms.
+The `HalfKP` feature set was formed by specialization of the `P` feature set for every single king square on the board. This in turn increased the feature set size, and caused the accesses to become much more sparse. This sparsity directly impacts how much each feature is seen during training, and that negatively impacts the learning of weights.
 
-`HalfKP` features are `(king_square, piece_square, piece_type, piece_color)`
+Feature factorization effectively, and efficiently, relates features together during training, so that more features are affected during each step of training. This is particularly important during early stages of training, because it results in even the rarest of feature weights being populated quickly with reasonable values.
 
-`P` features are `(piece_square, piece_type, piece_color)`.
+Feature factorization works by introducing a "virtual" feature set (as opposed to the "real" feature set, here `HalfKP`) that contains denser features, each being directly related to (and, importantly, redundant with) one or more "real" feature. These "virtual" features are present only during the training process, and will learn the common factor for all "real" features they relate to. Let's see how it works in case of `HalfKP`.
 
-3 parts are common between the two. So for each `P` feature there are 64 corresponding `HalfKP` features. We can extend our 40960 inputs to 40960+640, including both `HalfKP` and `P` features. Now each position will have at most 64 features (32 `HalfKP`, and 32 `P`) for each perspective. Nothing else changes in the data loader, nor in the forward pass, we just added more features! But we don't want to use them in actual play, it would be too expensive, and kinda pointless. We know which features are correlated with each other, so let's just coalesce them somehow before using the network for play.
+`HalfKP` is just `P` taken 64 times, once for each king square, as mentioned previously. Each `P` feature is therefore related to 64 `HalfKP` features, and will learn the common factor for a `(piece_square, piece_type, piece_color)` feature for all possible king positions.
+
+Because "virtual" features are redundant with the "real" features their weights can be coalesced into the "real" features weights after the training is finished. The way to coalesce them follows from the computation performed in the network layer (the feature transformer).
 
 #### Virtual feature coalescing
 
@@ -759,7 +761,7 @@ So how can we coalesce them? Let's look how matrix and vector multiplication is 
 
 ![](img/board_0.png):
 
-Let's focus on the feature `(A1, C3, pawn, white)`. Now, we're also gonna add a `P` feature `(C3, pawn, white)`. What happens when the input goes through the first layer?
+Let's focus on the feature `(A1, C3, pawn, white)`. Now, we're also gonna add the corresponding `P` feature `(C3, pawn, white)`. What happens when the input goes through the first layer?
 
 ```cpp
 accumulator += weights[(A1, C3, pawn, white)];
@@ -780,7 +782,7 @@ Sometimes it's possible to add even more factors. It should be noted however, th
 
 ##### "K" factors
 
-The king position, 64 features. This one requires some careful handling as a single position has this feature multiple times - the number of pieces on the board. This means that the input for this feature is no longer 1, but the number of position on the board instead. This is needed purely because with HalfKP the king feature is not encoded anywhere. HalfKA doesn't need it for example because it specifically has the feature for the king's position. In general, handling this is tricky, it may even require reducing the gradient for these features (otherwise the gradient is `input*weight`, but input is large compared to others).
+The king position, 64 features. This one requires some careful handling as a single position has this feature multiple times - equal to the number of pieces on the board. This virtual feature set is needed purely because with HalfKP the king position feature is not encoded anywhere. HalfKA doesn't need it for example because it specifically has the feature for the king's position. In general, handling this is tricky, it may even require reducing the gradient for these features (otherwise the gradient is `input*weight`, but input is large compared to others).
 
 ##### "HalfRelativeKP" factors
 
