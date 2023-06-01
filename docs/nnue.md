@@ -125,6 +125,7 @@ What this document DOES NOT contain:
     + [A part of the feature transformer directly forwarded to the output.](#a-part-of-the-feature-transformer-directly-forwarded-to-the-output)
     + [Multiple PSQT outputs and multiple subnetworks](#multiple-psqt-outputs-and-multiple-subnetworks)
 * [Historical Stockfish evaluation network architectures](#historical-stockfish-evaluation-network-architectures)
+    + ["SFNNv6" architecture](#sfnnv6-architecture)
     + ["SFNNv5" architecture](#sfnnv5-architecture)
     + ["SFNNv4" architecture](#sfnnv4-architecture)
     + ["SFNNv3" architecture](#sfnnv3-architecture)
