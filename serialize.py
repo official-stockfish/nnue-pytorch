@@ -298,6 +298,10 @@ def main():
   parser.add_argument("target", help="Target file (can be .pt or .nnue)")
   parser.add_argument("--description", default=None, type=str, dest='description', help="The description string to include in the network. Only works when serializing into a .nnue file.")
   parser.add_argument("--ft_compression", default='leb128', type=str, dest='ft_compression', help="Compression method to use for FT weights and biases. Either 'none' or 'leb128'. Only allowed if saving to .nnue.")
+  parser.add_argument("--ft_perm", default=None, type=str, dest='ft_perm', help="Path to a file that defines the permutation to use on the feature transformer.")
+  parser.add_argument("--ft_optimize", action='store_true', dest='ft_optimize', help="Whether to perform full feature transformer optimization (ftperm.py) on the resulting network. This process is very time consuming.")
+  parser.add_argument("--ft_optimize_data", default=None, type=str, dest='ft_optimize_data', help="Path to the dataset to use for FT optimization.")
+  parser.add_argument("--ft_optimize_count", default=10000, type=int, dest='ft_optimize_count', help="Number of positions to use for FT optimization.")
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
@@ -323,6 +327,22 @@ def main():
 
   if args.ft_compression not in ['none', 'leb128']:
     raise Exception('Invalid compression method.')
+
+  if args.ft_optimize and args.ft_perm is not None:
+    raise Exception('Options --ft_perm and --ft_optimize are mutually exclusive.')
+
+  if args.ft_perm is not None:
+    import ftperm
+    ftperm.ft_permute(nnue, args.ft_perm)
+
+  if args.ft_optimize:
+    import ftperm
+    if args.ft_optimize_data is None:
+      raise Exception('Invalid dataset path for FT optimization. (--ft_optimize_data)')
+    if args.ft_optimize_count is None or args.ft_optimize_count < 1:
+      raise Exception('Invalid number of positions to optimize FT with. (--ft_optimize_count)')
+
+    ftperm.ft_optimize(nnue, args.ft_optimize_data, args.ft_optimize_count)
 
   if args.target.endswith('.ckpt'):
     raise Exception('Cannot convert into .ckpt')
