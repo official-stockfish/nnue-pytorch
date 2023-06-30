@@ -51,170 +51,248 @@ Algorithm by Daniel Monroe. Github @Ergodice.
 
 '''
 
+ZERO_BLOCK_SIZE = 4
+VERBOSE = False
+USE_CUPY = False
+
+def batched(arr, batch_size):
+    '''
+    Utility generator that yields chunks of array `arr` of size `batch_size`
+    Expects arr to be a numpy-like array
+    '''
+    n_samples = arr.shape[0]
+    idx = 0
+    while idx < n_samples:
+        yield arr[idx:min(idx+batch_size, n_samples)]
+        idx += batch_size
+
+
 def apply_swap(perm, i, j):
+    '''
+    Swap `i`-th and `j`-th elements in the array `perm`.
+    '''
     perm[i], perm[j] = perm[j], perm[i]
 
-def apply_cycle(perm, idx):
-    values = [perm[i] for i in idx]
-    new_values = values[1:] + [values[0]]
-    for i, j in zip(idx, new_values):
+
+def apply_rotate_right(perm, indices):
+    '''
+    Rotates right the values in `perm` at selected indices `indices`.
+    The rotation is performed as-if the selected indices were layed out in the order
+    specified in the `indices` list.
+    '''
+    values = [perm[i] for i in indices]
+    new_values = [values[-1]] + values[:-1]
+    for i, j in zip(indices, new_values):
         perm[i] = j
 
-def get_swapped_zero_count(actmat, use_cupy=True):
-    shape = actmat.shape
-    actmat = actmat.reshape((actmat.shape[0], actmat.shape[1]//4, 4))
+
+def get_swapped_zero_positive_count(actmat_flat, use_cupy=True):
     if use_cupy:
-        actmat = cp.asarray(actmat, dtype=cp.int8)
-        num_zeros = cp.sum(actmat, axis=2, keepdims=True)
-        num_zeros = cp.tile(num_zeros, (1, 1, 4))
-        
-        num_zeros = cp.reshape(num_zeros, shape)
-        actmat = cp.reshape(actmat, shape)
+        actmat_flat = cp.asarray(actmat_flat, dtype=cp.int8)
 
-        rest_zero_indicator = num_zeros - actmat == 3
-        rest_zero_indicator = cp.reshape(rest_zero_indicator, shape).astype(cp.int8)
-
-
-    else:
-        num_zeros = np.sum(actmat, axis=2, keepdims=True)
-        num_zeros = np.tile(num_zeros, (1, 1, 4))
-        
-        num_zeros = np.reshape(num_zeros, shape).astype(int)
-        actmat = np.reshape(actmat, shape).astype(int)
-
-        rest_zero_indicator = num_zeros - actmat == 3
-        rest_zero_indicator = np.reshape(rest_zero_indicator, shape).astype(int)
-    
+    shape = actmat_flat.shape
+    # Group into blocks that are processed at once during inference
+    # actmat is a boolean matrix of shape (N, L1 // 2) with "True" meaning 0
+    actmat_chunked = actmat_flat.reshape((actmat_flat.shape[0], actmat_flat.shape[1]//ZERO_BLOCK_SIZE, ZERO_BLOCK_SIZE))
 
     if use_cupy:
-        swapped_zero_count = cp.einsum('bi,bj->ij', actmat, rest_zero_indicator, dtype=int)
+        # Calculate number of zeros in each block
+        num_zeros = cp.sum(actmat_chunked, axis=2, keepdims=True)
+        # Broadcast back to the same shape as actmat_chunked so it's easier to work with
+        num_zeros = cp.tile(num_zeros, (1, 1, ZERO_BLOCK_SIZE))
+
+        # Marks an element if all other elements in a block are zero.
+        #
+        # Example:
+        #                                   b  i   k      b  i   k      b  i   k
+        # slice                            [0, 13, :]    [0, 14, :]    [0, 15, :]
+        # num_zeros           = [... [... [3, 3, 3, 3], [1, 1, 1, 1], [4, 4, 4, 4] ...] ...]
+        # actmat_chunked      = [... [... [1, 1, 0, 1], [0, 0, 1, 0], [1, 1, 1, 1] ...] ...]
+        # rest_zero_indicator = [... [... [0, 0, 1, 0], [0, 0, 0, 0], [1, 1, 1, 1] ...] ...]
+        #
+        rest_zero_indicator = (num_zeros - actmat_chunked == ZERO_BLOCK_SIZE - 1).reshape(shape).astype(cp.int8)
+
+        # Sum all possible pairs of elements in a single sample of actmat_flat and rest_zero_indicator.
+        # Aggregate sum over the whole batch.
+        # This tells us how much "good" a swap of i-th and j-th slices would do. It doesn't consider
+        # how much "bad" it would do though, that will be accounted for later, for performance reasons.
+        swapped_zero_count = cp.einsum('bi,bj->ij', actmat_flat, rest_zero_indicator, dtype=int)
 
     else:
-        swapped_zero_count = np.einsum('bi,bj->ij', actmat, rest_zero_indicator)
-    
+        # Same operation but with numpy
+        num_zeros = np.sum(actmat_chunked, axis=2, keepdims=True)
+        num_zeros = np.tile(num_zeros, (1, 1, ZERO_BLOCK_SIZE))
+        
+        rest_zero_indicator = (num_zeros - actmat_chunked == ZERO_BLOCK_SIZE - 1).reshape(shape).astype(int)
+
+        swapped_zero_count = np.einsum('bi,bj->ij', actmat_flat, rest_zero_indicator)
 
     return swapped_zero_count
 
-def get_score_change(actmat, use_cupy=True):
+
+def get_swapped_zero_increase(actmat, use_cupy=True):
     n_neurons = actmat.shape[1]
-    n_samples = actmat.shape[0]
-    # actmat is a boolean matrix of shape (N, L1) with "True" meaning 0
     swapped_zero_count = 0
 
-
-    # process in batches since the arrays are too large
+    # Process in batches since the arrays are too large
     # TODO: Find a good batch size. Try lowest as possible as VRAM is an issue on low end devices.
     BATCH_SIZE = 10000
-    idx = 0
-    while idx < n_samples:
-        actmat_batch = actmat[idx:min(idx+BATCH_SIZE, n_samples)]
-        swapped_zero_count += get_swapped_zero_count(actmat_batch, use_cupy=use_cupy)
-        idx += BATCH_SIZE
-   
+    for actmat_batch in batched(actmat, BATCH_SIZE):
+        swapped_zero_count += get_swapped_zero_positive_count(actmat_batch, use_cupy=use_cupy)
 
-    # 768 x 768
+    # (L1/2) x (L1/2)
     if use_cupy:
+        # Subtract from each i-th slice the positive value of the current i-th placement.
+        # This is the place where we account for how much "bad" it would do.
+        # It is done here because we process earlier in batches, but this operation is distributive,
+        # so it needs to only be done once at the end.
         swapped_zero_increase = swapped_zero_count - cp.reshape(cp.diag(swapped_zero_count), (1, n_neurons))
         swapped_zero_increase = cp.asnumpy(swapped_zero_increase)
 
     else:
         swapped_zero_increase = swapped_zero_count - np.reshape(np.diag(swapped_zero_count), (1, n_neurons))
 
-    score_change = swapped_zero_increase
+    return swapped_zero_increase
 
-    # kill off swaps between neurons in the same block
-    blocks = np.arange(n_neurons).reshape((n_neurons, 1)) // 4
+
+def get_score_change(actmat, use_cupy=True):
+    # actmat is a boolean matrix of shape (N, L1) with "True" meaning 0
+
+    n_neurons = actmat.shape[1]
+
+    score_change = get_swapped_zero_increase(actmat, use_cupy)
+
+    # Kill off swaps between neurons in the same block
+    blocks = np.arange(n_neurons).reshape((n_neurons, 1)) // ZERO_BLOCK_SIZE
     same_block_killer = 1 - (blocks == blocks.T).astype(int)
     score_change = score_change * same_block_killer
     return score_change
 
 
 def make_swaps_2(actmat, use_cupy=True):
+    '''
+    Returns a series of independent 2-swap operations that collectively improve the objective function.
+    '''
+
     # For each pair of nodes, we want to calculate the difference between the number of 4-zero runs when swapping them
     start_time = time.time()
     print("Starting make_swaps_2")
+
     n_neurons = actmat.shape[1]
     n_samples = actmat.shape[0]
-    n_blocks = n_neurons // 4
+    n_blocks = n_neurons // ZERO_BLOCK_SIZE
 
+    # Compute the score change of swapping i-th and j-th neurons
     score_change = get_score_change(actmat, use_cupy=use_cupy)
+    # Sum score_change[i, j] + score_change[j, i] to get the cumulative impact of the swap.
     score_change = score_change + score_change.T
 
+    def all_indices_in_same_block(i):
+        ''' Returns a list of indices of all neurons in the same block as the i-th neuron. '''
+        # Floor to the start of the block.
+        base = i // ZERO_BLOCK_SIZE * ZERO_BLOCK_SIZE
+        return list(range(base, base + ZERO_BLOCK_SIZE))
 
-    def make_indices_to_kill(i):
-        block = i // 4
-        return list(range(block * 4, block * 4 + 4))
     swaps = []
     total_score_change = 0
     while True:
         swap = np.argmax(score_change)
+        # argmax returns a flat index, so we need to recompute the position.
         i, j = swap // n_neurons, swap % n_neurons
-        indices_to_kill = make_indices_to_kill(i) + make_indices_to_kill(j)
+
         improvement = score_change[i, j]
         if improvement == 0:
             break
-        #print(f"Swapping {i} and {j} for improvement {improvement}")
+
+        if VERBOSE:
+            print(f"Swapping {i} and {j} for improvement {improvement}")
+
+        # The swap is an improvement, add it to the list.
         total_score_change += improvement
         swaps.append((i, j))
+
+        indices_to_kill = all_indices_in_same_block(i) + all_indices_in_same_block(j)
         for index in indices_to_kill:
-            score_change[:, index] = -9999
-            score_change[index, :] = -9999
-    total_improvement = total_score_change / n_samples / (n_neurons//4) *100
+            # Zero out the improvement for the swaps to and from blocks which had neurons swapped.
+            # This ensures they won't be picked later, and therefore all swaps will be independent.
+            score_change[:, index] = 0
+            score_change[index, :] = 0
+
+    total_improvement = total_score_change / n_samples / (n_neurons//ZERO_BLOCK_SIZE) * 100
+
     print(f"Time elapsed: {time.time() - start_time:0.3f}")
     print(f"Improvement this iteration: {total_improvement:0.3f}")
 
     return swaps, total_improvement
 
-def make_swaps_3(actmat, use_cupy=True):
-    # for each triplet of nodes, we want to calculate the change in score when moving them in a cycle
-    
-    score_changes = get_score_change(actmat, use_cupy=use_cupy)
-    n_neurons = score_changes.shape[0]
-    n_samples = actmat.shape[0]
-    n_blocks = n_neurons // 4
-    orig_shape = (n_neurons,) * 3
-    compressed_shape = (n_blocks, 4) * 3
-    cycles = []
-    total_score_change = 0
 
+def make_swaps_3(actmat, use_cupy=True):
+    '''
+    Returns a series of independent left-rotates operations that collectively improve the objective function.
+    '''
+
+    # For each triplet of nodes, we want to calculate the change in score when moving them in a cycle
     print("Starting make_swaps_3")
     start_time = time.time()
 
+    n_neurons = actmat.shape[1]
+    n_samples = actmat.shape[0]
+    n_blocks = n_neurons // ZERO_BLOCK_SIZE
+
+    score_changes = get_score_change(actmat, use_cupy=use_cupy)
+
     # For each neuron i, j, k we sum score_change[i, j] + score_change[j, k] + score_change[k, i]
-    score_changes_3 = score_changes[:, :, None] + score_changes[None, :, :] + (score_changes.T)[:, None, :]
+    # This is the cumulative impact of the right-rotation.
+    score_changes = score_changes[:, :, None] + score_changes[None, :, :] + (score_changes.T)[:, None, :]
 
-    # improvement = score_changes_3[4, 8, 12] / n_samples / (n_neurons//4) *100
-    # print(improvement)
-    # cycles.append((12,8,4))
-    # return cycles, improvement
-    
+    orig_shape = (n_neurons,) * 3
+    compressed_shape = (n_blocks, ZERO_BLOCK_SIZE) * 3
+    cycles = []
+    total_score_change = 0
 
-    # We don't want to have to go through an enormous array so compress it to represent blocks rather than neurons
-    # Cupy doesn't support a list of axes
-    # TODO: Maybe there is some cheeky way to use cupy here? This part takes by far the longest.
-    # TODO: Uses quite a bit of RAM, see if it can be improved.
-    max_values = cp.amax(cp.reshape(score_changes_3, compressed_shape), axis=5, keepdims=False)
-    max_values = cp.amax(max_values, axis=3, keepdims=False)
-    max_values = cp.amax(max_values, axis=1, keepdims=False)
-    
+    if use_cupy:
+        # We don't want to have to go through an enormous array so compress it to represent blocks rather than neurons
+        # Cupy doesn't support a list of axes so we go one by one.
+        max_values = cp.amax(cp.reshape(score_changes, compressed_shape), axis=5, keepdims=False)
+        max_values = cp.amax(max_values, axis=3, keepdims=False)
+        max_values = cp.amax(max_values, axis=1, keepdims=False)
+    else:
+        max_values = np.amax(np.reshape(score_changes, compressed_shape), axis=(5, 3, 1), keepdims=False)
+
+    # Kill rotates that would only affect less than 3 different blocks.
+    # We must do this, because the rest of the algorithm relies on it for correctness.
+    # It would also be pointless as such cases degenerate to the ones handled by make_swaps_2.
     for block in range(n_blocks):
         max_values[block, block, :] = 0
         max_values[block, :, block] = 0
         max_values[:, block, block] = 0
 
     while True:
-        out_argmax = max_values.argmax()
-        val = max_values.flatten()[out_argmax]
-        if val <= 0:
-            break # Finish!
-        total_score_change += val
-        b1, b2, b3 = np.unravel_index(out_argmax, (n_blocks, n_blocks, n_blocks))
-        i, j, k = b1 * 4, b2 * 4, b3 * 4
-        # Now we need to find the best swap for this triplet of blocks (we already know there is a gain available)
-        in_argmax = score_changes_3[i:i+4, j:j+4, k:k+4].argmax()
-        i1, j1, k1 = np.unravel_index(in_argmax, (4, 4, 4))
+        best_blocks = max_values.argmax()
+        improvement_blocks = max_values.flatten()[best_blocks]
+        if improvement_blocks == 0:
+            break
+
+        total_score_change += improvement_blocks
+
+        # We first find the blocks that have neurons that can be rotated with a gain.
+        b1, b2, b3 = np.unravel_index(best_blocks, (n_blocks, n_blocks, n_blocks))
+        i, j, k = b1 * ZERO_BLOCK_SIZE, b2 * ZERO_BLOCK_SIZE, b3 * ZERO_BLOCK_SIZE
+
+        # Now we need to find the best set of neurons for this rotation in the found blocks
+        # (we already know there is a gain available)
+        local_score_changes = score_changes[i:i+ZERO_BLOCK_SIZE, j:j+ZERO_BLOCK_SIZE, k:k+ZERO_BLOCK_SIZE]
+        best_neurons = local_score_changes.argmax()
+        improvement_neurons = local_score_changes.flatten()[best_neurons]
+        assert improvement_blocks == improvement_neurons
+        i1, j1, k1 = np.unravel_index(best_neurons, (ZERO_BLOCK_SIZE, ZERO_BLOCK_SIZE, ZERO_BLOCK_SIZE))
         i, j, k = i + i1, j + j1, k + k1
-        cycles.append((k, j, i))
+
+        if VERBOSE:
+            print(f"Right-rotating {i}, {j}, {k} for improvement {improvement_neurons}")
+
+        # Add the right-rotate indices. We add them in reverse order as we previously computed for a right-rotate.
+        cycles.append((i, j, k))
 
         # Now silence these blocks since the scores are no longer accurate
         # We only need to affect the smaller array since gains of zeros and under are ignored
@@ -223,7 +301,7 @@ def make_swaps_3(actmat, use_cupy=True):
             max_values[:, b, :] = 0
             max_values[:, :, b] = 0
 
-    total_improvement = total_score_change / n_samples / (n_neurons//4) *100
+    total_improvement = total_score_change / n_samples / (n_neurons//4) * 100
     print(f"Time elapsed: {time.time() - start_time:0.3f}")
     print(f"Improvement this iteration: {total_improvement:0.3f}")
     return cycles, total_improvement
@@ -231,35 +309,50 @@ def make_swaps_3(actmat, use_cupy=True):
 
 def find_perm_impl(actmat):
     actmat = np.reshape(actmat, (actmat.shape[0] * 2, actmat.shape[1]//2))
-    actmat = cp.asarray(actmat, dtype=cp.int8)
+    if USE_CUPY:
+        actmat = cp.asarray(actmat, dtype=cp.int8)
     actmat_orig = actmat.copy()
+
     total_score_change = 0
     perm = np.arange(M.L1 // 2)
-    stage1 = True
-    stop_after_stage1 = False
-    fails_in_a_row = 0
+
+    stages = [make_swaps_2, make_swaps_3]
+    # The optimization routines are deterministic, so no need to retry.
+    stages_max_fails = [0, 0]
+    stage_id = 0
+    stop_after_stage = None
+    num_fails = 0
+
     for i in range(50):
-        swap_fn = make_swaps_2 if stage1 else make_swaps_3
         print("Iteration", i+1)
+
+        # Choose the current stage optimization function
+        swap_fn = stages[stage_id]
+
+        # Apply the current permutation to get the current best neuron order.
         actmat = actmat_orig[:, perm]
-        swaps, score_change = swap_fn(actmat)
+
+        # Calculate a set of independent right rotates (so swaps for 2 element case)
+        # that when applied improve the objective function
+        swaps, score_change = swap_fn(actmat, USE_CUPY)
         for cycle in swaps:
-            apply_cycle(perm, cycle)
+            # Update the current best permutation with the newly found adjustments.
+            apply_rotate_right(perm, cycle)
 
         total_score_change += score_change
-        print("Total improvement:", total_score_change)
-        print()
-        if score_change == 0:
-            fails_in_a_row += 1
-            if fails_in_a_row == 2 or stop_after_stage1:
-                print("No more improvement possible.")
-                break
-            else:
-                stage1=not stage1
-                print(f"Switching to stage {1 if stage1 else 2}")
+        print(f'Total improvement: {total_score_change}\n')
 
-        else:
-            fails_in_a_row = 0
+        if score_change == 0:
+            num_fails += 1
+            if num_fails > stages_max_fails[stage_id]:
+                num_fails = 0
+                stage_id += 1
+
+                if stage_id >= len(stages) or (stop_after_stage is not None and stage_id > stop_after_stage):
+                    print('No more improvement possible.')
+                    break
+
+                print(f'Switching to stage {stage_id}')
 
     return perm
 
