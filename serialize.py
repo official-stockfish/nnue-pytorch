@@ -297,7 +297,7 @@ def main():
   parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
   parser.add_argument("target", help="Target file (can be .pt or .nnue)")
   parser.add_argument("--description", default=None, type=str, dest='description', help="The description string to include in the network. Only works when serializing into a .nnue file.")
-  parser.add_argument("--ft_compression", default='none', type=str, dest='ft_compression', help="Compression method to use for FT weights and biases. Either 'none' or 'leb128'. Only allowed if saving to .nnue.")
+  parser.add_argument("--ft_compression", default='leb128', type=str, dest='ft_compression', help="Compression method to use for FT weights and biases. Either 'none' or 'leb128'. Only allowed if saving to .nnue.")
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
@@ -318,7 +318,8 @@ def main():
     raise Exception('Invalid network input format.')
 
   if args.ft_compression != 'none' and not args.target.endswith('.nnue'):
-    raise Exception('Compression only allowed for .nnue target.')
+    args.ft_compression = 'none'
+    # raise Exception('Compression only allowed for .nnue target.')
 
   if args.ft_compression not in ['none', 'leb128']:
     raise Exception('Invalid compression method.')
