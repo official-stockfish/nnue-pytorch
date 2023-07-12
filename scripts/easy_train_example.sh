@@ -21,7 +21,7 @@ python easy_train.py \
     --validation-size=16384 \
     --network-testing-threads=24 \
     --network-testing-explore-factor=1.5 \
-    --network-testing-book="https://github.com/official-stockfish/books/raw/master/UHO_XXL_+0.90_+1.19.epd.zip" \
+    --network-testing-book="https://github.com/official-stockfish/books/raw/master/UHO_4060_v2.epd.zip" \
     --network-testing-nodes-per-move=20000 \
     --network-testing-hash-mb=8 \
     --network-testing-games-per-round=200 \

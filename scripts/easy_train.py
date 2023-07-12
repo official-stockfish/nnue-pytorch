@@ -2114,7 +2114,7 @@ def parse_cli_args():
     )
     parser.add_argument(
         '--network-testing-book',
-        default='https://github.com/official-stockfish/books/raw/master/UHO_XXL_+0.90_+1.19.epd.zip',
+        default='https://github.com/official-stockfish/books/raw/master/UHO_4060_v2.epd.zip',
         type=str,
         metavar='PATH_OR_URL',
         dest='network_testing_book',
