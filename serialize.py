@@ -215,7 +215,7 @@ class NNUEReader():
     self.read_int32(VERSION) # version
     self.read_int32(fc_hash ^ feature_set.hash ^ (M.L1*2))
     desc_len = self.read_int32()
-    description = self.f.read(desc_len)
+    self.description = self.f.read(desc_len).decode('utf-8')
 
   def read_leb_128_array(self, dtype, shape):
     l = self.read_int32()
@@ -314,6 +314,8 @@ def main():
     with open(args.source, 'rb') as f:
       reader = NNUEReader(f, feature_set)
       nnue = reader.model
+      if args.description is None:
+        args.description = reader.description
   else:
     raise Exception('Invalid network input format.')
 
