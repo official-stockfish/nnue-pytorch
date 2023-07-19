@@ -10,12 +10,12 @@ from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
-def make_data_loaders(train_filename, val_filename, feature_set, num_workers, batch_size, filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index, main_device, epoch_size, val_size):
+def make_data_loaders(train_filenames, val_filenames, feature_set, num_workers, batch_size, filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index, main_device, epoch_size, val_size):
   # Epoch and validation sizes are arbitrary
   features_name = feature_set.name
-  train_infinite = nnue_dataset.SparseBatchDataset(features_name, train_filename, batch_size, num_workers=num_workers,
+  train_infinite = nnue_dataset.SparseBatchDataset(features_name, train_filenames, batch_size, num_workers=num_workers,
                                                    filtered=filtered, random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, early_fen_skipping=early_fen_skipping, param_index=param_index, device=main_device)
-  val_infinite = nnue_dataset.SparseBatchDataset(features_name, val_filename, batch_size, filtered=filtered,
+  val_infinite = nnue_dataset.SparseBatchDataset(features_name, val_filenames, batch_size, filtered=filtered,
                                                    random_fen_skipping=random_fen_skipping, wld_filtered=wld_filtered, early_fen_skipping=early_fen_skipping, param_index=param_index, device=main_device)
   # num_workers has to be 0 for sparse, and 1 for dense
   # it currently cannot work in parallel mode but it shouldn't need to
@@ -33,11 +33,14 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def flatten_once(lst):
+    return sum(lst, [])
+
 def main():
   parser = argparse.ArgumentParser(description="Trains the network.")
-  parser.add_argument("train", help="Training data (.bin or .binpack)")
-  parser.add_argument("val", help="Validation data (.bin or .binpack)")
+  parser.add_argument("datasets", action='append', nargs='+', help="Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if not validation data is specified.")
   parser = pl.Trainer.add_argparse_args(parser)
+  parser.add_argument("--validation-data", type=str, action='append', nargs='+', dest='validation_datasets', help="Validation data to use for validation instead of the training data.")
   parser.add_argument("--lambda", default=1.0, type=float, dest='lambda_', help="lambda=1.0 = train on evaluations, lambda=0.0 = train on game results, interpolates between (default=1.0).")
   parser.add_argument("--start-lambda", default=None, type=float, dest='start_lambda', help="lambda to use at first epoch.")
   parser.add_argument("--end-lambda", default=None, type=float, dest='end_lambda', help="lambda to use at last epoch.")
@@ -61,10 +64,24 @@ def main():
   features.add_argparse_args(parser)
   args = parser.parse_args()
 
-  if not os.path.exists(args.train):
-    raise Exception('{0} does not exist'.format(args.train))
-  if not os.path.exists(args.val):
-    raise Exception('{0} does not exist'.format(args.val))
+  args.datasets = flatten_once(args.datasets)
+  if args.validation_datasets:
+    args.validation_datasets = flatten_once(args.validation_datasets)
+  else:
+    args.validation_datasets = []
+
+  for dataset in args.datasets:
+    if not os.path.exists(dataset):
+      raise Exception('{0} does not exist'.format(dataset))
+
+  for val_dataset in args.validation_datasets:
+    if not os.path.exists(val_dataset):
+      raise Exception('{0} does not exist'.format(val_dataset))
+
+  train_datasets = args.datasets
+  val_datasets = train_datasets
+  if len(args.validation_datasets) > 0:
+    val_datasets = args.validation_datasets
 
   if (args.start_lambda is not None) != (args.end_lambda is not None):
     raise Exception('Either both or none of start_lambda and end_lambda must be specified.')
@@ -101,7 +118,8 @@ def main():
   print("Num virtual features: {}".format(feature_set.num_virtual_features))
   print("Num features: {}".format(feature_set.num_features))
 
-  print("Training with {} validating with {}".format(args.train, args.val))
+  print("Training with: {}".format(train_datasets))
+  print("Validating with: {}".format(val_datasets))
 
   pl.seed_everything(args.seed)
   print("Seed {}".format(args.seed))
@@ -134,8 +152,8 @@ def main():
 
   print('Using c++ data loader')
   train, val = make_data_loaders(
-    args.train,
-    args.val,
+    train_datasets,
+    val_datasets,
     feature_set,
     args.num_workers,
     batch_size,
