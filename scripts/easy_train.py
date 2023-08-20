@@ -647,8 +647,8 @@ class TrainingRun(Thread):
         gpu_id,
         run_id,
         nnue_pytorch_directory,
-        training_dataset,
-        validation_dataset,
+        training_datasets,
+        validation_datasets,
         num_data_loader_threads,
         num_pytorch_threads,
         num_epochs,
@@ -680,8 +680,8 @@ class TrainingRun(Thread):
 
         # Use abspaths because we will be running the script with a different cwd
         self._nnue_pytorch_directory = os.path.abspath(nnue_pytorch_directory)
-        self._training_dataset = os.path.abspath(training_dataset)
-        self._validation_dataset = os.path.abspath(validation_dataset)
+        self._training_datasets = [os.path.abspath(d) for d in training_datasets]
+        self._validation_datasets = [os.path.abspath(d) for d in validation_datasets]
         self._num_data_loader_threads = num_data_loader_threads
         self._num_pytorch_threads = num_pytorch_threads
         self._num_epochs = num_epochs
@@ -726,8 +726,6 @@ class TrainingRun(Thread):
 
     def _get_stringified_args(self):
         args = [
-            self._training_dataset,
-            self._validation_dataset,
             f'--num-workers={self._num_data_loader_threads}',
             f'--threads={self._num_pytorch_threads}',
             f'--max_epoch={self._num_epochs}',
@@ -773,6 +771,12 @@ class TrainingRun(Thread):
 
         for arg in self._additional_args:
             args.append(arg)
+
+        for dataset in self._training_datasets:
+            args.append(dataset)
+
+        for dataset in self._validation_datasets:
+            args.append(f'--validation-data={dataset}')
 
         return args
 
@@ -1774,6 +1778,9 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def flatten_once(lst):
+    return sum(lst, [])
+
 def parse_cli_args():
     default_pytorch_threads = 2
     default_data_loader_threads = 4
@@ -1803,20 +1810,22 @@ def parse_cli_args():
     )
     parser.add_argument(
         '--training-dataset',
-        default=None,
         type=str,
+        action='append',
+        nargs='+',
         metavar='PATH',
-        dest='training_dataset',
+        dest='training_datasets',
         required=True,
-        help='Path to the training data. Must be a single file. Supports .bin and .binpack files. Binpack recommended for maximum performance.'
+        help='Path to a training dataset. Supports .binpack files.'
     )
     parser.add_argument(
         '--validation-dataset',
-        default=None,
         type=str,
+        action='append',
+        nargs='+',
         metavar='PATH',
-        dest='validation_dataset',
-        help='Path fo the validation data. Must be a single file. Same support as for training data. If not set then defaults to training data.'
+        dest='validation_datasets',
+        help='Path to a validation dataset. Supports .binpack files.'
     )
     parser.add_argument(
         '--lambda',
@@ -2194,18 +2203,26 @@ def parse_cli_args():
     )
     args = parser.parse_args()
 
-    if not args.training_dataset:
+    args.training_datasets = flatten_once(args.training_datasets)
+    if args.validation_datasets:
+        args.validation_datasets = flatten_once(args.validation_datasets)
+    else:
+        args.validation_datasets = []
+
+    if len(args.training_datasets) == 0:
         raise Exception('No training data specified')
 
     if args.lambda_ < 0.0 or args.lambda_ > 1.0:
         raise Exception('lambda must be within [0, 1]')
 
-    args.validation_dataset = args.validation_dataset or args.training_dataset
-    if not Path(args.validation_dataset).is_file():
-        raise Exception(f'Invalid validation data set file name: {args.validation_dataset}')
+    args.validation_datasets = args.validation_datasets or args.training_datasets
+    for dataset in args.validation_datasets:
+        if not Path(dataset).is_file():
+            raise Exception(f'Invalid validation data set file name: {dataset}')
 
-    if not Path(args.training_dataset).is_file():
-        raise Exception(f'Invalid training data set file name: {args.training_dataset}')
+    for dataset in args.training_datasets:
+        if not Path(dataset).is_file():
+            raise Exception(f'Invalid training data set file name: {dataset}')
 
     # these are not required because testing is optional
     if args.engine_base_branch and args.engine_base_branch.count('/') != 2:
@@ -2440,7 +2457,7 @@ def main():
     os.makedirs(absolute_workspace_path, exist_ok=True)
 
     do_network_testing = args.engine_base_branch and args.engine_test_branch and args.do_network_testing
-    do_network_training = args.do_network_training and args.training_dataset
+    do_network_training = args.do_network_training and args.training_datasets
 
     # Global (workspace) setup
 
@@ -2538,8 +2555,8 @@ def main():
                     gpu_id=gpu_id,
                     run_id=run_id,
                     nnue_pytorch_directory=nnue_pytorch_directory,
-                    training_dataset=args.training_dataset,
-                    validation_dataset=args.validation_dataset,
+                    training_datasets=args.training_datasets,
+                    validation_datasets=args.validation_datasets,
                     num_data_loader_threads=args.num_workers,
                     num_pytorch_threads=args.threads,
                     num_epochs=args.max_epoch,

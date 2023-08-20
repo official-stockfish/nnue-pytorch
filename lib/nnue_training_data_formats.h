@@ -6726,6 +6726,12 @@ namespace binpack
         }
     }
 
+    inline std::ifstream::pos_type filesize(const char* filename)
+    {
+        std::ifstream in(filename, std::ifstream::ate | std::ifstream::binary);
+        return in.tellg();
+    }
+
     struct CompressedTrainingDataFile
     {
         struct Header
@@ -6737,12 +6743,15 @@ namespace binpack
             m_path(std::move(path)),
             m_file(m_path, std::ios_base::binary | std::ios_base::in | std::ios_base::out | om)
         {
+            // Racey but who cares
+            m_sizeBytes = filesize(m_path.c_str());
         }
 
         void append(const char* data, std::uint32_t size)
         {
             writeChunkHeader({size});
             m_file.write(data, size);
+            m_sizeBytes += size + 8;
         }
 
         [[nodiscard]] bool hasNextChunk()
@@ -6756,6 +6765,11 @@ namespace binpack
             return !m_file.eof();
         }
 
+        void seek_to_start()
+        {
+            m_file.seekg(0);
+        }
+
         [[nodiscard]] std::vector<unsigned char> readNextChunk()
         {
             auto size = readChunkHeader().chunkSize;
@@ -6764,9 +6778,15 @@ namespace binpack
             return data;
         }
 
+        [[nodiscard]] std::size_t sizeBytes() const
+        {
+            return m_sizeBytes;
+        }
+
     private:
         std::string m_path;
         std::fstream m_file;
+        std::size_t m_sizeBytes;
 
         void writeChunkHeader(Header h)
         {
@@ -7558,20 +7578,31 @@ namespace binpack
 
         CompressedTrainingDataEntryParallelReader(
             int concurrency,
-            std::string path,
+            std::vector<std::string> paths,
             std::ios_base::openmode om = std::ios_base::app,
+            bool cyclic = false,
             std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr
         ) :
             m_concurrency(concurrency),
-            m_inputFile(path, om),
             m_bufferOffset(0),
+            m_cyclic(cyclic),
             m_skipPredicate(std::move(skipPredicate))
         {
             m_numRunningWorkers.store(0);
-            if (!m_inputFile.hasNextChunk())
+            std::vector<double> sizes; // discrete distribution wants double weights
+            for (const auto& path : paths)
             {
-                return;
+                auto& file = m_inputFiles.emplace_back(path, om);
+
+                if (!file.hasNextChunk())
+                {
+                    return;
+                }
+
+                sizes.emplace_back(static_cast<double>(file.sizeBytes()));
             }
+
+            m_inputFileDistribution = std::discrete_distribution<>(sizes.begin(), sizes.end());
 
             m_stopFlag.store(false);
 
@@ -7742,8 +7773,10 @@ namespace binpack
 
     private:
         int m_concurrency;
-        CompressedTrainingDataFile m_inputFile;
+        std::vector<CompressedTrainingDataFile> m_inputFiles;
+        std::discrete_distribution<> m_inputFileDistribution;
         std::atomic_int m_numRunningWorkers;
+        bool m_cyclic;
 
         static constexpr int threadBufferSize = 256 * 256 * 16;
 
@@ -7763,17 +7796,24 @@ namespace binpack
         {
             if (m_offset + sizeof(PackedTrainingDataEntry) + 2 > m_chunk.size())
             {
+                auto& prng = rng::get_thread_local_rng();
+                const std::size_t fileId = m_inputFileDistribution(prng);
+                auto& inputFile = m_inputFiles[fileId];
+
                 std::unique_lock lock(m_fileMutex);
 
-                if (!m_inputFile.hasNextChunk())
+                if (!inputFile.hasNextChunk())
                 {
-                    return true;
+                    if (m_cyclic)
+                    {
+                        inputFile.seek_to_start();
+                    }
+                    else
+                        return true;
                 }
-                else
-                {
-                    m_chunk = m_inputFile.readNextChunk();
-                    m_offset = 0;
-                }
+
+                m_chunk = inputFile.readNextChunk();
+                m_offset = 0;
             }
 
             return false;

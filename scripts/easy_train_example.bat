@@ -1,6 +1,7 @@
 python easy_train.py ^
     --training-dataset=c:/dev/nnue-pytorch/noob_master_leaf_static_d12_85M_0.binpack ^
-    --validation-dataset=c:/dev/nnue-pytorch/d8_100000.binpack ^
+    --training-dataset=c:/dev/nnue-pytorch/d8_100000.binpack ^
+    --training-dataset=c:/dev/nnue-pytorch/10m_d3_2.binpack ^
     --num-workers=1 ^
     --threads=1 ^
     --gpus="0," ^
