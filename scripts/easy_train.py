@@ -2035,7 +2035,7 @@ def parse_cli_args():
     )
     parser.add_argument(
         '--nnue-pytorch-branch',
-        default='glinscott/nnue-pytorch/master',
+        default='official-stockfish/nnue-pytorch/master',
         type=str,
         metavar='BRANCH_OR_COMMIT',
         dest='nnue_pytorch_branch',

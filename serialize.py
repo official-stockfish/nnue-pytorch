@@ -57,7 +57,7 @@ def decode_leb_128_array(arr, n):
 
 # hardcoded for now
 VERSION = 0x7AF32F20
-DEFAULT_DESCRIPTION = "Network trained with the https://github.com/glinscott/nnue-pytorch trainer."
+DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
 
 class NNUEWriter():
   """
