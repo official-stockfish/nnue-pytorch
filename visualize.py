@@ -133,7 +133,7 @@ class NNUEVisualizer():
                 if default_order:
                     # Piece centric, but with flipped king position.
                     # Same order as used by https://github.com/hxim/Stockfish-Evaluation-Guide.
-                    # See also https://github.com/glinscott/nnue-pytorch/issues/42#issuecomment-753604393.
+                    # See also https://github.com/official-stockfish/nnue-pytorch/issues/42#issuecomment-753604393.
                     inpos = [[(7- kipos[0])   + pipos[0]   *8, kipos[1]+(7-pipos[1])*8],
                              [(7-(kipos[0]^7))+(pipos[0]^7)*8, kipos[1]+(7-pipos[1])*8]]
                     d = - 8 if piece < 2 else 48 + (piece // 2 - 1) * 64
