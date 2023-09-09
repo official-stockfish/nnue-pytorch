@@ -7,7 +7,7 @@
 ```
 python3 -m venv env
 source env/bin/activate
-pip install python-chess==0.31.4 pytorch-lightning torch matplotlib
+pip install python-chess==0.31.4 pytorch-lightning==1.9.5 torch matplotlib tensorboard
 ```
 
 #### Install CuPy
@@ -41,18 +41,14 @@ sh compile_data_loader.bat
 
 ```
 source env/bin/activate
-python train.py train_data.bin val_data.bin
+python train.py --gpus 1 train_data.bin val_data.bin
 ```
 
 ## Resuming from a checkpoint
 ```
-python train.py --resume_from_checkpoint <path> ...
+python train.py --gpus 1 --resume_from_checkpoint <path> ...
 ```
 
-## Training on GPU
-```
-python train.py --gpus 1 ...
-```
 ## Feature set selection
 By default the trainer uses a factorized HalfKAv2_hm feature set (named "HalfKAv2_hm^")
 If you wish to change the feature set used then you can use the `--features=NAME` option. For the list of available features see `--help`
