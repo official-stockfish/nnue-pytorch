@@ -1,0 +1,11 @@
+psutil
+asciimatics
+GPUtil
+python-chess==0.31.4
+matplotlib
+--find-links https://download.pytorch.org/whl/torch_stable.html
+torch==2.0.1+cu118
+pytorch-lightning==1.9.5
+tensorboard
+cupy-cuda11x
+numba

@@ -1,30 +1,44 @@
 # Setup
 
-#### Install PyTorch
+### Software prerequisites
 
-[PyTorch installation guide](https://pytorch.org/get-started/locally/)
+#### Python
+
+If using easy_train.py then at least 3.7 is required.
+
+Otherwise versions around 3.6 should also work, but updating is recommended.
+
+Python 3.11 was also tested and works well.
+
+#### A C++ compiler
+
+If you're using easy_train.py then at least GCC 9.2 is required for compiling the data loader, Stockfish, and c-chess-cli. This a defensive version requirement as older versions were known to cause problems with Stockfish.
+
+If you're not using easy_train.py then no automatic compilation will take place; use what you wish.
+
+If you're on Windows the best way is to probably use [MSYS2](https://www.msys2.org/). It would also make it easy to install Make (next step).
+
+#### Make
+
+For compiling Stockfish and c-chess-cli. Not strictly necessary if you're not using easy_train.py, but recommended.
+
+#### CMake
+
+Necessary for compiling the data loader.
+
+https://cmake.org/install/
+
+### Package dependencies
 
 ```
-python3 -m venv env
-source env/bin/activate
-pip install python-chess==0.31.4 pytorch-lightning==1.9.5 torch matplotlib tensorboard
+python -m venv trainer
+pip install -r requirements.txt
 ```
 
-#### Install CuPy
-First check what version of cuda is being used by pytorch.
-```
-import torch
-torch.version.cuda
-```
-Then install CuPy with the matching CUDA version.
-```
-pip install cupy-cudaXXX
-```
-where XXX corresponds to the first 3 digits of the CUDA version. For example `cupy-cuda112` for CUDA 11.2.
+PyTorch with CUDA 11.8 will be automatically installed, along with the matching CuPy version.
 
-CuPy might use the PyTorch's private installation of CUDA, but it is better to install the matching version of CUDA separately. [CUDA Downloads](https://developer.nvidia.com/cuda-downloads)
+### The data loader (if not using easy_train.py)
 
-#### Build the fast DataLoader
 This requires a C++17 compiler and cmake.
 
 Windows:
