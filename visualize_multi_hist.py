@@ -38,14 +38,14 @@ def get_bins(inputs_columns, num_bins):
     return [a + (b-a) / num_bins * i for i in range(num_bins+1)]
 
 def plot_hists(tensors_columns, row_names, col_names, w=8.0, h=3.0, title=None, num_bins=256, filename='a.png'):
-    fig, axs = plt.subplots(len(tensors_columns[0]), len(tensors_columns), sharex=True, sharey=True, figsize=(w * len(tensors_columns), h * len(tensors_columns[0])), dpi=100)
+    fig, axs = plt.subplots(len(tensors_columns[0]), len(tensors_columns), sharex=True, sharey=True, squeeze=False, figsize=(w * len(tensors_columns), h * len(tensors_columns[0])), dpi=100)
     if title:
         fig.suptitle(title)
     bins = get_bins(tensors_columns, num_bins)
     for i, tensors in enumerate(tensors_columns):
         print('Processing column {}/{}.'.format(i+1, len(tensors_columns)))
         for j, tensor in enumerate(tensors):
-            ax = axs[j, i] if len(tensors_columns) > 1 else axs[j]
+            ax = axs[j, i]
             print('    Processing tensor {}/{}.'.format(j+1, len(tensors)))
             ax.hist(tensor, log=True, bins=bins)
             if i == 0 and row_names[j]:
@@ -66,7 +66,7 @@ def main():
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
-    supported_features = ('HalfKAv2', 'HalfKAv2^')
+    supported_features = ('HalfKAv2', 'HalfKAv2^', 'HalfKAv2_hm', 'HalfKAv2_hm^')
     assert args.features in supported_features
     feature_set = features.get_feature_set_from_name(args.features)
 
