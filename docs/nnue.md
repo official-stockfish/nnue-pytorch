@@ -2960,7 +2960,7 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 ### "SFNNv8" architecture
 
-Same as "SFNNv7" with L1 size increased from 2048 to 2560.
+Same as "SFNNv5" with L1 size increased to 2560.
 
 2023-09-22 - *
 
@@ -2970,7 +2970,7 @@ Same as "SFNNv7" with L1 size increased from 2048 to 2560.
 
 ### "SFNNv7" architecture
 
-Same as "SFNNv6" with L1 size increased from 1536 to 2048.
+Same as "SFNNv5" with L1 size increased to 2048.
 
 2023-07-01 - 2023-09-22
 
