@@ -1494,7 +1494,7 @@ int32_t* linear_sparse_input(
     constexpr int num_tiles = layer.num_outputs / tile_size;
 
     // We need to find out the indices of the input values that are non-zero
-    // We'll use a lookup table approach. Over allocate 16 elements
+    // We'll use a lookup table approach. Overallocate 16 elements
     // so that stores are always valid (we will be using larger stores)
     uint16_t nnz_input_indices[layer.num_inputs + 16];
     int num_nnz_input_indices = 0;
@@ -1890,7 +1890,7 @@ int8_t* crelu16(,
             _mm256_permute4x64_epi64(
                 // clamp from below
                 _mm256_max_epi8(
-                    // packs saturate to 127, so we only need to clamp from below
+                    // packs saturates to 127, so we only need to clamp from below
                     _mm256_packs_epi16(in0, in1),
                     zero
                 ),
@@ -1999,7 +1999,7 @@ int8_t* quantmoid4(
         v0 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v0));
         v1 = _mm256_subs_epu16(cst_127_epi16, _mm256_abs_epi16(v1));
 
-        // Since we use multi later we have to prepare the input such that
+        // Since we use mulhi later we have to prepare the input such that
         // the high part (16 highest bits, as the 16-bit multiplication produces
         // a 32-bit result) after the multiplication land correctly. We want to
         // divide by 256==2^8 later (right shift by 8), so we would have 8 spare
@@ -2345,7 +2345,7 @@ if __name__ == '__main__':
 
 ### Using custom CUDA kernels
 
-How to run our own kernel? Don't we need a complicated setup with the CUDA compiler and all that? CuPy to the rescue. CuPy is a python library that allows the easy creation of CUDA kernels using plain python strings containing the CUDA code. CuPy handles compilation and everything else for us. For example:
+How to run our own kernel? Don't we need a complicated setup with the CUDA compiler and all that? CuPy to the rescue. CuPy is a python library that allows easy creation of CUDA kernels using plain python strings containing the CUDA code. CuPy handles compilation and everything else for us. For example:
 
 ```python
 import cupy as cp
