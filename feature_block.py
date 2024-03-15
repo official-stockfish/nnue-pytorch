@@ -1,10 +1,12 @@
 from collections import OrderedDict
 
+
 def _get_main_factor_name(full_name):
-    return full_name.replace('^', '')
+    return full_name.replace("^", "")
+
 
 class FeatureBlock:
-    '''
+    """
     This is the base class for all the network input features.
     All features must inherit from this class.
     It abstracts a named set of features in a way that
@@ -45,11 +47,11 @@ class FeatureBlock:
     get_active_features (def get_active_features(self, board: chess.Board)),
     which takes the board and returns the list of indices of the features
     that are active for this board.
-    '''
+    """
 
     def __init__(self, name, hash, factors):
         if not isinstance(factors, OrderedDict):
-            raise Exception('Factors must be an collections.OrderedDict')
+            raise Exception("Factors must be an collections.OrderedDict")
 
         self.name = name
         self.hash = hash
@@ -61,18 +63,20 @@ class FeatureBlock:
     def get_main_factor_name(self):
         return _get_main_factor_name(self.name)
 
-    '''
+    """
     This method represents the default factorizer. If your feature block
     has multiple factors you need to override this method to return
     a list of factors for a given feature.
-    '''
+    """
+
     def get_feature_factors(self, idx):
         return [idx]
 
-    '''
+    """
     This method takes a string name of a factor and returns the offset of the
     first feature in this factor when consulted with the sizes of the previous factors.
-    '''
+    """
+
     def get_factor_base_feature(self, name):
         offset = 0
         for n, s in self.factors.items():
@@ -81,4 +85,4 @@ class FeatureBlock:
 
             offset += s
 
-        raise Exception('No factor named {} in {}'.format(name, self.name))
+        raise Exception("No factor named {} in {}".format(name, self.name))
