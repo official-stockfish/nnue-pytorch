@@ -97,7 +97,7 @@ class FenBatchProvider:
         wld_filtered=False,
         param_index=0):
 
-        self.filename = filename.encode('utf-8')
+        self.filename = filename
         self.cyclic = cyclic
         self.num_workers = num_workers
         self.batch_size = batch_size
