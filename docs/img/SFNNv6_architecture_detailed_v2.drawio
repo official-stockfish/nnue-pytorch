@@ -452,7 +452,7 @@
             <mxPoint x="180" y="240" as="sourcePoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="8hmfTA59ZN2ZGKohdV2Q-147" value="Dense Linear&#xa;&lt;15, 32&gt;" style="swimlane;fontFamily=Courier New;fontSize=7;fillColor=#00FFFF;startSize=23;" parent="8hmfTA59ZN2ZGKohdV2Q-22" vertex="1" collapsed="1">
+        <mxCell id="8hmfTA59ZN2ZGKohdV2Q-147" value="Dense Linear&#xa;&lt;30, 32&gt;" style="swimlane;fontFamily=Courier New;fontSize=7;fillColor=#00FFFF;startSize=23;" parent="8hmfTA59ZN2ZGKohdV2Q-22" vertex="1" collapsed="1">
           <mxGeometry x="40" y="270" width="100" height="20" as="geometry">
             <mxRectangle x="410" y="620" width="200" height="30" as="alternateBounds" />
           </mxGeometry>
