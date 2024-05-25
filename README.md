@@ -86,3 +86,6 @@ This script runs in a loop, and will monitor the directory for new checkpoints. 
 * https://github.com/DanielUranga/TensorFlowNNUE
 * https://hxim.github.io/Stockfish-Evaluation-Guide/
 * dkappe - Suggesting ranger (https://github.com/lessw2020/Ranger-Deep-Learning-Optimizer)
+
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Code style: clang-format](https://img.shields.io/badge/code%20style-clang%20format-000000.svg)](https://github.com/llvm/llvm-project)
