@@ -48,7 +48,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <mutex>
 #include <random>
 
-#ifdef __BMI2__
+#ifdef HAS_BMI2
 #include <immintrin.h> // _pdep_u64
 #endif
 
@@ -267,7 +267,7 @@ namespace chess
 
     inline int nthSetBitIndex(std::uint64_t v, std::uint64_t n)
     {
-    #ifdef __BMI2__
+    #ifdef HAS_BMI2
         return intrin::msb(_pdep_u64(1ULL << n, v));
     #endif
 
