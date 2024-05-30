@@ -18,24 +18,25 @@ include(CheckCXXCompilerFlag)
 # Function to check if the CPU supports bmi2
 function(check_bmi2_support)
     execute_process(
-        COMMAND awk "/^vendor_id/{{print \$3; exit}}" /proc/cpuinfo
+        COMMAND bash -c "awk '/^vendor_id/{{print \$3; exit}}' /proc/cpuinfo"
         OUTPUT_VARIABLE VENDOR_ID
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     execute_process(
-        COMMAND awk "/^cpu family/{{print \$4; exit}}" /proc/cpuinfo
+        COMMAND bash -c "awk '/^cpu family/{{print \$4; exit}}' /proc/cpuinfo"
         OUTPUT_VARIABLE CPU_FAMILY
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     execute_process(
-        COMMAND grep -o "bmi2" /proc/cpuinfo
+        COMMAND bash -c "grep -m1 -o 'bmi2' /proc/cpuinfo"
         OUTPUT_VARIABLE CPU_BMI2
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
 
-    if(VENDOR_ID STREQUAL "AuthenticAMD" )
+    if(VENDOR_ID STREQUAL "AuthenticAMD")
         if(CPU_FAMILY GREATER_EQUAL "23" AND CPU_BMI2 STREQUAL "bmi2")
             set(CPU_SUPPORTS_BMI2 TRUE PARENT_SCOPE)
+        endif()
     elseif(CPU_BMI2 STREQUAL "bmi2")
         set(CPU_SUPPORTS_BMI2 TRUE PARENT_SCOPE)
     else()
@@ -48,6 +49,8 @@ check_bmi2_support()
 if(CPU_SUPPORTS_BMI2)
     message(STATUS "Adding BMI2 support")
     add_definitions(-DHAS_BMI2)
+else()
+    message(STATUS "No BMI2 support")
 endif()
 
 add_library(training_data_loader SHARED training_data_loader.cpp)
