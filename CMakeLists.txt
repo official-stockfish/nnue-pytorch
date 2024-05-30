@@ -15,8 +15,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED 17)
 
 include(CheckCXXCompilerFlag)
 
-# Function to check if the CPU is AMD and not older than family 25
-function(check_amd_family_25_or_newer)
+# Function to check if the CPU supports bmi2
+function(check_bmi2_support)
     execute_process(
         COMMAND awk "/^vendor_id/{{print \$3; exit}}" /proc/cpuinfo
         OUTPUT_VARIABLE VENDOR_ID
@@ -43,7 +43,7 @@ function(check_amd_family_25_or_newer)
     endif()
 endfunction()
 
-check_amd_family_25_or_newer()
+check_bmi2_support()
 
 if(CPU_SUPPORTS_BMI2)
     message(STATUS "Adding BMI2 support")
