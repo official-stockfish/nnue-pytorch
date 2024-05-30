@@ -27,28 +27,27 @@ function(check_amd_family_25_or_newer)
         OUTPUT_VARIABLE CPU_FAMILY
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
+    execute_process(
+        COMMAND grep -o "bmi2" /proc/cpuinfo
+        OUTPUT_VARIABLE CPU_BMI2
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
 
-    if(VENDOR_ID STREQUAL "AuthenticAMD" AND CPU_FAMILY GREATER_EQUAL "25")
-        set(CPU_AMD_FAMILY_25_OR_NEWER TRUE PARENT_SCOPE)
+    if(VENDOR_ID STREQUAL "AuthenticAMD" )
+        if(CPU_FAMILY GREATER_EQUAL "23" AND CPU_BMI2 STREQUAL "bmi2")
+            set(CPU_SUPPORTS_BMI2 TRUE PARENT_SCOPE)
+    elseif(CPU_BMI2 STREQUAL "bmi2")
+        set(CPU_SUPPORTS_BMI2 TRUE PARENT_SCOPE)
     else()
-        set(CPU_AMD_FAMILY_25_OR_NEWER FALSE PARENT_SCOPE)
+        set(CPU_SUPPORTS_BMI2 FALSE PARENT_SCOPE)
     endif()
 endfunction()
 
-# Call the function to check if the CPU is AMD and not older than family 25
 check_amd_family_25_or_newer()
 
-# Check for BMI2 support
-check_cxx_compiler_flag("-mbmi2" COMPILER_SUPPORTS_BMI2)
-if(COMPILER_SUPPORTS_BMI2)
-    if(CPU_AMD_FAMILY_25_OR_NEWER OR NOT VENDOR_ID STREQUAL "AuthenticAMD")
-        message(STATUS "Adding BMI2 support")
-        add_definitions(-DHAS_BMI2)
-    else()
-        message(STATUS "CPU is older than AMD family 25, not adding BMI2 support")
-    endif()
-else()
-    message(FATAL_ERROR "Compiler does not support BMI2")
+if(CPU_SUPPORTS_BMI2)
+    message(STATUS "Adding BMI2 support")
+    add_definitions(-DHAS_BMI2)
 endif()
 
 add_library(training_data_loader SHARED training_data_loader.cpp)
