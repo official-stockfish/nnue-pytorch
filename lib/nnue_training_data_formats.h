@@ -48,6 +48,10 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <mutex>
 #include <random>
 
+#ifdef __BMI2__
+#include <immintrin.h> // _pdep_u64
+#endif
+
 #include "rng.h"
 
 #if (defined(_MSC_VER) || defined(__INTEL_COMPILER)) && !defined(__clang__)
@@ -263,6 +267,10 @@ namespace chess
 
     inline int nthSetBitIndex(std::uint64_t v, std::uint64_t n)
     {
+    #ifdef __BMI2__
+        return intrin::msb(_pdep_u64(1ULL << n, v));
+    #endif
+
         std::uint64_t shift = 0;
 
         std::uint64_t p = intrin::popcount(v & 0xFFFFFFFFull);
