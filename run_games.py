@@ -278,7 +278,7 @@ def run_approximate_ordo(root_dir):
     print_atomic("Finished running ordo.")
 
 def run_ordo(root_dir, ordo_exe, concurrency):
-    """ run an ordo calcuation on an existing pgn file """
+    """ run an ordo calculation on an existing pgn file """
     pgn_file_name = os.path.join(root_dir, "out.pgn")
     ordo_file_name = os.path.join(root_dir, "ordo.out")
     ordo_file_name_temp = os.path.join(root_dir, "ordo_temp.out")
