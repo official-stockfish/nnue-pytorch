@@ -127,6 +127,7 @@ What this document DOES NOT contain:
     + [A part of the feature transformer directly forwarded to the output.](#a-part-of-the-feature-transformer-directly-forwarded-to-the-output)
     + [Multiple PSQT outputs and multiple subnetworks](#multiple-psqt-outputs-and-multiple-subnetworks)
 * [Historical Stockfish evaluation network architectures](#historical-stockfish-evaluation-network-architectures)
+    + ["SFNNv9" architecture](#sfnnv9-architecture)
     + ["SFNNv8" architecture](#sfnnv8-architecture)
     + ["SFNNv7" architecture](#sfnnv7-architecture)
     + ["SFNNv6" architecture](#sfnnv6-architecture)
@@ -2958,11 +2959,21 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 ## Historical Stockfish evaluation network architectures
 
+### "SFNNv9" architecture
+
+Same as "SFNNv5" with L1 size increased to 3072.
+
+2024-04-01 - *
+
+[Commit 0716b845fdef8a20102b07eaec074b8da8162523](https://github.com/official-stockfish/Stockfish/commit/0716b845fdef8a20102b07eaec074b8da8162523)
+
+![](img/SFNNv9_architecture_detailed_v2.svg)
+
 ### "SFNNv8" architecture
 
 Same as "SFNNv5" with L1 size increased to 2560.
 
-2023-09-22 - *
+2023-09-22 - 2024-04-01
 
 [Commit 782c32223583d7774770fc56e50bd88aae35cd1a](https://github.com/official-stockfish/Stockfish/commit/70ba9de85cddc5460b1ec53e0a99bee271e26ece)
 
