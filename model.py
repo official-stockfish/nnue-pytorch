@@ -322,10 +322,12 @@ class NNUE(pl.LightningModule):
     return self.step_(batch, batch_idx, 'train_loss')
 
   def validation_step(self, batch, batch_idx):
-    self.step_(batch, batch_idx, 'val_loss')
+    with torch.no_grad():
+      self.step_(batch, batch_idx, 'val_loss')
 
   def test_step(self, batch, batch_idx):
-    self.step_(batch, batch_idx, 'test_loss')
+    with torch.no_grad():
+      self.step_(batch, batch_idx, 'test_loss')
 
   def configure_optimizers(self):
     LR = self.lr
