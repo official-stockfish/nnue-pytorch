@@ -1480,7 +1480,7 @@ class TrainerRunsWidget(Widget):
 
     def add_run(self, run):
         self._runs.append(run)
-        self._runs = list(sorted(runs, key=lambda x: (x.gpu_id, x.run_id)))
+        self._runs = list(sorted(self._runs, key=lambda x: (x.gpu_id, x.run_id)))
 
     def required_height(self, offset, w):
         # A special value indicating that it should use the whole column.
