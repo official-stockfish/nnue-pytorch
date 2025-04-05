@@ -9,3 +9,4 @@ pytorch-lightning==1.9.5
 tensorboard
 cupy-cuda11x
 numba
+requests
