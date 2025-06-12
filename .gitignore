@@ -2,3 +2,7 @@ __pycache__/
 env/
 build/
 logs/
+testing
+libtraining_data_loader.*
+easy_train_data
+*.yaml
