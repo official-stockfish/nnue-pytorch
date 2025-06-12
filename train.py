@@ -10,6 +10,9 @@ from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from torch.utils.data import DataLoader, Dataset
 
+import warnings
+warnings.filterwarnings("ignore", ".*does not have many workers.*")
+
 def make_data_loaders(train_filenames, val_filenames, feature_set, num_workers, batch_size, filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index, main_device, epoch_size, val_size):
   # Epoch and validation sizes are arbitrary
   features_name = feature_set.name
@@ -39,7 +42,9 @@ def flatten_once(lst):
 def main():
   parser = argparse.ArgumentParser(description="Trains the network.")
   parser.add_argument("datasets", action='append', nargs='+', help="Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if not validation data is specified.")
-  parser = pl.Trainer.add_argparse_args(parser)
+  parser.add_argument("--default_root_dir", type=str, default=None, dest='default_root_dir', help="Default root directory for logs and checkpoints. Default: None (use current directory).")
+  parser.add_argument("--gpus", type=str, default=None, dest='gpus', help="List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (use all available gpus).")
+  parser.add_argument("--max_epochs", default=800, type=int, dest='max_epochs', help="Maximum number of epochs to train for. Default 800.")
   parser.add_argument("--validation-data", type=str, action='append', nargs='+', dest='validation_datasets', help="Validation data to use for validation instead of the training data.")
   parser.add_argument("--lambda", default=1.0, type=float, dest='lambda_', help="lambda=1.0 = train on evaluations, lambda=0.0 = train on game results, interpolates between (default=1.0).")
   parser.add_argument("--start-lambda", default=None, type=float, dest='start_lambda', help="lambda to use at first epoch.")
@@ -144,7 +149,17 @@ def main():
 
   tb_logger = pl_loggers.TensorBoardLogger(logdir)
   checkpoint_callback = pl.callbacks.ModelCheckpoint(save_last=args.save_last_network, every_n_epochs=args.network_save_period, save_top_k=-1)
-  trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback], logger=tb_logger)
+
+  trainer = pl.Trainer(
+    default_root_dir=logdir,
+    max_epochs=args.max_epochs,
+    devices=[int(x) for x in args.gpus.rstrip(',').split(",") if x] if args.gpus else "auto",
+    logger=tb_logger,
+    callbacks=[checkpoint_callback],
+    enable_progress_bar=True,
+    enable_checkpointing=True,
+    benchmark=True,
+  )
 
   main_device = trainer.strategy.root_device if trainer.strategy.root_device.index is None else 'cuda:' + str(trainer.strategy.root_device.index)
 
