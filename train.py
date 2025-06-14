@@ -60,6 +60,7 @@ def main():
   parser.add_argument("--no-wld-fen-skipping", action='store_true', dest='no_wld_fen_skipping', help="If used then no wld fen skipping will be done. By default wld fen skipping is done.")
   parser.add_argument("--random-fen-skipping", default=3, type=int, dest='random_fen_skipping', help="skip fens randomly on average random_fen_skipping before using one.")
   parser.add_argument("--resume-from-model", dest='resume_from_model', help="Initializes training using the weights from the given .pt model")
+  parser.add_argument("--resume-from-checkpoint", dest='resume_from_checkpoint', help="Initializes training using a given .ckpt model")
   parser.add_argument("--network-save-period", type=int, default=20, dest='network_save_period', help="Number of epochs between network snapshots. None to disable.")
   parser.add_argument("--save-last-network", type=str2bool, default=True, dest='save_last_network', help="Whether to always save the last produced network.")
   parser.add_argument("--epoch-size", type=int, default=100000000, dest='epoch_size', help="Number of positions per epoch.")
@@ -181,7 +182,10 @@ def main():
     args.epoch_size,
     args.validation_size)
 
-  trainer.fit(nnue, train, val)
+  if (args.resume_from_checkpoint):
+     trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)
+  else:
+     trainer.fit(nnue, train, val)
 
   with open(os.path.join(logdir, 'training_finished'), 'w'):
     pass
