@@ -1079,19 +1079,31 @@ extern "C" {
 
 }
 
-/* benches */ /*
-#include <chrono>
+/* benches */
 
-int main()
-{
-    auto stream = create_sparse_batch_stream("HalfKP", 4, { "10m_d3_q_2.binpack" }, 8192, true, false, 0, false, -1, 0);
-    auto t0 = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < 1000; ++i)
-    {
-        if (i % 100 == 0) std::cout << i << '\n';
-        destroy_sparse_batch(stream->next());
-    }
-    auto t1 = std::chrono::high_resolution_clock::now();
-    std::cout << (t1 - t0).count() / 1e9 << "s\n";
-}
-//*/
+// #include <chrono>
+// #include <iostream>
+
+// int main(int argc, char** argv)
+// {
+//     if (argc < 2) {
+//         std::cerr << "Usage: " << argv[0] << " file1 [file2 ...]\n";
+//         return 1;
+//     }
+
+//     const char** files = const_cast<const char**>(&argv[1]);
+//     int file_count = argc - 1;
+
+//     auto stream = create_sparse_batch_stream("HalfKP", 1, file_count, files, 8192, true, false, 0, false, -1, 0);
+
+//     auto t0 = std::chrono::high_resolution_clock::now();
+//     for (int i = 0; i < 1000; ++i)
+//     {
+//         if (i % 100 == 0) std::cout << i << '\n';
+//         destroy_sparse_batch(stream->next());
+//     }
+//     auto t1 = std::chrono::high_resolution_clock::now();
+
+//     std::cout << (t1 - t0).count() / 1e9 << "s\n";
+//     return 0;
+// }
