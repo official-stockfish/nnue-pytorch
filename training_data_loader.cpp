@@ -643,7 +643,7 @@ struct Fen
     {
         if (m_fen != nullptr)
         {
-            delete m_fen;
+            delete[] m_fen;
         }
 
         m_size = fen.size();
