@@ -126,14 +126,14 @@ class NNUEWriter():
     layer = model.input
 
     bias = layer.bias.data[:M.L1]
-    bias = bias.mul(model.quantized_one).round().to(torch.int16).cpu()
+    bias = bias.mul(model.quantized_one).round().to(torch.int16)
 
     all_weight = M.coalesce_ft_weights(model, layer)
     weight = all_weight[:, :M.L1]
     psqt_weight = all_weight[:, M.L1:]
 
-    weight = weight.mul(model.quantized_one).round().to(torch.int16).cpu()
-    psqt_weight = psqt_weight.mul(model.nnue2score * model.weight_scale_out).round().to(torch.int32).cpu()
+    weight = weight.mul(model.quantized_one).round().to(torch.int16)
+    psqt_weight = psqt_weight.mul(model.nnue2score * model.weight_scale_out).round().to(torch.int32)
 
     ascii_hist('ft bias:', bias.numpy())
     ascii_hist('ft weight:', weight.numpy())
@@ -156,14 +156,14 @@ class NNUEWriter():
     kMaxWeight = model.quantized_one / kWeightScale
 
     bias = layer.bias.data
-    bias = bias.mul(kBiasScale).round().to(torch.int32).cpu()
+    bias = bias.mul(kBiasScale).round().to(torch.int32)
 
     weight = layer.weight.data
     clipped = torch.count_nonzero(weight.clamp(-kMaxWeight, kMaxWeight) - weight)
     total_elements = torch.numel(weight)
     clipped_max = torch.max(torch.abs(weight.clamp(-kMaxWeight, kMaxWeight) - weight))
 
-    weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8).cpu()
+    weight = weight.clamp(-kMaxWeight, kMaxWeight).mul(kWeightScale).round().to(torch.int8)
 
     ascii_hist('fc bias:', bias.numpy())
     print("layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(clipped, total_elements, clipped_max, kMaxWeight))
@@ -310,7 +310,7 @@ def main():
   print('Converting %s to %s' % (args.source, args.target))
 
   if args.source.endswith('.ckpt'):
-    nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set)
+    nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set, map_location=torch.device("cpu"))
     nnue.eval()
   elif args.source.endswith('.pt'):
     nnue = torch.load(args.source)
