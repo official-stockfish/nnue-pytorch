@@ -34,6 +34,7 @@ def _kernel_with_threads(kernel, threads):
     return f
 
 _feature_transformer_slice_forward_kernel_cache = dict()
+@torch.compiler.disable(recursive=False)
 def make_feature_transformer_slice_forward_kernel(max_active_features, output_size):
     '''
         @param: max_active_features
@@ -154,6 +155,7 @@ void feature_transformer_slice_forward(
     return _feature_transformer_slice_forward_kernel_cache[key]
 
 _feature_transformer_slice_backward_kernel_cache = dict()
+@torch.compiler.disable(recursive=False)
 def make_feature_transformer_slice_backward_kernel(max_active_features, output_size):
     ''''
         @param: max_active_features
