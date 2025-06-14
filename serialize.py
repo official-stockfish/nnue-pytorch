@@ -310,7 +310,7 @@ def main():
   print('Converting %s to %s' % (args.source, args.target))
 
   if args.source.endswith('.ckpt'):
-    nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set)
+    nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set, map_location=torch.device("cpu"))
     nnue.eval()
   elif args.source.endswith('.pt'):
     nnue = torch.load(args.source)
