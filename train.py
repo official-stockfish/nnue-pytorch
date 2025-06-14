@@ -108,7 +108,7 @@ def main():
       param_index=args.param_index
     )
   else:
-    nnue = torch.load(args.resume_from_model)
+    nnue = torch.load(args.resume_from_model, weights_only=False)
     nnue.set_feature_set(feature_set)
     nnue.start_lambda = start_lambda
     nnue.end_lambda = end_lambda

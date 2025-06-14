@@ -313,7 +313,7 @@ def main():
     nnue = M.NNUE.load_from_checkpoint(args.source, feature_set=feature_set, map_location=torch.device("cpu"))
     nnue.eval()
   elif args.source.endswith('.pt'):
-    nnue = torch.load(args.source)
+    nnue = torch.load(args.source, weights_only=False)
   elif args.source.endswith('.nnue'):
     with open(args.source, 'rb') as f:
       reader = NNUEReader(f, feature_set)
