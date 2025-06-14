@@ -8,6 +8,7 @@ import sys
 import torch
 from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
+from pytorch_lightning.callbacks import TQDMProgressBar
 from torch.utils.data import DataLoader, Dataset
 
 import warnings
@@ -156,7 +157,7 @@ def main():
     max_epochs=args.max_epochs,
     devices=[int(x) for x in args.gpus.rstrip(',').split(",") if x] if args.gpus else "auto",
     logger=tb_logger,
-    callbacks=[checkpoint_callback],
+    callbacks=[checkpoint_callback, TQDMProgressBar(refresh_rate=300)],
     enable_progress_bar=True,
     enable_checkpointing=True,
     benchmark=True,
