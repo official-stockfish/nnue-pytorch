@@ -18,5 +18,3 @@ docker run -it \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
   nnue-pytorch
-
-docker run -it -v /host/path:/container/path nnue-pytorch
