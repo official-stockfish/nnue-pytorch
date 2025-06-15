@@ -26,7 +26,9 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
+#include <atomic>
 #include <algorithm>
+#include <condition_variable>
 #include <cstdio>
 #include <cassert>
 #include <string>
@@ -47,6 +49,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <thread>
 #include <mutex>
 #include <random>
+#include <functional>
 
 #ifdef HAS_BMI2
 #include <immintrin.h> // _pdep_u64
