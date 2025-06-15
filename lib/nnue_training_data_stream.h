@@ -7,6 +7,8 @@
 #include <fstream>
 #include <string>
 #include <memory>
+#include <vector>
+#include <functional>
 
 namespace training_data {
 
