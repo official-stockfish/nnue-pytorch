@@ -1,5 +1,6 @@
 from feature_block import *
 from feature_set import *
+import model as M
 
 import argparse
 
@@ -17,6 +18,16 @@ import halfka_v2_hm
 _feature_modules = [halfkp, halfka, halfka_v2, halfka_v2_hm]
 
 _feature_blocks_by_name = dict()
+
+class SetFeaturesAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        split_values = values.split("&")
+        feature_set_name = split_values[0]
+        setattr(namespace, self.dest, feature_set_name)
+
+        l1 = split_values[1].split("=")[1]
+        print(l1)
+        M.L1 = int(l1)
 
 
 def _add_feature_block(feature_block_cls):
@@ -53,6 +64,7 @@ def add_argparse_args(parser):
     parser.add_argument(
         "--features",
         dest="features",
+        action=SetFeaturesAction,
         default=_default_feature_set_name,
         help='The feature set to use. Can be a union of feature blocks (for example P+HalfKP). "^" denotes a factorized block. Currently available feature blocks are: '
         + ", ".join(get_available_feature_blocks_names()),
