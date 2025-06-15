@@ -1079,31 +1079,73 @@ extern "C" {
 
 }
 
-/* benches */
+#if defined(BENCH)
 
-// #include <chrono>
-// #include <iostream>
+/* benches
+   compile and run with:
+     g++ -g3 -O3 -DNDEBUG -DBENCH -march=native training_data_loader.cpp && ./a.out /path/to/binpack
+*/
 
-// int main(int argc, char** argv)
-// {
-//     if (argc < 2) {
-//         std::cerr << "Usage: " << argv[0] << " file1 [file2 ...]\n";
-//         return 1;
-//     }
+#include <chrono>
+#include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <string>
 
-//     const char** files = const_cast<const char**>(&argv[1]);
-//     int file_count = argc - 1;
+long long get_rchar_self() {
+    std::ifstream io_file("/proc/self/io");
+    std::string line;
+    while (std::getline(io_file, line)) {
+        if (line.rfind("rchar:", 0) == 0) {
+            return std::stoll(line.substr(6));
+        }
+    }
+    return -1; // Error or not found
+}
 
-//     auto stream = create_sparse_batch_stream("HalfKP", 1, file_count, files, 8192, true, false, 0, false, -1, 0);
+int main(int argc, char** argv)
+{
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << " file1 [file2 ...]\n";
+        return 1;
+    }
 
-//     auto t0 = std::chrono::high_resolution_clock::now();
-//     for (int i = 0; i < 1000; ++i)
-//     {
-//         if (i % 100 == 0) std::cout << i << '\n';
-//         destroy_sparse_batch(stream->next());
-//     }
-//     auto t1 = std::chrono::high_resolution_clock::now();
+    const char** files = const_cast<const char**>(&argv[1]);
+    int file_count = argc - 1;
 
-//     std::cout << (t1 - t0).count() / 1e9 << "s\n";
-//     return 0;
-// }
+    const int concurrency = std::thread::hardware_concurrency();
+    // some typical numbers, more skipping means more load
+    const int batch_size = 16384;
+    const bool cyclic = true;
+    const bool filtered = true;
+    const int random_fen_skipping = 3;
+    const bool wld_filtered = true;
+    const int early_fen_skipping = 5;
+    const int param_index = 0;
+    auto stream = create_sparse_batch_stream("HalfKAv2_hm^", concurrency, file_count, files, batch_size, cyclic,
+                                             filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index);
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    for (int i = 1; i <= 6000; ++i)
+    {
+        destroy_sparse_batch(stream->next());
+        auto t1 = std::chrono::high_resolution_clock::now();
+        if (i % 1 == 0)
+        {
+             double sec = (t1 - t0).count() / 1e9;
+             long long bytes = get_rchar_self();
+             std::cout << "\rIter:   " << std::fixed << std::setw(8) << i
+                       << "       Time(s): " << std::fixed << std::setw(8) << std::setprecision(3) << sec
+                       << "       MPos/s:   " << std::fixed << std::setw(8) << std::setprecision(3) << i * batch_size / (sec * 1000 * 1000)
+                       << "       It/s:    " << std::fixed << std::setw(8) << std::setprecision(1) << i / sec
+                       << "       MB/s:    " << std::fixed << std::setw(8) << std::setprecision(1) << bytes / (sec * 1024 * 1024)
+                       << "       B/pos:  " << std::fixed << std::setw(8) << std::setprecision(1) << bytes / (i * batch_size)
+                       <<  std::flush;
+        }
+    }
+    std::cout << std::endl;
+
+    return 0;
+}
+
+#endif
