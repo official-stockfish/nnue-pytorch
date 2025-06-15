@@ -29,6 +29,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <algorithm>
 #include <cstdio>
 #include <cassert>
+#include <ios>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -6747,9 +6748,9 @@ namespace binpack
             std::uint32_t chunkSize;
         };
 
-        CompressedTrainingDataFile(std::string path, std::ios_base::openmode om = std::ios_base::app) :
+        CompressedTrainingDataFile(std::string path, std::ios_base::openmode om) :
             m_path(std::move(path)),
-            m_file(m_path, std::ios_base::binary | std::ios_base::in | std::ios_base::out | om)
+            m_file(m_path, std::ios_base::binary | om)
         {
             // Racey but who cares
             m_sizeBytes = filesize(m_path.c_str());
@@ -7414,7 +7415,7 @@ namespace binpack
         static constexpr std::size_t chunkSize = suggestedChunkSize;
 
         CompressedTrainingDataEntryWriter(std::string path, std::ios_base::openmode om = std::ios_base::app) :
-            m_outputFile(path, om),
+            m_outputFile(path, om | std::ios_base::out),
             m_lastEntry{},
             m_movelist{},
             m_packedSize(0),
@@ -7497,7 +7498,7 @@ namespace binpack
         static constexpr std::size_t chunkSize = suggestedChunkSize;
 
         CompressedTrainingDataEntryReader(std::string path, std::ios_base::openmode om = std::ios_base::app) :
-            m_inputFile(path, om),
+            m_inputFile(path, om | std::ios_base::in),
             m_chunk(),
             m_movelistReader(std::nullopt),
             m_offset(0),
@@ -7600,7 +7601,7 @@ namespace binpack
             std::vector<double> sizes; // discrete distribution wants double weights
             for (const auto& path : paths)
             {
-                auto& file = m_inputFiles.emplace_back(path, om);
+                auto& file = m_inputFiles.emplace_back(path, om | std::ios_base::in);
 
                 if (!file.hasNextChunk())
                 {
