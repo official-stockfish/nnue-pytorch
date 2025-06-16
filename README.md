@@ -6,14 +6,20 @@
 
 Use Docker with the NVIDIA PyTorch container. This eliminates the need for local Python environment setup and C++ compilation.
 
-Requirements:
+#### Prerequisites
+
+For AMD Users:
+- Docker
+- Up-to-date ROCm driver
+
+For NVIDIA Users:
 - Docker
 - Up-to-date NVIDIA driver
 - NVIDIA Container Toolkit
 
-For driver requirements, check the [PyTorch container release notes](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-25-04.html#rel-25-04).
+For driver requirements, check [Running ROCm Docker containers (AMD)](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/docker.html) or the [PyTorch container release notes (Nvidia)](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-25-04.html#rel-25-04).
 
-The container includes CUDA 12.x and all required dependencies. Your local CUDA toolkit version doesn't matter.
+The container includes CUDA 12.x / ROCm latest and all required dependencies. Your local CUDA/ROCm toolkit version doesn't matter.
 
 ### Running the container
 
@@ -23,9 +29,9 @@ Use the provided script to build and start the container:
 ./run_docker.sh
 ```
 
-You'll be prompted to enter the path to your data directory, which will be mounted into the container. Once inside the container, you can run training commands directly.
+You'll be prompted to select the target GPU vendor and the path to your data directory, which will be mounted into the container. Once inside the container, you can run training commands directly.
 
-_Building the container will take it's time and disk space (~30GB)_
+_Building the container will take it's time and disk space (~30-60GB)_
 
 ## Network training and management
 
