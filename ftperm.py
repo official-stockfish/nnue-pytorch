@@ -52,7 +52,6 @@ Algorithm by Daniel Monroe. Github @Ergodice.
 
 ZERO_BLOCK_SIZE = 4
 VERBOSE = False
-USE_CUPY = False
 
 
 def batched(arr, batch_size):
@@ -339,9 +338,9 @@ def make_swaps_3(actmat, use_cupy=True):
     return cycles, total_improvement
 
 
-def find_perm_impl(actmat):
+def find_perm_impl(actmat, use_cupy):
     actmat = np.reshape(actmat, (actmat.shape[0] * 2, actmat.shape[1] // 2))
-    if USE_CUPY:
+    if use_cupy:
         actmat = cp.asarray(actmat, dtype=cp.int8)
     actmat_orig = actmat.copy()
 
@@ -366,7 +365,7 @@ def find_perm_impl(actmat):
 
         # Calculate a set of independent right rotates (so swaps for 2 element case)
         # that when applied improve the objective function
-        swaps, score_change = swap_fn(actmat, USE_CUPY)
+        swaps, score_change = swap_fn(actmat, use_cupy)
         for cycle in swaps:
             # Update the current best permutation with the newly found adjustments.
             apply_rotate_right(perm, cycle)
@@ -583,21 +582,28 @@ def command_eval_perm(args):
     else:
         perm = None
 
-    eval_perm_impl(actmat, perm)
+    eval_perm_impl(actmat, perm, args.use_cupy)
 
 
 def command_find_perm(args):
     with open(args.data, "rb") as file:
         actmat = np.load(file)
 
-    perm = find_perm_impl(actmat)
+    perm = find_perm_impl(actmat, args.use_cupy)
 
     # perm = np.random.permutation([i for i in range(M.L1)])
     with open(args.out, "wb") as file:
         np.save(file, perm)
 
 
-def ft_optimize(model, dataset_path, count, actmat_save_path=None, perm_save_path=None):
+def ft_optimize(
+    model,
+    dataset_path,
+    count,
+    actmat_save_path=None,
+    perm_save_path=None,
+    use_cupy=True,
+):
     print("Gathering activation data...")
     actmat = gather_impl(model, dataset_path, count)
     if actmat_save_path is not None:
@@ -605,7 +611,7 @@ def ft_optimize(model, dataset_path, count, actmat_save_path=None, perm_save_pat
             np.save(file, actmat)
 
     print("Finding permutation...")
-    perm = find_perm_impl(actmat)
+    perm = find_perm_impl(actmat, use_cupy)
     if actmat_save_path is not None:
         with open(perm_save_path, "wb") as file:
             np.save(file, perm)
@@ -637,6 +643,7 @@ def main():
     parser_gather.add_argument(
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
+    parser_gather.add_argument("--use_cupy", type=bool, default=True, help="Use cupy")
     features.add_argparse_args(parser_gather)
     parser_gather.set_defaults(func=command_gather)
 
