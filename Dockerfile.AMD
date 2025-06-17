@@ -11,7 +11,7 @@ WORKDIR /workspace/nnue-pytorch
 COPY requirements.txt setup_script.sh ./
 
 RUN pip install --no-cache-dir -r requirements.txt
-RUN ROCM_HOME=/opt/rocm CUPY_INSTALL_USE_HIP=1 pip install --no-cache-dir git+https://github.com/cupy/cupy.git
+RUN ROCM_HOME=/opt/rocm CUPY_INSTALL_USE_HIP=1 pip install --no-cache-dir git+https://github.com/cupy/cupy.git@3a2c950d64ee
 
 RUN chmod +x setup_script.sh
 
