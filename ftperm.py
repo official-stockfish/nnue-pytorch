@@ -582,7 +582,7 @@ def command_eval_perm(args):
     else:
         perm = None
 
-    eval_perm_impl(actmat, perm, args.use_cupy)
+    eval_perm_impl(actmat, perm)
 
 
 def command_find_perm(args):
@@ -623,8 +623,22 @@ def ft_optimize(
     ft_permute_impl(model, perm)
 
 
+def set_cupy_device(device):
+    if device is not None:
+        cp.cuda.runtime.setDevice(device)
+
+
 def main():
     parser = argparse.ArgumentParser(description="")
+    parser.add_argument(
+        "--no-cupy",
+        action="store_false",
+        dest="use_cupy",
+        help="Disable CUPY usage if not enough GPU memory is available. This will use numpy instead, which is slower.",
+    )
+    parser.add_argument(
+        "--device", type=int, default="0", help="Device to use for cupy"
+    )
     subparsers = parser.add_subparsers()
 
     parser_gather = subparsers.add_parser("gather", help="a help")
@@ -643,7 +657,6 @@ def main():
     parser_gather.add_argument(
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
-    parser_gather.add_argument("--use_cupy", type=bool, default=True, help="Use cupy")
     features.add_argparse_args(parser_gather)
     parser_gather.set_defaults(func=command_gather)
 
@@ -666,7 +679,15 @@ def main():
     parser_gather.set_defaults(func=command_eval_perm)
 
     args = parser.parse_args()
-    args.func(args)
+
+    if args.use_cupy:
+        if args.device is not None:
+            set_cupy_device(args.device)
+
+    if hasattr(args, "func"):
+        args.func(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
