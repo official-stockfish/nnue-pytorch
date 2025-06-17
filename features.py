@@ -19,6 +19,7 @@ _feature_modules = [halfkp, halfka, halfka_v2, halfka_v2_hm]
 
 _feature_blocks_by_name = dict()
 
+
 class SetNetworkSize(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         M.L1 = int(values)
@@ -62,7 +63,7 @@ def add_argparse_args(parser):
         help='The feature set to use. Can be a union of feature blocks (for example P+HalfKP). "^" denotes a factorized block. Currently available feature blocks are: '
         + ", ".join(get_available_feature_blocks_names()),
     )
-    parser.add_argument('--l1', type=int, default=M.L1, action=SetNetworkSize)
+    parser.add_argument("--l1", type=int, default=M.L1, action=SetNetworkSize)
 
 
 def _init():

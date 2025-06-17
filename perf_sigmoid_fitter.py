@@ -2,11 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import curve_fit
 import sys
-import glob
 import nnue_dataset
 import torch
 import sys
-import random
 
 
 def sigmoid(x, k):
