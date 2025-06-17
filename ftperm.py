@@ -43,7 +43,6 @@ import copy
 import numpy as np
 from model import NNUE
 import cupy as cp
-from math import ceil
 
 """
 

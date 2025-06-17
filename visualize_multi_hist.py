@@ -1,11 +1,9 @@
 import argparse
-import chess
 import features
 import model as M
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 
 from serialize import NNUEReader
 

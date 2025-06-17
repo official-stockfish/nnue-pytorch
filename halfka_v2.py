@@ -1,6 +1,5 @@
 import chess
 import torch
-import feature_block
 from collections import OrderedDict
 from feature_block import *
 

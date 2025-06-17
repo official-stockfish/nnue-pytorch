@@ -1,7 +1,5 @@
-from collections import OrderedDict
 from feature_block import *
 import torch
-import chess
 
 
 def _calculate_features_hash(features):

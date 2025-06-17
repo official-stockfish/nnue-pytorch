@@ -1,11 +1,8 @@
-import numpy as np
-
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 import matplotlib.pyplot as plt
 import argparse
 import re
-import sys
 import os
 import collections
 
