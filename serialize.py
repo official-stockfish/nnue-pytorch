@@ -441,7 +441,7 @@ def main():
 
         if args.use_cupy:
             if args.device is not None:
-                ftperm.set_cupy_device(argsargs.device)
+                ftperm.set_cupy_device(args.device)
 
         ftperm.ft_optimize(
             nnue, args.ft_optimize_data, args.ft_optimize_count, use_cupy=args.use_cupy
