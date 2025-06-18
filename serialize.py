@@ -380,6 +380,15 @@ def main():
         dest="ft_optimize_count",
         help="Number of positions to use for FT optimization.",
     )
+    parser.add_argument(
+        "--no-cupy",
+        action="store_false",
+        dest="use_cupy",
+        help="Disable CUPY usage if not enough GPU memory is available. This will use numpy instead, which is slower.",
+    )
+    parser.add_argument(
+        "--device", type=int, default="0", help="Device to use for cupy"
+    )
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -413,12 +422,12 @@ def main():
     if args.ft_optimize and args.ft_perm is not None:
         raise Exception("Options --ft_perm and --ft_optimize are mutually exclusive.")
 
-    if args.ft_perm is not None:
+    if args.ft_perm is not None and args.target.endswith(".nnue"):
         import ftperm
 
         ftperm.ft_permute(nnue, args.ft_perm)
 
-    if args.ft_optimize:
+    if args.ft_optimize and args.target.endswith(".nnue"):
         import ftperm
 
         if args.ft_optimize_data is None:
@@ -430,7 +439,13 @@ def main():
                 "Invalid number of positions to optimize FT with. (--ft_optimize_count)"
             )
 
-        ftperm.ft_optimize(nnue, args.ft_optimize_data, args.ft_optimize_count)
+        if args.use_cupy:
+            if args.device is not None:
+                ftperm.set_cupy_device(argsargs.device)
+
+        ftperm.ft_optimize(
+            nnue, args.ft_optimize_data, args.ft_optimize_count, use_cupy=args.use_cupy
+        )
 
     if args.target.endswith(".ckpt"):
         raise Exception("Cannot convert into .ckpt")
