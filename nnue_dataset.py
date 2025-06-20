@@ -496,6 +496,11 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         )
 
 
+import threading
+import queue
+from torch.utils.data import Dataset
+
+
 class FixedNumBatchesDataset(Dataset):
     def __init__(self, dataset, num_batches):
         super(FixedNumBatchesDataset, self).__init__()
@@ -503,8 +508,56 @@ class FixedNumBatchesDataset(Dataset):
         self.iter = iter(self.dataset)
         self.num_batches = num_batches
 
+        self._prefetch_queue = queue.Queue(maxsize=100)
+        self._prefetch_thread = None
+        self._stop_prefetching = threading.Event()
+        self._prefetch_started = False
+        self._lock = threading.Lock()
+
+    def _prefetch_worker(self):
+        try:
+            while not self._stop_prefetching.is_set():
+                try:
+                    item = next(self.iter)
+                    self._prefetch_queue.put(item)
+                except StopIteration:
+                    self._prefetch_queue.put(None)
+                    break
+                except queue.Full:
+                    continue
+        except Exception as e:
+            self._prefetch_queue.put(e)
+
+    def _start_prefetching(self):
+        with self._lock:
+            if not self._prefetch_started:
+                self._prefetch_thread = threading.Thread(
+                    target=self._prefetch_worker, daemon=True
+                )
+                self._prefetch_thread.start()
+                self._prefetch_started = True
+
     def __len__(self):
         return self.num_batches
 
     def __getitem__(self, idx):
-        return next(self.iter)
+        self._start_prefetching()
+
+        try:
+            item = self._prefetch_queue.get(timeout=30.0)  # 30 second timeout
+
+            if item is None:
+                raise StopIteration("End of dataset reached")
+            elif isinstance(item, Exception):
+                raise item
+
+            return item
+
+        except queue.Empty:
+            raise RuntimeError("Prefetch timeout - no data available")
+
+    def __del__(self):
+        if hasattr(self, "_stop_prefetching"):
+            self._stop_prefetching.set()
+        if hasattr(self, "_prefetch_thread") and self._prefetch_thread:
+            self._prefetch_thread.join(timeout=1.0)
