@@ -317,7 +317,7 @@ class NNUEVisualizer:
 
     def plot_fc_weights(self):
         if not self.args.no_fc_weights:
-            num_buckets = self.model.feature_set.num_ls_buckets
+            num_buckets = self.model.num_ls_buckets
             fig, axs = plt.subplots(3, num_buckets, dpi=self.dpi)
 
             extra_info = ""
@@ -343,9 +343,7 @@ class NNUEVisualizer:
 
                 for i in range(N):
                     l1_weights[2 * i] = l1_weights_[i][self.sorted_input_neurons]
-                    l1_weights[2 * i + 1] = l1_weights_[i][
-                        self.M + self.sorted_input_neurons
-                    ]
+                    l1_weights[2 * i + 1] = l1_weights_[i+N][self.sorted_input_neurons]
                 return l1_weights, N
 
             def get_l2_weights(bucket_id, l2):
@@ -482,7 +480,7 @@ class NNUEVisualizer:
                     self.ref_model.layer_stacks.get_coalesced_layer_stacks()
                 )
 
-            num_buckets = self.model.feature_set.num_ls_buckets
+            num_buckets = self.model.num_ls_buckets
             fig, axs = plt.subplots(3, num_buckets, dpi=self.dpi)
             extra_info = ""
             if self.args.sort_input_neurons:
