@@ -809,7 +809,8 @@ private:
     std::vector<std::thread> m_workers;
 };
 
-std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int param_index)
+std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered, int random_fen_skipping, bool wld_filtered,
+                                                                  int early_fen_skipping, int simple_eval_skipping, int param_index)
 {
     if (filtered || random_fen_skipping || wld_filtered || early_fen_skipping)
     {
@@ -818,7 +819,8 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered,
             prob = double(random_fen_skipping) / (random_fen_skipping + 1),
             filtered,
             wld_filtered,
-            early_fen_skipping
+            early_fen_skipping,
+            simple_eval_skipping
             ](const TrainingDataEntry& e){
 
             // VALUE_NONE from Stockfish.
@@ -884,6 +886,9 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered,
                 return true;
 
             if (wld_filtered && do_wld_skip())
+                return true;
+
+            if (simple_eval_skipping > 0 && e.pos.simple_eval() < simple_eval_skipping)
                 return true;
 
             constexpr bool do_debug_print = false;
@@ -995,9 +1000,9 @@ extern "C" {
     }
 
     // changing the signature needs matching changes in nnue_dataset.py
-    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int param_index)
+    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int simple_eval_skipping, int param_index)
     {
-        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index);
+        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, early_fen_skipping, simple_eval_skipping, param_index);
         auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
         return new FenBatchStream(concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
@@ -1010,9 +1015,9 @@ extern "C" {
 
     // changing the signature needs matching changes in nnue_dataset.py
     EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic,
-                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int param_index)
+                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int simple_eval_skipping, int param_index)
     {
-        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index);
+        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, early_fen_skipping, simple_eval_skipping, param_index);
         auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
         std::string_view feature_set(feature_set_c);
@@ -1121,9 +1126,10 @@ int main(int argc, char** argv)
     const int random_fen_skipping = 3;
     const bool wld_filtered = true;
     const int early_fen_skipping = 5;
+    const int simple_eval_skipping = 0;
     const int param_index = 0;
     auto stream = create_sparse_batch_stream("HalfKAv2_hm^", concurrency, file_count, files, batch_size, cyclic,
-                                             filtered, random_fen_skipping, wld_filtered, early_fen_skipping, param_index);
+                                             filtered, random_fen_skipping, wld_filtered, early_fen_skipping, simple_eval_skipping, param_index);
 
     auto t0 = std::chrono::high_resolution_clock::now();
     for (int i = 1; i <= 6000; ++i)
