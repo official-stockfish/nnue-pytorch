@@ -4543,7 +4543,7 @@ namespace chess
 
         [[nodiscard]] inline Bitboard checkers() const;
 
-        [[nodiscard]] inline std::uint16_t simple_eval() const;
+        [[nodiscard]] inline std::int16_t simple_eval() const;
 
         [[nodiscard]] inline bool isCheckAfterMove(Move move) const;
 
@@ -5092,9 +5092,9 @@ namespace chess
         return BaseType::attackers(kingSquare(m_sideToMove), !m_sideToMove);
     }
 
-    [[nodiscard]] inline std::uint16_t Position::simple_eval() const
+    [[nodiscard]] inline std::int16_t Position::simple_eval() const
     {
-        return std::abs(
+        return (m_sideToMove == Color::White ? 1 : -1) * (
              208 * (pieceCount(whitePawn)   - pieceCount(blackPawn))
           +  781 * (pieceCount(whiteKnight) - pieceCount(blackKnight))
           +  825 * (pieceCount(whiteBishop) - pieceCount(blackBishop))
