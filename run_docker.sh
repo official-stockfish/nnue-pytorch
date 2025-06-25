@@ -42,4 +42,4 @@ docker run -it \
   --ipc=host \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
-  $(IMAGE_TAG)
+  $IMAGE_TAG
