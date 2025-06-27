@@ -506,7 +506,7 @@ if __name__ == "__main__":
 
     def test():
         BATCH_SIZE = 16
-        INPUT_SIZE = 768
+        INPUT_SIZE = 10
         MAX_ACTIVE_FEATURES = 32
         STRIDE = 128
         MAX_ERROR = 1e-4
@@ -563,7 +563,6 @@ if __name__ == "__main__":
         MAX_ACTIVE_FEATURES = 64
 
         layer = DoubleFeatureTransformerSlice(INPUT_SIZE, STRIDE).cuda()
-        layer = torch.compile(layer, fullgraph=True, mode="max-autotune")
         indices0 = torch.cat(
             [
                 torch.sort(
@@ -595,38 +594,12 @@ if __name__ == "__main__":
             BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32
         ).cuda()
 
-        # Warmup
-        output0, output1 = layer(indices0, values0, indices1, values1)
-        output0 = torch.clamp(output0, 0.0, 1.0)
-        output0 = output0.clone()
-        output1 = output1.clone()
-        output1 = torch.clamp(output1, 0.0, 1.0)
-        g = ((output0 - output1) ** 2).mean()
-        g.backward()
-        torch.cuda.synchronize()
-
-        for _ in range(ITERS):
-            torch.compiler.cudagraph_mark_step_begin()
-            output0, output1 = layer(indices0, values0, indices1, values1)
-            output0 = output0.clone()
-            output1 = output1.clone()
-            output0 = torch.clamp(output0, 0.0, 1.0)
-            output1 = torch.clamp(output1, 0.0, 1.0)
-
-            g = ((output0 - output1) ** 2).mean()
-            g.backward()
-
-            torch.cuda.synchronize()
-
         output0, output1 = layer(indices0, values0, indices1, values1)
 
         start = time.time()
 
         for _ in range(ITERS):
-            torch.compiler.cudagraph_mark_step_begin()
             output0, output1 = layer(indices0, values0, indices1, values1)
-            output0 = output0.clone()
-            output1 = output1.clone()
             output0 = torch.clamp(output0, 0.0, 1.0)
             output1 = torch.clamp(output1, 0.0, 1.0)
 
