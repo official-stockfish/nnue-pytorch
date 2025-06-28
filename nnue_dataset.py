@@ -188,14 +188,7 @@ class FenBatchProvider:
         cyclic,
         num_workers,
         batch_size=None,
-        config: DataloaderSkipConfig = DataloaderSkipConfig(
-            filtered=False,
-            random_fen_skipping=0,
-            wld_filtered=False,
-            early_fen_skipping=-1,
-            simple_eval_skipping=-1,
-            param_index=0,
-        ),
+        config: DataloaderSkipConfig = DataloaderSkipConfig(),
     ):
         self.filename = filename
         self.cyclic = cyclic
@@ -246,14 +239,7 @@ class TrainingDataProvider:
         cyclic,
         num_workers,
         batch_size=None,
-        config: DataloaderSkipConfig = DataloaderSkipConfig(
-            filtered=False,
-            random_fen_skipping=0,
-            wld_filtered=False,
-            early_fen_skipping=-1,
-            simple_eval_skipping=-1,
-            param_index=0,
-        ),
+        config: DataloaderSkipConfig = DataloaderSkipConfig(),
         device="cpu",
     ):
         self.feature_set = feature_set.encode("utf-8")
@@ -379,14 +365,7 @@ class SparseBatchProvider(TrainingDataProvider):
         batch_size,
         cyclic=True,
         num_workers=1,
-        config: DataloaderSkipConfig = DataloaderSkipConfig(
-            filtered=False,
-            random_fen_skipping=0,
-            wld_filtered=False,
-            early_fen_skipping=-1,
-            simple_eval_skipping=-1,
-            param_index=0,
-        ),
+        config: DataloaderSkipConfig = DataloaderSkipConfig(),
         device="cpu",
     ):
         super(SparseBatchProvider, self).__init__(
@@ -412,14 +391,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         batch_size,
         cyclic=True,
         num_workers=1,
-        config: DataloaderSkipConfig = DataloaderSkipConfig(
-            filtered=False,
-            random_fen_skipping=0,
-            wld_filtered=False,
-            early_fen_skipping=-1,
-            simple_eval_skipping=-1,
-            param_index=0,
-        ),
+        config: DataloaderSkipConfig = DataloaderSkipConfig(),
         device="cpu",
     ):
         super().__init__()

@@ -4,12 +4,12 @@ import ctypes
 
 @dataclass
 class DataloaderSkipConfig:
-    filtered: bool
-    random_fen_skipping: int
-    wld_filtered: bool
-    early_fen_skipping: int
-    simple_eval_skipping: int
-    param_index: int
+    filtered: bool = False
+    random_fen_skipping: int = 0
+    wld_filtered: bool = False
+    early_fen_skipping: int = -1
+    simple_eval_skipping: int = -1
+    param_index: int = 0
 
 
 class CDataloaderSkipConfig(ctypes.Structure):
