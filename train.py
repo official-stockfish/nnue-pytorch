@@ -9,7 +9,7 @@ import torch
 from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import TQDMProgressBar
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
 import warnings
 
@@ -22,12 +22,7 @@ def make_data_loaders(
     feature_set,
     num_workers,
     batch_size,
-    filtered,
-    random_fen_skipping,
-    wld_filtered,
-    early_fen_skipping,
-    simple_eval_skipping,
-    param_index,
+    config: nnue_dataset.DataloaderSkipConfig,
     main_device,
     epoch_size,
     val_size,
@@ -39,24 +34,14 @@ def make_data_loaders(
         train_filenames,
         batch_size,
         num_workers=num_workers,
-        filtered=filtered,
-        random_fen_skipping=random_fen_skipping,
-        wld_filtered=wld_filtered,
-        early_fen_skipping=early_fen_skipping,
-        simple_eval_skipping=simple_eval_skipping,
-        param_index=param_index,
+        config=config,
         device=main_device,
     )
     val_infinite = nnue_dataset.SparseBatchDataset(
         features_name,
         val_filenames,
         batch_size,
-        filtered=filtered,
-        random_fen_skipping=random_fen_skipping,
-        wld_filtered=wld_filtered,
-        early_fen_skipping=early_fen_skipping,
-        simple_eval_skipping=simple_eval_skipping,
-        param_index=param_index,
+        config=config,
         device=main_device,
     )
     # num_workers has to be 0 for sparse, and 1 for dense
@@ -389,12 +374,14 @@ def main():
         feature_set,
         args.num_workers,
         batch_size,
-        not args.no_smart_fen_skipping,
-        args.random_fen_skipping,
-        not args.no_wld_fen_skipping,
-        args.early_fen_skipping,
-        args.simple_eval_skipping,
-        args.param_index,
+        nnue_dataset.DataloaderSkipConfig(
+            filtered=not args.no_smart_fen_skipping,
+            random_fen_skipping=args.random_fen_skipping,
+            wld_filtered=not args.no_wld_fen_skipping,
+            early_fen_skipping=args.early_fen_skipping,
+            simple_eval_skipping=args.simple_eval_skipping,
+            param_index=args.param_index,
+        ),
         main_device,
         args.epoch_size,
         args.validation_size,
