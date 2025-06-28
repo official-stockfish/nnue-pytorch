@@ -1091,7 +1091,7 @@ extern "C" {
 
 /* benches
    compile and run with:
-     g++ -g3 -O3 -DNDEBUG -DBENCH -march=native training_data_loader.cpp && ./a.out /path/to/binpack
+     g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native training_data_loader.cpp && ./a.out /path/to/binpack
 */
 
 #include <chrono>
@@ -1125,14 +1125,15 @@ int main(int argc, char** argv)
     // some typical numbers, more skipping means more load
     const int batch_size = 16384;
     const bool cyclic = true;
-    const bool filtered = true;
-    const int random_fen_skipping = 3;
-    const bool wld_filtered = true;
-    const int early_fen_skipping = 5;
-    const int simple_eval_skipping = 0;
-    const int param_index = 0;
-    auto stream = create_sparse_batch_stream("HalfKAv2_hm^", concurrency, file_count, files, batch_size, cyclic,
-                                             filtered, random_fen_skipping, wld_filtered, early_fen_skipping, simple_eval_skipping, param_index);
+    const DataloaderSkipConfig config = {
+        .filtered = true,
+        .random_fen_skipping = 3,
+        .wld_filtered = true,
+        .early_fen_skipping = 5,
+        .simple_eval_skipping = 0,
+        .param_index = 0
+    };
+    auto stream = create_sparse_batch_stream("HalfKAv2_hm^", concurrency, file_count, files, batch_size, cyclic, config);
 
     auto t0 = std::chrono::high_resolution_clock::now();
     for (int i = 1; i <= 6000; ++i)
