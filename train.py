@@ -26,6 +26,7 @@ def make_data_loaders(
     random_fen_skipping,
     wld_filtered,
     early_fen_skipping,
+    simple_eval_skipping,
     param_index,
     main_device,
     epoch_size,
@@ -42,6 +43,7 @@ def make_data_loaders(
         random_fen_skipping=random_fen_skipping,
         wld_filtered=wld_filtered,
         early_fen_skipping=early_fen_skipping,
+        simple_eval_skipping=simple_eval_skipping,
         param_index=param_index,
         device=main_device,
     )
@@ -53,6 +55,7 @@ def make_data_loaders(
         random_fen_skipping=random_fen_skipping,
         wld_filtered=wld_filtered,
         early_fen_skipping=early_fen_skipping,
+        simple_eval_skipping=simple_eval_skipping,
         param_index=param_index,
         device=main_device,
     )
@@ -259,6 +262,13 @@ def main():
         dest="early_fen_skipping",
         help="Skip n plies from the start.",
     )
+    parser.add_argument(
+        "--simple-eval-skipping",
+        type=int,
+        default=-1,
+        dest="simple_eval_skipping",
+        help="Skip positions that have abs(simple_eval(pos)) < n",
+    )
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -333,6 +343,7 @@ def main():
     print("WLD fen skipping: {}".format(not args.no_wld_fen_skipping))
     print("Random fen skipping: {}".format(args.random_fen_skipping))
     print("Skip early plies: {}".format(args.early_fen_skipping))
+    print("Skip simple eval : {}".format(args.simple_eval_skipping))
     print("Param index: {}".format(args.param_index))
 
     if args.threads > 0:
@@ -382,6 +393,7 @@ def main():
         args.random_fen_skipping,
         not args.no_wld_fen_skipping,
         args.early_fen_skipping,
+        args.simple_eval_skipping,
         args.param_index,
         main_device,
         args.epoch_size,

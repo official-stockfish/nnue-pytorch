@@ -140,7 +140,7 @@ class FenBatch(ctypes.Structure):
 
 
 FenBatchPtr = ctypes.POINTER(FenBatch)
-# EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int param_index)
+# EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int simple_eval_skipping, int param_index)
 create_fen_batch_stream = dll.create_fen_batch_stream
 create_fen_batch_stream.restype = ctypes.c_void_p
 create_fen_batch_stream.argtypes = [
@@ -152,6 +152,7 @@ create_fen_batch_stream.argtypes = [
     ctypes.c_bool,
     ctypes.c_int,
     ctypes.c_bool,
+    ctypes.c_int,
     ctypes.c_int,
     ctypes.c_int,
 ]
@@ -168,6 +169,7 @@ def make_fen_batch_stream(
     random_fen_skipping,
     wld_filtered,
     early_fen_skipping,
+    simple_eval_skipping,
     param_index,
 ):
     filenames_ = (ctypes.c_char_p * len(filenames))()
@@ -182,6 +184,7 @@ def make_fen_batch_stream(
         random_fen_skipping,
         wld_filtered,
         early_fen_skipping,
+        simple_eval_skipping,
         param_index,
     )
 
@@ -202,6 +205,7 @@ class FenBatchProvider:
         filtered=False,
         random_fen_skipping=0,
         early_fen_skipping=-1,
+        simple_eval_skipping=-1,
         wld_filtered=False,
         param_index=0,
     ):
@@ -213,6 +217,7 @@ class FenBatchProvider:
         self.wld_filtered = wld_filtered
         self.random_fen_skipping = random_fen_skipping
         self.early_fen_skipping = early_fen_skipping
+        self.simple_eval_skipping = simple_eval_skipping
         self.param_index = param_index
 
         if batch_size:
@@ -225,6 +230,7 @@ class FenBatchProvider:
                 random_fen_skipping,
                 wld_filtered,
                 early_fen_skipping,
+                simple_eval_skipping,
                 param_index,
             )
         else:
@@ -236,6 +242,7 @@ class FenBatchProvider:
                 random_fen_skipping,
                 wld_filtered,
                 early_fen_skipping,
+                simple_eval_skipping,
                 param_index,
             )
 
@@ -272,6 +279,7 @@ class TrainingDataProvider:
         random_fen_skipping=0,
         wld_filtered=False,
         early_fen_skipping=-1,
+        simple_eval_skipping=-1,
         param_index=0,
         device="cpu",
     ):
@@ -301,6 +309,7 @@ class TrainingDataProvider:
                 random_fen_skipping,
                 wld_filtered,
                 early_fen_skipping,
+                simple_eval_skipping,
                 param_index,
             )
         else:
@@ -313,6 +322,7 @@ class TrainingDataProvider:
                 random_fen_skipping,
                 wld_filtered,
                 early_fen_skipping,
+                simple_eval_skipping,
                 param_index,
             )
 
@@ -334,7 +344,7 @@ class TrainingDataProvider:
 
 
 #    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic,
-#                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int param_index)
+#                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int simple_eval_skipping, int param_index)
 create_sparse_batch_stream = dll.create_sparse_batch_stream
 create_sparse_batch_stream.restype = ctypes.c_void_p
 create_sparse_batch_stream.argtypes = [
@@ -347,6 +357,7 @@ create_sparse_batch_stream.argtypes = [
     ctypes.c_bool,
     ctypes.c_int,
     ctypes.c_bool,
+    ctypes.c_int,
     ctypes.c_int,
     ctypes.c_int,
 ]
@@ -364,6 +375,7 @@ def make_sparse_batch_stream(
     random_fen_skipping,
     wld_filtered,
     early_fen_skipping,
+    simple_eval_skipping,
     param_index,
 ):
     filenames_ = (ctypes.c_char_p * len(filenames))()
@@ -379,6 +391,7 @@ def make_sparse_batch_stream(
         random_fen_skipping,
         wld_filtered,
         early_fen_skipping,
+        simple_eval_skipping,
         param_index,
     )
 
@@ -430,6 +443,7 @@ class SparseBatchProvider(TrainingDataProvider):
         random_fen_skipping=0,
         wld_filtered=False,
         early_fen_skipping=-1,
+        simple_eval_skipping=-1,
         param_index=0,
         device="cpu",
     ):
@@ -447,6 +461,7 @@ class SparseBatchProvider(TrainingDataProvider):
             random_fen_skipping,
             wld_filtered,
             early_fen_skipping,
+            simple_eval_skipping,
             param_index,
             device,
         )
@@ -464,6 +479,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         random_fen_skipping=0,
         wld_filtered=False,
         early_fen_skipping=-1,
+        simple_eval_skipping=-1,
         param_index=0,
         device="cpu",
     ):
@@ -477,6 +493,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         self.random_fen_skipping = random_fen_skipping
         self.wld_filtered = wld_filtered
         self.early_fen_skipping = early_fen_skipping
+        self.simple_eval_skipping = simple_eval_skipping
         self.param_index = param_index
         self.device = device
 
@@ -491,6 +508,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             random_fen_skipping=self.random_fen_skipping,
             wld_filtered=self.wld_filtered,
             early_fen_skipping=self.early_fen_skipping,
+            simple_eval_skipping=self.simple_eval_skipping,
             param_index=self.param_index,
             device=self.device,
         )
@@ -544,7 +562,7 @@ class FixedNumBatchesDataset(Dataset):
         self._start_prefetching()
 
         try:
-            item = self._prefetch_queue.get(timeout=30.0)  # 30 second timeout
+            item = self._prefetch_queue.get(timeout=300.0)  # 300 second timeout
 
             if item is None:
                 raise StopIteration("End of dataset reached")
