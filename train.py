@@ -8,12 +8,37 @@ import sys
 import torch
 from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import TQDMProgressBar
-from torch.utils.data import DataLoader
+from pytorch_lightning.callbacks import TQDMProgressBar, Callback
+from torch.utils.data import DataLoader, Dataset
+import time
+from datetime import timedelta
 
 import warnings
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
+
+
+class TimeLimitAfterCheckpoint(Callback):
+    def __init__(self, max_time: str):
+        parts = list(map(int, max_time.strip().split(":")))
+        if len(parts) != 4:
+            raise ValueError("max_time must be in format 'DD:HH:MM:SS'")
+        days, hours, minutes, seconds = parts
+        self.max_duration = timedelta(
+            days=days, hours=hours, minutes=minutes, seconds=seconds
+        ).total_seconds()
+        self.start_time = None
+
+    def on_fit_start(self, trainer, pl_module):
+        self.start_time = time.time()
+
+    def on_validation_end(self, trainer, pl_module):
+        elapsed = time.time() - self.start_time
+        if elapsed >= self.max_duration:
+            trainer.should_stop = True
+            print(
+                f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
+            )
 
 
 def make_data_loaders(
@@ -106,6 +131,13 @@ def main():
         type=int,
         dest="max_epochs",
         help="Maximum number of epochs to train for. Default 800.",
+    )
+    parser.add_argument(
+        "--max_time",
+        default="30:00:00:00",
+        type=str,
+        dest="max_time",
+        help="The maximum time to train for. A string in the format DD:HH:MM:SS (Default 30:00:00:00).",
     )
     parser.add_argument(
         "--validation-data",
@@ -352,7 +384,11 @@ def main():
         if args.gpus
         else "auto",
         logger=tb_logger,
-        callbacks=[checkpoint_callback, TQDMProgressBar(refresh_rate=300)],
+        callbacks=[
+            checkpoint_callback,
+            TQDMProgressBar(refresh_rate=300),
+            TimeLimitAfterCheckpoint(args.max_time),
+        ],
         enable_progress_bar=True,
         enable_checkpointing=True,
         benchmark=True,
