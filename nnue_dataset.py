@@ -5,6 +5,7 @@ import os
 import sys
 import glob
 from torch.utils.data import Dataset
+from dataloader_skip_config import DataloaderSkipConfig, CDataloaderSkipConfig
 
 local_dllpath = [
     n
@@ -140,7 +141,7 @@ class FenBatch(ctypes.Structure):
 
 
 FenBatchPtr = ctypes.POINTER(FenBatch)
-# EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int simple_eval_skipping, int param_index)
+# EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, DataloaderSkipConfig config)
 create_fen_batch_stream = dll.create_fen_batch_stream
 create_fen_batch_stream.restype = ctypes.c_void_p
 create_fen_batch_stream.argtypes = [
@@ -149,12 +150,7 @@ create_fen_batch_stream.argtypes = [
     ctypes.POINTER(ctypes.c_char_p),
     ctypes.c_int,
     ctypes.c_bool,
-    ctypes.c_bool,
-    ctypes.c_int,
-    ctypes.c_bool,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
+    CDataloaderSkipConfig,
 ]
 destroy_fen_batch_stream = dll.destroy_fen_batch_stream
 destroy_fen_batch_stream.argtypes = [ctypes.c_void_p]
@@ -165,12 +161,7 @@ def make_fen_batch_stream(
     filenames,
     batch_size,
     cyclic,
-    filtered,
-    random_fen_skipping,
-    wld_filtered,
-    early_fen_skipping,
-    simple_eval_skipping,
-    param_index,
+    config: DataloaderSkipConfig,
 ):
     filenames_ = (ctypes.c_char_p * len(filenames))()
     filenames_[:] = [filename.encode("utf-8") for filename in filenames]
@@ -180,12 +171,7 @@ def make_fen_batch_stream(
         filenames_,
         batch_size,
         cyclic,
-        filtered,
-        random_fen_skipping,
-        wld_filtered,
-        early_fen_skipping,
-        simple_eval_skipping,
-        param_index,
+        CDataloaderSkipConfig(config),
     )
 
 
@@ -202,49 +188,34 @@ class FenBatchProvider:
         cyclic,
         num_workers,
         batch_size=None,
-        filtered=False,
-        random_fen_skipping=0,
-        early_fen_skipping=-1,
-        simple_eval_skipping=-1,
-        wld_filtered=False,
-        param_index=0,
+        config: DataloaderSkipConfig = DataloaderSkipConfig(
+            filtered=False,
+            random_fen_skipping=0,
+            wld_filtered=False,
+            early_fen_skipping=-1,
+            simple_eval_skipping=-1,
+            param_index=0,
+        ),
     ):
         self.filename = filename
         self.cyclic = cyclic
         self.num_workers = num_workers
         self.batch_size = batch_size
-        self.filtered = filtered
-        self.wld_filtered = wld_filtered
-        self.random_fen_skipping = random_fen_skipping
-        self.early_fen_skipping = early_fen_skipping
-        self.simple_eval_skipping = simple_eval_skipping
-        self.param_index = param_index
+        self.config = config
 
         if batch_size:
             self.stream = make_fen_batch_stream(
-                self.num_workers,
-                [self.filename],
-                batch_size,
-                cyclic,
-                filtered,
-                random_fen_skipping,
-                wld_filtered,
-                early_fen_skipping,
-                simple_eval_skipping,
-                param_index,
+                self.num_workers, [self.filename], batch_size, cyclic, config
             )
         else:
-            self.stream = make_fen_batch_stream(
-                self.num_workers,
-                [self.filename],
-                cyclic,
-                filtered,
-                random_fen_skipping,
-                wld_filtered,
-                early_fen_skipping,
-                simple_eval_skipping,
-                param_index,
-            )
+            # doesnt work yet
+            assert False
+            # self.stream = make_fen_batch_stream(
+            #     self.num_workers,
+            #     [self.filename],
+            #     cyclic,
+            #     config=config
+            # )
 
     def __iter__(self):
         return self
@@ -275,12 +246,14 @@ class TrainingDataProvider:
         cyclic,
         num_workers,
         batch_size=None,
-        filtered=False,
-        random_fen_skipping=0,
-        wld_filtered=False,
-        early_fen_skipping=-1,
-        simple_eval_skipping=-1,
-        param_index=0,
+        config: DataloaderSkipConfig = DataloaderSkipConfig(
+            filtered=False,
+            random_fen_skipping=0,
+            wld_filtered=False,
+            early_fen_skipping=-1,
+            simple_eval_skipping=-1,
+            param_index=0,
+        ),
         device="cpu",
     ):
         self.feature_set = feature_set.encode("utf-8")
@@ -292,10 +265,7 @@ class TrainingDataProvider:
         self.cyclic = cyclic
         self.num_workers = num_workers
         self.batch_size = batch_size
-        self.filtered = filtered
-        self.wld_filtered = wld_filtered
-        self.random_fen_skipping = random_fen_skipping
-        self.param_index = param_index
+        self.config = config
         self.device = device
 
         if batch_size:
@@ -305,25 +275,11 @@ class TrainingDataProvider:
                 self.filenames,
                 batch_size,
                 cyclic,
-                filtered,
-                random_fen_skipping,
-                wld_filtered,
-                early_fen_skipping,
-                simple_eval_skipping,
-                param_index,
+                config,
             )
         else:
             self.stream = self.create_stream(
-                self.feature_set,
-                self.num_workers,
-                self.filenames,
-                cyclic,
-                filtered,
-                random_fen_skipping,
-                wld_filtered,
-                early_fen_skipping,
-                simple_eval_skipping,
-                param_index,
+                self.feature_set, self.num_workers, self.filenames, cyclic, config
             )
 
     def __iter__(self):
@@ -343,8 +299,7 @@ class TrainingDataProvider:
         self.destroy_stream(self.stream)
 
 
-#    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic,
-#                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int simple_eval_skipping, int param_index)
+#    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, DataloaderSkipConfig config)
 create_sparse_batch_stream = dll.create_sparse_batch_stream
 create_sparse_batch_stream.restype = ctypes.c_void_p
 create_sparse_batch_stream.argtypes = [
@@ -354,12 +309,7 @@ create_sparse_batch_stream.argtypes = [
     ctypes.POINTER(ctypes.c_char_p),
     ctypes.c_int,
     ctypes.c_bool,
-    ctypes.c_bool,
-    ctypes.c_int,
-    ctypes.c_bool,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
+    CDataloaderSkipConfig,
 ]
 destroy_sparse_batch_stream = dll.destroy_sparse_batch_stream
 destroy_sparse_batch_stream.argtypes = [ctypes.c_void_p]
@@ -371,12 +321,7 @@ def make_sparse_batch_stream(
     filenames,
     batch_size,
     cyclic,
-    filtered,
-    random_fen_skipping,
-    wld_filtered,
-    early_fen_skipping,
-    simple_eval_skipping,
-    param_index,
+    config: DataloaderSkipConfig,
 ):
     filenames_ = (ctypes.c_char_p * len(filenames))()
     filenames_[:] = [filename.encode("utf-8") for filename in filenames]
@@ -387,12 +332,7 @@ def make_sparse_batch_stream(
         filenames_,
         batch_size,
         cyclic,
-        filtered,
-        random_fen_skipping,
-        wld_filtered,
-        early_fen_skipping,
-        simple_eval_skipping,
-        param_index,
+        CDataloaderSkipConfig(config),
     )
 
 
@@ -439,12 +379,14 @@ class SparseBatchProvider(TrainingDataProvider):
         batch_size,
         cyclic=True,
         num_workers=1,
-        filtered=False,
-        random_fen_skipping=0,
-        wld_filtered=False,
-        early_fen_skipping=-1,
-        simple_eval_skipping=-1,
-        param_index=0,
+        config: DataloaderSkipConfig = DataloaderSkipConfig(
+            filtered=False,
+            random_fen_skipping=0,
+            wld_filtered=False,
+            early_fen_skipping=-1,
+            simple_eval_skipping=-1,
+            param_index=0,
+        ),
         device="cpu",
     ):
         super(SparseBatchProvider, self).__init__(
@@ -457,12 +399,7 @@ class SparseBatchProvider(TrainingDataProvider):
             cyclic,
             num_workers,
             batch_size,
-            filtered,
-            random_fen_skipping,
-            wld_filtered,
-            early_fen_skipping,
-            simple_eval_skipping,
-            param_index,
+            config,
             device,
         )
 
@@ -475,26 +412,23 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         batch_size,
         cyclic=True,
         num_workers=1,
-        filtered=False,
-        random_fen_skipping=0,
-        wld_filtered=False,
-        early_fen_skipping=-1,
-        simple_eval_skipping=-1,
-        param_index=0,
+        config: DataloaderSkipConfig = DataloaderSkipConfig(
+            filtered=False,
+            random_fen_skipping=0,
+            wld_filtered=False,
+            early_fen_skipping=-1,
+            simple_eval_skipping=-1,
+            param_index=0,
+        ),
         device="cpu",
     ):
-        super(SparseBatchDataset).__init__()
+        super().__init__()
         self.feature_set = feature_set
         self.filenames = filenames
         self.batch_size = batch_size
         self.cyclic = cyclic
         self.num_workers = num_workers
-        self.filtered = filtered
-        self.random_fen_skipping = random_fen_skipping
-        self.wld_filtered = wld_filtered
-        self.early_fen_skipping = early_fen_skipping
-        self.simple_eval_skipping = simple_eval_skipping
-        self.param_index = param_index
+        self.config = config
         self.device = device
 
     def __iter__(self):
@@ -504,19 +438,13 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             self.batch_size,
             cyclic=self.cyclic,
             num_workers=self.num_workers,
-            filtered=self.filtered,
-            random_fen_skipping=self.random_fen_skipping,
-            wld_filtered=self.wld_filtered,
-            early_fen_skipping=self.early_fen_skipping,
-            simple_eval_skipping=self.simple_eval_skipping,
-            param_index=self.param_index,
+            config=self.config,
             device=self.device,
         )
 
 
 import threading
 import queue
-from torch.utils.data import Dataset
 
 
 class FixedNumBatchesDataset(Dataset):

@@ -809,18 +809,22 @@ private:
     std::vector<std::thread> m_workers;
 };
 
-std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered, int random_fen_skipping, bool wld_filtered,
-                                                                  int early_fen_skipping, int simple_eval_skipping, int param_index)
+struct DataloaderSkipConfig {
+    bool filtered;
+    int random_fen_skipping;
+    bool wld_filtered;
+    int early_fen_skipping;
+    int simple_eval_skipping;
+    int param_index;
+};
+
+std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config)
 {
-    if (filtered || random_fen_skipping || wld_filtered || early_fen_skipping)
+    if (config.filtered || config.random_fen_skipping || config.wld_filtered || config.early_fen_skipping)
     {
         return [
-            random_fen_skipping,
-            prob = double(random_fen_skipping) / (random_fen_skipping + 1),
-            filtered,
-            wld_filtered,
-            early_fen_skipping,
-            simple_eval_skipping
+            config,
+            prob = double(config.random_fen_skipping) / (config.random_fen_skipping + 1)
             ](const TrainingDataEntry& e){
 
             // VALUE_NONE from Stockfish.
@@ -876,19 +880,19 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(bool filtered,
             if (e.score == VALUE_NONE)
                 return true;
 
-            if (e.ply <= early_fen_skipping)
+            if (e.ply <= config.early_fen_skipping)
                 return true;
 
-            if (random_fen_skipping && do_skip())
+            if (config.random_fen_skipping && do_skip())
                 return true;
 
-            if (filtered && do_filter())
+            if (config.filtered && do_filter())
                 return true;
 
-            if (wld_filtered && do_wld_skip())
+            if (config.wld_filtered && do_wld_skip())
                 return true;
 
-            if (simple_eval_skipping > 0 && std::abs(e.pos.simple_eval()) < simple_eval_skipping)
+            if (config.simple_eval_skipping > 0 && std::abs(e.pos.simple_eval()) < config.simple_eval_skipping)
                 return true;
 
             constexpr bool do_debug_print = false;
@@ -1000,9 +1004,9 @@ extern "C" {
     }
 
     // changing the signature needs matching changes in nnue_dataset.py
-    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int simple_eval_skipping, int param_index)
+    EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, DataloaderSkipConfig config)
     {
-        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, early_fen_skipping, simple_eval_skipping, param_index);
+        auto skipPredicate = make_skip_predicate(config);
         auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
         return new FenBatchStream(concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
@@ -1014,10 +1018,9 @@ extern "C" {
     }
 
     // changing the signature needs matching changes in nnue_dataset.py
-    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic,
-                                                                 bool filtered, int random_fen_skipping, bool wld_filtered, int early_fen_skipping, int simple_eval_skipping, int param_index)
+    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, DataloaderSkipConfig config)
     {
-        auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping, wld_filtered, early_fen_skipping, simple_eval_skipping, param_index);
+        auto skipPredicate = make_skip_predicate(config);
         auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
         std::string_view feature_set(feature_set_c);
