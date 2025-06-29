@@ -103,6 +103,16 @@ def flatten_once(lst):
     return sum(lst, [])
 
 
+def get_model_with_fixed_offset(model, batch_size, main_device):
+    model.layer_stacks.idx_offset = torch.arange(
+        0,
+        batch_size * model.layer_stacks.count,
+        model.layer_stacks.count,
+        device=main_device,
+    )
+    return model
+
+
 def main():
     parser = argparse.ArgumentParser(description="Trains the network.")
     parser.add_argument(
@@ -198,6 +208,14 @@ def main():
         type=int,
         dest="threads",
         help="Number of torch threads to use. Default automatic (cores) .",
+    )
+    parser.add_argument(
+        "--compile-backend",
+        default="inductor",
+        choices=["inductor", "cudagraphs"],
+        type=str,
+        dest="compile_backend",
+        help="Which backend to use for torch.compile. inductor works well with larger nets, cudagraphs with smaller nets",
     )
     parser.add_argument(
         "--seed", default=42, type=int, dest="seed", help="torch seed to use."
@@ -400,7 +418,8 @@ def main():
         else "cuda:" + str(trainer.strategy.root_device.index)
     )
 
-    nnue = torch.compile(nnue)
+    nnue = get_model_with_fixed_offset(nnue, batch_size, main_device)
+    nnue = torch.compile(nnue, backend=args.compile_backend)
     nnue.to(device=main_device)
 
     print("Using c++ data loader")
