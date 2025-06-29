@@ -400,7 +400,15 @@ def read_model(nnue_path, feature_set):
 
 
 def make_fen_batch_provider(data_path, batch_size):
-    return nnue_dataset.FenBatchProvider(data_path, True, 1, batch_size, False, 10)
+    return nnue_dataset.FenBatchProvider(
+        data_path,
+        True,
+        1,
+        batch_size,
+        nnue_dataset.DataloaderSkipConfig(
+            random_fen_skipping=10,
+        ),
+    )
 
 
 def filter_fens(fens):
