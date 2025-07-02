@@ -169,6 +169,13 @@ def main():
         help="lambda to use at last epoch.",
     )
     parser.add_argument(
+        "--qp-asymmetry",
+        default=0.0,
+        type=float,
+        dest="qp_asymmetry",
+        help="Adjust to loss for those if q (prediction) > p (reference) (default=0.0)",
+    )
+    parser.add_argument(
         "--gamma",
         default=0.992,
         type=float,
@@ -324,6 +331,7 @@ def main():
             start_lambda=start_lambda,
             max_epoch=max_epoch,
             end_lambda=end_lambda,
+            qp_asymmetry=args.qp_asymmetry,
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
@@ -333,6 +341,7 @@ def main():
         nnue.set_feature_set(feature_set)
         nnue.start_lambda = start_lambda
         nnue.end_lambda = end_lambda
+        nnue.qp_asymmetry = args.qp_asymmetry
         nnue.max_epoch = max_epoch
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
