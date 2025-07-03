@@ -313,6 +313,11 @@ def main():
             "Either both or none of start_lambda and end_lambda must be specified."
         )
 
+    batch_size = args.batch_size
+    if batch_size <= 0:
+        batch_size = 16384
+    print("Using batch size {}".format(batch_size))
+
     feature_set = features.get_feature_set_from_name(args.features)
 
     start_lambda = args.start_lambda or args.lambda_
@@ -323,6 +328,7 @@ def main():
             feature_set=feature_set,
             start_lambda=start_lambda,
             max_epoch=max_epoch,
+            num_batches_per_epoch=args.epoch_size / batch_size,
             end_lambda=end_lambda,
             gamma=args.gamma,
             lr=args.lr,
@@ -334,6 +340,7 @@ def main():
         nnue.start_lambda = start_lambda
         nnue.end_lambda = end_lambda
         nnue.max_epoch = max_epoch
+        nnue.num_batches_per_epoch = args.epoch_size / batch_size
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
@@ -350,11 +357,6 @@ def main():
 
     pl.seed_everything(args.seed)
     print("Seed {}".format(args.seed))
-
-    batch_size = args.batch_size
-    if batch_size <= 0:
-        batch_size = 16384
-    print("Using batch size {}".format(batch_size))
 
     print("Smart fen skipping: {}".format(not args.no_smart_fen_skipping))
     print("WLD fen skipping: {}".format(not args.no_wld_fen_skipping))
