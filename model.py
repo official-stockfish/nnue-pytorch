@@ -155,6 +155,7 @@ class NNUE(pl.LightningModule):
         feature_set,
         start_lambda=1.0,
         end_lambda=1.0,
+        qp_asymmetry=0.0,
         max_epoch=800,
         num_batches_per_epoch=int(100_000_000 / 16384),
         gamma=0.992,
@@ -173,6 +174,7 @@ class NNUE(pl.LightningModule):
         self.layer_stacks = LayerStacks(self.num_ls_buckets)
         self.start_lambda = start_lambda
         self.end_lambda = end_lambda
+        self.qp_asymmetry = qp_asymmetry
         self.max_epoch = max_epoch
         self.num_batches_per_epoch = num_batches_per_epoch
         self.gamma = gamma
@@ -416,7 +418,10 @@ class NNUE(pl.LightningModule):
         )
         pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
-        loss = torch.pow(torch.abs(pt - qf), 2.5).mean()
+        loss = torch.pow(torch.abs(pt - qf), 2.5)
+        if self.qp_asymmetry != 0.0:
+            loss = loss * ((qf > pt) * self.qp_asymmetry + 1)
+        loss = loss.mean()
 
         self.log(loss_type, loss)
 
