@@ -1,4 +1,4 @@
-import ranger
+import ranger21
 import torch
 from torch import nn
 import pytorch_lightning as pl
@@ -156,6 +156,7 @@ class NNUE(pl.LightningModule):
         start_lambda=1.0,
         end_lambda=1.0,
         max_epoch=800,
+        num_batches_per_epoch=int(100_000_000 / 16384),
         gamma=0.992,
         lr=8.75e-4,
         param_index=0,
@@ -173,6 +174,7 @@ class NNUE(pl.LightningModule):
         self.start_lambda = start_lambda
         self.end_lambda = end_lambda
         self.max_epoch = max_epoch
+        self.num_batches_per_epoch = num_batches_per_epoch
         self.gamma = gamma
         self.lr = lr
         self.param_index = param_index
@@ -442,11 +444,24 @@ class NNUE(pl.LightningModule):
             {"params": [self.layer_stacks.output.weight], "lr": LR},
             {"params": [self.layer_stacks.output.bias], "lr": LR},
         ]
-        # Increasing the eps leads to less saturated nets with a few dead neurons.
-        # Gradient localisation appears slightly harmful.
-        optimizer = ranger.Ranger(
-            train_params, betas=(0.9, 0.999), eps=1.0e-7, gc_loc=False, use_gc=False
+
+        optimizer = ranger21.Ranger21(
+            train_params,
+            lr=1.0,
+            betas=(0.9, 0.999),
+            eps=1.0e-7,
+            using_gc=False,
+            using_normgc=False,
+            weight_decay=0.0,
+            num_batches_per_epoch=self.num_batches_per_epoch,
+            num_epochs=self.max_epoch,
+            warmdown_active=False,
+            use_warmup=False,
+            use_adaptive_gradient_clipping=False,
+            softplus=False,
+            pnm_momentum_factor=0.0,
         )
+
         scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer, step_size=1, gamma=self.gamma
         )
