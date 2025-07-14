@@ -11,7 +11,7 @@ L2 = 15
 L3 = 32
 
 
-# parameters needed for the definition of hte loss
+# parameters needed for the definition of the loss
 @dataclass
 class LossParams:
     in_offset: float = 270
@@ -22,26 +22,6 @@ class LossParams:
     end_lambda: float = 1.0
     pow_exp: float = 2.5
     qp_asymmetry: float = 0.0
-
-    def __init__(
-        self,
-        in_offset: float = 270,
-        out_offset: float = 270,
-        in_scaling: float = 340,
-        out_scaling: float = 380,
-        start_lambda: float = 1.0,
-        end_lambda: float = 1.0,
-        pow_exp: float = 2.5,
-        qp_asymmetry: float = 0.0,
-    ):
-        self.in_offset = in_offset
-        self.out_offset = out_offset
-        self.in_scaling = in_scaling
-        self.out_scaling = out_scaling
-        self.start_lambda = start_lambda
-        self.end_lambda = end_lambda
-        self.pow_exp = pow_exp
-        self.qp_asymmetry = qp_asymmetry
 
 
 def coalesce_ft_weights(model, layer):
