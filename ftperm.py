@@ -403,7 +403,7 @@ def make_fen_batch_provider(data_path, batch_size):
     return nnue_dataset.FenBatchProvider(
         data_path,
         True,
-        1,
+        4,  # some speedup and avoids StopIteration from fetch_next_fen_batch.
         batch_size,
         nnue_dataset.DataloaderSkipConfig(
             random_fen_skipping=10,
