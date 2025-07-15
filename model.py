@@ -3,11 +3,25 @@ import torch
 from torch import nn
 import pytorch_lightning as pl
 from feature_transformer import DoubleFeatureTransformerSlice
+from dataclasses import dataclass
 
 # 3 layer fully connected network
 L1 = 3072
 L2 = 15
 L3 = 32
+
+
+# parameters needed for the definition of the loss
+@dataclass
+class LossParams:
+    in_offset: float = 270
+    out_offset: float = 270
+    in_scaling: float = 340
+    out_scaling: float = 380
+    start_lambda: float = 1.0
+    end_lambda: float = 1.0
+    pow_exp: float = 2.5
+    qp_asymmetry: float = 0.0
 
 
 def coalesce_ft_weights(model, layer):
@@ -81,8 +95,7 @@ class LayerStacks(nn.Module):
         self.output.bias = nn.Parameter(output_bias)
 
     def forward(self, x, ls_indices):
-
-        assert self.idx_offset != None and self.idx_offset.shape[0] == x.shape[0]
+        assert self.idx_offset is not None and self.idx_offset.shape[0] == x.shape[0]
 
         indices = ls_indices.flatten() + self.idx_offset
 
@@ -150,9 +163,6 @@ class NNUE(pl.LightningModule):
     def __init__(
         self,
         feature_set,
-        start_lambda=1.0,
-        end_lambda=1.0,
-        qp_asymmetry=0.0,
         max_epoch=800,
         num_batches_per_epoch=int(100_000_000 / 16384),
         gamma=0.992,
@@ -160,6 +170,7 @@ class NNUE(pl.LightningModule):
         param_index=0,
         num_psqt_buckets=8,
         num_ls_buckets=8,
+        loss_params=LossParams(),
     ):
         super(NNUE, self).__init__()
         self.num_psqt_buckets = num_psqt_buckets
@@ -169,9 +180,7 @@ class NNUE(pl.LightningModule):
         )
         self.feature_set = feature_set
         self.layer_stacks = LayerStacks(self.num_ls_buckets)
-        self.start_lambda = start_lambda
-        self.end_lambda = end_lambda
-        self.qp_asymmetry = qp_asymmetry
+        self.loss_params = loss_params
         self.max_epoch = max_epoch
         self.num_batches_per_epoch = num_batches_per_epoch
         self.gamma = gamma
@@ -362,6 +371,8 @@ class NNUE(pl.LightningModule):
         return x
 
     def step_(self, batch, batch_idx, loss_type):
+        _ = batch_idx  # unused, but required by pytorch-lightning
+
         # We clip weights at the start of each step. This means that after
         # the last step the weights might be outside of the desired range.
         # They should be also clipped accordingly in the serializer.
@@ -380,12 +391,6 @@ class NNUE(pl.LightningModule):
             layer_stack_indices,
         ) = batch
 
-        # convert the network and search scores to an estimate match result
-        # based on the win_rate_model, with scalings and offsets optimized
-        in_scaling = 340
-        out_scaling = 380
-        offset = 270
-
         scorenet = (
             self(
                 us,
@@ -399,25 +404,29 @@ class NNUE(pl.LightningModule):
             )
             * self.nnue2score
         )
-        q = (scorenet - offset) / in_scaling  # used to compute the chance of a win
-        qm = (-scorenet - offset) / in_scaling  # used to compute the chance of a loss
-        qf = 0.5 * (
-            1.0 + q.sigmoid() - qm.sigmoid()
-        )  # estimated match result (using win, loss and draw probs).
 
-        p = (score - offset) / out_scaling
-        pm = (-score - offset) / out_scaling
-        pf = 0.5 * (1.0 + p.sigmoid() - pm.sigmoid())
+        p = self.loss_params
+        # convert the network and search scores to an estimate match result
+        # based on the win_rate_model, with scalings and offsets optimized
+        q = (scorenet - p.in_offset) / p.in_scaling
+        qm = (-scorenet - p.in_offset) / p.in_scaling
+        qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
 
+        s = (score - p.out_offset) / p.out_scaling
+        sm = (-score - p.out_offset) / p.out_scaling
+        pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
+
+        # blend that eval based score with te actual game outcome
         t = outcome
-        actual_lambda = self.start_lambda + (self.end_lambda - self.start_lambda) * (
+        actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
             self.current_epoch / self.max_epoch
         )
         pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
-        loss = torch.pow(torch.abs(pt - qf), 2.5)
-        if self.qp_asymmetry != 0.0:
-            loss = loss * ((qf > pt) * self.qp_asymmetry + 1)
+        # use a MSE-like loss function
+        loss = torch.pow(torch.abs(pt - qf), p.pow_exp)
+        if p.qp_asymmetry != 0.0:
+            loss = loss * ((qf > pt) * p.qp_asymmetry + 1)
         loss = loss.mean()
 
         self.log(loss_type, loss)

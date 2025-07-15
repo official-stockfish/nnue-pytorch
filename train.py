@@ -186,6 +186,41 @@ def main():
         help="Adjust to loss for those if q (prediction) > p (reference) (default=0.0)",
     )
     parser.add_argument(
+        "--pow-exp",
+        default=2.5,
+        type=float,
+        dest="pow_exp",
+        help="exponent of the power law used for the mean error (default=2.5)",
+    )
+    parser.add_argument(
+        "--in-offset",
+        default=270,
+        type=float,
+        dest="in_offset",
+        help="offset for conversion to win on input (default=270.0)",
+    )
+    parser.add_argument(
+        "--out-offset",
+        default=270,
+        type=float,
+        dest="out_offset",
+        help="offset for conversion to win on input (default=270.0)",
+    )
+    parser.add_argument(
+        "--in-scaling",
+        default=340,
+        type=float,
+        dest="in_scaling",
+        help="scaling for conversion to win on input (default=340.0)",
+    )
+    parser.add_argument(
+        "--out-scaling",
+        default=380,
+        type=float,
+        dest="out_scaling",
+        help="scaling for conversion to win on input (default=380.0)",
+    )
+    parser.add_argument(
         "--gamma",
         default=0.992,
         type=float,
@@ -345,17 +380,26 @@ def main():
 
     feature_set = features.get_feature_set_from_name(args.features)
 
-    start_lambda = args.start_lambda or args.lambda_
-    end_lambda = args.end_lambda or args.lambda_
+    loss_params = M.LossParams(
+        in_offset=args.in_offset,
+        in_scaling=args.in_scaling,
+        out_offset=args.out_offset,
+        out_scaling=args.out_scaling,
+        start_lambda=args.start_lambda or args.lambda_,
+        end_lambda=args.end_lambda or args.lambda_,
+        pow_exp=args.pow_exp,
+        qp_asymmetry=args.qp_asymmetry,
+    )
+    print("Loss parameters:")
+    print(loss_params)
+
     max_epoch = args.max_epochs or 800
     if args.resume_from_model is None:
         nnue = M.NNUE(
             feature_set=feature_set,
-            start_lambda=start_lambda,
+            loss_params=loss_params,
             max_epoch=max_epoch,
             num_batches_per_epoch=args.epoch_size / batch_size,
-            end_lambda=end_lambda,
-            qp_asymmetry=args.qp_asymmetry,
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
@@ -363,9 +407,7 @@ def main():
     else:
         nnue = torch.load(args.resume_from_model, weights_only=False)
         nnue.set_feature_set(feature_set)
-        nnue.start_lambda = start_lambda
-        nnue.end_lambda = end_lambda
-        nnue.qp_asymmetry = args.qp_asymmetry
+        nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
         nnue.num_batches_per_epoch = args.epoch_size / batch_size
         # we can set the following here just like that because when resuming
