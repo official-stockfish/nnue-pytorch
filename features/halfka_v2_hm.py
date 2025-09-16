@@ -1,6 +1,9 @@
-import chess
 from collections import OrderedDict
-from feature_block import *
+
+import chess
+
+from .feature_block import *
+
 
 NUM_SQ = 64
 NUM_PT_REAL = 11
