@@ -475,7 +475,7 @@ def main():
     nnue = torch.compile(nnue, backend=args.compile_backend)
     nnue.to(device=main_device)
 
-    print("Using c++ data loader")
+    print("Using C++ data loader")
     train, val = make_data_loaders(
         train_datasets,
         val_datasets,

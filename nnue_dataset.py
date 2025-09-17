@@ -1,22 +1,20 @@
-import numpy as np
 import ctypes
-import torch
 import os
-import sys
 import glob
+import threading
+import queue
+
+import numpy as np
+import torch
 from torch.utils.data import Dataset
+
 from dataloader_skip_config import DataloaderSkipConfig, CDataloaderSkipConfig
 
-local_dllpath = [
-    n
-    for n in glob.glob("./*training_data_loader.*")
-    if n.endswith(".so") or n.endswith(".dll") or n.endswith(".dylib")
-]
-if not local_dllpath:
-    print("Cannot find data_loader shared library.")
-    sys.exit(1)
-dllpath = os.path.abspath(local_dllpath[0])
-dll = ctypes.cdll.LoadLibrary(dllpath)
+
+def _to_c_str_array(str_list):
+    c_str_array = (ctypes.c_char_p * len(str_list))()
+    c_str_array[:] = [s.encode("utf-8") for s in str_list]
+    return c_str_array
 
 
 class SparseBatch(ctypes.Structure):
@@ -141,44 +139,174 @@ class FenBatch(ctypes.Structure):
 
 
 FenBatchPtr = ctypes.POINTER(FenBatch)
-# EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, DataloaderSkipConfig config)
-create_fen_batch_stream = dll.create_fen_batch_stream
-create_fen_batch_stream.restype = ctypes.c_void_p
-create_fen_batch_stream.argtypes = [
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.POINTER(ctypes.c_char_p),
-    ctypes.c_int,
-    ctypes.c_bool,
-    CDataloaderSkipConfig,
-]
-destroy_fen_batch_stream = dll.destroy_fen_batch_stream
-destroy_fen_batch_stream.argtypes = [ctypes.c_void_p]
 
 
-def make_fen_batch_stream(
-    concurrency,
-    filenames,
-    batch_size,
-    cyclic,
-    config: DataloaderSkipConfig,
-):
-    filenames_ = (ctypes.c_char_p * len(filenames))()
-    filenames_[:] = [filename.encode("utf-8") for filename in filenames]
-    return create_fen_batch_stream(
+class CDataLoaderAPI:
+    def __init__(self):
+        self.dll = self._load_library()
+        self._define_prototypes()
+
+    def _load_library(self):
+        for lib in glob.glob("./*training_data_loader.*"):
+            if not (
+                lib.endswith(".so") or lib.endswith("dll") or lib.endswith(".dylib")
+            ):
+                continue
+            return ctypes.cdll.LoadLibrary(os.path.abspath(lib))
+        raise FileNotFoundError("Cannot find data_loader shared library.")
+
+    def _define_prototypes(self):
+        # EXPORT FenBatchStream* CDECL create_fen_batch_stream(
+        #     int concurrency,
+        #     int num_files,
+        #     const char* const* filenames,
+        #     int batch_size,
+        #     bool cyclic,
+        #     DataloaderSkipConfig config
+        # )
+        self.dll.create_fen_batch_stream.restype = ctypes.c_void_p
+        self.dll.create_fen_batch_stream.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_char_p),
+            ctypes.c_int,
+            ctypes.c_bool,
+            CDataloaderSkipConfig,
+        ]
+
+        # EXPORT void CDECL destroy_fen_batch_stream(FenBatchStream* stream)
+        self.dll.destroy_fen_batch_stream.argtypes = [ctypes.c_void_p]
+
+        # EXPORT FenBatch* CDECL fetch_next_fen_batch(Stream<FenBatch>* stream)
+        self.dll.fetch_next_fen_batch.restype = FenBatchPtr
+        self.dll.fetch_next_fen_batch.argtypes = [ctypes.c_void_p]
+
+        # EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(
+        #     const char* feature_set_c,
+        #     int concurrency,
+        #     int num_files,
+        #     const char* const* filenames,
+        #     int batch_size,
+        #     bool cyclic,
+        #     DataloaderSkipConfig config
+        # )
+        self.dll.create_sparse_batch_stream.restype = ctypes.c_void_p
+        self.dll.create_sparse_batch_stream.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_char_p),
+            ctypes.c_int,
+            ctypes.c_bool,
+            CDataloaderSkipConfig,
+        ]
+
+        # EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream)
+        self.dll.destroy_sparse_batch_stream.argtypes = [ctypes.c_void_p]
+
+        # EXPORT SparseBatch* CDECL fetch_next_sparse_batch(Stream<SparseBatch>* stream)
+        self.dll.fetch_next_sparse_batch.restype = SparseBatchPtr
+        self.dll.fetch_next_sparse_batch.argtypes = [ctypes.c_void_p]
+
+        # EXPORT SparseBatch* get_sparse_batch_from_fens(
+        #    const char* feature_set_c,
+        #    int num_fens,
+        #    const char* const* fens,
+        #    int* scores,
+        #    int* plies,
+        #    int* results
+        # )
+        self.dll.get_sparse_batch_from_fens.restype = SparseBatchPtr
+        self.dll.get_sparse_batch_from_fens.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_char_p),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+
+
+    def create_fen_batch_stream(
+        self,
         concurrency,
-        len(filenames),
-        filenames_,
+        filenames,
         batch_size,
         cyclic,
-        CDataloaderSkipConfig(config),
-    )
+        config: DataloaderSkipConfig,
+    ):
+        return self.dll.create_fen_batch_stream(
+            concurrency,
+            len(filenames),
+            _to_c_str_array(filenames),
+            batch_size,
+            cyclic,
+            CDataloaderSkipConfig(config),
+        )
+
+    def destroy_fen_batch_stream(self, stream):
+        self.dll.destroy_fen_batch_stream(stream)
+
+    def fetch_next_fen_batch(self, stream):
+        return self.dll.fetch_next_fen_batch(stream)
+
+    def destroy_fen_batch(self, fen_batch):
+        self.dll.destroy_fen_batch(fen_batch)
+
+    def create_sparse_batch_stream(
+        self,
+        feature_set,
+        concurrency,
+        filenames,
+        batch_size,
+        cyclic,
+        config: DataloaderSkipConfig,
+    ):
+        return self.dll.create_sparse_batch_stream(
+            feature_set,
+            concurrency,
+            len(filenames),
+            _to_c_str_array(filenames),
+            batch_size,
+            cyclic,
+            CDataloaderSkipConfig(config),
+        )
+
+    def destroy_sparse_batch_stream(self, stream):
+        self.dll.destroy_sparse_batch_stream(stream)
+
+    def get_sparse_batch_from_fens(self, feature_set, fens, scores, plies, results):
+        results_ = (ctypes.c_int * len(scores))()
+        scores_ = (ctypes.c_int * len(plies))()
+        plies_ = (ctypes.c_int * len(results))()
+        for i, v in enumerate(scores):
+            scores_[i] = v
+        for i, v in enumerate(plies):
+            plies_[i] = v
+        for i, v in enumerate(results):
+            results_[i] = v
+        b = self.dll.get_sparse_batch_from_fens(
+            feature_set.name.encode("utf-8"),
+            len(fens),
+            _to_c_str_array(fens),
+            scores_,
+            plies_,
+            results_,
+        )
+        return b
+
+    def fetch_next_sparse_batch(self, stream):
+        return self.dll.fetch_next_sparse_batch(stream)
+
+    def destroy_sparse_batch(self, batch):
+        self.dll.destroy_sparse_batch(batch)
 
 
-fetch_next_fen_batch = dll.fetch_next_fen_batch
-fetch_next_fen_batch.restype = FenBatchPtr
-fetch_next_fen_batch.argtypes = [ctypes.c_void_p]
-destroy_fen_batch = dll.destroy_fen_batch
+try:
+    c_lib = CDataLoaderAPI()
+except FileNotFoundError as e:
+    print(e)
+    exit(1)
 
 
 class FenBatchProvider:
@@ -197,7 +325,7 @@ class FenBatchProvider:
         self.config = config
 
         if batch_size:
-            self.stream = make_fen_batch_stream(
+            self.stream = c_lib.create_fen_batch_stream(
                 self.num_workers, [self.filename], batch_size, cyclic, config
             )
         else:
@@ -214,17 +342,17 @@ class FenBatchProvider:
         return self
 
     def __next__(self):
-        v = fetch_next_fen_batch(self.stream)
+        v = c_lib.fetch_next_fen_batch(self.stream)
 
         if v:
             fens = v.contents.get_fens()
-            destroy_fen_batch(v)
+            c_lib.destroy_fen_batch(v)
             return fens
         else:
             raise StopIteration
 
     def __del__(self):
-        destroy_fen_batch_stream(self.stream)
+        c_lib.destroy_fen_batch_stream(self.stream)
 
 
 class TrainingDataProvider:
@@ -285,78 +413,6 @@ class TrainingDataProvider:
         self.destroy_stream(self.stream)
 
 
-#    EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, DataloaderSkipConfig config)
-create_sparse_batch_stream = dll.create_sparse_batch_stream
-create_sparse_batch_stream.restype = ctypes.c_void_p
-create_sparse_batch_stream.argtypes = [
-    ctypes.c_char_p,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.POINTER(ctypes.c_char_p),
-    ctypes.c_int,
-    ctypes.c_bool,
-    CDataloaderSkipConfig,
-]
-destroy_sparse_batch_stream = dll.destroy_sparse_batch_stream
-destroy_sparse_batch_stream.argtypes = [ctypes.c_void_p]
-
-
-def make_sparse_batch_stream(
-    feature_set,
-    concurrency,
-    filenames,
-    batch_size,
-    cyclic,
-    config: DataloaderSkipConfig,
-):
-    filenames_ = (ctypes.c_char_p * len(filenames))()
-    filenames_[:] = [filename.encode("utf-8") for filename in filenames]
-    return create_sparse_batch_stream(
-        feature_set,
-        concurrency,
-        len(filenames),
-        filenames_,
-        batch_size,
-        cyclic,
-        CDataloaderSkipConfig(config),
-    )
-
-
-fetch_next_sparse_batch = dll.fetch_next_sparse_batch
-fetch_next_sparse_batch.restype = SparseBatchPtr
-fetch_next_sparse_batch.argtypes = [ctypes.c_void_p]
-destroy_sparse_batch = dll.destroy_sparse_batch
-
-get_sparse_batch_from_fens = dll.get_sparse_batch_from_fens
-get_sparse_batch_from_fens.restype = SparseBatchPtr
-get_sparse_batch_from_fens.argtypes = [
-    ctypes.c_char_p,
-    ctypes.c_int,
-    ctypes.POINTER(ctypes.c_char_p),
-    ctypes.POINTER(ctypes.c_int),
-    ctypes.POINTER(ctypes.c_int),
-    ctypes.POINTER(ctypes.c_int),
-]
-
-
-def make_sparse_batch_from_fens(feature_set, fens, scores, plies, results):
-    results_ = (ctypes.c_int * len(scores))()
-    scores_ = (ctypes.c_int * len(plies))()
-    plies_ = (ctypes.c_int * len(results))()
-    fens_ = (ctypes.c_char_p * len(fens))()
-    fens_[:] = [fen.encode("utf-8") for fen in fens]
-    for i, v in enumerate(scores):
-        scores_[i] = v
-    for i, v in enumerate(plies):
-        plies_[i] = v
-    for i, v in enumerate(results):
-        results_[i] = v
-    b = get_sparse_batch_from_fens(
-        feature_set.name.encode("utf-8"), len(fens), fens_, scores_, plies_, results_
-    )
-    return b
-
-
 class SparseBatchProvider(TrainingDataProvider):
     def __init__(
         self,
@@ -370,10 +426,10 @@ class SparseBatchProvider(TrainingDataProvider):
     ):
         super(SparseBatchProvider, self).__init__(
             feature_set,
-            make_sparse_batch_stream,
-            destroy_sparse_batch_stream,
-            fetch_next_sparse_batch,
-            destroy_sparse_batch,
+            c_lib.create_sparse_batch_stream,
+            c_lib.destroy_sparse_batch_stream,
+            c_lib.fetch_next_sparse_batch,
+            c_lib.destroy_sparse_batch,
             filenames,
             cyclic,
             num_workers,
@@ -413,10 +469,6 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             config=self.config,
             device=self.device,
         )
-
-
-import threading
-import queue
 
 
 class FixedNumBatchesDataset(Dataset):

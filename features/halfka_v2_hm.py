@@ -2,7 +2,7 @@ from collections import OrderedDict
 
 import chess
 
-from .feature_block import *
+from .feature_block import FeatureBlock
 
 
 NUM_SQ = 64
