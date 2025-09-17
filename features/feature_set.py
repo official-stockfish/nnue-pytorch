@@ -1,5 +1,6 @@
-from feature_block import *
 import torch
+
+from .feature_block import FeatureBlock
 
 
 def _calculate_features_hash(features):

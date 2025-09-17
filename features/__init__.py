@@ -1,8 +1,7 @@
-from feature_block import *
-from feature_set import *
-import model as M
-
 import argparse
+
+from .feature_set import FeatureSet
+import model as M
 
 """
 Each module that defines feature blocks must be imported here and
@@ -10,10 +9,7 @@ added to the _feature_modules list. Each such module must define a
 function `get_feature_block_clss` at module scope that returns the list
 of feature block classes in that module.
 """
-import features.halfkp as halfkp
-import features.halfka as halfka
-import features.halfka_v2 as halfka_v2
-import features.halfka_v2_hm as halfka_v2_hm
+from . import halfkp, halfka, halfka_v2, halfka_v2_hm
 
 _feature_modules = [halfkp, halfka, halfka_v2, halfka_v2_hm]
 
