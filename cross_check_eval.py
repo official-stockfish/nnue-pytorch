@@ -183,11 +183,11 @@ def main():
     while done < args.count:
         fens = filter_fens(next(fen_batch_provider))
 
-        b = nnue_dataset.make_sparse_batch_from_fens(
+        b = nnue_dataset.c_lib.get_sparse_batch_from_fens(
             feature_set, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
         model_evals += eval_model_batch(model, b)
-        nnue_dataset.destroy_sparse_batch(b)
+        nnue_dataset.c_lib.destroy_sparse_batch(b)
 
         engine_evals += eval_engine_batch(args.engine, args.net, fens)
 
