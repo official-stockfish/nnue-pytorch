@@ -105,9 +105,15 @@ def gather_statistics_from_data(filename, count, bucket_size):
     # it doesn't actually matter, all we care about are the scores and outcomes
     # this is just the easiest way to do it
     dataset = data_loader.SparseBatchDataset(
-        "HalfKP", filename, batch_size, cyclic, 1, data_loader.DataloaderSkipConfig(
+        "HalfKP",
+        filename,
+        batch_size,
+        cyclic,
+        1,
+        data_loader.DataloaderSkipConfig(
             filtered=smart_fen_skipping,
-    ))
+        ),
+    )
     batches = iter(dataset)
     num_batches = (count + batch_size - 1) // batch_size
     data = gather_statistics_from_batches(

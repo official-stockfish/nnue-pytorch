@@ -108,11 +108,13 @@ class SparseBatch(ctypes.Structure):
             layer_stack_indices,
         )
 
+
 SparseBatchPtr = ctypes.POINTER(SparseBatch)
 
 
 class Fen(ctypes.Structure):
     _fields_ = [("size", ctypes.c_int), ("fen", ctypes.c_char_p)]
+
 
 FenPtr = ctypes.POINTER(Fen)
 
@@ -125,6 +127,7 @@ class FenBatch(ctypes.Structure):
         for i in range(self.size):
             strings.append(self.fens[i].fen.decode("utf-8"))
         return strings
+
 
 FenBatchPtr = ctypes.POINTER(FenBatch)
 
@@ -213,7 +216,6 @@ class CDataLoaderAPI:
             ctypes.POINTER(ctypes.c_int),
             ctypes.POINTER(ctypes.c_int),
         ]
-
 
 
 try:

@@ -3,10 +3,12 @@ import ctypes
 from ._native import c_lib
 from .config import CDataloaderSkipConfig, DataloaderSkipConfig
 
+
 def _to_c_str_array(str_list):
     c_str_array = (ctypes.c_char_p * len(str_list))()
     c_str_array[:] = [s.encode("utf-8") for s in str_list]
     return c_str_array
+
 
 def create_fen_batch_stream(
     concurrency,
@@ -24,14 +26,18 @@ def create_fen_batch_stream(
         CDataloaderSkipConfig(config),
     )
 
+
 def destroy_fen_batch_stream(stream):
     c_lib.dll.destroy_fen_batch_stream(stream)
+
 
 def fetch_next_fen_batch(stream):
     return c_lib.dll.fetch_next_fen_batch(stream)
 
+
 def destroy_fen_batch(fen_batch):
     c_lib.dll.destroy_fen_batch(fen_batch)
+
 
 def create_sparse_batch_stream(
     feature_set,
@@ -51,8 +57,10 @@ def create_sparse_batch_stream(
         CDataloaderSkipConfig(config),
     )
 
+
 def destroy_sparse_batch_stream(stream):
     c_lib.dll.destroy_sparse_batch_stream(stream)
+
 
 def get_sparse_batch_from_fens(feature_set, fens, scores, plies, results):
     assert len(fens) == len(scores) == len(plies) == len(results)
@@ -69,8 +77,10 @@ def get_sparse_batch_from_fens(feature_set, fens, scores, plies, results):
         to_c_int_array(results),
     )
 
+
 def fetch_next_sparse_batch(stream):
     return c_lib.dll.fetch_next_sparse_batch(stream)
+
 
 def destroy_sparse_batch(batch):
     c_lib.dll.destroy_sparse_batch(batch)
