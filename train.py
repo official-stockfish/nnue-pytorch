@@ -1,6 +1,6 @@
 import argparse
 import model as M
-import nnue_dataset
+import data_loader
 import pytorch_lightning as pl
 import features
 import os
@@ -47,14 +47,14 @@ def make_data_loaders(
     feature_set,
     num_workers,
     batch_size,
-    config: nnue_dataset.DataloaderSkipConfig,
+    config: data_loader.DataloaderSkipConfig,
     main_device,
     epoch_size,
     val_size,
 ):
     # Epoch and validation sizes are arbitrary
     features_name = feature_set.name
-    train_infinite = nnue_dataset.SparseBatchDataset(
+    train_infinite = data_loader.SparseBatchDataset(
         features_name,
         train_filenames,
         batch_size,
@@ -62,7 +62,7 @@ def make_data_loaders(
         config=config,
         device=main_device,
     )
-    val_infinite = nnue_dataset.SparseBatchDataset(
+    val_infinite = data_loader.SparseBatchDataset(
         features_name,
         val_filenames,
         batch_size,
@@ -72,14 +72,14 @@ def make_data_loaders(
     # num_workers has to be 0 for sparse, and 1 for dense
     # it currently cannot work in parallel mode but it shouldn't need to
     train = DataLoader(
-        nnue_dataset.FixedNumBatchesDataset(
+        data_loader.FixedNumBatchesDataset(
             train_infinite, (epoch_size + batch_size - 1) // batch_size
         ),
         batch_size=None,
         batch_sampler=None,
     )
     val = DataLoader(
-        nnue_dataset.FixedNumBatchesDataset(
+        data_loader.FixedNumBatchesDataset(
             val_infinite, (val_size + batch_size - 1) // batch_size
         ),
         batch_size=None,
@@ -482,7 +482,7 @@ def main():
         feature_set,
         args.num_workers,
         batch_size,
-        nnue_dataset.DataloaderSkipConfig(
+        data_loader.DataloaderSkipConfig(
             filtered=not args.no_smart_fen_skipping,
             random_fen_skipping=args.random_fen_skipping,
             wld_filtered=not args.no_wld_fen_skipping,

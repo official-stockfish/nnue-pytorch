@@ -35,14 +35,15 @@ import time
 import argparse
 import features
 import serialize
-import nnue_dataset
 import chess
-import model as M
 import torch
 import copy
-import numpy as np
-from model import NNUE
 import cupy as cp
+import numpy as np
+
+import data_loader
+import model as M
+from model import NNUE
 
 """
 
@@ -400,12 +401,12 @@ def read_model(nnue_path, feature_set):
 
 
 def make_fen_batch_provider(data_path, batch_size):
-    return nnue_dataset.FenBatchProvider(
+    return data_loader.FenBatchProvider(
         data_path,
         True,
         4,  # some speedup and avoids StopIteration from fetch_next_fen_batch.
         batch_size,
-        nnue_dataset.DataloaderSkipConfig(
+        data_loader.DataloaderSkipConfig(
             random_fen_skipping=10,
         ),
     )
@@ -529,7 +530,7 @@ def gather_impl(model, dataset, count):
     while done < count:
         fens = filter_fens(next(fen_batch_provider))
 
-        b = nnue_dataset.c_lib.get_sparse_batch_from_fens(
+        b = data_loader.get_sparse_batch_from_fens(
             quantized_model.feature_set,
             fens,
             [0] * len(fens),
@@ -539,7 +540,7 @@ def gather_impl(model, dataset, count):
         actmat = eval_ft(quantized_model, b).cpu()
         actmat = actmat <= ZERO_POINT
         actmats.append(actmat.numpy())
-        nnue_dataset.c_lib.destroy_sparse_batch(b)
+        data_loader.destroy_sparse_batch(b)
 
         done += len(fens)
         print("Processed {} positions.".format(done))

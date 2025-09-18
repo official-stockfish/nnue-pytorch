@@ -1003,7 +1003,7 @@ extern "C" {
         return nullptr;
     }
 
-    // changing the signature needs matching changes in nnue_dataset.py
+    // changing the signature needs matching changes in data_loader/_native.py
     EXPORT FenBatchStream* CDECL create_fen_batch_stream(int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, DataloaderSkipConfig config)
     {
         auto skipPredicate = make_skip_predicate(config);
@@ -1017,7 +1017,7 @@ extern "C" {
         delete stream;
     }
 
-    // changing the signature needs matching changes in nnue_dataset.py
+    // changing the signature needs matching changes in data_loader/_native.py
     EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char* feature_set_c, int concurrency, int num_files, const char* const* filenames, int batch_size, bool cyclic, DataloaderSkipConfig config)
     {
         auto skipPredicate = make_skip_predicate(config);
