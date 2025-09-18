@@ -529,7 +529,7 @@ def gather_impl(model, dataset, count):
     while done < count:
         fens = filter_fens(next(fen_batch_provider))
 
-        b = nnue_dataset.make_sparse_batch_from_fens(
+        b = nnue_dataset.c_lib.get_sparse_batch_from_fens(
             quantized_model.feature_set,
             fens,
             [0] * len(fens),
@@ -539,7 +539,7 @@ def gather_impl(model, dataset, count):
         actmat = eval_ft(quantized_model, b).cpu()
         actmat = actmat <= ZERO_POINT
         actmats.append(actmat.numpy())
-        nnue_dataset.destroy_sparse_batch(b)
+        nnue_dataset.c_lib.destroy_sparse_batch(b)
 
         done += len(fens)
         print("Processed {} positions.".format(done))
