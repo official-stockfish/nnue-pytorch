@@ -276,24 +276,19 @@ class CDataLoaderAPI:
         self.dll.destroy_sparse_batch_stream(stream)
 
     def get_sparse_batch_from_fens(self, feature_set, fens, scores, plies, results):
-        results_ = (ctypes.c_int * len(scores))()
-        scores_ = (ctypes.c_int * len(plies))()
-        plies_ = (ctypes.c_int * len(results))()
-        for i, v in enumerate(scores):
-            scores_[i] = v
-        for i, v in enumerate(plies):
-            plies_[i] = v
-        for i, v in enumerate(results):
-            results_[i] = v
-        b = self.dll.get_sparse_batch_from_fens(
+        assert len(fens) == len(scores) == len(plies) == len(results)
+
+        def to_c_int_array(data):
+            return (ctypes.c_int * len(data))(*data)
+
+        return self.dll.get_sparse_batch_from_fens(
             feature_set.name.encode("utf-8"),
             len(fens),
             _to_c_str_array(fens),
-            scores_,
-            plies_,
-            results_,
+            to_c_int_array(scores),
+            to_c_int_array(plies),
+            to_c_int_array(results),
         )
-        return b
 
     def fetch_next_sparse_batch(self, stream):
         return self.dll.fetch_next_sparse_batch(stream)
