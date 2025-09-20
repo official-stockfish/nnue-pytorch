@@ -1121,7 +1121,11 @@ int main(int argc, char** argv)
     const char** files = const_cast<const char**>(&argv[1]);
     int file_count = argc - 1;
 
+#ifdef PGO_BUILD
+    const int concurrency = 1;
+#else
     const int concurrency = std::thread::hardware_concurrency();
+#endif
     // some typical numbers, more skipping means more load
     const int batch_size = 16384;
     const bool cyclic = true;
@@ -1136,7 +1140,14 @@ int main(int argc, char** argv)
     auto stream = create_sparse_batch_stream("HalfKAv2_hm^", concurrency, file_count, files, batch_size, cyclic, config);
 
     auto t0 = std::chrono::high_resolution_clock::now();
-    for (int i = 1; i <= 6000; ++i)
+
+#ifdef PGO_BUILD
+    constexpr int iteration_count = 30;
+#else
+    constexpr int iteration_count = 6000;
+#endif
+
+    for (int i = 1; i <= iteration_count; ++i)
     {
         destroy_sparse_batch(stream->next());
         auto t1 = std::chrono::high_resolution_clock::now();
