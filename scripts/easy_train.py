@@ -1222,7 +1222,7 @@ def setup_stockfish(directory, repo, branch_or_commit, arch, threads=1):
 def is_nnue_pytorch_setup(directory):
     try:
         with subprocess.Popen(
-            [sys.executable, "nnue_dataset.py"], cwd=directory
+            [sys.executable, "data_loader/__init__.py"], cwd=directory
         ) as process:
             if process.wait(timeout=TIMEOUT):
                 return False

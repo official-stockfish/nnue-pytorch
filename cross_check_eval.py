@@ -1,10 +1,12 @@
 import argparse
-import features
-import serialize
-import nnue_dataset
 import subprocess
 import re
+
 import chess
+
+import features
+import serialize
+import data_loader
 from model import NNUE
 
 
@@ -15,12 +17,12 @@ def read_model(nnue_path, feature_set):
 
 
 def make_fen_batch_provider(data_path, batch_size):
-    return nnue_dataset.FenBatchProvider(
+    return data_loader.FenBatchProvider(
         data_path,
         True,
         1,
         batch_size,
-        nnue_dataset.DataloaderSkipConfig(
+        data_loader.DataloaderSkipConfig(
             random_fen_skipping=10,
         ),
     )
@@ -183,11 +185,11 @@ def main():
     while done < args.count:
         fens = filter_fens(next(fen_batch_provider))
 
-        b = nnue_dataset.make_sparse_batch_from_fens(
+        b = data_loader.get_sparse_batch_from_fens(
             feature_set, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
         model_evals += eval_model_batch(model, b)
-        nnue_dataset.destroy_sparse_batch(b)
+        data_loader.destroy_sparse_batch(b)
 
         engine_evals += eval_engine_batch(args.engine, args.net, fens)
 
