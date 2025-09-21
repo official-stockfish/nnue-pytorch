@@ -19,7 +19,7 @@ For NVIDIA Users:
 
 For driver requirements, check [Running ROCm Docker containers (AMD)](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/docker.html) or the [PyTorch container release notes (Nvidia)](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-25-04.html#rel-25-04).
 
-The container includes CUDA 12.x / ROCm latest and all required dependencies. Your local CUDA/ROCm toolkit version doesn't matter.
+The container includes CUDA 12.x / ROCm 6.4.3 and all required dependencies. Your local CUDA/ROCm toolkit version doesn't matter.
 
 ### Running the container
 
