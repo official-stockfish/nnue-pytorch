@@ -92,7 +92,7 @@ def gather_statistics_from_batches(batches, bucket_size):
     return data
 
 
-def gather_statistics_from_data(filename, count, bucket_size):
+def gather_statistics_from_data(filename: str, count: int, bucket_size: int):
     """
     Takes a .bin or .binpack file and produces perf% statistics
     The result is a dictionary of the form { eval : (perf%, count) }
@@ -105,7 +105,7 @@ def gather_statistics_from_data(filename, count, bucket_size):
     # this is just the easiest way to do it
     dataset = data_loader.SparseBatchDataset(
         "HalfKP",
-        filename,
+        [filename],
         batch_size,
         cyclic,
         1,
