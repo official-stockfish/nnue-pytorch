@@ -78,7 +78,11 @@ class LayerStacks(nn.Module):
         self.output.bias = nn.Parameter(output_bias)
 
     def forward(self, x: Tensor, ls_indices: Tensor):
-        assert hasattr(self, "idx_offset") and self.idx_offset is not None and self.idx_offset.shape[0] == x.shape[0]
+        assert (
+            hasattr(self, "idx_offset")
+            and self.idx_offset is not None
+            and self.idx_offset.shape[0] == x.shape[0]
+        )
 
         indices = ls_indices.flatten() + self.idx_offset
 
@@ -365,10 +369,10 @@ class NNUE(L.LightningModule):
         num_psqt_buckets=8,
         num_ls_buckets=8,
         loss_params=LossParams(),
-        compilation_mode: str | None = None
+        compilation_mode: str | None = None,
     ):
         super().__init__()
-        self.model = NNUEModel(feature_set, num_psqt_buckets, num_ls_buckets)
+        self.model: NNUEModel = NNUEModel(feature_set, num_psqt_buckets, num_ls_buckets)
         self.loss_params = loss_params
         self.max_epoch = max_epoch
         self.batch_size = batch_size
@@ -504,7 +508,7 @@ class NNUE(L.LightningModule):
         return [optimizer], [scheduler]
 
 
-def coalesce_ft_weights(model: NNUE, layer: BaseFeatureTransformerSlice):
+def coalesce_ft_weights(model: NNUEModel, layer: BaseFeatureTransformerSlice):
     weight = layer.weight.data
     indices = model.feature_set.get_virtual_to_real_features_gather_indices()
     weight_coalesced = weight.new_zeros(
