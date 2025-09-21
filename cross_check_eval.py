@@ -29,7 +29,7 @@ def make_fen_batch_provider(data_path, batch_size):
     )
 
 
-def eval_model_batch(model, batch):
+def eval_model_batch(model, batch: data_loader.SparseBatchPtr):
     (
         us,
         them,

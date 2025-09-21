@@ -109,27 +109,18 @@ class SparseBatch(ctypes.Structure):
         )
 
 
-SparseBatchPtr = ctypes.POINTER(SparseBatch)
-
-
 class Fen(ctypes.Structure):
     _fields_ = [("size", ctypes.c_int), ("fen", ctypes.c_char_p)]
 
 
-FenPtr = ctypes.POINTER(Fen)
-
-
 class FenBatch(ctypes.Structure):
-    _fields_ = [("size", ctypes.c_int), ("fens", FenPtr)]
+    _fields_ = [("size", ctypes.c_int), ("fens", ctypes.POINTER(Fen))]
 
     def get_fens(self):
         strings = []
         for i in range(self.size):
             strings.append(self.fens[i].fen.decode("utf-8"))
         return strings
-
-
-FenBatchPtr = ctypes.POINTER(FenBatch)
 
 
 class CDataLoaderAPI:
@@ -169,7 +160,7 @@ class CDataLoaderAPI:
         self.dll.destroy_fen_batch_stream.argtypes = [ctypes.c_void_p]
 
         # EXPORT FenBatch* CDECL fetch_next_fen_batch(Stream<FenBatch>* stream)
-        self.dll.fetch_next_fen_batch.restype = FenBatchPtr
+        self.dll.fetch_next_fen_batch.restype = ctypes.POINTER(FenBatch)
         self.dll.fetch_next_fen_batch.argtypes = [ctypes.c_void_p]
 
         # EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(
@@ -196,7 +187,7 @@ class CDataLoaderAPI:
         self.dll.destroy_sparse_batch_stream.argtypes = [ctypes.c_void_p]
 
         # EXPORT SparseBatch* CDECL fetch_next_sparse_batch(Stream<SparseBatch>* stream)
-        self.dll.fetch_next_sparse_batch.restype = SparseBatchPtr
+        self.dll.fetch_next_sparse_batch.restype = ctypes.POINTER(SparseBatch)
         self.dll.fetch_next_sparse_batch.argtypes = [ctypes.c_void_p]
 
         # EXPORT SparseBatch* get_sparse_batch_from_fens(
@@ -207,7 +198,7 @@ class CDataLoaderAPI:
         #    int* plies,
         #    int* results
         # )
-        self.dll.get_sparse_batch_from_fens.restype = SparseBatchPtr
+        self.dll.get_sparse_batch_from_fens.restype = ctypes.POINTER(SparseBatch)
         self.dll.get_sparse_batch_from_fens.argtypes = [
             ctypes.c_char_p,
             ctypes.c_int,
@@ -216,6 +207,10 @@ class CDataLoaderAPI:
             ctypes.POINTER(ctypes.c_int),
             ctypes.POINTER(ctypes.c_int),
         ]
+
+
+type SparseBatchPtr = ctypes._Pointer[SparseBatch]
+type FenBatchPtr = ctypes._Pointer[FenBatch]
 
 
 try:

@@ -1,6 +1,6 @@
 import ctypes
 
-from ._native import c_lib
+from ._native import c_lib, SparseBatchPtr, FenBatchPtr
 from .config import CDataloaderSkipConfig, DataloaderSkipConfig
 from features.feature_set import FeatureSet
 from typing import List
@@ -18,7 +18,7 @@ def create_fen_batch_stream(
     batch_size,
     cyclic,
     config: DataloaderSkipConfig,
-):
+) -> ctypes.c_void_p:
     return c_lib.dll.create_fen_batch_stream(
         concurrency,
         len(filenames),
@@ -29,15 +29,15 @@ def create_fen_batch_stream(
     )
 
 
-def destroy_fen_batch_stream(stream):
+def destroy_fen_batch_stream(stream: ctypes.c_void_p):
     c_lib.dll.destroy_fen_batch_stream(stream)
 
 
-def fetch_next_fen_batch(stream):
+def fetch_next_fen_batch(stream: ctypes.c_void_p) -> FenBatchPtr:
     return c_lib.dll.fetch_next_fen_batch(stream)
 
 
-def destroy_fen_batch(fen_batch):
+def destroy_fen_batch(fen_batch: FenBatchPtr):
     c_lib.dll.destroy_fen_batch(fen_batch)
 
 
@@ -48,7 +48,7 @@ def create_sparse_batch_stream(
     batch_size,
     cyclic,
     config: DataloaderSkipConfig,
-):
+) -> ctypes.c_void_p:
     return c_lib.dll.create_sparse_batch_stream(
         feature_set,
         concurrency,
@@ -60,11 +60,13 @@ def create_sparse_batch_stream(
     )
 
 
-def destroy_sparse_batch_stream(stream):
+def destroy_sparse_batch_stream(stream: ctypes.c_void_p):
     c_lib.dll.destroy_sparse_batch_stream(stream)
 
 
-def get_sparse_batch_from_fens(feature_set: FeatureSet, fens, scores, plies, results):
+def get_sparse_batch_from_fens(
+    feature_set: FeatureSet, fens, scores, plies, results
+) -> SparseBatchPtr:
     assert len(fens) == len(scores) == len(plies) == len(results)
 
     def to_c_int_array(data):
@@ -80,9 +82,9 @@ def get_sparse_batch_from_fens(feature_set: FeatureSet, fens, scores, plies, res
     )
 
 
-def fetch_next_sparse_batch(stream):
+def fetch_next_sparse_batch(stream: ctypes.c_void_p) -> SparseBatchPtr:
     return c_lib.dll.fetch_next_sparse_batch(stream)
 
 
-def destroy_sparse_batch(batch):
+def destroy_sparse_batch(batch: SparseBatchPtr):
     c_lib.dll.destroy_sparse_batch(batch)
