@@ -78,7 +78,7 @@ class LayerStacks(nn.Module):
         self.output.bias = nn.Parameter(output_bias)
 
     def forward(self, x: Tensor, ls_indices: Tensor):
-        assert hasattr(self, "idx_offset") self.idx_offset is not None and self.idx_offset.shape[0] == x.shape[0]
+        assert hasattr(self, "idx_offset") and self.idx_offset is not None and self.idx_offset.shape[0] == x.shape[0]
 
         indices = ls_indices.flatten() + self.idx_offset
 
