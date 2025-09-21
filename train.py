@@ -451,6 +451,7 @@ def main():
     trainer = pl.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
+        accelerator="cuda",
         devices=[int(x) for x in args.gpus.rstrip(",").split(",") if x]
         if args.gpus
         else "auto",
@@ -473,7 +474,6 @@ def main():
 
     nnue = get_model_with_fixed_offset(nnue, batch_size, main_device)
     nnue = torch.compile(nnue, backend=args.compile_backend)
-    nnue.to(device=main_device)
 
     print("Using C++ data loader")
     train, val = make_data_loaders(
