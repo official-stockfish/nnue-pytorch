@@ -455,7 +455,7 @@ def forward_ft(
     return l0_.round()
 
 
-def eval_ft(model, batch):
+def eval_ft(model, batch: data_loader.SparseBatchPtr):
     with torch.no_grad():
         (
             us,

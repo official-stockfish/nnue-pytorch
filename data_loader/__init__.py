@@ -4,6 +4,8 @@ from .dataset import SparseBatchDataset, FenBatchProvider, FixedNumBatchesDatase
 
 from .stream import get_sparse_batch_from_fens, destroy_sparse_batch
 
+from ._native import SparseBatchPtr, FenBatchPtr
+
 __all__ = [
     "DataloaderSkipConfig",
     "SparseBatchDataset",
@@ -11,4 +13,7 @@ __all__ = [
     "FixedNumBatchesDataset",
     "get_sparse_batch_from_fens",
     "destroy_sparse_batch",
+    # types
+    "SparseBatchPtr",
+    "FenBatchPtr",
 ]
