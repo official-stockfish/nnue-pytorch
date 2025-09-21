@@ -142,6 +142,7 @@ class NNUEModel(nn.Module):
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
     ):
+        super().__init__()
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
@@ -369,7 +370,7 @@ class NNUE(L.LightningModule):
         num_ls_buckets=8,
         loss_params=LossParams(),
     ):
-        super(NNUE, self).__init__()
+        super().__init__()
         self.model = NNUEModel(feature_set, num_psqt_buckets, num_ls_buckets)
         self.loss_params = loss_params
         self.max_epoch = max_epoch
