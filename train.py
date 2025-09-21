@@ -470,7 +470,7 @@ def main():
         else "cuda:" + str(trainer.strategy.root_device.index)
     )
 
-    nnue = get_model_with_fixed_offset(nnue, batch_size, main_device)
+    nnue.model = get_model_with_fixed_offset(nnue.model, batch_size, main_device)
     nnue = torch.compile(nnue, backend=args.compile_backend)
 
     print("Using C++ data loader")
