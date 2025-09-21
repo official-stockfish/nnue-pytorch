@@ -470,7 +470,7 @@ class NNUE(L.LightningModule):
         self.model = get_model_with_fixed_offset(self.model, self.batch_size, self.device)
 
         if self.compilation_mode is not None:
-            self.model = torch.compile(self.model, backend=self.compilation_mode)
+            self = torch.compile(self, backend=self.compilation_mode)
 
     def configure_optimizers(self):
         LR = self.lr
