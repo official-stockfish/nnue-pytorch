@@ -8,7 +8,6 @@ from feature_transformer import (
 import lightning as L
 from dataclasses import dataclass
 from features.feature_set import FeatureSet
-from typing import List, Tuple
 
 # 3 layer fully connected network
 L1 = 3072
@@ -362,6 +361,7 @@ class NNUE(L.LightningModule):
         self,
         feature_set: FeatureSet,
         max_epoch=800,
+        batch_size: int = 16384,
         num_batches_per_epoch=int(100_000_000 / 16384),
         gamma=0.992,
         lr=8.75e-4,
@@ -369,20 +369,23 @@ class NNUE(L.LightningModule):
         num_psqt_buckets=8,
         num_ls_buckets=8,
         loss_params=LossParams(),
+        compilation_mode: str | None = None
     ):
         super().__init__()
         self.model = NNUEModel(feature_set, num_psqt_buckets, num_ls_buckets)
         self.loss_params = loss_params
         self.max_epoch = max_epoch
+        self.batch_size = batch_size
         self.num_batches_per_epoch = num_batches_per_epoch
         self.gamma = gamma
         self.lr = lr
         self.param_index = param_index
+        self.compilation_mode = compilation_mode
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)
 
-    def step_(self, batch: Tuple[Tensor, ...], batch_idx, loss_type):
+    def step_(self, batch: tuple[Tensor, ...], batch_idx, loss_type):
         _ = batch_idx  # unused, but required by pytorch-lightning
 
         # We clip weights at the start of each step. This means that after
@@ -454,6 +457,21 @@ class NNUE(L.LightningModule):
     def test_step(self, batch, batch_idx):
         self.step_(batch, batch_idx, "test_loss")
 
+    def configure_model(self):
+        def get_model_with_fixed_offset(model, batch_size, device):
+            model.layer_stacks.idx_offset = torch.arange(
+                0,
+                batch_size * model.layer_stacks.count,
+                model.layer_stacks.count,
+            )
+            self.register_buffer("layer_stacks_offset", model.layer_stacks.idx_offset)
+            return model
+
+        self.model = get_model_with_fixed_offset(self.model, self.batch_size, self.device)
+
+        if self.compilation_mode is not None:
+            self.model = torch.compile(self.model, backend=self.compilation_mode)
+
     def configure_optimizers(self):
         LR = self.lr
         train_params = [
@@ -504,5 +522,5 @@ def coalesce_ft_weights(model: NNUE, layer: BaseFeatureTransformerSlice):
     return weight_coalesced
 
 
-def get_parameters(layers: List[nn.Module]):
+def get_parameters(layers: list[nn.Module]):
     return [p for layer in layers for p in layer.parameters()]

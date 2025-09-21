@@ -101,16 +101,6 @@ def flatten_once(lst):
     return sum(lst, [])
 
 
-def get_model_with_fixed_offset(model, batch_size, main_device):
-    model.layer_stacks.idx_offset = torch.arange(
-        0,
-        batch_size * model.layer_stacks.count,
-        model.layer_stacks.count,
-        device=main_device,
-    )
-    return model
-
-
 def main():
     parser = argparse.ArgumentParser(description="Trains the network.")
     parser.add_argument(
@@ -397,6 +387,7 @@ def main():
             feature_set=feature_set,
             loss_params=loss_params,
             max_epoch=max_epoch,
+            batch_size=batch_size,
             num_batches_per_epoch=args.epoch_size / batch_size,
             gamma=args.gamma,
             lr=args.lr,
@@ -404,7 +395,7 @@ def main():
         )
     else:
         nnue = torch.load(args.resume_from_model, weights_only=False)
-        nnue.set_feature_set(feature_set)
+        nnue.model.set_feature_set(feature_set)
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
         nnue.num_batches_per_epoch = args.epoch_size / batch_size
@@ -463,15 +454,6 @@ def main():
         enable_checkpointing=True,
         benchmark=True,
     )
-
-    main_device = (
-        trainer.strategy.root_device
-        if trainer.strategy.root_device.index is None
-        else "cuda:" + str(trainer.strategy.root_device.index)
-    )
-
-    nnue.model = get_model_with_fixed_offset(nnue.model, batch_size, main_device)
-    nnue = torch.compile(nnue, backend=args.compile_backend)
 
     print("Using C++ data loader")
     train, val = make_data_loaders(
