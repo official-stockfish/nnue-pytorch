@@ -1,11 +1,11 @@
 import ranger21
 import torch
 from torch import nn, Tensor
-import pytorch_lightning as pl
 from feature_transformer import (
     DoubleFeatureTransformerSlice,
     BaseFeatureTransformerSlice,
 )
+import lightning as L
 from dataclasses import dataclass
 from features.feature_set import FeatureSet
 from typing import List, Tuple
@@ -135,7 +135,7 @@ class LayerStacks(nn.Module):
                 yield l1, l2, output
 
 
-class NNUE(pl.LightningModule):
+class NNUE(L.LightningModule):
     """
     feature_set - an instance of FeatureSet defining the input features
 

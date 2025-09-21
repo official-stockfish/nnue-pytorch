@@ -204,14 +204,12 @@ def validate_pytorch():
 
 
 def validate_pytorchlightning():
-    pkg = PackageInfo("pytorch_lightning")
+    pkg = PackageInfo("lightning")
     if pkg.exists:
-        LOGGER.info(f"Found pytorch_lightning version {pkg.version}. OK.")
+        LOGGER.info(f"Found lightning version {pkg.version}. OK.")
         return True
     else:
-        LOGGER.error(
-            "No pytorch_lightning found. Run `pip install pytorch-lightning`. Exiting."
-        )
+        LOGGER.error("No lightning found. Run `pip install lightning`. Exiting.")
         return False
 
 

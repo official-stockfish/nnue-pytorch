@@ -7,4 +7,4 @@ tensorboard
 numba
 numpy<2.0
 requests
-pytorch-lightning
+lightning

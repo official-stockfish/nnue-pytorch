@@ -1,14 +1,14 @@
 import argparse
 import model as M
 import data_loader
-import pytorch_lightning as pl
+import lightning as L
 import features
 import os
 import sys
 import torch
 from torch import set_num_threads as t_set_num_threads
-from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import TQDMProgressBar, Callback
+from lightning.pytorch import loggers as pl_loggers
+from lightning.pytorch.callbacks import TQDMProgressBar, Callback, ModelCheckpoint
 from torch.utils.data import DataLoader
 import time
 from datetime import timedelta
@@ -422,7 +422,7 @@ def main():
     print("Training with: {}".format(train_datasets))
     print("Validating with: {}".format(val_datasets))
 
-    pl.seed_everything(args.seed)
+    L.seed_everything(args.seed)
     print("Seed {}".format(args.seed))
 
     print("Smart fen skipping: {}".format(not args.no_smart_fen_skipping))
@@ -440,13 +440,13 @@ def main():
     print("Using log dir {}".format(logdir), flush=True)
 
     tb_logger = pl_loggers.TensorBoardLogger(logdir)
-    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+    checkpoint_callback = ModelCheckpoint(
         save_last=args.save_last_network,
         every_n_epochs=args.network_save_period,
         save_top_k=-1,
     )
 
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
         accelerator="cuda",
