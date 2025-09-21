@@ -59,9 +59,9 @@ def get_nets_by_directory(best_nets, worst_nets, num_best_to_keep=16):
 
     for net_name, rating, error in itertools.chain(best_nets, worst_nets):
         basedir = get_net_dir(net_name)
-        if not basedir in binned_best_nets:
+        if basedir not in binned_best_nets:
             binned_best_nets[basedir] = []
-        if not basedir in binned_worst_nets:
+        if basedir not in binned_worst_nets:
             binned_worst_nets[basedir] = []
 
     for net_name, rating, error in worst_nets:

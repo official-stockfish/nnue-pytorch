@@ -4,7 +4,6 @@ from scipy.optimize import curve_fit
 import sys
 import data_loader
 import torch
-import sys
 
 
 def sigmoid(x, k):
