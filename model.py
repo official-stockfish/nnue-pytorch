@@ -238,16 +238,28 @@ class NNUE(pl.LightningModule):
         input_bias = self.input.bias
         # 1.0 / kPonanzaConstant
         scale = 1 / self.nnue2score
+
         with torch.no_grad():
             initial_values = self.feature_set.get_initial_psqt_features()
             assert len(initial_values) == self.feature_set.num_features
+
+            new_weights = (
+                torch.tensor(
+                    initial_values,
+                    device=input_weights.device,
+                    dtype=input_weights.dtype,
+                )
+                * scale
+            )
+
             for i in range(self.num_psqt_buckets):
-                input_weights[:, L1 + i] = torch.FloatTensor(initial_values) * scale
+                input_weights[:, L1 + i] = new_weights
                 # Bias doesn't matter because it cancels out during
                 # inference during perspective averaging. We set it to 0
                 # just for the sake of it. It might still diverge away from 0
                 # due to gradient imprecision but it won't change anything.
                 input_bias[L1 + i] = 0.0
+
         self.input.weight = nn.Parameter(input_weights)
         self.input.bias = nn.Parameter(input_bias)
 
