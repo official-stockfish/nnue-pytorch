@@ -191,7 +191,7 @@ def do_plots(out_filename, root_dirs, elo_range, loss_range, split):
                     epoch = row[1]
                     elo = row[2]
                     error = row[3]
-                    if not epoch in epochs:
+                    if epoch not in epochs:
                         if elo > maxelo - elo_range:
                             epochs.append(epoch)
                             elos.append(elo)

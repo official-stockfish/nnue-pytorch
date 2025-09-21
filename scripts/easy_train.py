@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import time
-import random
 import sys
 import psutil
 import re
@@ -11,7 +10,6 @@ import importlib.metadata
 import argparse
 import math
 import logging
-import time
 
 EXITCODE_OK = 0
 EXITCODE_MISSING_DEPENDENCIES = 2
@@ -184,11 +182,11 @@ def validate_pytorch():
             from torch import cuda
 
             if cuda.is_available() and cuda.device_count() > 0:
-                LOGGER.info(f"Found torch with CUDA. OK.")
+                LOGGER.info("Found torch with CUDA. OK.")
                 return True
             else:
                 LOGGER.error(
-                    f"Found torch without CUDA but CUDA support required. Exiting"
+                    "Found torch without CUDA but CUDA support required. Exiting"
                 )
                 return False
         else:
@@ -271,10 +269,8 @@ if not validate_environment_requirements():
 # Only now import the rest of the required packages
 from asciimatics.widgets import (
     Frame,
-    ListBox,
     Layout,
     Divider,
-    Text,
     Button,
     TextBox,
     Widget,
@@ -285,10 +281,8 @@ from asciimatics.widgets import (
 )
 from asciimatics.scene import Scene
 from asciimatics.screen import Screen
-from asciimatics.exceptions import ResizeScreenError, NextScene, StopApplication
-from asciimatics.utilities import BoxTool
-from asciimatics.constants import SINGLE_LINE, DOUBLE_LINE
-from asciimatics.event import KeyboardEvent, MouseEvent
+from asciimatics.exceptions import ResizeScreenError, StopApplication
+from asciimatics.event import KeyboardEvent
 from threading import Thread, Lock, Event
 import GPUtil
 import io
@@ -298,8 +292,6 @@ import zipfile
 import shutil
 import urllib.request
 import urllib.parse
-import signal
-from datetime import datetime, timedelta
 from tqdm.auto import tqdm
 from pathlib import Path
 
@@ -358,7 +350,7 @@ TUI_SCREEN = None
 def schedule_exit(timeout_seconds, errcode):
     def f():
         time.sleep(timeout_seconds)
-        LOGGER.info(f"Performing a scheduled exit.")
+        LOGGER.info("Performing a scheduled exit.")
         if TUI_SCREEN:
             if sys.platform == "win32":
                 TUI_SCREEN.close(restore=True)
@@ -1048,7 +1040,7 @@ def requests_get_content(url, *args, **kwargs):
         result = requests.get(url, *args, **kwargs)
         result.raise_for_status()
         return result.content
-    except Exception as e:
+    except Exception:
         raise Exception(f"GET request to {url} failed")
 
 
@@ -1252,7 +1244,7 @@ def setup_nnue_pytorch(directory, repo, branch_or_commit):
             )
 
     if not is_nnue_pytorch_setup(directory):
-        raise Exception(f"Incorrect nnue-pytorch setup or timeout.")
+        raise Exception("Incorrect nnue-pytorch setup or timeout.")
 
 
 class CChessCliRunningTestEntry:
@@ -1431,7 +1423,7 @@ class NetworkTesting(Thread):
                 return "\n".join(lines)
             elif self._current_convert is not None:
                 lines = [
-                    f"Converting network...",
+                    "Converting network...",
                     f"Run  : {self._current_convert[0]}",
                     f"Epoch: {self._current_convert[1]}",
                 ]
@@ -2669,7 +2661,7 @@ def main():
 
     # Global (workspace) setup
 
-    with SystemWideMutex(os.path.join(absolute_workspace_path, f".lock")) as mutex:
+    with SystemWideMutex(os.path.join(absolute_workspace_path, ".lock")) as mutex:
         ordo_directory = os.path.join(absolute_workspace_path, "ordo")
         c_chess_cli_directory = os.path.join(absolute_workspace_path, "c-chess-cli")
         books_directory = os.path.join(absolute_workspace_path, "books")
@@ -2689,13 +2681,13 @@ def main():
     )
     try:
         os.makedirs(experiment_directory, exist_ok=False)
-    except FileExistsError as e:
+    except FileExistsError:
         if args.fail_on_experiment_exists and os.listdir(experiment_directory):
             LOGGER.error(
                 f"Directory {experiment_directory} already exists. An experiment must use a new directory."
             )
             LOGGER.error(
-                f"Alternatively, override this with the option --resume-training=True or --fail-on-experiment-exists=False."
+                "Alternatively, override this with the option --resume-training=True or --fail-on-experiment-exists=False."
             )
             return
 
