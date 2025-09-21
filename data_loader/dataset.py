@@ -67,7 +67,6 @@ class TrainingDataProvider:
         num_workers,
         batch_size=None,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
-        device="cpu",
     ):
         self.feature_set = feature_set.encode("utf-8")
         self.create_stream = create_stream
@@ -79,7 +78,6 @@ class TrainingDataProvider:
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.config = config
-        self.device = device
 
         if batch_size:
             self.stream = self.create_stream(
@@ -102,7 +100,7 @@ class TrainingDataProvider:
         v = self.fetch_next(self.stream)
 
         if v:
-            tensors = v.contents.get_tensors(self.device)
+            tensors = v.contents.get_tensors("cpu")
             self.destroy_part(v)
             return tensors
         else:
@@ -121,7 +119,6 @@ class SparseBatchProvider(TrainingDataProvider):
         cyclic=True,
         num_workers=1,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
-        device="cpu",
     ):
         super(SparseBatchProvider, self).__init__(
             feature_set,
@@ -134,7 +131,6 @@ class SparseBatchProvider(TrainingDataProvider):
             num_workers,
             batch_size,
             config,
-            device,
         )
 
 
@@ -147,7 +143,6 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         cyclic=True,
         num_workers=1,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
-        device="cpu",
     ):
         super().__init__()
         self.feature_set = feature_set
@@ -156,7 +151,6 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         self.cyclic = cyclic
         self.num_workers = num_workers
         self.config = config
-        self.device = device
 
     def __iter__(self):
         return SparseBatchProvider(
@@ -166,7 +160,6 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             cyclic=self.cyclic,
             num_workers=self.num_workers,
             config=self.config,
-            device=self.device,
         )
 
 

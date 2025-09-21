@@ -48,7 +48,6 @@ def make_data_loaders(
     num_workers,
     batch_size,
     config: data_loader.DataloaderSkipConfig,
-    main_device,
     epoch_size,
     val_size,
 ):
@@ -60,14 +59,12 @@ def make_data_loaders(
         batch_size,
         num_workers=num_workers,
         config=config,
-        device=main_device,
     )
     val_infinite = data_loader.SparseBatchDataset(
         features_name,
         val_filenames,
         batch_size,
         config=config,
-        device=main_device,
     )
     # num_workers has to be 0 for sparse, and 1 for dense
     # it currently cannot work in parallel mode but it shouldn't need to
@@ -490,7 +487,6 @@ def main():
             simple_eval_skipping=args.simple_eval_skipping,
             param_index=args.param_index,
         ),
-        "cpu",
         args.epoch_size,
         args.validation_size,
     )
