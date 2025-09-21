@@ -9,9 +9,10 @@ import torch
 from torch import set_num_threads as t_set_num_threads
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import TQDMProgressBar, Callback
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 import time
 from datetime import timedelta
+from features.feature_set import FeatureSet
 
 import warnings
 
@@ -44,7 +45,7 @@ class TimeLimitAfterCheckpoint(Callback):
 def make_data_loaders(
     train_filenames,
     val_filenames,
-    feature_set,
+    feature_set: FeatureSet,
     num_workers,
     batch_size,
     config: data_loader.DataloaderSkipConfig,

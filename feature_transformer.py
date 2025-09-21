@@ -573,13 +573,14 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
         return None, None, None, None, weight_grad, bias_grad
 
 
-class FeatureTransformerSlice(nn.Module):
+class BaseFeatureTransformerSlice(nn.Module):
     def __init__(self, num_inputs, num_outputs):
-        super(FeatureTransformerSlice, self).__init__()
+        super(BaseFeatureTransformerSlice, self).__init__()
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
 
         sigma = math.sqrt(1 / num_inputs)
+
         self.weight = nn.Parameter(
             torch.rand(num_inputs, num_outputs, dtype=torch.float32) * (2 * sigma)
             - sigma
@@ -588,27 +589,15 @@ class FeatureTransformerSlice(nn.Module):
             torch.rand(num_outputs, dtype=torch.float32) * (2 * sigma) - sigma
         )
 
+
+class FeatureTransformerSlice(BaseFeatureTransformerSlice):
     def forward(self, feature_indices, feature_values):
         return FeatureTransformerSliceFunction.apply(
             feature_indices, feature_values, self.weight, self.bias
         )
 
 
-class DoubleFeatureTransformerSlice(nn.Module):
-    def __init__(self, num_inputs, num_outputs):
-        super(DoubleFeatureTransformerSlice, self).__init__()
-        self.num_inputs = num_inputs
-        self.num_outputs = num_outputs
-
-        sigma = math.sqrt(1 / num_inputs)
-        self.weight = nn.Parameter(
-            torch.rand(num_inputs, num_outputs, dtype=torch.float32) * (2 * sigma)
-            - sigma
-        )
-        self.bias = nn.Parameter(
-            torch.rand(num_outputs, dtype=torch.float32) * (2 * sigma) - sigma
-        )
-
+class DoubleFeatureTransformerSlice(BaseFeatureTransformerSlice):
     def forward(
         self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
     ):
@@ -624,8 +613,6 @@ class DoubleFeatureTransformerSlice(nn.Module):
 
 if __name__ == "__main__":
     import time
-    import sys
-    import os
 
     def FeatureTransformerSliceFunctionEmulate(
         feature_indices, feature_values, weight, bias

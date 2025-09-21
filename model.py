@@ -1,9 +1,14 @@
 import ranger21
 import torch
-from torch import nn
+from torch import nn, Tensor
 import pytorch_lightning as pl
-from feature_transformer import DoubleFeatureTransformerSlice
+from feature_transformer import (
+    DoubleFeatureTransformerSlice,
+    BaseFeatureTransformerSlice,
+)
 from dataclasses import dataclass
+from features.feature_set import FeatureSet
+from typing import List, Tuple
 
 # 3 layer fully connected network
 L1 = 3072
@@ -24,25 +29,8 @@ class LossParams:
     qp_asymmetry: float = 0.0
 
 
-def coalesce_ft_weights(model, layer):
-    weight = layer.weight.data
-    indices = model.feature_set.get_virtual_to_real_features_gather_indices()
-    weight_coalesced = weight.new_zeros(
-        (model.feature_set.num_real_features, weight.shape[1])
-    )
-    for i_real, is_virtual in enumerate(indices):
-        weight_coalesced[i_real, :] = sum(
-            weight[i_virtual, :] for i_virtual in is_virtual
-        )
-    return weight_coalesced
-
-
-def get_parameters(layers):
-    return [p for layer in layers for p in layer.parameters()]
-
-
 class LayerStacks(nn.Module):
-    def __init__(self, count):
+    def __init__(self, count: int):
         super(LayerStacks, self).__init__()
 
         self.count = count
@@ -94,7 +82,7 @@ class LayerStacks(nn.Module):
         self.output.weight = nn.Parameter(output_weight)
         self.output.bias = nn.Parameter(output_bias)
 
-    def forward(self, x, ls_indices):
+    def forward(self, x: Tensor, ls_indices: Tensor):
         assert self.idx_offset is not None and self.idx_offset.shape[0] == x.shape[0]
 
         indices = ls_indices.flatten() + self.idx_offset
@@ -162,7 +150,7 @@ class NNUE(pl.LightningModule):
 
     def __init__(
         self,
-        feature_set,
+        feature_set: FeatureSet,
         max_epoch=800,
         num_batches_per_epoch=int(100_000_000 / 16384),
         gamma=0.992,
@@ -304,7 +292,7 @@ class NNUE(pl.LightningModule):
   to new_feature_set. Currently only works for adding virtual features.
   """
 
-    def set_feature_set(self, new_feature_set):
+    def set_feature_set(self, new_feature_set: FeatureSet):
         if self.feature_set.name == new_feature_set.name:
             return
 
@@ -351,14 +339,14 @@ class NNUE(pl.LightningModule):
 
     def forward(
         self,
-        us,
-        them,
-        white_indices,
-        white_values,
-        black_indices,
-        black_values,
-        psqt_indices,
-        layer_stack_indices,
+        us: Tensor,
+        them: Tensor,
+        white_indices: Tensor,
+        white_values: Tensor,
+        black_indices: Tensor,
+        black_values: Tensor,
+        psqt_indices: Tensor,
+        layer_stack_indices: Tensor,
     ):
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
         w, wpsqt = torch.split(wp, L1, dim=1)
@@ -382,7 +370,7 @@ class NNUE(pl.LightningModule):
 
         return x
 
-    def step_(self, batch, batch_idx, loss_type):
+    def step_(self, batch: Tuple[Tensor, ...], batch_idx, loss_type):
         _ = batch_idx  # unused, but required by pytorch-lightning
 
         # We clip weights at the start of each step. This means that after
@@ -489,3 +477,20 @@ class NNUE(pl.LightningModule):
             optimizer, step_size=1, gamma=self.gamma
         )
         return [optimizer], [scheduler]
+
+
+def coalesce_ft_weights(model: NNUE, layer: BaseFeatureTransformerSlice):
+    weight = layer.weight.data
+    indices = model.feature_set.get_virtual_to_real_features_gather_indices()
+    weight_coalesced = weight.new_zeros(
+        (model.feature_set.num_real_features, weight.shape[1])
+    )
+    for i_real, is_virtual in enumerate(indices):
+        weight_coalesced[i_real, :] = sum(
+            weight[i_virtual, :] for i_virtual in is_virtual
+        )
+    return weight_coalesced
+
+
+def get_parameters(layers: List[nn.Module]):
+    return [p for layer in layers for p in layer.parameters()]

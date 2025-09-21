@@ -57,7 +57,7 @@ class FenBatchProvider:
 class TrainingDataProvider:
     def __init__(
         self,
-        feature_set,
+        feature_set: str,
         create_stream,
         destroy_stream,
         fetch_next,
@@ -113,7 +113,7 @@ class TrainingDataProvider:
 class SparseBatchProvider(TrainingDataProvider):
     def __init__(
         self,
-        feature_set,
+        feature_set: str,
         filenames,
         batch_size,
         cyclic=True,
@@ -137,7 +137,7 @@ class SparseBatchProvider(TrainingDataProvider):
 class SparseBatchDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
-        feature_set,
+        feature_set: str,
         filenames,
         batch_size,
         cyclic=True,

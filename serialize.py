@@ -8,6 +8,7 @@ from functools import reduce
 import operator
 import numpy as np
 from numba import njit
+from features.feature_set import FeatureSet
 
 
 def ascii_hist(name, x, bins=6):
@@ -65,7 +66,7 @@ class NNUEWriter:
     All values are stored in little endian.
     """
 
-    def __init__(self, model, description=None, ft_compression="none"):
+    def __init__(self, model: M.NNUE, description=None, ft_compression="none"):
         if description is None:
             description = DEFAULT_DESCRIPTION
 
@@ -85,7 +86,7 @@ class NNUEWriter:
             self.write_fc_layer(model, output, is_output=True)
 
     @staticmethod
-    def fc_hash(model):
+    def fc_hash(model: M.NNUE):
         # InputSlice hash
         prev_hash = 0xEC42E90D
         prev_hash ^= M.L1 * 2
@@ -107,7 +108,7 @@ class NNUEWriter:
             prev_hash = layer_hash
         return layer_hash
 
-    def write_header(self, model, fc_hash, description):
+    def write_header(self, model: M.NNUE, fc_hash, description):
         self.int32(VERSION)  # version
         self.int32(fc_hash ^ model.feature_set.hash ^ (M.L1 * 2))  # halfkp network hash
         encoded_description = description.encode("utf-8")
@@ -128,7 +129,7 @@ class NNUEWriter:
         else:
             raise Exception("Invalid compression method.")
 
-    def write_feature_transformer(self, model, ft_compression):
+    def write_feature_transformer(self, model: M.NNUE, ft_compression):
         layer = model.input
 
         bias = layer.bias.data[: M.L1]
@@ -155,7 +156,7 @@ class NNUEWriter:
         self.write_tensor(weight.flatten().numpy(), ft_compression)
         self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
 
-    def write_fc_layer(self, model, layer, is_output=False):
+    def write_fc_layer(self, model: M.NNUE, layer, is_output=False):
         # FC layers are stored as int8 weights, and int32 biases
         kWeightScaleHidden = model.weight_scale_hidden
         kWeightScaleOut = (
@@ -209,7 +210,7 @@ class NNUEWriter:
 
 
 class NNUEReader:
-    def __init__(self, f, feature_set):
+    def __init__(self, f, feature_set: FeatureSet):
         self.f = f
         self.feature_set = feature_set
         self.model = M.NNUE(feature_set)
@@ -241,7 +242,7 @@ class NNUEReader:
             self.model.layer_stacks.output.weight.data[i : (i + 1), :] = output.weight
             self.model.layer_stacks.output.bias.data[i : (i + 1)] = output.bias
 
-    def read_header(self, feature_set, fc_hash):
+    def read_header(self, feature_set: FeatureSet, fc_hash):
         self.read_int32(VERSION)  # version
         self.read_int32(fc_hash ^ feature_set.hash ^ (M.L1 * 2))
         desc_len = self.read_int32()
