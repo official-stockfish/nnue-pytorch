@@ -8,9 +8,10 @@ import features
 import serialize
 import data_loader
 from model import NNUE
+from features.feature_set import FeatureSet
 
 
-def read_model(nnue_path, feature_set):
+def read_model(nnue_path, feature_set: FeatureSet):
     with open(nnue_path, "rb") as f:
         reader = serialize.NNUEReader(f, feature_set)
         return reader.model
