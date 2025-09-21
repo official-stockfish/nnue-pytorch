@@ -392,6 +392,7 @@ def main():
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
+            compilation_mode=args.compile_backend
         )
     else:
         nnue = torch.load(args.resume_from_model, weights_only=False)
