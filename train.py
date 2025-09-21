@@ -490,7 +490,7 @@ def main():
             simple_eval_skipping=args.simple_eval_skipping,
             param_index=args.param_index,
         ),
-        main_device,
+        "cpu",
         args.epoch_size,
         args.validation_size,
     )
