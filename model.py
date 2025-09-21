@@ -42,10 +42,6 @@ class LayerStacks(nn.Module):
         self.l2 = nn.Linear(L2 * 2, L3 * count)
         self.output = nn.Linear(L3, 1 * count)
 
-        # Cached helper tensor for choosing outputs by bucket indices.
-        # Initialized lazily in forward.
-        self.idx_offset = None
-
         self._init_layers()
 
     def _init_layers(self):
@@ -82,7 +78,7 @@ class LayerStacks(nn.Module):
         self.output.bias = nn.Parameter(output_bias)
 
     def forward(self, x: Tensor, ls_indices: Tensor):
-        assert self.idx_offset is not None and self.idx_offset.shape[0] == x.shape[0]
+        assert hasattr(self, "idx_offset") self.idx_offset is not None and self.idx_offset.shape[0] == x.shape[0]
 
         indices = ls_indices.flatten() + self.idx_offset
 
@@ -458,16 +454,15 @@ class NNUE(L.LightningModule):
         self.step_(batch, batch_idx, "test_loss")
 
     def configure_model(self):
-        def get_model_with_fixed_offset(model, batch_size):
-            model.layer_stacks.idx_offset = torch.arange(
+        def create_fixed_offset(model, batch_size):
+            idx_offset = torch.arange(
                 0,
                 batch_size * model.layer_stacks.count,
                 model.layer_stacks.count,
             )
-            self.register_buffer("layer_stacks_offset", model.layer_stacks.idx_offset)
-            return model
+            model.layer_stacks.register_buffer("idx_offset", idx_offset)
 
-        self.model = get_model_with_fixed_offset(self.model, self.batch_size)
+        create_fixed_offset(self.model, self.batch_size)
 
         if self.compilation_mode is not None:
             self.model = torch.compile(self.model, backend=self.compilation_mode)
