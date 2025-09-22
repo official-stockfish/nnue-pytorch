@@ -387,26 +387,22 @@ def main():
             feature_set=feature_set,
             loss_params=loss_params,
             max_epoch=max_epoch,
-            batch_size=batch_size,
             num_batches_per_epoch=args.epoch_size / batch_size,
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
-            compilation_mode=args.compile_backend,
         )
     else:
         nnue = torch.load(args.resume_from_model, weights_only=False)
         nnue.model.set_feature_set(feature_set)
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
-        nnue.batch_size = batch_size
         nnue.num_batches_per_epoch = args.epoch_size / batch_size
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
         nnue.lr = args.lr
         nnue.param_index = args.param_index
-        nnue.compilation_mode = args.compile_backend
 
     print("Feature set: {}".format(feature_set.name))
     print("Num real features: {}".format(feature_set.num_real_features))

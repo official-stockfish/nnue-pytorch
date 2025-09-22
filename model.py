@@ -362,7 +362,6 @@ class NNUE(L.LightningModule):
         self,
         feature_set: FeatureSet,
         max_epoch=800,
-        batch_size: int = 16384,
         num_batches_per_epoch=int(100_000_000 / 16384),
         gamma=0.992,
         lr=8.75e-4,
@@ -370,18 +369,15 @@ class NNUE(L.LightningModule):
         num_psqt_buckets=8,
         num_ls_buckets=8,
         loss_params=LossParams(),
-        compilation_mode: str | None = None,
     ):
         super().__init__()
         self.model: NNUEModel = NNUEModel(feature_set, num_psqt_buckets, num_ls_buckets)
         self.loss_params = loss_params
         self.max_epoch = max_epoch
-        self.batch_size = batch_size
         self.num_batches_per_epoch = num_batches_per_epoch
         self.gamma = gamma
         self.lr = lr
         self.param_index = param_index
-        self.compilation_mode = compilation_mode
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)
