@@ -448,6 +448,7 @@ def main():
             checkpoint_callback,
             TQDMProgressBar(refresh_rate=300),
             TimeLimitAfterCheckpoint(args.max_time),
+            M.WeightClippingCallback()
         ],
         enable_progress_bar=True,
         enable_checkpointing=True,

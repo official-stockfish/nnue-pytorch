@@ -227,7 +227,7 @@ class NNUEModel(nn.Module):
         self.input.weight = nn.Parameter(input_weights)
         self.input.bias = nn.Parameter(input_bias)
 
-    def _clip_weights(self):
+    def clip_weights(self):
         """
         Clips the weights of the model based on the min/max values allowed
         by the quantization scheme.
@@ -385,11 +385,6 @@ class NNUE(L.LightningModule):
     def step_(self, batch: tuple[Tensor, ...], batch_idx, loss_type):
         _ = batch_idx  # unused, but required by pytorch-lightning
 
-        # We clip weights at the start of each step. This means that after
-        # the last step the weights might be outside of the desired range.
-        # They should be also clipped accordingly in the serializer.
-        self.model._clip_weights()
-
         (
             us,
             them,
@@ -489,6 +484,23 @@ class NNUE(L.LightningModule):
             optimizer, step_size=1, gamma=self.gamma
         )
         return [optimizer], [scheduler]
+
+
+class WeightClippingCallback(L.Callback):
+    def on_train_batch_start(
+        self,
+        trainer: L.Trainer,
+        pl_module: L.LightningModule,
+        batch: any,
+        batch_idx: int,
+    ) -> None:
+        if hasattr(pl_module, "model") and hasattr(pl_module.model, "clip_weights"):
+            pl_module.model.clip_weights()
+        else:
+            raise AttributeError(
+                "The LightningModule must have a 'model' attribute with a '_clip_weights' method."
+            )
+
 
 
 def coalesce_ft_weights(model: NNUEModel, layer: BaseFeatureTransformerSlice):
