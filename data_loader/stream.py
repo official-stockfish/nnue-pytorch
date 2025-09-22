@@ -3,7 +3,6 @@ import ctypes
 from ._native import c_lib, SparseBatchPtr, FenBatchPtr
 from .config import CDataloaderSkipConfig, DataloaderSkipConfig
 from features.feature_set import FeatureSet
-from typing import List
 
 
 def _to_c_str_array(str_list):
@@ -14,7 +13,7 @@ def _to_c_str_array(str_list):
 
 def create_fen_batch_stream(
     concurrency,
-    filenames: List[str],
+    filenames: list[str],
     batch_size,
     cyclic,
     config: DataloaderSkipConfig,
@@ -44,7 +43,7 @@ def destroy_fen_batch(fen_batch: FenBatchPtr):
 def create_sparse_batch_stream(
     feature_set: str,
     concurrency,
-    filenames: List[str],
+    filenames: list[str],
     batch_size,
     cyclic,
     config: DataloaderSkipConfig,

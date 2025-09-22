@@ -7,8 +7,6 @@ from torch.utils.data import Dataset
 from . import stream
 from .config import DataloaderSkipConfig
 
-from typing import List
-
 
 class FenBatchProvider:
     def __init__(
@@ -64,7 +62,7 @@ class TrainingDataProvider:
         destroy_stream,
         fetch_next,
         destroy_part,
-        filenames: List[str],
+        filenames: list[str],
         cyclic,
         num_workers,
         batch_size=None,
@@ -116,7 +114,7 @@ class SparseBatchProvider(TrainingDataProvider):
     def __init__(
         self,
         feature_set: str,
-        filenames: List[str],
+        filenames: list[str],
         batch_size,
         cyclic=True,
         num_workers=1,
@@ -140,7 +138,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
         feature_set: str,
-        filenames: List[str],
+        filenames: list[str],
         batch_size,
         cyclic=True,
         num_workers=1,
