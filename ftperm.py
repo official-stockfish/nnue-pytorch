@@ -517,8 +517,6 @@ def gather_impl(model, dataset, count):
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
     BATCH_SIZE = 1000
 
-    old_device = model.device
-
     quantized_model = copy.deepcopy(model)
     quantize_ft(quantized_model)
     quantized_model.cuda()

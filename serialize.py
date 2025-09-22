@@ -66,7 +66,7 @@ class NNUEWriter:
     All values are stored in little endian.
     """
 
-    def __init__(self, model: M.NNUE, description=None, ft_compression="none"):
+    def __init__(self, model: M.NNUEModel, description=None, ft_compression="none"):
         if description is None:
             description = DEFAULT_DESCRIPTION
 
@@ -86,7 +86,7 @@ class NNUEWriter:
             self.write_fc_layer(model, output, is_output=True)
 
     @staticmethod
-    def fc_hash(model: M.NNUE):
+    def fc_hash(model: M.NNUEModel):
         # InputSlice hash
         prev_hash = 0xEC42E90D
         prev_hash ^= M.L1 * 2
@@ -108,7 +108,7 @@ class NNUEWriter:
             prev_hash = layer_hash
         return layer_hash
 
-    def write_header(self, model: M.NNUE, fc_hash, description):
+    def write_header(self, model: M.NNUEModel, fc_hash, description):
         self.int32(VERSION)  # version
         self.int32(fc_hash ^ model.feature_set.hash ^ (M.L1 * 2))  # halfkp network hash
         encoded_description = description.encode("utf-8")
@@ -129,7 +129,7 @@ class NNUEWriter:
         else:
             raise Exception("Invalid compression method.")
 
-    def write_feature_transformer(self, model: M.NNUE, ft_compression):
+    def write_feature_transformer(self, model: M.NNUEModel, ft_compression):
         layer = model.input
 
         bias = layer.bias.data[: M.L1]
@@ -156,7 +156,7 @@ class NNUEWriter:
         self.write_tensor(weight.flatten().numpy(), ft_compression)
         self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
 
-    def write_fc_layer(self, model: M.NNUE, layer, is_output=False):
+    def write_fc_layer(self, model: M.NNUEModel, layer, is_output=False):
         # FC layers are stored as int8 weights, and int32 biases
         kWeightScaleHidden = model.weight_scale_hidden
         kWeightScaleOut = (
@@ -213,7 +213,7 @@ class NNUEReader:
     def __init__(self, f, feature_set: FeatureSet):
         self.f = f
         self.feature_set = feature_set
-        self.model = M.NNUE(feature_set)
+        self.model = M.NNUEModel(feature_set)
         fc_hash = NNUEWriter.fc_hash(self.model)
 
         self.read_header(feature_set, fc_hash)
@@ -406,8 +406,9 @@ def main():
         nnue = torch.load(args.source, weights_only=False)
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
+            nnue = M.NNUE(feature_set)
             reader = NNUEReader(f, feature_set)
-            nnue = reader.model
+            nnue.model = reader.model
             if args.description is None:
                 args.description = reader.description
     else:
@@ -426,7 +427,7 @@ def main():
     if args.ft_perm is not None and args.target.endswith(".nnue"):
         import ftperm
 
-        ftperm.ft_permute(nnue, args.ft_perm)
+        ftperm.ft_permute(nnue.model, args.ft_perm)
 
     if args.ft_optimize and args.target.endswith(".nnue"):
         import ftperm
@@ -445,7 +446,10 @@ def main():
                 ftperm.set_cupy_device(args.device)
 
         ftperm.ft_optimize(
-            nnue, args.ft_optimize_data, args.ft_optimize_count, use_cupy=args.use_cupy
+            nnue.model,
+            args.ft_optimize_data,
+            args.ft_optimize_count,
+            use_cupy=args.use_cupy,
         )
 
     if args.target.endswith(".ckpt"):
@@ -453,7 +457,9 @@ def main():
     elif args.target.endswith(".pt"):
         torch.save(nnue, args.target)
     elif args.target.endswith(".nnue"):
-        writer = NNUEWriter(nnue, args.description, ft_compression=args.ft_compression)
+        writer = NNUEWriter(
+            nnue.model, args.description, ft_compression=args.ft_compression
+        )
         with open(args.target, "wb") as f:
             f.write(writer.buf)
     else:

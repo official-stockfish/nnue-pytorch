@@ -8,21 +8,22 @@ import matplotlib.pyplot as plt
 from serialize import NNUEReader
 
 
-def load_model(filename, feature_set):
+def load_model(filename, feature_set) -> M.NNUEModel:
     if filename.endswith(".pt") or filename.endswith(".ckpt"):
         if filename.endswith(".pt"):
             model = torch.load(filename, weights_only=False)
         else:
             model = M.NNUE.load_from_checkpoint(filename, feature_set=feature_set)
         model.eval()
+        return model.model
+
     elif filename.endswith(".nnue"):
         with open(filename, "rb") as f:
             reader = NNUEReader(f, feature_set)
-        model = reader.model
+        return reader.model
+
     else:
         raise Exception("Invalid filetype: " + str(filename))
-
-    return model
 
 
 def get_bins(inputs_columns, num_bins):
