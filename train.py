@@ -458,6 +458,8 @@ def main():
         benchmark=True,
     )
 
+    nnue = torch.compile(nnue, backend=args.compile_backend)
+
     print("Using C++ data loader")
     train, val = make_data_loaders(
         train_datasets,

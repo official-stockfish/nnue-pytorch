@@ -78,13 +78,14 @@ class LayerStacks(nn.Module):
         self.output.bias = nn.Parameter(output_bias)
 
     def forward(self, x: Tensor, ls_indices: Tensor):
-        assert (
-            hasattr(self, "idx_offset")
-            and self.idx_offset is not None
-            and self.idx_offset.shape[0] == x.shape[0]
+        idx_offset = torch.arange(
+            0,
+            x.shape[0] * self.count,
+            self.count,
+            device=x.device
         )
 
-        indices = ls_indices.flatten() + self.idx_offset
+        indices = ls_indices.flatten() + idx_offset
 
         l1s_ = self.l1(x).reshape((-1, self.count, L2 + 1))
         l1f_ = self.l1_fact(x)
@@ -456,20 +457,6 @@ class NNUE(L.LightningModule):
 
     def test_step(self, batch, batch_idx):
         self.step_(batch, batch_idx, "test_loss")
-
-    def configure_model(self):
-        def create_fixed_offset(model, batch_size):
-            idx_offset = torch.arange(
-                0,
-                batch_size * model.layer_stacks.count,
-                model.layer_stacks.count,
-            )
-            model.layer_stacks.register_buffer("idx_offset", idx_offset)
-
-        create_fixed_offset(self.model, self.batch_size)
-
-        if self.compilation_mode is not None:
-            self.model.compile(backend=self.compilation_mode)
 
     def configure_optimizers(self):
         LR = self.lr
