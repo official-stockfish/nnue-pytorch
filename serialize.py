@@ -217,7 +217,7 @@ class NNUEReader:
     def __init__(self, f, feature_set: FeatureSet, config: M.ModelConfig):
         self.f = f
         self.feature_set = feature_set
-        self.model = M.NNUEModel(feature_set)
+        self.model = M.NNUEModel(feature_set, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
