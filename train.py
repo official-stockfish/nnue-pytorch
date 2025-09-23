@@ -44,7 +44,7 @@ class TimeLimitAfterCheckpoint(Callback):
 def make_data_loaders(
     train_filenames,
     val_filenames,
-    feature_set: FeatureSet,
+    feature_set: M.FeatureSet,
     num_workers,
     batch_size,
     config: data_loader.DataloaderSkipConfig,
