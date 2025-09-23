@@ -783,9 +783,11 @@ struct Stream: AnyStream {
     Stream(int                                           concurrency,
            const std::vector<std::string>&               filenames,
            bool                                          cyclic,
-           std::function<bool(const TrainingDataEntry&)> skipPredicate) :
+           std::function<bool(const TrainingDataEntry&)> skipPredicate,
+           int                                           rank       = 0,
+           int                                           world_size = 1) :
         m_stream(training_data::open_sfen_input_file_parallel(
-          concurrency, filenames, cyclic, skipPredicate)) {}
+          concurrency, filenames, cyclic, skipPredicate, rank, world_size)) {}
 
     virtual StorageT* next() = 0;
 
@@ -827,11 +829,15 @@ struct FeaturedBatchStream: Stream<StorageT> {
                         const std::vector<std::string>&               filenames,
                         int                                           batch_size,
                         bool                                          cyclic,
-                        std::function<bool(const TrainingDataEntry&)> skipPredicate) :
+                        std::function<bool(const TrainingDataEntry&)> skipPredicate,
+                        int                                           rank       = 0,
+                        int                                           world_size = 1) :
         BaseType(std::max(1, concurrency / num_feature_threads_per_reading_thread),
                  filenames,
                  cyclic,
-                 skipPredicate),
+                 skipPredicate,
+                 rank,
+                 world_size),
         m_concurrency(concurrency),
         m_batch_size(batch_size) {
         m_stop_flag.store(false);
@@ -993,11 +999,15 @@ struct FenBatchStream: Stream<FenBatch> {
                    const std::vector<std::string>&               filenames,
                    int                                           batch_size,
                    bool                                          cyclic,
-                   std::function<bool(const TrainingDataEntry&)> skipPredicate) :
+                   std::function<bool(const TrainingDataEntry&)> skipPredicate,
+                   int                                           rank       = 0,
+                   int                                           world_size = 1) :
         BaseType(std::max(1, concurrency / num_feature_threads_per_reading_thread),
                  filenames,
                  cyclic,
-                 skipPredicate),
+                 skipPredicate,
+                 rank,
+                 world_size),
         m_concurrency(concurrency),
         m_batch_size(batch_size) {
         m_stop_flag.store(false);
@@ -1110,6 +1120,11 @@ struct DataloaderSkipConfig {
     int    simple_eval_skipping;
     int    param_index;
     double pc_y1, pc_y2, pc_y3;
+};
+
+struct DataloaderDDPConfig {
+    int rank;
+    int world_size;
 };
 
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
@@ -1282,11 +1297,13 @@ EXPORT FenBatchStream* CDECL create_fen_batch_stream(int                  concur
                                                      const char* const*   filenames,
                                                      int                  batch_size,
                                                      bool                 cyclic,
-                                                     DataloaderSkipConfig config) {
+                                                     DataloaderSkipConfig config,
+                                                     DataloaderDDPConfig  ddp_config) {
     auto skipPredicate = make_skip_predicate(config);
     auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
-    return new FenBatchStream(concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
+    return new FenBatchStream(concurrency, filenames_vec, batch_size, cyclic, skipPredicate,
+                              ddp_config.rank, ddp_config.world_size);
 }
 
 EXPORT void CDECL destroy_fen_batch_stream(FenBatchStream* stream) { delete stream; }
@@ -1298,7 +1315,8 @@ EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char*        
                                                              const char* const*   filenames,
                                                              int                  batch_size,
                                                              bool                 cyclic,
-                                                             DataloaderSkipConfig config) {
+                                                             DataloaderSkipConfig config,
+                                                             DataloaderDDPConfig  ddp_config) {
     auto skipPredicate = make_skip_predicate(config);
     auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
@@ -1314,7 +1332,8 @@ EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char*        
           else
           {
               return new FeaturedBatchStream<FeatureSet<decltype(fs)>, SparseBatch>(
-                concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
+                concurrency, filenames_vec, batch_size, cyclic, skipPredicate, ddp_config.rank,
+                ddp_config.world_size);
           }
       },
       feature_variant);
@@ -1385,8 +1404,9 @@ int main(int argc, char** argv) {
                                              .pc_y1                = 1.0,
                                              .pc_y2                = 2.0,
                                              .pc_y3                = 1.0};
+    const DataloaderDDPConfig  ddp_config = {.rank = 0, .world_size = 1};
     auto stream = create_sparse_batch_stream("Full_Threats^", concurrency, file_count, files,
-                                             batch_size, cyclic, config);
+                                             batch_size, cyclic, config, ddp_config);
 
     auto t0 = std::chrono::high_resolution_clock::now();
 

@@ -6,3 +6,7 @@ testing
 libtraining_data_loader.*
 easy_train_data
 *.yaml
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake

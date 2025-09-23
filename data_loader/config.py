@@ -15,6 +15,12 @@ class DataloaderSkipConfig:
     pc_y3: float = 1.0
 
 
+@dataclass
+class DataloaderDDPConfig:
+    rank: int = 0
+    world_size: int = 1
+
+
 class CDataloaderSkipConfig(ctypes.Structure):
     _fields_ = [
         ("filtered", ctypes.c_bool),
@@ -39,4 +45,17 @@ class CDataloaderSkipConfig(ctypes.Structure):
             pc_y1=config.pc_y1,
             pc_y2=config.pc_y2,
             pc_y3=config.pc_y3,
+        )
+
+
+class CDataloaderDDPConfig(ctypes.Structure):
+    _fields_ = [
+        ("rank", ctypes.c_int),
+        ("world_size", ctypes.c_int),
+    ]
+
+    def __init__(self, config: DataloaderDDPConfig):
+        super().__init__(
+            rank=config.rank,
+            world_size=config.world_size,
         )
