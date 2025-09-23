@@ -1,5 +1,5 @@
-from .model import NNUEModel
-from .feature_transformer import BaseFeatureTransformerSlice
+from ..model import NNUEModel
+from ..feature_transformer import BaseFeatureTransformerSlice
 
 
 def coalesce_ft_weights(model: NNUEModel, layer: BaseFeatureTransformerSlice):
