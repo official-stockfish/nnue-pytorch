@@ -5,7 +5,14 @@ import re
 import chess
 
 import data_loader
-from model import add_feature_args, FeatureSet, get_feature_set_from_name, NNUE, NNUEReader, ModelConfig
+from model import (
+    add_feature_args,
+    FeatureSet,
+    get_feature_set_from_name,
+    NNUE,
+    NNUEReader,
+    ModelConfig,
+)
 
 
 def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):

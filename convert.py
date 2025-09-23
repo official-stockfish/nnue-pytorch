@@ -4,6 +4,7 @@ import torch
 
 import model as M
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Converts files between ckpt and nnue format."

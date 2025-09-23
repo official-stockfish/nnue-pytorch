@@ -12,6 +12,7 @@ from ..config import ModelConfig
 from ..features import FeatureSet
 from ..model import NNUEModel
 
+
 def ascii_hist(name, x, bins=6):
     N, X = np.histogram(x, bins=bins)
     total = 1.0 * len(x)
@@ -67,7 +68,9 @@ class NNUEWriter:
     All values are stored in little endian.
     """
 
-    def __init__(self, model: NNUEModel, description=DEFAULT_DESCRIPTION, ft_compression="none"):
+    def __init__(
+        self, model: NNUEModel, description=DEFAULT_DESCRIPTION, ft_compression="none"
+    ):
         self.buf = bytearray()
 
         # NOTE: model.clip_weights() should probably be called here. It's not necessary now

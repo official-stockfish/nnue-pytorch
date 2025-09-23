@@ -548,8 +548,6 @@ class NNUEVisualizer:
             self._process_fig("biases", fig)
 
 
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Visualizes networks in ckpt, pt and nnue format."
