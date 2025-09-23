@@ -1,14 +1,16 @@
 import argparse
-import features
-import model as M
 import struct
-import torch
-from torch import nn
-from functools import reduce
 import operator
+from functools import reduce
+
 import numpy as np
 from numba import njit
-from features.feature_set import FeatureSet
+import torch
+from torch import nn
+
+import features
+from features import FeatureSet
+import model as M
 
 
 def ascii_hist(name, x, bins=6):
@@ -72,12 +74,12 @@ class NNUEWriter:
 
         self.buf = bytearray()
 
-        # NOTE: model._clip_weights() should probably be called here. It's not necessary now
+        # NOTE: model.clip_weights() should probably be called here. It's not necessary now
         # because it doesn't have more restrictive bounds than these defined by quantization,
         # but it might be necessary in the future.
         fc_hash = self.fc_hash(model)
         self.write_header(model, fc_hash, description)
-        self.int32(model.feature_set.hash ^ (M.L1 * 2))  # Feature transformer hash
+        self.int32(model.feature_set.hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model, ft_compression)
         for l1, l2, output in model.layer_stacks.get_coalesced_layer_stacks():
             self.int32(fc_hash)  # FC layers hash
@@ -89,7 +91,7 @@ class NNUEWriter:
     def fc_hash(model: M.NNUEModel):
         # InputSlice hash
         prev_hash = 0xEC42E90D
-        prev_hash ^= M.L1 * 2
+        prev_hash ^= model.L1 * 2
 
         # Fully connected layers
         layers = [
@@ -110,7 +112,9 @@ class NNUEWriter:
 
     def write_header(self, model: M.NNUEModel, fc_hash, description):
         self.int32(VERSION)  # version
-        self.int32(fc_hash ^ model.feature_set.hash ^ (M.L1 * 2))  # halfkp network hash
+        self.int32(
+            fc_hash ^ model.feature_set.hash ^ (model.L1 * 2)
+        )  # halfkp network hash
         encoded_description = description.encode("utf-8")
         self.int32(len(encoded_description))  # Network definition
         self.buf.extend(encoded_description)
@@ -132,12 +136,12 @@ class NNUEWriter:
     def write_feature_transformer(self, model: M.NNUEModel, ft_compression):
         layer = model.input
 
-        bias = layer.bias.data[: M.L1]
+        bias = layer.bias.data[: model.L1]
         bias = bias.mul(model.quantized_one).round().to(torch.int16)
 
         all_weight = M.coalesce_ft_weights(model, layer)
-        weight = all_weight[:, : M.L1]
-        psqt_weight = all_weight[:, M.L1 :]
+        weight = all_weight[:, : model.L1]
+        psqt_weight = all_weight[:, model.L1 :]
 
         weight = weight.mul(model.quantized_one).round().to(torch.int16)
         psqt_weight = (
@@ -210,19 +214,22 @@ class NNUEWriter:
 
 
 class NNUEReader:
-    def __init__(self, f, feature_set: FeatureSet):
+    def __init__(self, f, feature_set: FeatureSet, config: M.ModelConfig):
         self.f = f
         self.feature_set = feature_set
-        self.model = M.NNUEModel(feature_set)
+        self.model = M.NNUEModel(feature_set, config)
+        self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
         self.read_header(feature_set, fc_hash)
-        self.read_int32(feature_set.hash ^ (M.L1 * 2))  # Feature transformer hash
+        self.read_int32(
+            feature_set.hash ^ (self.config.L1 * 2)
+        )  # Feature transformer hash
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
         for i in range(self.model.num_ls_buckets):
-            l1 = nn.Linear(2 * M.L1 // 2, M.L2 + 1)
-            l2 = nn.Linear(M.L2 * 2, M.L3)
-            output = nn.Linear(M.L3, 1)
+            l1 = nn.Linear(2 * self.config.L1 // 2, self.config.L2 + 1)
+            l2 = nn.Linear(self.config.L2 * 2, self.config.L3)
+            output = nn.Linear(self.config.L3, 1)
 
             self.read_int32(fc_hash)  # FC layers hash
             self.read_fc_layer(l1)
@@ -230,21 +237,23 @@ class NNUEReader:
             self.read_fc_layer(output, is_output=True)
 
             self.model.layer_stacks.l1.weight.data[
-                i * (M.L2 + 1) : (i + 1) * (M.L2 + 1), :
+                i * (self.config.L2 + 1) : (i + 1) * (self.config.L2 + 1), :
             ] = l1.weight
             self.model.layer_stacks.l1.bias.data[
-                i * (M.L2 + 1) : (i + 1) * (M.L2 + 1)
+                i * (self.config.L2 + 1) : (i + 1) * (self.config.L2 + 1)
             ] = l1.bias
-            self.model.layer_stacks.l2.weight.data[i * M.L3 : (i + 1) * M.L3, :] = (
-                l2.weight
-            )
-            self.model.layer_stacks.l2.bias.data[i * M.L3 : (i + 1) * M.L3] = l2.bias
+            self.model.layer_stacks.l2.weight.data[
+                i * self.config.L3 : (i + 1) * self.config.L3, :
+            ] = l2.weight
+            self.model.layer_stacks.l2.bias.data[
+                i * self.config.L3 : (i + 1) * self.config.L3
+            ] = l2.bias
             self.model.layer_stacks.output.weight.data[i : (i + 1), :] = output.weight
             self.model.layer_stacks.output.bias.data[i : (i + 1)] = output.bias
 
     def read_header(self, feature_set: FeatureSet, fc_hash):
         self.read_int32(VERSION)  # version
-        self.read_int32(fc_hash ^ feature_set.hash ^ (M.L1 * 2))
+        self.read_int32(fc_hash ^ feature_set.hash ^ (self.config.L1 * 2))
         desc_len = self.read_int32()
         self.description = self.f.read(desc_len).decode("utf-8")
 
@@ -390,6 +399,7 @@ def main():
     parser.add_argument(
         "--device", type=int, default="0", help="Device to use for cupy"
     )
+    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -399,15 +409,18 @@ def main():
 
     if args.source.endswith(".ckpt"):
         nnue = M.NNUE.load_from_checkpoint(
-            args.source, feature_set=feature_set, map_location=torch.device("cpu")
+            args.source,
+            feature_set=feature_set,
+            config=M.ModelConfig(L1=args.l1),
+            map_location=torch.device("cpu"),
         )
         nnue.eval()
     elif args.source.endswith(".pt"):
         nnue = torch.load(args.source, weights_only=False)
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
-            nnue = M.NNUE(feature_set)
-            reader = NNUEReader(f, feature_set)
+            nnue = M.NNUE(feature_set, M.ModelConfig(L1=args.l1))
+            reader = NNUEReader(f, feature_set, M.ModelConfig(L1=args.l1))
             nnue.model = reader.model
             if args.description is None:
                 args.description = reader.description

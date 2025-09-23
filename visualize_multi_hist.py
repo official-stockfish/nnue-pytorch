@@ -8,18 +8,20 @@ import matplotlib.pyplot as plt
 from serialize import NNUEReader
 
 
-def load_model(filename, feature_set) -> M.NNUEModel:
+def load_model(filename, feature_set, config: M.ModelConfig) -> M.NNUEModel:
     if filename.endswith(".pt") or filename.endswith(".ckpt"):
         if filename.endswith(".pt"):
             model = torch.load(filename, weights_only=False)
         else:
-            model = M.NNUE.load_from_checkpoint(filename, feature_set=feature_set)
+            model = M.NNUE.load_from_checkpoint(
+                filename, feature_set=feature_set, config=config
+            )
         model.eval()
         return model.model
 
     elif filename.endswith(".nnue"):
         with open(filename, "rb") as f:
-            reader = NNUEReader(f, feature_set)
+            reader = NNUEReader(f, feature_set, config)
         return reader.model
 
     else:
@@ -84,6 +86,7 @@ def main():
     parser.add_argument(
         "--dont-show", action="store_true", help="Don't show the plots."
     )
+    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -102,14 +105,16 @@ def main():
             label = label[:-5]
         labels.append("\n".join(label.split("-")))
 
-    models = [load_model(m, feature_set) for m in args.models]
+    models = [
+        load_model(m, feature_set, M.ModelConfig(L1=args.l1)) for m in args.models
+    ]
 
     coalesced_ins = [M.coalesce_ft_weights(model, model.input) for model in models]
     input_weights = [
-        coalesced_in[:, : M.L1].flatten().numpy() for coalesced_in in coalesced_ins
+        coalesced_in[:, : args.l1].flatten().numpy() for coalesced_in in coalesced_ins
     ]
     input_weights_psqt = [
-        (coalesced_in[:, M.L1 :] * 600).flatten().numpy()
+        (coalesced_in[:, args.l1 :] * 600).flatten().numpy()
         for coalesced_in in coalesced_ins
     ]
     plot_hists(

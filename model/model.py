@@ -1,46 +1,28 @@
-import ranger21
 import torch
 from torch import nn, Tensor
-from feature_transformer import (
-    DoubleFeatureTransformerSlice,
-    BaseFeatureTransformerSlice,
-)
-import lightning as L
-from dataclasses import dataclass
-from features.feature_set import FeatureSet
 
-# 3 layer fully connected network
-L1 = 3072
-L2 = 15
-L3 = 32
-
-
-# parameters needed for the definition of the loss
-@dataclass
-class LossParams:
-    in_offset: float = 270
-    out_offset: float = 270
-    in_scaling: float = 340
-    out_scaling: float = 380
-    start_lambda: float = 1.0
-    end_lambda: float = 1.0
-    pow_exp: float = 2.5
-    qp_asymmetry: float = 0.0
+from features import FeatureSet
+from .config import ModelConfig
+from .feature_transformer import DoubleFeatureTransformerSlice
 
 
 class LayerStacks(nn.Module):
-    def __init__(self, count: int):
+    def __init__(self, count: int, config: ModelConfig):
         super(LayerStacks, self).__init__()
 
+        self.L1 = config.L1
+        self.L2 = config.L2
+        self.L3 = config.L3
+
         self.count = count
-        self.l1 = nn.Linear(2 * L1 // 2, (L2 + 1) * count)
+        self.l1 = nn.Linear(2 * self.L1 // 2, (self.L2 + 1) * count)
         # Factorizer only for the first layer because later
         # there's a non-linearity and factorization breaks.
         # This is by design. The weights in the further layers should be
         # able to diverge a lot.
-        self.l1_fact = nn.Linear(2 * L1 // 2, L2 + 1, bias=True)
-        self.l2 = nn.Linear(L2 * 2, L3 * count)
-        self.output = nn.Linear(L3, 1 * count)
+        self.l1_fact = nn.Linear(2 * self.L1 // 2, self.L2 + 1, bias=True)
+        self.l2 = nn.Linear(self.L2 * 2, self.L3 * count)
+        self.output = nn.Linear(self.L3, 1 * count)
 
         self._init_layers()
 
@@ -53,6 +35,7 @@ class LayerStacks(nn.Module):
         l2_bias = self.l2.bias
         output_weight = self.output.weight
         output_bias = self.output.bias
+
         with torch.no_grad():
             l1_fact_weight.fill_(0.0)
             l1_fact_bias.fill_(0.0)
@@ -60,12 +43,16 @@ class LayerStacks(nn.Module):
 
             for i in range(1, self.count):
                 # Force all layer stacks to be initialized in the same way.
-                l1_weight[i * (L2 + 1) : (i + 1) * (L2 + 1), :] = l1_weight[
-                    0 : (L2 + 1), :
+                l1_weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :] = l1_weight[
+                    0 : (self.L2 + 1), :
                 ]
-                l1_bias[i * (L2 + 1) : (i + 1) * (L2 + 1)] = l1_bias[0 : (L2 + 1)]
-                l2_weight[i * L3 : (i + 1) * L3, :] = l2_weight[0:L3, :]
-                l2_bias[i * L3 : (i + 1) * L3] = l2_bias[0:L3]
+                l1_bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)] = l1_bias[
+                    0 : (self.L2 + 1)
+                ]
+                l2_weight[i * self.L3 : (i + 1) * self.L3, :] = l2_weight[
+                    0 : self.L3, :
+                ]
+                l2_bias[i * self.L3 : (i + 1) * self.L3] = l2_bias[0 : self.L3]
                 output_weight[i : i + 1, :] = output_weight[0:1, :]
 
         self.l1.weight = nn.Parameter(l1_weight)
@@ -79,30 +66,27 @@ class LayerStacks(nn.Module):
 
     def forward(self, x: Tensor, ls_indices: Tensor):
         idx_offset = torch.arange(
-            0,
-            x.shape[0] * self.count,
-            self.count,
-            device=x.device
+            0, x.shape[0] * self.count, self.count, device=x.device
         )
 
         indices = ls_indices.flatten() + idx_offset
 
-        l1s_ = self.l1(x).reshape((-1, self.count, L2 + 1))
+        l1s_ = self.l1(x).reshape((-1, self.count, self.L2 + 1))
         l1f_ = self.l1_fact(x)
         # https://stackoverflow.com/questions/55881002/pytorch-tensor-indexing-how-to-gather-rows-by-tensor-containing-indices
         # basically we present it as a list of individual results and pick not only based on
         # the ls index but also based on batch (they are combined into one index)
-        l1c_ = l1s_.view(-1, L2 + 1)[indices]
-        l1c_, l1c_out = l1c_.split(L2, dim=1)
-        l1f_, l1f_out = l1f_.split(L2, dim=1)
+        l1c_ = l1s_.view(-1, self.L2 + 1)[indices]
+        l1c_, l1c_out = l1c_.split(self.L2, dim=1)
+        l1f_, l1f_out = l1f_.split(self.L2, dim=1)
         l1x_ = l1c_ + l1f_
         # multiply sqr crelu result by (127/128) to match quantized version
         l1x_ = torch.clamp(
             torch.cat([torch.pow(l1x_, 2.0) * (127 / 128), l1x_], dim=1), 0.0, 1.0
         )
 
-        l2s_ = self.l2(l1x_).reshape((-1, self.count, L3))
-        l2c_ = l2s_.view(-1, L3)[indices]
+        l2s_ = self.l2(l1x_).reshape((-1, self.count, self.L3))
+        l2c_ = l2s_.view(-1, self.L3)[indices]
         l2x_ = torch.clamp(l2c_, 0.0, 1.0)
 
         l3s_ = self.output(l2x_).reshape((-1, self.count, 1))
@@ -117,19 +101,19 @@ class LayerStacks(nn.Module):
         # for the serializer, because the buckets are interpreted as separate layers.
         for i in range(self.count):
             with torch.no_grad():
-                l1 = nn.Linear(2 * L1 // 2, L2 + 1)
-                l2 = nn.Linear(L2 * 2, L3)
-                output = nn.Linear(L3, 1)
+                l1 = nn.Linear(2 * self.L1 // 2, self.L2 + 1)
+                l2 = nn.Linear(self.L2 * 2, self.L3)
+                output = nn.Linear(self.L3, 1)
                 l1.weight.data = (
-                    self.l1.weight[i * (L2 + 1) : (i + 1) * (L2 + 1), :]
+                    self.l1.weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :]
                     + self.l1_fact.weight.data
                 )
                 l1.bias.data = (
-                    self.l1.bias[i * (L2 + 1) : (i + 1) * (L2 + 1)]
+                    self.l1.bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)]
                     + self.l1_fact.bias.data
                 )
-                l2.weight.data = self.l2.weight[i * L3 : (i + 1) * L3, :]
-                l2.bias.data = self.l2.bias[i * L3 : (i + 1) * L3]
+                l2.weight.data = self.l2.weight[i * self.L3 : (i + 1) * self.L3, :]
+                l2.bias.data = self.l2.bias[i * self.L3 : (i + 1) * self.L3]
                 output.weight.data = self.output.weight[i : (i + 1), :]
                 output.bias.data = self.output.bias[i : (i + 1)]
                 yield l1, l2, output
@@ -139,18 +123,24 @@ class NNUEModel(nn.Module):
     def __init__(
         self,
         feature_set: FeatureSet,
+        config: ModelConfig,
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
     ):
         super().__init__()
+
+        self.L1 = config.L1
+        self.L2 = config.L2
+        self.L3 = config.L3
+
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
         self.input = DoubleFeatureTransformerSlice(
-            feature_set.num_features, L1 + self.num_psqt_buckets
+            feature_set.num_features, self.L1 + self.num_psqt_buckets
         )
         self.feature_set = feature_set
-        self.layer_stacks = LayerStacks(self.num_ls_buckets)
+        self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
 
         self.nnue2score = 600.0
         self.weight_scale_hidden = 64.0
@@ -217,17 +207,17 @@ class NNUEModel(nn.Module):
             )
 
             for i in range(self.num_psqt_buckets):
-                input_weights[:, L1 + i] = new_weights
+                input_weights[:, self.L1 + i] = new_weights
                 # Bias doesn't matter because it cancels out during
                 # inference during perspective averaging. We set it to 0
                 # just for the sake of it. It might still diverge away from 0
                 # due to gradient imprecision but it won't change anything.
-                input_bias[L1 + i] = 0.0
+                input_bias[self.L1 + i] = 0.0
 
         self.input.weight = nn.Parameter(input_weights)
         self.input.bias = nn.Parameter(input_bias)
 
-    def _clip_weights(self):
+    def clip_weights(self):
         """
         Clips the weights of the model based on the min/max values allowed
         by the quantization scheme.
@@ -323,12 +313,12 @@ class NNUEModel(nn.Module):
         layer_stack_indices: Tensor,
     ):
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
-        w, wpsqt = torch.split(wp, L1, dim=1)
-        b, bpsqt = torch.split(bp, L1, dim=1)
+        w, wpsqt = torch.split(wp, self.L1, dim=1)
+        b, bpsqt = torch.split(bp, self.L1, dim=1)
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
         l0_ = torch.clamp(l0_, 0.0, 1.0)
 
-        l0_s = torch.split(l0_, L1 // 2, dim=1)
+        l0_s = torch.split(l0_, self.L1 // 2, dim=1)
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
         # We multiply by 127/128 because in the quantized network 1.0 is represented by 127
         # and it's more efficient to divide by 128 instead.
@@ -343,166 +333,3 @@ class NNUEModel(nn.Module):
         x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
         return x
-
-
-class NNUE(L.LightningModule):
-    """
-    feature_set - an instance of FeatureSet defining the input features
-
-    lambda_ = 0.0 - purely based on game results
-    0.0 < lambda_ < 1.0 - interpolated score and result
-    lambda_ = 1.0 - purely based on search scores
-
-    gamma - the multiplicative factor applied to the learning rate after each epoch
-
-    lr - the initial learning rate
-    """
-
-    def __init__(
-        self,
-        feature_set: FeatureSet,
-        max_epoch=800,
-        num_batches_per_epoch=int(100_000_000 / 16384),
-        gamma=0.992,
-        lr=8.75e-4,
-        param_index=0,
-        num_psqt_buckets=8,
-        num_ls_buckets=8,
-        loss_params=LossParams(),
-    ):
-        super().__init__()
-        self.model: NNUEModel = NNUEModel(feature_set, num_psqt_buckets, num_ls_buckets)
-        self.loss_params = loss_params
-        self.max_epoch = max_epoch
-        self.num_batches_per_epoch = num_batches_per_epoch
-        self.gamma = gamma
-        self.lr = lr
-        self.param_index = param_index
-
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
-
-    def step_(self, batch: tuple[Tensor, ...], batch_idx, loss_type):
-        _ = batch_idx  # unused, but required by pytorch-lightning
-
-        # We clip weights at the start of each step. This means that after
-        # the last step the weights might be outside of the desired range.
-        # They should be also clipped accordingly in the serializer.
-        self.model._clip_weights()
-
-        (
-            us,
-            them,
-            white_indices,
-            white_values,
-            black_indices,
-            black_values,
-            outcome,
-            score,
-            psqt_indices,
-            layer_stack_indices,
-        ) = batch
-
-        scorenet = (
-            self.model(
-                us,
-                them,
-                white_indices,
-                white_values,
-                black_indices,
-                black_values,
-                psqt_indices,
-                layer_stack_indices,
-            )
-            * self.model.nnue2score
-        )
-
-        p = self.loss_params
-        # convert the network and search scores to an estimate match result
-        # based on the win_rate_model, with scalings and offsets optimized
-        q = (scorenet - p.in_offset) / p.in_scaling
-        qm = (-scorenet - p.in_offset) / p.in_scaling
-        qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
-
-        s = (score - p.out_offset) / p.out_scaling
-        sm = (-score - p.out_offset) / p.out_scaling
-        pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
-
-        # blend that eval based score with te actual game outcome
-        t = outcome
-        actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
-            self.current_epoch / self.max_epoch
-        )
-        pt = pf * actual_lambda + t * (1.0 - actual_lambda)
-
-        # use a MSE-like loss function
-        loss = torch.pow(torch.abs(pt - qf), p.pow_exp)
-        if p.qp_asymmetry != 0.0:
-            loss = loss * ((qf > pt) * p.qp_asymmetry + 1)
-        loss = loss.mean()
-
-        self.log(loss_type, loss)
-
-        return loss
-
-    def training_step(self, batch, batch_idx):
-        return self.step_(batch, batch_idx, "train_loss")
-
-    def validation_step(self, batch, batch_idx):
-        self.step_(batch, batch_idx, "val_loss")
-
-    def test_step(self, batch, batch_idx):
-        self.step_(batch, batch_idx, "test_loss")
-
-    def configure_optimizers(self):
-        LR = self.lr
-        train_params = [
-            {"params": get_parameters([self.model.input]), "lr": LR, "gc_dim": 0},
-            {"params": [self.model.layer_stacks.l1_fact.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.l1_fact.bias], "lr": LR},
-            {"params": [self.model.layer_stacks.l1.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.l1.bias], "lr": LR},
-            {"params": [self.model.layer_stacks.l2.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.l2.bias], "lr": LR},
-            {"params": [self.model.layer_stacks.output.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.output.bias], "lr": LR},
-        ]
-
-        optimizer = ranger21.Ranger21(
-            train_params,
-            lr=1.0,
-            betas=(0.9, 0.999),
-            eps=1.0e-7,
-            using_gc=False,
-            using_normgc=False,
-            weight_decay=0.0,
-            num_batches_per_epoch=self.num_batches_per_epoch,
-            num_epochs=self.max_epoch,
-            warmdown_active=False,
-            use_warmup=False,
-            use_adaptive_gradient_clipping=False,
-            softplus=False,
-            pnm_momentum_factor=0.0,
-        )
-
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, step_size=1, gamma=self.gamma
-        )
-        return [optimizer], [scheduler]
-
-
-def coalesce_ft_weights(model: NNUEModel, layer: BaseFeatureTransformerSlice):
-    weight = layer.weight.data
-    indices = model.feature_set.get_virtual_to_real_features_gather_indices()
-    weight_coalesced = weight.new_zeros(
-        (model.feature_set.num_real_features, weight.shape[1])
-    )
-    for i_real, is_virtual in enumerate(indices):
-        weight_coalesced[i_real, :] = sum(
-            weight[i_virtual, :] for i_virtual in is_virtual
-        )
-    return weight_coalesced
-
-
-def get_parameters(layers: list[nn.Module]):
-    return [p for layer in layers for p in layer.parameters()]
