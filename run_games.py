@@ -4,12 +4,13 @@ import subprocess
 import sys
 import time
 import argparse
-import features
 import shutil
 import threading
 import math
 import random
 from pathlib import Path, PurePath
+
+from model import add_feature_args
 
 GLOBAL_LOCK = threading.Lock()
 
@@ -555,7 +556,7 @@ def main():
     parser.add_argument("--hash", type=int, default=8)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--games_per_round", type=int, default=200)
-    features.add_argparse_args(parser)
+    add_feature_args(parser)
     args = parser.parse_args()
 
     stockfish_base = args.stockfish_base

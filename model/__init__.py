@@ -1,5 +1,6 @@
 from .callbacks import WeightClippingCallback
 from .config import ModelConfig, LossParams
+from .features import add_feature_args, FeatureSet, get_feature_set_from_name
 from .lightning_module import NNUE
 from .model import NNUEModel
 from .utils import coalesce_ft_weights
@@ -9,6 +10,9 @@ __all__ = [
     "WeightClippingCallback",
     "ModelConfig",
     "LossParams",
+    "add_feature_args",
+    "FeatureSet",
+    "get_feature_set_from_name",
     "NNUE",
     "NNUEModel",
     "coalesce_ft_weights",

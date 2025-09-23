@@ -33,7 +33,6 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --
 
 import time
 import argparse
-import features
 import serialize
 import chess
 import torch
@@ -43,8 +42,7 @@ import numpy as np
 
 import data_loader
 import model as M
-from model import NNUE, NNUEModel, ModelConfig
-from features import FeatureSet
+from model import FeatureSet, NNUE, NNUEModel, ModelConfig
 
 
 """
@@ -549,7 +547,7 @@ def gather_impl(model, dataset, count):
 
 
 def command_gather(args):
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = M.get_feature_set_from_name(args.features)
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(
             args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)
@@ -669,7 +667,7 @@ def main():
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
     parser_gather.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    features.add_argparse_args(parser_gather)
+    M.add_feature_args(parser_gather)
     parser_gather.set_defaults(func=command_gather)
 
     parser_gather = subparsers.add_parser("find_perm", help="a help")

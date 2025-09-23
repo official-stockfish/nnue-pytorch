@@ -1,10 +1,10 @@
 import argparse
-import features
-import model as M
-import numpy as np
-import torch
-import matplotlib.pyplot as plt
 
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+
+import model as M
 from serialize import NNUEReader
 
 
@@ -87,12 +87,12 @@ def main():
         "--dont-show", action="store_true", help="Don't show the plots."
     )
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    features.add_argparse_args(parser)
+    M.add_feature_args(parser)
     args = parser.parse_args()
 
     supported_features = ("HalfKAv2", "HalfKAv2^", "HalfKAv2_hm", "HalfKAv2_hm^")
     assert args.features in supported_features
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = M.get_feature_set_from_name(args.features)
 
     from os.path import basename
 

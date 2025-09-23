@@ -8,8 +8,6 @@ from numba import njit
 import torch
 from torch import nn
 
-import features
-from features import FeatureSet
 import model as M
 
 
@@ -214,7 +212,7 @@ class NNUEWriter:
 
 
 class NNUEReader:
-    def __init__(self, f, feature_set: FeatureSet, config: M.ModelConfig):
+    def __init__(self, f, feature_set: M.FeatureSet, config: M.ModelConfig):
         self.f = f
         self.feature_set = feature_set
         self.model = M.NNUEModel(feature_set, config)
@@ -251,7 +249,7 @@ class NNUEReader:
             self.model.layer_stacks.output.weight.data[i : (i + 1), :] = output.weight
             self.model.layer_stacks.output.bias.data[i : (i + 1)] = output.bias
 
-    def read_header(self, feature_set: FeatureSet, fc_hash):
+    def read_header(self, feature_set: M.FeatureSet, fc_hash):
         self.read_int32(VERSION)  # version
         self.read_int32(fc_hash ^ feature_set.hash ^ (self.config.L1 * 2))
         desc_len = self.read_int32()
@@ -400,10 +398,10 @@ def main():
         "--device", type=int, default="0", help="Device to use for cupy"
     )
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    features.add_argparse_args(parser)
+    M.add_feature_args(parser)
     args = parser.parse_args()
 
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = M.get_feature_set_from_name(args.features)
 
     print("Converting %s to %s" % (args.source, args.target))
 

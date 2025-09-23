@@ -4,8 +4,8 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-import features
 import model as M
+from model import get_feature_set_from_name
 from serialize import NNUEReader
 
 
@@ -675,12 +675,12 @@ def main():
         help="Override the label used in plot titles and as prefix of saved files.",
     )
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    features.add_argparse_args(parser)
+    M.add_feature_args(parser)
     args = parser.parse_args()
 
     supported_features = ("HalfKAv2_hm", "HalfKAv2_hm^")
     assert args.features in supported_features
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = get_feature_set_from_name(args.features)
 
     from os.path import basename
 
@@ -691,7 +691,7 @@ def main():
     if args.ref_model:
         if args.ref_features:
             assert args.ref_features in supported_features
-            ref_feature_set = features.get_feature_set_from_name(args.ref_features)
+            ref_feature_set = get_feature_set_from_name(args.ref_features)
         else:
             ref_feature_set = feature_set
 

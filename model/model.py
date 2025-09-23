@@ -1,9 +1,9 @@
 import torch
 from torch import nn, Tensor
 
-from features import FeatureSet
 from .config import ModelConfig
 from .feature_transformer import DoubleFeatureTransformerSlice
+from .features import FeatureSet
 
 
 class LayerStacks(nn.Module):

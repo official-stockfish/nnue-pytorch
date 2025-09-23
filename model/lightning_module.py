@@ -3,8 +3,8 @@ import ranger21
 import torch
 from torch import Tensor
 
-from features import FeatureSet
 from .config import LossParams, ModelConfig
+from .features import FeatureSet
 from .model import NNUEModel
 from .utils import get_parameters
 

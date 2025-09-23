@@ -4,11 +4,9 @@ import re
 
 import chess
 
-import features
 import serialize
 import data_loader
-from model import NNUE, ModelConfig
-from features import FeatureSet
+from model import add_feature_args, FeatureSet, get_feature_set_from_name, NNUE, ModelConfig
 
 
 def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
@@ -165,12 +163,12 @@ def main():
         "--count", type=int, default=100, help="number of datapoints to process"
     )
     parser.add_argument("--l1", type=int, default=ModelConfig().L1)
-    features.add_argparse_args(parser)
+    add_feature_args(parser)
     args = parser.parse_args()
 
     batch_size = 1000
 
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = get_feature_set_from_name(args.features)
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(
             args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)

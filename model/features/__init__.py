@@ -42,7 +42,7 @@ def get_available_feature_blocks_names():
     return list(iter(_feature_blocks_by_name))
 
 
-def add_argparse_args(parser):
+def add_feature_args(parser):
     _default_feature_set_name = "HalfKAv2_hm^"
     parser.add_argument(
         "--features",
