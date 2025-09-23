@@ -25,12 +25,12 @@ class NNUE(L.LightningModule):
     def __init__(
         self,
         feature_set: FeatureSet,
+        config: ModelConfig,
         max_epoch=800,
         num_batches_per_epoch=int(100_000_000 / 16384),
         gamma=0.992,
         lr=8.75e-4,
         param_index=0,
-        config: ModelConfig = ModelConfig(),
         num_psqt_buckets=8,
         num_ls_buckets=8,
         loss_params=LossParams(),

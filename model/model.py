@@ -7,10 +7,9 @@ from .feature_transformer import DoubleFeatureTransformerSlice
 
 
 class LayerStacks(nn.Module):
-    def __init__(self, count: int, config: ModelConfig = ModelConfig()):
+    def __init__(self, count: int, config: ModelConfig):
         super(LayerStacks, self).__init__()
 
-        self.config = config
         self.L1 = config.L1
         self.L2 = config.L2
         self.L3 = config.L3
@@ -124,13 +123,12 @@ class NNUEModel(nn.Module):
     def __init__(
         self,
         feature_set: FeatureSet,
-        config: ModelConfig = ModelConfig(),
+        config: ModelConfig,
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
     ):
         super().__init__()
 
-        self.config = config
         self.L1 = config.L1
         self.L2 = config.L2
         self.L3 = config.L3
