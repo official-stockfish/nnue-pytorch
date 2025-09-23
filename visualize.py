@@ -556,7 +556,9 @@ def load_model(filename, feature_set, config: M.ModelConfig) -> M.NNUEModel:
         if filename.endswith(".pt"):
             model = torch.load(filename, weights_only=False)
         else:
-            model = M.NNUE.load_from_checkpoint(filename, feature_set=feature_set, config=config)
+            model = M.NNUE.load_from_checkpoint(
+                filename, feature_set=feature_set, config=config
+            )
         model.eval()
         return model.model
 
@@ -672,11 +674,7 @@ def main():
         required=False,
         help="Override the label used in plot titles and as prefix of saved files.",
     )
-    parser.add_argument(
-        "--l1",
-        type=int,
-        default=M.ModelConfig().L1
-    )
+    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -697,7 +695,9 @@ def main():
         else:
             ref_feature_set = feature_set
 
-        ref_model = load_model(args.ref_model, ref_feature_set, M.ModelConfig(L1=args.L1))
+        ref_model = load_model(
+            args.ref_model, ref_feature_set, M.ModelConfig(L1=args.L1)
+        )
 
         print(
             "Visualizing difference between {} and {}".format(
