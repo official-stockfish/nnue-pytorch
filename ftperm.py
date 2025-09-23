@@ -19,21 +19,20 @@ python ftperm.py find_perm --data=ftact1m.npy --out=ftact.perm
 python ftperm.py eval_perm --data=ftact1m.npy --perm=ftact.perm
 
 4. Apply permutation and save
-python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --ft_perm=ftact.perm
+python convert.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --ft_perm=ftact.perm
 
 ----------------------------------------------------------------
 
 OR do the whole process in one step
 
-python serialize.py networks\nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --ft_optimize --ft_optimize_data=data\fishpack32.binpack --ft_optimize_count=1000000
+python convert.py networks\nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --ft_optimize --ft_optimize_data=data\fishpack32.binpack --ft_optimize_count=1000000
 
-python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --ft_optimize --ft_optimize_data=noob_master_leaf_static_d12_85M_0.binpack --ft_optimize_count=10000
+python convert.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --ft_optimize --ft_optimize_data=noob_master_leaf_static_d12_85M_0.binpack --ft_optimize_count=10000
 
 """
 
 import time
 import argparse
-import serialize
 import chess
 import torch
 import copy
@@ -42,7 +41,7 @@ import numpy as np
 
 import data_loader
 import model as M
-from model import FeatureSet, NNUE, NNUEModel, ModelConfig
+from model import FeatureSet, NNUE, NNUEModel, NNUEReader, ModelConfig
 
 
 """
@@ -396,7 +395,7 @@ def find_perm_impl(actmat, use_cupy, L1: int):
 
 def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
     with open(nnue_path, "rb") as f:
-        reader = serialize.NNUEReader(f, feature_set, config)
+        reader = NNUEReader(f, feature_set, config)
         return reader.model
 
 

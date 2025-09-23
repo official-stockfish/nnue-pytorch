@@ -93,7 +93,7 @@ def convert_ckpt(root_dir, features):
             with subprocess.Popen(
                 [
                     sys.executable,
-                    "serialize.py",
+                    "convert.py",
                     ckpt,
                     nnue_file_name,
                     f"--features={features}",

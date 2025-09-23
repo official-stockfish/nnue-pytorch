@@ -1,4 +1,3 @@
-import argparse
 import struct
 import operator
 from functools import reduce
@@ -8,8 +7,10 @@ from numba import njit
 import torch
 from torch import nn
 
-import model as M
-
+from .coalesce_weights import coalesce_ft_weights
+from ..config import ModelConfig
+from ..features import FeatureSet
+from ..model import NNUEModel
 
 def ascii_hist(name, x, bins=6):
     N, X = np.histogram(x, bins=bins)
@@ -66,10 +67,7 @@ class NNUEWriter:
     All values are stored in little endian.
     """
 
-    def __init__(self, model: M.NNUEModel, description=None, ft_compression="none"):
-        if description is None:
-            description = DEFAULT_DESCRIPTION
-
+    def __init__(self, model: NNUEModel, description=DEFAULT_DESCRIPTION, ft_compression="none"):
         self.buf = bytearray()
 
         # NOTE: model.clip_weights() should probably be called here. It's not necessary now
@@ -86,7 +84,7 @@ class NNUEWriter:
             self.write_fc_layer(model, output, is_output=True)
 
     @staticmethod
-    def fc_hash(model: M.NNUEModel):
+    def fc_hash(model: NNUEModel):
         # InputSlice hash
         prev_hash = 0xEC42E90D
         prev_hash ^= model.L1 * 2
@@ -108,7 +106,7 @@ class NNUEWriter:
             prev_hash = layer_hash
         return layer_hash
 
-    def write_header(self, model: M.NNUEModel, fc_hash, description):
+    def write_header(self, model: NNUEModel, fc_hash, description):
         self.int32(VERSION)  # version
         self.int32(
             fc_hash ^ model.feature_set.hash ^ (model.L1 * 2)
@@ -131,13 +129,13 @@ class NNUEWriter:
         else:
             raise Exception("Invalid compression method.")
 
-    def write_feature_transformer(self, model: M.NNUEModel, ft_compression):
+    def write_feature_transformer(self, model: NNUEModel, ft_compression):
         layer = model.input
 
         bias = layer.bias.data[: model.L1]
         bias = bias.mul(model.quantized_one).round().to(torch.int16)
 
-        all_weight = M.coalesce_ft_weights(model, layer)
+        all_weight = coalesce_ft_weights(model, layer)
         weight = all_weight[:, : model.L1]
         psqt_weight = all_weight[:, model.L1 :]
 
@@ -158,7 +156,7 @@ class NNUEWriter:
         self.write_tensor(weight.flatten().numpy(), ft_compression)
         self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
 
-    def write_fc_layer(self, model: M.NNUEModel, layer, is_output=False):
+    def write_fc_layer(self, model: NNUEModel, layer, is_output=False):
         # FC layers are stored as int8 weights, and int32 biases
         kWeightScaleHidden = model.weight_scale_hidden
         kWeightScaleOut = (
@@ -212,10 +210,10 @@ class NNUEWriter:
 
 
 class NNUEReader:
-    def __init__(self, f, feature_set: M.FeatureSet, config: M.ModelConfig):
+    def __init__(self, f, feature_set: FeatureSet, config: ModelConfig):
         self.f = f
         self.feature_set = feature_set
-        self.model = M.NNUEModel(feature_set, config)
+        self.model = NNUEModel(feature_set, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
@@ -249,7 +247,7 @@ class NNUEReader:
             self.model.layer_stacks.output.weight.data[i : (i + 1), :] = output.weight
             self.model.layer_stacks.output.bias.data[i : (i + 1)] = output.bias
 
-    def read_header(self, feature_set: M.FeatureSet, fc_hash):
+    def read_header(self, feature_set: FeatureSet, fc_hash):
         self.read_int32(VERSION)  # version
         self.read_int32(fc_hash ^ feature_set.hash ^ (self.config.L1 * 2))
         desc_len = self.read_int32()
@@ -339,143 +337,3 @@ class NNUEReader:
         if expected is not None and v != expected:
             raise Exception("Expected: %x, got %x" % (expected, v))
         return v
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Converts files between ckpt and nnue format."
-    )
-    parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
-    parser.add_argument("target", help="Target file (can be .pt or .nnue)")
-    parser.add_argument(
-        "--description",
-        default=None,
-        type=str,
-        dest="description",
-        help="The description string to include in the network. Only works when serializing into a .nnue file.",
-    )
-    parser.add_argument(
-        "--ft_compression",
-        default="leb128",
-        type=str,
-        dest="ft_compression",
-        help="Compression method to use for FT weights and biases. Either 'none' or 'leb128'. Only allowed if saving to .nnue.",
-    )
-    parser.add_argument(
-        "--ft_perm",
-        default=None,
-        type=str,
-        dest="ft_perm",
-        help="Path to a file that defines the permutation to use on the feature transformer.",
-    )
-    parser.add_argument(
-        "--ft_optimize",
-        action="store_true",
-        dest="ft_optimize",
-        help="Whether to perform full feature transformer optimization (ftperm.py) on the resulting network. This process is very time consuming.",
-    )
-    parser.add_argument(
-        "--ft_optimize_data",
-        default=None,
-        type=str,
-        dest="ft_optimize_data",
-        help="Path to the dataset to use for FT optimization.",
-    )
-    parser.add_argument(
-        "--ft_optimize_count",
-        default=10000,
-        type=int,
-        dest="ft_optimize_count",
-        help="Number of positions to use for FT optimization.",
-    )
-    parser.add_argument(
-        "--no-cupy",
-        action="store_false",
-        dest="use_cupy",
-        help="Disable CUPY usage if not enough GPU memory is available. This will use numpy instead, which is slower.",
-    )
-    parser.add_argument(
-        "--device", type=int, default="0", help="Device to use for cupy"
-    )
-    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    M.add_feature_args(parser)
-    args = parser.parse_args()
-
-    feature_set = M.get_feature_set_from_name(args.features)
-
-    print("Converting %s to %s" % (args.source, args.target))
-
-    if args.source.endswith(".ckpt"):
-        nnue = M.NNUE.load_from_checkpoint(
-            args.source,
-            feature_set=feature_set,
-            config=M.ModelConfig(L1=args.l1),
-            map_location=torch.device("cpu"),
-        )
-        nnue.eval()
-    elif args.source.endswith(".pt"):
-        nnue = torch.load(args.source, weights_only=False)
-    elif args.source.endswith(".nnue"):
-        with open(args.source, "rb") as f:
-            nnue = M.NNUE(feature_set, M.ModelConfig(L1=args.l1))
-            reader = NNUEReader(f, feature_set, M.ModelConfig(L1=args.l1))
-            nnue.model = reader.model
-            if args.description is None:
-                args.description = reader.description
-    else:
-        raise Exception("Invalid network input format.")
-
-    if args.ft_compression != "none" and not args.target.endswith(".nnue"):
-        args.ft_compression = "none"
-        # raise Exception('Compression only allowed for .nnue target.')
-
-    if args.ft_compression not in ["none", "leb128"]:
-        raise Exception("Invalid compression method.")
-
-    if args.ft_optimize and args.ft_perm is not None:
-        raise Exception("Options --ft_perm and --ft_optimize are mutually exclusive.")
-
-    if args.ft_perm is not None and args.target.endswith(".nnue"):
-        import ftperm
-
-        ftperm.ft_permute(nnue.model, args.ft_perm)
-
-    if args.ft_optimize and args.target.endswith(".nnue"):
-        import ftperm
-
-        if args.ft_optimize_data is None:
-            raise Exception(
-                "Invalid dataset path for FT optimization. (--ft_optimize_data)"
-            )
-        if args.ft_optimize_count is None or args.ft_optimize_count < 1:
-            raise Exception(
-                "Invalid number of positions to optimize FT with. (--ft_optimize_count)"
-            )
-
-        if args.use_cupy:
-            if args.device is not None:
-                ftperm.set_cupy_device(args.device)
-
-        ftperm.ft_optimize(
-            nnue.model,
-            args.ft_optimize_data,
-            args.ft_optimize_count,
-            use_cupy=args.use_cupy,
-        )
-
-    if args.target.endswith(".ckpt"):
-        raise Exception("Cannot convert into .ckpt")
-    elif args.target.endswith(".pt"):
-        torch.save(nnue, args.target)
-    elif args.target.endswith(".nnue"):
-        writer = NNUEWriter(
-            nnue.model, args.description, ft_compression=args.ft_compression
-        )
-        with open(args.target, "wb") as f:
-            f.write(writer.buf)
-    else:
-        raise Exception("Invalid network output format.")
-
-
-if __name__ == "__main__":
-    main()

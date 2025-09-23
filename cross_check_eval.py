@@ -4,14 +4,13 @@ import re
 
 import chess
 
-import serialize
 import data_loader
-from model import add_feature_args, FeatureSet, get_feature_set_from_name, NNUE, ModelConfig
+from model import add_feature_args, FeatureSet, get_feature_set_from_name, NNUE, NNUEReader, ModelConfig
 
 
 def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
     with open(nnue_path, "rb") as f:
-        reader = serialize.NNUEReader(f, feature_set, config)
+        reader = NNUEReader(f, feature_set, config)
         return reader.model
 
 

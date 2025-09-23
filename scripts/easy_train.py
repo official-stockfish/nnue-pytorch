@@ -2542,7 +2542,7 @@ def prepare_start_model(
         with subprocess.Popen(
             [
                 sys.executable,
-                "serialize.py",
+                "convert.py",
                 os.path.abspath(model_path),
                 destination_model_path,
                 f"--features={features}",
@@ -2552,7 +2552,7 @@ def prepare_start_model(
             stderr=subprocess.STDOUT,
         ) as process:
             if process.wait():
-                raise Exception("Failed to run serialize.py for start model.")
+                raise Exception("Failed to run convert.py for start model.")
 
         if not os.path.exists(destination_model_path):
             raise Exception("Failed to convert start model.")
