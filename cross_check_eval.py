@@ -9,7 +9,7 @@ import serialize
 import data_loader
 import model as M
 from model import NNUE
-from features.feature_set import FeatureSet
+from features import FeatureSet
 
 
 def read_model(nnue_path, feature_set: FeatureSet):

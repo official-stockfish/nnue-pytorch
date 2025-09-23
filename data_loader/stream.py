@@ -2,7 +2,7 @@ import ctypes
 
 from ._native import c_lib, SparseBatchPtr, FenBatchPtr
 from .config import CDataloaderSkipConfig, DataloaderSkipConfig
-from features.feature_set import FeatureSet
+from features import FeatureSet
 
 
 def _to_c_str_array(str_list):

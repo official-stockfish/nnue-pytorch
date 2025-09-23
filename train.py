@@ -14,7 +14,7 @@ from lightning.pytorch.callbacks import TQDMProgressBar, Callback, ModelCheckpoi
 
 import data_loader
 import features
-from features.feature_set import FeatureSet
+from features import FeatureSet
 import model as M
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")

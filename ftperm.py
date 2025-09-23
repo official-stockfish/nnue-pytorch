@@ -44,7 +44,7 @@ import numpy as np
 import data_loader
 import model as M
 from model import NNUE, L1
-from features.feature_set import FeatureSet
+from features import FeatureSet
 
 
 """
