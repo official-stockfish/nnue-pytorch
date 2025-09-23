@@ -72,7 +72,7 @@ class NNUEWriter:
 
         self.buf = bytearray()
 
-        # NOTE: model._clip_weights() should probably be called here. It's not necessary now
+        # NOTE: model.clip_weights() should probably be called here. It's not necessary now
         # because it doesn't have more restrictive bounds than these defined by quantization,
         # but it might be necessary in the future.
         fc_hash = self.fc_hash(model)

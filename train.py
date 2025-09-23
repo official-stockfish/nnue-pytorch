@@ -135,7 +135,7 @@ def main():
         default="30:00:00:00",
         type=str,
         dest="max_time",
-        help="The maximum time to train for. A string in the format DD:HH:MM:SS (Default 30:00:00:00).",
+        help="The maximum time to train for. A string in the format DD:H:MM:SS (Default 30:00:00:00).",
     )
     parser.add_argument(
         "--validation-data",
