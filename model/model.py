@@ -2,23 +2,28 @@ import torch
 from torch import nn, Tensor
 
 from features import FeatureSet
-from .config import L1, L2, L3
+from .config import ModelConfig
 from .feature_transformer import DoubleFeatureTransformerSlice
 
 
 class LayerStacks(nn.Module):
-    def __init__(self, count: int):
+    def __init__(self, count: int, config: ModelConfig = ModelConfig()):
         super(LayerStacks, self).__init__()
 
+        self.config = config
+        self.L1 = config.L1
+        self.L2 = config.L2
+        self.L3 = config.L3
+
         self.count = count
-        self.l1 = nn.Linear(2 * L1 // 2, (L2 + 1) * count)
+        self.l1 = nn.Linear(2 * self.L1 // 2, (self.L2 + 1) * count)
         # Factorizer only for the first layer because later
         # there's a non-linearity and factorization breaks.
         # This is by design. The weights in the further layers should be
         # able to diverge a lot.
-        self.l1_fact = nn.Linear(2 * L1 // 2, L2 + 1, bias=True)
-        self.l2 = nn.Linear(L2 * 2, L3 * count)
-        self.output = nn.Linear(L3, 1 * count)
+        self.l1_fact = nn.Linear(2 * self.L1 // 2, self.L2 + 1, bias=True)
+        self.l2 = nn.Linear(self.L2 * 2, self.L3 * count)
+        self.output = nn.Linear(self.L3, 1 * count)
 
         self._init_layers()
 
@@ -39,12 +44,12 @@ class LayerStacks(nn.Module):
 
             for i in range(1, self.count):
                 # Force all layer stacks to be initialized in the same way.
-                l1_weight[i * (L2 + 1) : (i + 1) * (L2 + 1), :] = l1_weight[
-                    0 : (L2 + 1), :
+                l1_weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :] = l1_weight[
+                    0 : (self.L2 + 1), :
                 ]
-                l1_bias[i * (L2 + 1) : (i + 1) * (L2 + 1)] = l1_bias[0 : (L2 + 1)]
-                l2_weight[i * L3 : (i + 1) * L3, :] = l2_weight[0:L3, :]
-                l2_bias[i * L3 : (i + 1) * L3] = l2_bias[0:L3]
+                l1_bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)] = l1_bias[0 : (self.L2 + 1)]
+                l2_weight[i * self.L3 : (i + 1) * self.L3, :] = l2_weight[0:self.L3, :]
+                l2_bias[i * self.L3 : (i + 1) * self.L3] = l2_bias[0:self.L3]
                 output_weight[i : i + 1, :] = output_weight[0:1, :]
 
         self.l1.weight = nn.Parameter(l1_weight)
@@ -63,22 +68,22 @@ class LayerStacks(nn.Module):
 
         indices = ls_indices.flatten() + idx_offset
 
-        l1s_ = self.l1(x).reshape((-1, self.count, L2 + 1))
+        l1s_ = self.l1(x).reshape((-1, self.count, self.L2 + 1))
         l1f_ = self.l1_fact(x)
         # https://stackoverflow.com/questions/55881002/pytorch-tensor-indexing-how-to-gather-rows-by-tensor-containing-indices
         # basically we present it as a list of individual results and pick not only based on
         # the ls index but also based on batch (they are combined into one index)
-        l1c_ = l1s_.view(-1, L2 + 1)[indices]
-        l1c_, l1c_out = l1c_.split(L2, dim=1)
-        l1f_, l1f_out = l1f_.split(L2, dim=1)
+        l1c_ = l1s_.view(-1, self.L2 + 1)[indices]
+        l1c_, l1c_out = l1c_.split(self.L2, dim=1)
+        l1f_, l1f_out = l1f_.split(self.L2, dim=1)
         l1x_ = l1c_ + l1f_
         # multiply sqr crelu result by (127/128) to match quantized version
         l1x_ = torch.clamp(
             torch.cat([torch.pow(l1x_, 2.0) * (127 / 128), l1x_], dim=1), 0.0, 1.0
         )
 
-        l2s_ = self.l2(l1x_).reshape((-1, self.count, L3))
-        l2c_ = l2s_.view(-1, L3)[indices]
+        l2s_ = self.l2(l1x_).reshape((-1, self.count, self.L3))
+        l2c_ = l2s_.view(-1, self.L3)[indices]
         l2x_ = torch.clamp(l2c_, 0.0, 1.0)
 
         l3s_ = self.output(l2x_).reshape((-1, self.count, 1))
@@ -93,19 +98,19 @@ class LayerStacks(nn.Module):
         # for the serializer, because the buckets are interpreted as separate layers.
         for i in range(self.count):
             with torch.no_grad():
-                l1 = nn.Linear(2 * L1 // 2, L2 + 1)
-                l2 = nn.Linear(L2 * 2, L3)
-                output = nn.Linear(L3, 1)
+                l1 = nn.Linear(2 * self.L1 // 2, self.L2 + 1)
+                l2 = nn.Linear(self.L2 * 2, self.L3)
+                output = nn.Linear(self.L3, 1)
                 l1.weight.data = (
-                    self.l1.weight[i * (L2 + 1) : (i + 1) * (L2 + 1), :]
+                    self.l1.weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :]
                     + self.l1_fact.weight.data
                 )
                 l1.bias.data = (
-                    self.l1.bias[i * (L2 + 1) : (i + 1) * (L2 + 1)]
+                    self.l1.bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)]
                     + self.l1_fact.bias.data
                 )
-                l2.weight.data = self.l2.weight[i * L3 : (i + 1) * L3, :]
-                l2.bias.data = self.l2.bias[i * L3 : (i + 1) * L3]
+                l2.weight.data = self.l2.weight[i * self.L3 : (i + 1) * self.L3, :]
+                l2.bias.data = self.l2.bias[i * self.L3 : (i + 1) * self.L3]
                 output.weight.data = self.output.weight[i : (i + 1), :]
                 output.bias.data = self.output.bias[i : (i + 1)]
                 yield l1, l2, output
@@ -115,18 +120,25 @@ class NNUEModel(nn.Module):
     def __init__(
         self,
         feature_set: FeatureSet,
+        config: ModelConfig = ModelConfig(),
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
     ):
         super().__init__()
+
+        self.config = config
+        self.L1 = config.L1
+        self.L2 = config.L2
+        self.L3 = config.L3
+
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
         self.input = DoubleFeatureTransformerSlice(
-            feature_set.num_features, L1 + self.num_psqt_buckets
+            feature_set.num_features, self.L1 + self.num_psqt_buckets
         )
         self.feature_set = feature_set
-        self.layer_stacks = LayerStacks(self.num_ls_buckets)
+        self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
 
         self.nnue2score = 600.0
         self.weight_scale_hidden = 64.0
@@ -193,12 +205,12 @@ class NNUEModel(nn.Module):
             )
 
             for i in range(self.num_psqt_buckets):
-                input_weights[:, L1 + i] = new_weights
+                input_weights[:, self.L1 + i] = new_weights
                 # Bias doesn't matter because it cancels out during
                 # inference during perspective averaging. We set it to 0
                 # just for the sake of it. It might still diverge away from 0
                 # due to gradient imprecision but it won't change anything.
-                input_bias[L1 + i] = 0.0
+                input_bias[self.L1 + i] = 0.0
 
         self.input.weight = nn.Parameter(input_weights)
         self.input.bias = nn.Parameter(input_bias)
@@ -299,12 +311,12 @@ class NNUEModel(nn.Module):
         layer_stack_indices: Tensor,
     ):
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
-        w, wpsqt = torch.split(wp, L1, dim=1)
-        b, bpsqt = torch.split(bp, L1, dim=1)
+        w, wpsqt = torch.split(wp, self.L1, dim=1)
+        b, bpsqt = torch.split(bp, self.L1, dim=1)
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
         l0_ = torch.clamp(l0_, 0.0, 1.0)
 
-        l0_s = torch.split(l0_, L1 // 2, dim=1)
+        l0_s = torch.split(l0_, self.L1 // 2, dim=1)
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
         # We multiply by 127/128 because in the quantized network 1.0 is represented by 127
         # and it's more efficient to divide by 128 instead.

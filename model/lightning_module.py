@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 from features import FeatureSet
-from .config import LossParams
+from .config import LossParams, ModelConfig
 from .model import NNUEModel
 from .utils import get_parameters
 
@@ -30,12 +30,13 @@ class NNUE(L.LightningModule):
         gamma=0.992,
         lr=8.75e-4,
         param_index=0,
+        config: ModelConfig = ModelConfig(),
         num_psqt_buckets=8,
         num_ls_buckets=8,
         loss_params=LossParams(),
     ):
         super().__init__()
-        self.model: NNUEModel = NNUEModel(feature_set, num_psqt_buckets, num_ls_buckets)
+        self.model: NNUEModel = NNUEModel(feature_set, config, num_psqt_buckets, num_ls_buckets)
         self.loss_params = loss_params
         self.max_epoch = max_epoch
         self.num_batches_per_epoch = num_batches_per_epoch

@@ -335,8 +335,12 @@ def main():
         dest="simple_eval_skipping",
         help="Skip positions that have abs(simple_eval(pos)) < n",
     )
+    parser.add_argument(
+        "--l1",
+        type=int,
+        default=M.ModelConfig().L1
+    )
     features.add_argparse_args(parser)
-    M.add_argparse_args(parser)
     args = parser.parse_args()
 
     args.datasets = flatten_once(args.datasets)
@@ -393,6 +397,7 @@ def main():
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
+            config=M.ModelConfig(L1=args.l1),
         )
     else:
         nnue = torch.load(args.resume_from_model, weights_only=False)

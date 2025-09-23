@@ -43,7 +43,7 @@ import numpy as np
 
 import data_loader
 import model as M
-from model import NNUE, L1
+from model import NNUE, NNUEModel, ModelConfig
 from features import FeatureSet
 
 
@@ -341,7 +341,7 @@ def make_swaps_3(actmat, use_cupy=True):
     return cycles, total_improvement
 
 
-def find_perm_impl(actmat, use_cupy):
+def find_perm_impl(actmat, use_cupy, L1: int):
     actmat = np.reshape(actmat, (actmat.shape[0] * 2, actmat.shape[1] // 2))
     if use_cupy:
         actmat = cp.asarray(actmat, dtype=cp.int8)
@@ -396,7 +396,7 @@ def find_perm_impl(actmat, use_cupy):
 # -------------------------------------------------------------
 
 
-def read_model(nnue_path, feature_set: FeatureSet):
+def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
     with open(nnue_path, "rb") as f:
         reader = serialize.NNUEReader(f, feature_set)
         return reader.model
@@ -441,12 +441,12 @@ def forward_ft(
     layer_stack_indices,
 ):
     wp, bp = model.input(white_indices, white_values, black_indices, black_values)
-    w, _ = torch.split(wp, L1, dim=1)
-    b, _ = torch.split(bp, L1, dim=1)
+    w, _ = torch.split(wp, model.L1, dim=1)
+    b, _ = torch.split(bp, model.L1, dim=1)
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
     l0_ = torch.clamp(l0_, 0.0, 127.0)
 
-    l0_s = torch.split(l0_, L1 // 2, dim=1)
+    l0_s = torch.split(l0_, model.L1 // 2, dim=1)
     l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
     # We multiply by 127/128 because in the quantized network 1.0 is represented by 127
     # and it's more efficient to divide by 128 instead.
@@ -553,7 +553,7 @@ def command_gather(args):
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set)
     else:
-        model = read_model(args.net, feature_set)
+        model = read_model(args.net, feature_set, ModelConfig(L1=args.l1))
 
     model.eval()
 
@@ -606,7 +606,7 @@ def command_find_perm(args):
 
 
 def ft_optimize(
-    model,
+    model: NNUEModel,
     dataset_path,
     count,
     actmat_save_path=None,
@@ -620,7 +620,7 @@ def ft_optimize(
             np.save(file, actmat)
 
     print("Finding permutation...")
-    perm = find_perm_impl(actmat, use_cupy)
+    perm = find_perm_impl(actmat, use_cupy, model.L1)
     if actmat_save_path is not None:
         with open(perm_save_path, "wb") as file:
             np.save(file, perm)
@@ -666,8 +666,12 @@ def main():
     parser_gather.add_argument(
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
+    parser_gather.add_argument(
+        "--l1",
+        type=int,
+        default=M.ModelConfig().L1
+    )
     features.add_argparse_args(parser_gather)
-    M.add_argparse_args(parser_gather)
     parser_gather.set_defaults(func=command_gather)
 
     parser_gather = subparsers.add_parser("find_perm", help="a help")

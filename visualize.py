@@ -43,16 +43,16 @@ class NNUEVisualizer:
     def plot_input_weights(self):
         # Coalesce weights and transform them to Numpy domain.
         weights = M.coalesce_ft_weights(self.model, self.model.input)
-        weights = weights[:, : M.L1]
+        weights = weights[:, : self.model.L1]
         weights = weights.flatten().numpy()
 
         if self.args.ref_model:
             ref_weights = M.coalesce_ft_weights(self.ref_model, self.ref_model.input)
-            ref_weights = ref_weights[:, : M.L1]
+            ref_weights = ref_weights[:, : self.model.L1]
             ref_weights = ref_weights.flatten().numpy()
             weights -= ref_weights
 
-        hd = M.L1  # Number of input neurons.
+        hd = self.model.L1  # Number of input neurons.
         self.M = hd
 
         # Preferred ratio of number of input neurons per row/col.
@@ -551,7 +551,7 @@ class NNUEVisualizer:
             self._process_fig("biases", fig)
 
 
-def load_model(filename, feature_set) -> M.NNUEModel:
+def load_model(filename, feature_set, config: M.ModelConfig) -> M.NNUEModel:
     if filename.endswith(".pt") or filename.endswith(".ckpt"):
         if filename.endswith(".pt"):
             model = torch.load(filename, weights_only=False)
@@ -562,7 +562,7 @@ def load_model(filename, feature_set) -> M.NNUEModel:
 
     elif filename.endswith(".nnue"):
         with open(filename, "rb") as f:
-            reader = NNUEReader(f, feature_set)
+            reader = NNUEReader(f, feature_set, config)
         return reader.model
 
     else:
@@ -672,8 +672,12 @@ def main():
         required=False,
         help="Override the label used in plot titles and as prefix of saved files.",
     )
+    parser.add_argument(
+        "--l1",
+        type=int,
+        default=M.ModelConfig().L1
+    )
     features.add_argparse_args(parser)
-    M.add_argparse_args(parser)
     args = parser.parse_args()
 
     supported_features = ("HalfKAv2_hm", "HalfKAv2_hm^")
@@ -684,7 +688,7 @@ def main():
 
     label = basename(args.model)
 
-    model = load_model(args.model, feature_set)
+    model = load_model(args.model, feature_set, M.ModelConfig(L1=args.l1))
 
     if args.ref_model:
         if args.ref_features:
@@ -693,7 +697,7 @@ def main():
         else:
             ref_feature_set = feature_set
 
-        ref_model = load_model(args.ref_model, ref_feature_set)
+        ref_model = load_model(args.ref_model, ref_feature_set, M.ModelConfig(L1=args.L1))
 
         print(
             "Visualizing difference between {} and {}".format(
@@ -722,4 +726,3 @@ def main():
 
 
 if __name__ == "__main__":
-    main()

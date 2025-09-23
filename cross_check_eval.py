@@ -7,14 +7,13 @@ import chess
 import features
 import serialize
 import data_loader
-import model as M
-from model import NNUE
+from model import NNUE, ModelConfig
 from features import FeatureSet
 
 
-def read_model(nnue_path, feature_set: FeatureSet):
+def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
     with open(nnue_path, "rb") as f:
-        reader = serialize.NNUEReader(f, feature_set)
+        reader = serialize.NNUEReader(f, feature_set, config)
         return reader.model
 
 
@@ -165,8 +164,12 @@ def main():
     parser.add_argument(
         "--count", type=int, default=100, help="number of datapoints to process"
     )
+    parser.add_argument(
+        "--l1",
+        type=int,
+        default=ModelConfig().L1
+    )
     features.add_argparse_args(parser)
-    M.add_argparse_args(parser)
     args = parser.parse_args()
 
     batch_size = 1000
@@ -175,7 +178,7 @@ def main():
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set)
     else:
-        model = read_model(args.net, feature_set)
+        model = read_model(args.net, feature_set, ModelConfig(L1=args.l1))
     model.eval()
     fen_batch_provider = make_fen_batch_provider(args.data, batch_size)
 
