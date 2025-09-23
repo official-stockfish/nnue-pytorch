@@ -8,6 +8,7 @@ from .config import LossParams
 from .model import NNUEModel
 from .utils import get_parameters
 
+
 class NNUE(L.LightningModule):
     """
     feature_set - an instance of FeatureSet defining the input features
@@ -20,6 +21,7 @@ class NNUE(L.LightningModule):
 
     lr - the initial learning rate
     """
+
     def __init__(
         self,
         feature_set: FeatureSet,

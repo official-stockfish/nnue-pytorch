@@ -58,10 +58,7 @@ class LayerStacks(nn.Module):
 
     def forward(self, x: Tensor, ls_indices: Tensor):
         idx_offset = torch.arange(
-            0,
-            x.shape[0] * self.count,
-            self.count,
-            device=x.device
+            0, x.shape[0] * self.count, self.count, device=x.device
         )
 
         indices = ls_indices.flatten() + idx_offset
@@ -322,5 +319,3 @@ class NNUEModel(nn.Module):
         x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
         return x
-
-

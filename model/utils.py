@@ -3,6 +3,7 @@ from torch import nn
 from .model import NNUEModel
 from .feature_transformer import BaseFeatureTransformerSlice
 
+
 def coalesce_ft_weights(model: NNUEModel, layer: BaseFeatureTransformerSlice):
     weight = layer.weight.data
     indices = model.feature_set.get_virtual_to_real_features_gather_indices()

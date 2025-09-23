@@ -1,5 +1,6 @@
 import lightning as L
 
+
 class WeightClippingCallback(L.Callback):
     def on_train_batch_start(
         self,

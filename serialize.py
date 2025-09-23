@@ -12,6 +12,7 @@ import features
 from features import FeatureSet
 import model as M
 
+
 def ascii_hist(name, x, bins=6):
     N, X = np.histogram(x, bins=bins)
     total = 1.0 * len(x)
