@@ -696,7 +696,7 @@ def main():
             ref_feature_set = feature_set
 
         ref_model = load_model(
-            args.ref_model, ref_feature_set, M.ModelConfig(L1=args.L1)
+            args.ref_model, ref_feature_set, M.ModelConfig(L1=args.l1)
         )
 
         print(

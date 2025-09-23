@@ -398,7 +398,7 @@ def find_perm_impl(actmat, use_cupy, L1: int):
 
 def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
     with open(nnue_path, "rb") as f:
-        reader = serialize.NNUEReader(f, feature_set)
+        reader = serialize.NNUEReader(f, feature_set, config)
         return reader.model
 
 
