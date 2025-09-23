@@ -551,7 +551,7 @@ def gather_impl(model, dataset, count):
 def command_gather(args):
     feature_set = features.get_feature_set_from_name(args.features)
     if args.checkpoint:
-        model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set)
+        model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1))
     else:
         model = read_model(args.net, feature_set, ModelConfig(L1=args.l1))
 

@@ -407,7 +407,7 @@ def main():
 
     if args.source.endswith(".ckpt"):
         nnue = M.NNUE.load_from_checkpoint(
-            args.source, feature_set=feature_set, map_location=torch.device("cpu")
+            args.source, feature_set=feature_set, config=M.ModelConfig(L1=args.l1), map_location=torch.device("cpu")
         )
         nnue.eval()
     elif args.source.endswith(".pt"):
