@@ -335,11 +335,7 @@ def main():
         dest="simple_eval_skipping",
         help="Skip positions that have abs(simple_eval(pos)) < n",
     )
-    parser.add_argument(
-        "--l1",
-        type=int,
-        default=M.ModelConfig().L1
-    )
+    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
     features.add_argparse_args(parser)
     args = parser.parse_args()
 

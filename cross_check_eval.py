@@ -164,11 +164,7 @@ def main():
     parser.add_argument(
         "--count", type=int, default=100, help="number of datapoints to process"
     )
-    parser.add_argument(
-        "--l1",
-        type=int,
-        default=ModelConfig().L1
-    )
+    parser.add_argument("--l1", type=int, default=ModelConfig().L1)
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -176,7 +172,9 @@ def main():
 
     feature_set = features.get_feature_set_from_name(args.features)
     if args.checkpoint:
-        model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1))
+        model = NNUE.load_from_checkpoint(
+            args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)
+        )
     else:
         model = read_model(args.net, feature_set, ModelConfig(L1=args.l1))
     model.eval()

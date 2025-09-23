@@ -112,7 +112,9 @@ class NNUEWriter:
 
     def write_header(self, model: M.NNUEModel, fc_hash, description):
         self.int32(VERSION)  # version
-        self.int32(fc_hash ^ model.feature_set.hash ^ (model.L1 * 2))  # halfkp network hash
+        self.int32(
+            fc_hash ^ model.feature_set.hash ^ (model.L1 * 2)
+        )  # halfkp network hash
         encoded_description = description.encode("utf-8")
         self.int32(len(encoded_description))  # Network definition
         self.buf.extend(encoded_description)
@@ -220,7 +222,9 @@ class NNUEReader:
         fc_hash = NNUEWriter.fc_hash(self.model)
 
         self.read_header(feature_set, fc_hash)
-        self.read_int32(feature_set.hash ^ (self.config.L1 * 2))  # Feature transformer hash
+        self.read_int32(
+            feature_set.hash ^ (self.config.L1 * 2)
+        )  # Feature transformer hash
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
         for i in range(self.model.num_ls_buckets):
             l1 = nn.Linear(2 * self.config.L1 // 2, self.config.L2 + 1)
@@ -238,10 +242,12 @@ class NNUEReader:
             self.model.layer_stacks.l1.bias.data[
                 i * (self.config.L2 + 1) : (i + 1) * (self.config.L2 + 1)
             ] = l1.bias
-            self.model.layer_stacks.l2.weight.data[i * self.config.L3 : (i + 1) * self.config.L3, :] = (
-                l2.weight
-            )
-            self.model.layer_stacks.l2.bias.data[i * self.config.L3 : (i + 1) * self.config.L3] = l2.bias
+            self.model.layer_stacks.l2.weight.data[
+                i * self.config.L3 : (i + 1) * self.config.L3, :
+            ] = l2.weight
+            self.model.layer_stacks.l2.bias.data[
+                i * self.config.L3 : (i + 1) * self.config.L3
+            ] = l2.bias
             self.model.layer_stacks.output.weight.data[i : (i + 1), :] = output.weight
             self.model.layer_stacks.output.bias.data[i : (i + 1)] = output.bias
 
@@ -393,11 +399,7 @@ def main():
     parser.add_argument(
         "--device", type=int, default="0", help="Device to use for cupy"
     )
-    parser.add_argument(
-        "--l1",
-        type=int,
-        default=M.ModelConfig().L1
-    )
+    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -407,7 +409,10 @@ def main():
 
     if args.source.endswith(".ckpt"):
         nnue = M.NNUE.load_from_checkpoint(
-            args.source, feature_set=feature_set, config=M.ModelConfig(L1=args.l1), map_location=torch.device("cpu")
+            args.source,
+            feature_set=feature_set,
+            config=M.ModelConfig(L1=args.l1),
+            map_location=torch.device("cpu"),
         )
         nnue.eval()
     elif args.source.endswith(".pt"):

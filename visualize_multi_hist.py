@@ -13,7 +13,9 @@ def load_model(filename, feature_set, config: M.ModelConfig) -> M.NNUEModel:
         if filename.endswith(".pt"):
             model = torch.load(filename, weights_only=False)
         else:
-            model = M.NNUE.load_from_checkpoint(filename, feature_set=feature_set, config=config)
+            model = M.NNUE.load_from_checkpoint(
+                filename, feature_set=feature_set, config=config
+            )
         model.eval()
         return model.model
 
@@ -84,11 +86,7 @@ def main():
     parser.add_argument(
         "--dont-show", action="store_true", help="Don't show the plots."
     )
-    parser.add_argument(
-        "--l1",
-        type=int,
-        default=M.ModelConfig().L1
-    )
+    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
@@ -107,7 +105,9 @@ def main():
             label = label[:-5]
         labels.append("\n".join(label.split("-")))
 
-    models = [load_model(m, feature_set, M.ModelConfig(L1=args.l1)) for m in args.models]
+    models = [
+        load_model(m, feature_set, M.ModelConfig(L1=args.l1)) for m in args.models
+    ]
 
     coalesced_ins = [M.coalesce_ft_weights(model, model.input) for model in models]
     input_weights = [

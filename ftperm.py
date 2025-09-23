@@ -551,7 +551,9 @@ def gather_impl(model, dataset, count):
 def command_gather(args):
     feature_set = features.get_feature_set_from_name(args.features)
     if args.checkpoint:
-        model = NNUE.load_from_checkpoint(args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1))
+        model = NNUE.load_from_checkpoint(
+            args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)
+        )
     else:
         model = read_model(args.net, feature_set, ModelConfig(L1=args.l1))
 
@@ -666,11 +668,7 @@ def main():
     parser_gather.add_argument(
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
-    parser_gather.add_argument(
-        "--l1",
-        type=int,
-        default=M.ModelConfig().L1
-    )
+    parser_gather.add_argument("--l1", type=int, default=M.ModelConfig().L1)
     features.add_argparse_args(parser_gather)
     parser_gather.set_defaults(func=command_gather)
 

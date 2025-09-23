@@ -36,7 +36,9 @@ class NNUE(L.LightningModule):
         loss_params=LossParams(),
     ):
         super().__init__()
-        self.model: NNUEModel = NNUEModel(feature_set, config, num_psqt_buckets, num_ls_buckets)
+        self.model: NNUEModel = NNUEModel(
+            feature_set, config, num_psqt_buckets, num_ls_buckets
+        )
         self.loss_params = loss_params
         self.max_epoch = max_epoch
         self.num_batches_per_epoch = num_batches_per_epoch

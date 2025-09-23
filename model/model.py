@@ -47,9 +47,13 @@ class LayerStacks(nn.Module):
                 l1_weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :] = l1_weight[
                     0 : (self.L2 + 1), :
                 ]
-                l1_bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)] = l1_bias[0 : (self.L2 + 1)]
-                l2_weight[i * self.L3 : (i + 1) * self.L3, :] = l2_weight[0:self.L3, :]
-                l2_bias[i * self.L3 : (i + 1) * self.L3] = l2_bias[0:self.L3]
+                l1_bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)] = l1_bias[
+                    0 : (self.L2 + 1)
+                ]
+                l2_weight[i * self.L3 : (i + 1) * self.L3, :] = l2_weight[
+                    0 : self.L3, :
+                ]
+                l2_bias[i * self.L3 : (i + 1) * self.L3] = l2_bias[0 : self.L3]
                 output_weight[i : i + 1, :] = output_weight[0:1, :]
 
         self.l1.weight = nn.Parameter(l1_weight)

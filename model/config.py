@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+
 # 3 layer fully connected network
 @dataclass
 class ModelConfig:
