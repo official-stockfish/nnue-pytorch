@@ -673,6 +673,7 @@ def main():
         help="Override the label used in plot titles and as prefix of saved files.",
     )
     features.add_argparse_args(parser)
+    M.add_argparse_args(parser)
     args = parser.parse_args()
 
     supported_features = ("HalfKAv2_hm", "HalfKAv2_hm^")

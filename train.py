@@ -1,20 +1,21 @@
 import argparse
-import model as M
-import data_loader
-import lightning as L
-import features
+import time
+import warnings
 import os
 import sys
+from datetime import timedelta
+
+import lightning as L
 import torch
 from torch import set_num_threads as t_set_num_threads
+from torch.utils.data import DataLoader
 from lightning.pytorch import loggers as pl_loggers
 from lightning.pytorch.callbacks import TQDMProgressBar, Callback, ModelCheckpoint
-from torch.utils.data import DataLoader
-import time
-from datetime import timedelta
-from features.feature_set import FeatureSet
 
-import warnings
+import data_loader
+import features
+from features.feature_set import FeatureSet
+import model as M
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -335,6 +336,7 @@ def main():
         help="Skip positions that have abs(simple_eval(pos)) < n",
     )
     features.add_argparse_args(parser)
+    M.add_argparse_args(parser)
     args = parser.parse_args()
 
     args.datasets = flatten_once(args.datasets)

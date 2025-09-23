@@ -85,6 +85,7 @@ def main():
         "--dont-show", action="store_true", help="Don't show the plots."
     )
     features.add_argparse_args(parser)
+    M.add_argparse_args(parser)
     args = parser.parse_args()
 
     supported_features = ("HalfKAv2", "HalfKAv2^", "HalfKAv2_hm", "HalfKAv2_hm^")

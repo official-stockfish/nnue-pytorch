@@ -1,15 +1,16 @@
 import argparse
-import features
-import model as M
 import struct
-import torch
-from torch import nn
-from functools import reduce
 import operator
+from functools import reduce
+
 import numpy as np
 from numba import njit
-from features.feature_set import FeatureSet
+import torch
+from torch import nn
 
+import features
+from features import FeatureSet
+import model as M
 
 def ascii_hist(name, x, bins=6):
     N, X = np.histogram(x, bins=bins)
@@ -391,6 +392,7 @@ def main():
         "--device", type=int, default="0", help="Device to use for cupy"
     )
     features.add_argparse_args(parser)
+    M.add_argparse_args(parser)
     args = parser.parse_args()
 
     feature_set = features.get_feature_set_from_name(args.features)

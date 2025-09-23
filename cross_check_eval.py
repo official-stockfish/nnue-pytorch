@@ -7,6 +7,7 @@ import chess
 import features
 import serialize
 import data_loader
+import model as M
 from model import NNUE
 from features.feature_set import FeatureSet
 
@@ -165,6 +166,7 @@ def main():
         "--count", type=int, default=100, help="number of datapoints to process"
     )
     features.add_argparse_args(parser)
+    M.add_argparse_args(parser)
     args = parser.parse_args()
 
     batch_size = 1000

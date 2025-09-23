@@ -42,6 +42,7 @@ import cupy as cp
 import numpy as np
 
 import data_loader
+import model as M
 from model import NNUE, L1
 from features.feature_set import FeatureSet
 
@@ -666,6 +667,7 @@ def main():
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
     features.add_argparse_args(parser_gather)
+    M.add_argparse_args(parser_gather)
     parser_gather.set_defaults(func=command_gather)
 
     parser_gather = subparsers.add_parser("find_perm", help="a help")
