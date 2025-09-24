@@ -69,8 +69,11 @@ class NNUEWriter:
     """
 
     def __init__(
-        self, model: NNUEModel, description=DEFAULT_DESCRIPTION, ft_compression="none"
+        self, model: NNUEModel, description=None, ft_compression="none"
     ):
+        if description is None:
+            description = DEFAULT_DESCRIPTION
+
         self.buf = bytearray()
 
         # NOTE: model.clip_weights() should probably be called here. It's not necessary now
