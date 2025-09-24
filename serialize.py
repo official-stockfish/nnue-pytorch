@@ -82,7 +82,7 @@ def main():
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
             nnue = M.NNUE(feature_set, M.ModelConfig(L1=args.l1))
-            reader = NNUEReader(f, feature_set, M.ModelConfig(L1=args.l1))
+            reader = M.NNUEReader(f, feature_set, M.ModelConfig(L1=args.l1))
             nnue.model = reader.model
             if args.description is None:
                 args.description = reader.description
