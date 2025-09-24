@@ -4,16 +4,20 @@ import re
 
 import chess
 
-import features
-import serialize
 import data_loader
-from model import NNUE, ModelConfig
-from features import FeatureSet
+from model import (
+    add_feature_args,
+    FeatureSet,
+    get_feature_set_from_name,
+    NNUE,
+    NNUEReader,
+    ModelConfig,
+)
 
 
 def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
     with open(nnue_path, "rb") as f:
-        reader = serialize.NNUEReader(f, feature_set, config)
+        reader = NNUEReader(f, feature_set, config)
         return reader.model
 
 
@@ -165,12 +169,12 @@ def main():
         "--count", type=int, default=100, help="number of datapoints to process"
     )
     parser.add_argument("--l1", type=int, default=ModelConfig().L1)
-    features.add_argparse_args(parser)
+    add_feature_args(parser)
     args = parser.parse_args()
 
     batch_size = 1000
 
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = get_feature_set_from_name(args.features)
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(
             args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)
@@ -189,7 +193,7 @@ def main():
         fens = filter_fens(next(fen_batch_provider))
 
         b = data_loader.get_sparse_batch_from_fens(
-            feature_set, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
+            feature_set.name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
         model_evals += eval_model_batch(model, b)
         data_loader.destroy_sparse_batch(b)

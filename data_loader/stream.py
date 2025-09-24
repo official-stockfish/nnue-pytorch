@@ -2,7 +2,6 @@ import ctypes
 
 from ._native import c_lib, SparseBatchPtr, FenBatchPtr
 from .config import CDataloaderSkipConfig, DataloaderSkipConfig
-from features import FeatureSet
 
 
 def _to_c_str_array(str_list):
@@ -64,7 +63,7 @@ def destroy_sparse_batch_stream(stream: ctypes.c_void_p):
 
 
 def get_sparse_batch_from_fens(
-    feature_set: FeatureSet, fens, scores, plies, results
+    feature_set: str, fens, scores, plies, results
 ) -> SparseBatchPtr:
     assert len(fens) == len(scores) == len(plies) == len(results)
 
@@ -72,7 +71,7 @@ def get_sparse_batch_from_fens(
         return (ctypes.c_int * len(data))(*data)
 
     return c_lib.dll.get_sparse_batch_from_fens(
-        feature_set.name.encode("utf-8"),
+        feature_set.encode("utf-8"),
         len(fens),
         _to_c_str_array(fens),
         to_c_int_array(scores),

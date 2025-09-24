@@ -33,8 +33,6 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --
 
 import time
 import argparse
-import features
-import serialize
 import chess
 import torch
 import copy
@@ -43,8 +41,7 @@ import numpy as np
 
 import data_loader
 import model as M
-from model import NNUE, NNUEModel, ModelConfig
-from features import FeatureSet
+from model import FeatureSet, NNUE, NNUEModel, NNUEReader, ModelConfig
 
 
 """
@@ -398,7 +395,7 @@ def find_perm_impl(actmat, use_cupy, L1: int):
 
 def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
     with open(nnue_path, "rb") as f:
-        reader = serialize.NNUEReader(f, feature_set, config)
+        reader = NNUEReader(f, feature_set, config)
         return reader.model
 
 
@@ -531,7 +528,7 @@ def gather_impl(model, dataset, count):
         fens = filter_fens(next(fen_batch_provider))
 
         b = data_loader.get_sparse_batch_from_fens(
-            quantized_model.feature_set,
+            quantized_model.feature_set.name,
             fens,
             [0] * len(fens),
             [1] * len(fens),
@@ -549,7 +546,7 @@ def gather_impl(model, dataset, count):
 
 
 def command_gather(args):
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = M.get_feature_set_from_name(args.features)
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(
             args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)
@@ -669,7 +666,7 @@ def main():
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
     parser_gather.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    features.add_argparse_args(parser_gather)
+    M.add_feature_args(parser_gather)
     parser_gather.set_defaults(func=command_gather)
 
     parser_gather = subparsers.add_parser("find_perm", help="a help")

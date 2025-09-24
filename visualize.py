@@ -1,12 +1,9 @@
 import argparse
 import chess
 import numpy as np
-import torch
 import matplotlib.pyplot as plt
 
-import features
 import model as M
-from serialize import NNUEReader
 
 
 class NNUEVisualizer:
@@ -551,26 +548,6 @@ class NNUEVisualizer:
             self._process_fig("biases", fig)
 
 
-def load_model(filename, feature_set, config: M.ModelConfig) -> M.NNUEModel:
-    if filename.endswith(".pt") or filename.endswith(".ckpt"):
-        if filename.endswith(".pt"):
-            model = torch.load(filename, weights_only=False)
-        else:
-            model = M.NNUE.load_from_checkpoint(
-                filename, feature_set=feature_set, config=config
-            )
-        model.eval()
-        return model.model
-
-    elif filename.endswith(".nnue"):
-        with open(filename, "rb") as f:
-            reader = NNUEReader(f, feature_set, config)
-        return reader.model
-
-    else:
-        raise Exception("Invalid filetype: " + str(filename))
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Visualizes networks in ckpt, pt and nnue format."
@@ -675,27 +652,27 @@ def main():
         help="Override the label used in plot titles and as prefix of saved files.",
     )
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    features.add_argparse_args(parser)
+    M.add_feature_args(parser)
     args = parser.parse_args()
 
     supported_features = ("HalfKAv2_hm", "HalfKAv2_hm^")
     assert args.features in supported_features
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = M.get_feature_set_from_name(args.features)
 
     from os.path import basename
 
     label = basename(args.model)
 
-    model = load_model(args.model, feature_set, M.ModelConfig(L1=args.l1))
+    model = M.load_model(args.model, feature_set, M.ModelConfig(L1=args.l1))
 
     if args.ref_model:
         if args.ref_features:
             assert args.ref_features in supported_features
-            ref_feature_set = features.get_feature_set_from_name(args.ref_features)
+            ref_feature_set = M.get_feature_set_from_name(args.ref_features)
         else:
             ref_feature_set = feature_set
 
-        ref_model = load_model(
+        ref_model = M.load_model(
             args.ref_model, ref_feature_set, M.ModelConfig(L1=args.l1)
         )
 

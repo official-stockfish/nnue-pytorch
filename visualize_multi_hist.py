@@ -1,31 +1,9 @@
 import argparse
-import features
-import model as M
+
 import numpy as np
-import torch
 import matplotlib.pyplot as plt
 
-from serialize import NNUEReader
-
-
-def load_model(filename, feature_set, config: M.ModelConfig) -> M.NNUEModel:
-    if filename.endswith(".pt") or filename.endswith(".ckpt"):
-        if filename.endswith(".pt"):
-            model = torch.load(filename, weights_only=False)
-        else:
-            model = M.NNUE.load_from_checkpoint(
-                filename, feature_set=feature_set, config=config
-            )
-        model.eval()
-        return model.model
-
-    elif filename.endswith(".nnue"):
-        with open(filename, "rb") as f:
-            reader = NNUEReader(f, feature_set, config)
-        return reader.model
-
-    else:
-        raise Exception("Invalid filetype: " + str(filename))
+import model as M
 
 
 def get_bins(inputs_columns, num_bins):
@@ -87,12 +65,12 @@ def main():
         "--dont-show", action="store_true", help="Don't show the plots."
     )
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    features.add_argparse_args(parser)
+    M.add_feature_args(parser)
     args = parser.parse_args()
 
     supported_features = ("HalfKAv2", "HalfKAv2^", "HalfKAv2_hm", "HalfKAv2_hm^")
     assert args.features in supported_features
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = M.get_feature_set_from_name(args.features)
 
     from os.path import basename
 
@@ -106,7 +84,7 @@ def main():
         labels.append("\n".join(label.split("-")))
 
     models = [
-        load_model(m, feature_set, M.ModelConfig(L1=args.l1)) for m in args.models
+        M.load_model(m, feature_set, M.ModelConfig(L1=args.l1)) for m in args.models
     ]
 
     coalesced_ins = [M.coalesce_ft_weights(model, model.input) for model in models]

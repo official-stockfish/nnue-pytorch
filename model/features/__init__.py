@@ -32,7 +32,7 @@ def get_feature_blocks_from_names(names):
     return [_feature_blocks_by_name[name] for name in names]
 
 
-def get_feature_set_from_name(name):
+def get_feature_set_from_name(name) -> FeatureSet:
     feature_block_names = name.split("+")
     blocks = get_feature_blocks_from_names(feature_block_names)
     return FeatureSet(blocks)
@@ -42,7 +42,7 @@ def get_available_feature_blocks_names():
     return list(iter(_feature_blocks_by_name))
 
 
-def add_argparse_args(parser):
+def add_feature_args(parser):
     _default_feature_set_name = "HalfKAv2_hm^"
     parser.add_argument(
         "--features",

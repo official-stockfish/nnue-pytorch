@@ -1,12 +1,15 @@
 import lightning as L
 import ranger21
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
-from features import FeatureSet
 from .config import LossParams, ModelConfig
+from .features import FeatureSet
 from .model import NNUEModel
-from .utils import get_parameters
+
+
+def _get_parameters(layers: list[nn.Module]):
+    return [p for layer in layers for p in layer.parameters()]
 
 
 class NNUE(L.LightningModule):
@@ -119,7 +122,7 @@ class NNUE(L.LightningModule):
     def configure_optimizers(self):
         LR = self.lr
         train_params = [
-            {"params": get_parameters([self.model.input]), "lr": LR, "gc_dim": 0},
+            {"params": _get_parameters([self.model.input]), "lr": LR, "gc_dim": 0},
             {"params": [self.model.layer_stacks.l1_fact.weight], "lr": LR},
             {"params": [self.model.layer_stacks.l1_fact.bias], "lr": LR},
             {"params": [self.model.layer_stacks.l1.weight], "lr": LR},

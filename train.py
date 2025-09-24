@@ -13,8 +13,6 @@ from lightning.pytorch import loggers as pl_loggers
 from lightning.pytorch.callbacks import TQDMProgressBar, Callback, ModelCheckpoint
 
 import data_loader
-import features
-from features import FeatureSet
 import model as M
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
@@ -46,7 +44,7 @@ class TimeLimitAfterCheckpoint(Callback):
 def make_data_loaders(
     train_filenames,
     val_filenames,
-    feature_set: FeatureSet,
+    feature_set: M.FeatureSet,
     num_workers,
     batch_size,
     config: data_loader.DataloaderSkipConfig,
@@ -336,7 +334,7 @@ def main():
         help="Skip positions that have abs(simple_eval(pos)) < n",
     )
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    features.add_argparse_args(parser)
+    M.add_feature_args(parser)
     args = parser.parse_args()
 
     args.datasets = flatten_once(args.datasets)
@@ -368,7 +366,7 @@ def main():
         batch_size = 16384
     print("Using batch size {}".format(batch_size))
 
-    feature_set = features.get_feature_set_from_name(args.features)
+    feature_set = M.get_feature_set_from_name(args.features)
 
     loss_params = M.LossParams(
         in_offset=args.in_offset,

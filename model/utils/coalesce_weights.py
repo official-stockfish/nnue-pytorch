@@ -1,7 +1,5 @@
-from torch import nn
-
-from .model import NNUEModel
-from .feature_transformer import BaseFeatureTransformerSlice
+from ..model import NNUEModel
+from ..feature_transformer import BaseFeatureTransformerSlice
 
 
 def coalesce_ft_weights(model: NNUEModel, layer: BaseFeatureTransformerSlice):
@@ -15,7 +13,3 @@ def coalesce_ft_weights(model: NNUEModel, layer: BaseFeatureTransformerSlice):
             weight[i_virtual, :] for i_virtual in is_virtual
         )
     return weight_coalesced
-
-
-def get_parameters(layers: list[nn.Module]):
-    return [p for layer in layers for p in layer.parameters()]
