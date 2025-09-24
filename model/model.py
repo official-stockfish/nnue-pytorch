@@ -8,7 +8,7 @@ from .features import FeatureSet
 
 class LayerStacks(nn.Module):
     def __init__(self, count: int, config: ModelConfig):
-        super(LayerStacks, self).__init__()
+        super().__init__()
 
         self.L1 = config.L1
         self.L2 = config.L2

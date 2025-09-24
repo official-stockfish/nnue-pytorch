@@ -26,13 +26,13 @@ KingBuckets = [
 # fmt: on
 
 
-def orient(is_white_pov: bool, sq: int, ksq: int):
+def orient(is_white_pov: bool, sq: int, ksq: int) -> int:
     # ksq must not be oriented
     kfile = ksq % 8
     return (7 * (kfile < 4)) ^ (56 * (not is_white_pov)) ^ sq
 
 
-def halfka_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece):
+def halfka_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece) -> int:
     p_idx = (p.piece_type - 1) * 2 + (p.color != is_white_pov)
     o_ksq = orient(is_white_pov, king_sq, king_sq)
     if p_idx == 11:
@@ -44,7 +44,7 @@ def halfka_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece):
     )
 
 
-def halfka_psqts():
+def halfka_psqts() -> list[int]:
     # values copied from stockfish, in stockfish internal units
     piece_values = {
         chess.PAWN: 126,
@@ -69,7 +69,7 @@ def halfka_psqts():
 
 class Features(FeatureBlock):
     def __init__(self):
-        super(Features, self).__init__(
+        super().__init__(
             "HalfKAv2_hm", 0x7F234CB8, OrderedDict([("HalfKAv2_hm", NUM_INPUTS)])
         )
 
@@ -78,13 +78,13 @@ class Features(FeatureBlock):
             "Not supported yet, you must use the c++ data loader for support during training"
         )
 
-    def get_initial_psqt_features(self):
+    def get_initial_psqt_features(self) -> list[int]:
         return halfka_psqts()
 
 
 class FactorizedFeatures(FeatureBlock):
     def __init__(self):
-        super(FactorizedFeatures, self).__init__(
+        super().__init__(
             "HalfKAv2_hm^",
             0x7F234CB8,
             OrderedDict([("HalfKAv2_hm", NUM_INPUTS), ("A", NUM_PLANES_VIRTUAL)]),
@@ -95,7 +95,7 @@ class FactorizedFeatures(FeatureBlock):
             "Not supported yet, you must use the c++ data loader for factorizer support during training"
         )
 
-    def get_feature_factors(self, idx):
+    def get_feature_factors(self, idx: int) -> list[int]:
         if idx >= self.num_real_features:
             raise Exception("Feature must be real")
 
@@ -107,7 +107,7 @@ class FactorizedFeatures(FeatureBlock):
 
         return [idx, self.get_factor_base_feature("A") + a_idx]
 
-    def get_initial_psqt_features(self):
+    def get_initial_psqt_features(self) -> list[int]:
         return halfka_psqts() + [0] * NUM_PLANES_VIRTUAL
 
 
@@ -116,5 +116,5 @@ This is used by the features module for discovery of feature blocks.
 """
 
 
-def get_feature_block_clss():
+def get_feature_block_clss() -> list:
     return [Features, FactorizedFeatures]

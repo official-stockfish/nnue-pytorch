@@ -570,7 +570,7 @@ Pytorch has built-in types for linear layers, so defining the model is pretty si
 ```python
 class NNUE(nn.Module):
     def __init__(self):
-        super(NNUE, self).__init__()
+        super().__init__()
 
         self.ft = nn.Linear(NUM_FEATURES, M)
         self.l1 = nn.Linear(2 * M, N)
@@ -2828,7 +2828,7 @@ class FeatureTransformerSliceFunction(autograd.Function):
 
 class FeatureTransformerSlice(nn.Module):
     def __init__(self, num_inputs, num_outputs):
-        super(FeatureTransformerSlice, self).__init__()
+        super().__init__()
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
 
@@ -2894,7 +2894,7 @@ L3 = 32
 
 class LayerStacks(nn.Module):
     def __init__(self, count):
-        super(LayerStacks, self).__init__()
+        super().__init__()
 
         self.count = count
         # Layers are larger, very good for GPUs

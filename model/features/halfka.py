@@ -45,11 +45,11 @@ def halfka_psqts():
 
 class Features(FeatureBlock):
     def __init__(self):
-        super(Features, self).__init__(
+        super().__init__(
             "HalfKA", 0x5F134CB8, OrderedDict([("HalfKA", NUM_PLANES * NUM_SQ)])
         )
 
-    def get_active_features(self, board: chess.Board):
+    def get_active_features(self, board: chess.Board) -> tuple[torch.Tensor, torch.Tensor]:
         def piece_features(turn):
             indices = torch.zeros(NUM_PLANES * NUM_SQ)
             for sq, p in board.piece_map().items():
@@ -58,13 +58,13 @@ class Features(FeatureBlock):
 
         return (piece_features(chess.WHITE), piece_features(chess.BLACK))
 
-    def get_initial_psqt_features(self):
+    def get_initial_psqt_features(self) -> list[int]:
         return halfka_psqts()
 
 
 class FactorizedFeatures(FeatureBlock):
     def __init__(self):
-        super(FactorizedFeatures, self).__init__(
+        super().__init__(
             "HalfKA^",
             0x5F134CB8,
             OrderedDict([("HalfKA", NUM_PLANES * NUM_SQ), ("A", NUM_SQ * NUM_PT)]),
@@ -75,7 +75,7 @@ class FactorizedFeatures(FeatureBlock):
             "Not supported yet, you must use the c++ data loader for factorizer support during training"
         )
 
-    def get_feature_factors(self, idx):
+    def get_feature_factors(self, idx: int):
         if idx >= self.num_real_features:
             raise Exception("Feature must be real")
 
@@ -92,5 +92,5 @@ This is used by the features module for discovery of feature blocks.
 """
 
 
-def get_feature_block_clss():
+def get_feature_block_clss() -> list:
     return [Features, FactorizedFeatures]

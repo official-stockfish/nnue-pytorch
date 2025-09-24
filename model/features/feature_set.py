@@ -1,3 +1,4 @@
+import chess
 import torch
 
 from .feature_block import FeatureBlock
@@ -61,7 +62,7 @@ class FeatureSet:
 
         return ranges
 
-    def get_active_features(self, board):
+    def get_active_features(self, board: chess.Board):
         """
         This method goes over all of the feature blocks and gathers the active features.
         Each block has its own index space assigned so the features from two different
@@ -82,7 +83,7 @@ class FeatureSet:
 
         return w, b
 
-    def get_feature_factors(self, idx):
+    def get_feature_factors(self, idx: int):
         """
         This method takes a feature idx and looks for the block that owns it.
         If it found the block it asks it to factorize the index, otherwise

@@ -1,3 +1,7 @@
+import argparse
+import types
+
+from .feature_block import FeatureBlock
 from .feature_set import FeatureSet
 
 """
@@ -8,9 +12,9 @@ of feature block classes in that module.
 """
 from . import halfkp, halfka, halfka_v2, halfka_v2_hm
 
-_feature_modules = [halfkp, halfka, halfka_v2, halfka_v2_hm]
+_feature_modules: list[types.ModuleType] = [halfkp, halfka, halfka_v2, halfka_v2_hm]
 
-_feature_blocks_by_name = dict()
+_feature_blocks_by_name: dict[str, FeatureBlock] = dict()
 
 
 def _add_feature_block(feature_block_cls):
@@ -18,31 +22,31 @@ def _add_feature_block(feature_block_cls):
     _feature_blocks_by_name[feature_block.name] = feature_block
 
 
-def _add_features_blocks_from_module(module):
+def _add_features_blocks_from_module(module: types.ModuleType):
     feature_block_clss = module.get_feature_block_clss()
     for feature_block_cls in feature_block_clss:
         _add_feature_block(feature_block_cls)
 
 
-def get_feature_block_from_name(name):
+def get_feature_block_from_name(name: str) -> FeatureBlock:
     return _feature_blocks_by_name[name]
 
 
-def get_feature_blocks_from_names(names):
+def get_feature_blocks_from_names(names: list[str]) -> list[FeatureBlock]:
     return [_feature_blocks_by_name[name] for name in names]
 
 
-def get_feature_set_from_name(name) -> FeatureSet:
+def get_feature_set_from_name(name: str) -> FeatureSet:
     feature_block_names = name.split("+")
     blocks = get_feature_blocks_from_names(feature_block_names)
     return FeatureSet(blocks)
 
 
-def get_available_feature_blocks_names():
+def get_available_feature_blocks_names() -> list[FeatureBlock]:
     return list(iter(_feature_blocks_by_name))
 
 
-def add_feature_args(parser):
+def add_feature_args(parser: argparse.ArgumentParser) -> None:
     _default_feature_set_name = "HalfKAv2_hm^"
     parser.add_argument(
         "--features",
@@ -53,9 +57,16 @@ def add_feature_args(parser):
     )
 
 
-def _init():
+def _init() -> None:
     for module in _feature_modules:
         _add_features_blocks_from_module(module)
 
 
 _init()
+
+
+__all__ = [
+    "FeatureSet",
+    "add_feature_args",
+    "get_available_feature_blocks_names",
+]

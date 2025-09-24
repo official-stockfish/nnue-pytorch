@@ -11,22 +11,22 @@ NUM_PT = 10
 NUM_PLANES = NUM_SQ * NUM_PT + 1
 
 
-def orient(is_white_pov: bool, sq: int):
+def orient(is_white_pov: bool, sq: int) -> int:
     return (63 * (not is_white_pov)) ^ sq
 
 
-def halfkp_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece):
+def halfkp_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece) -> int:
     p_idx = (p.piece_type - 1) * 2 + (p.color != is_white_pov)
     return 1 + orient(is_white_pov, sq) + p_idx * NUM_SQ + king_sq * NUM_PLANES
 
 
 class Features(FeatureBlock):
     def __init__(self):
-        super(Features, self).__init__(
+        super().__init__(
             "HalfKP", 0x5D69D5B8, OrderedDict([("HalfKP", NUM_PLANES * NUM_SQ)])
         )
 
-    def get_active_features(self, board: chess.Board):
+    def get_active_features(self, board: chess.Board) -> torch.Tensor:
         def piece_features(turn):
             indices = torch.zeros(NUM_PLANES * NUM_SQ)
             for sq, p in board.piece_map().items():
@@ -43,7 +43,7 @@ class Features(FeatureBlock):
 
 class FactorizedFeatures(FeatureBlock):
     def __init__(self):
-        super(FactorizedFeatures, self).__init__(
+        super().__init__(
             "HalfKP^",
             0x5D69D5B8,
             OrderedDict(
@@ -52,7 +52,7 @@ class FactorizedFeatures(FeatureBlock):
         )
         self.base = Features()
 
-    def get_active_features(self, board: chess.Board):
+    def get_active_features(self, board: chess.Board) -> torch.Tensor:
         white, black = self.base.get_active_features(board)
 
         def piece_features(base, color):
@@ -71,7 +71,7 @@ class FactorizedFeatures(FeatureBlock):
 
         return (piece_features(white, chess.WHITE), piece_features(black, chess.BLACK))
 
-    def get_feature_factors(self, idx):
+    def get_feature_factors(self, idx: int) -> list[int]:
         if idx >= self.num_real_features:
             raise Exception("Feature must be real")
 
@@ -93,5 +93,5 @@ This is used by the features module for discovery of feature blocks.
 """
 
 
-def get_feature_block_clss():
+def get_feature_block_clss() -> list:
     return [Features, FactorizedFeatures]

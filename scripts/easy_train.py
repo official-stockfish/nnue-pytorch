@@ -553,7 +553,7 @@ class SystemResourcesMonitor(Thread):
     """
 
     def __init__(self, period_seconds):
-        super(SystemResourcesMonitor, self).__init__()
+        super().__init__()
 
         self._period_seconds = period_seconds
         self._mutex = Lock()
@@ -750,7 +750,7 @@ class TrainingRun(Thread):
         end_lambda=None,
         additional_args=[],
     ):
-        super(TrainingRun, self).__init__()
+        super().__init__()
         self._gpu_id = gpu_id
         self._run_id = run_id
 
@@ -1342,7 +1342,7 @@ class NetworkTesting(Thread):
         active=True,
         additional_args=[],
     ):
-        super(NetworkTesting, self).__init__()
+        super().__init__()
 
         self._nnue_pytorch_directory = os.path.abspath(nnue_pytorch_directory)
         self._root_dir = os.path.abspath(root_dir)
@@ -1590,7 +1590,7 @@ class TrainerRunsWidget(Widget):
     """
 
     def __init__(self, runs, name=None):
-        super(TrainerRunsWidget, self).__init__(name)
+        super().__init__(name)
 
         self._runs = list(sorted(runs, key=lambda x: (x.gpu_id, x.run_id)))
 
@@ -1789,7 +1789,7 @@ class TrainerRunsWidget(Widget):
 
 class MainView(Frame):
     def __init__(self, screen, training_runs, network_testing):
-        super(MainView, self).__init__(
+        super().__init__(
             screen,
             screen.height,
             screen.width,
@@ -1837,7 +1837,7 @@ class MainView(Frame):
 
     def reset(self):
         # Do standard reset to clear out form, then populate with new data.
-        super(MainView, self).reset()
+        super().reset()
 
     def _update_network_list(self):
         self._networks_view.options.clear()
@@ -1860,7 +1860,7 @@ class MainView(Frame):
         self._network_testing_status.value = self._network_testing.get_status_string()
 
     def update(self, frame_no):
-        super(MainView, self).update(frame_no)
+        super().update(frame_no)
 
         self._update_network_list()
         self._update_network_testing_status()
@@ -2442,7 +2442,7 @@ class TqdmDownloadProgressBar(tqdm):
 
 class TqdmToLogger(io.StringIO):
     def __init__(self):
-        super(TqdmToLogger, self).__init__()
+        super().__init__()
 
     def write(self, buf):
         self.buf = buf

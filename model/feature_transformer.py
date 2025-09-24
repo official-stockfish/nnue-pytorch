@@ -575,7 +575,7 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
 
 class BaseFeatureTransformerSlice(nn.Module):
     def __init__(self, num_inputs, num_outputs):
-        super(BaseFeatureTransformerSlice, self).__init__()
+        super().__init__()
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
 

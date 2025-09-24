@@ -1,7 +1,7 @@
 from collections import OrderedDict
 
 
-def _get_main_factor_name(full_name):
+def _get_main_factor_name(full_name: str) -> str:
     return full_name.replace("^", "")
 
 
@@ -49,7 +49,7 @@ class FeatureBlock:
     that are active for this board.
     """
 
-    def __init__(self, name, hash, factors):
+    def __init__(self, name: str, hash: int, factors: OrderedDict[str, int]):
         if not isinstance(factors, OrderedDict):
             raise Exception("Factors must be an collections.OrderedDict")
 
@@ -60,24 +60,22 @@ class FeatureBlock:
         self.num_features = sum(v for n, v in factors.items())
         self.num_virtual_features = self.num_features - self.num_real_features
 
-    def get_main_factor_name(self):
+    def get_main_factor_name(self) -> str:
         return _get_main_factor_name(self.name)
 
-    """
-    This method represents the default factorizer. If your feature block
-    has multiple factors you need to override this method to return
-    a list of factors for a given feature.
-    """
-
-    def get_feature_factors(self, idx):
+    def get_feature_factors(self, idx: int) -> list[int]:
+        """
+        This method represents the default factorizer. If your feature block
+        has multiple factors you need to override this method to return
+        a list of factors for a given feature.
+        """
         return [idx]
 
-    """
-    This method takes a string name of a factor and returns the offset of the
-    first feature in this factor when consulted with the sizes of the previous factors.
-    """
-
-    def get_factor_base_feature(self, name):
+    def get_factor_base_feature(self, name: str) -> int:
+        """
+        This method takes a string name of a factor and returns the offset of the
+        first feature in this factor when consulted with the sizes of the previous factors.
+        """
         offset = 0
         for n, s in self.factors.items():
             if n == name:
