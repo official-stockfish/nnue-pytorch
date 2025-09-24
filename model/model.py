@@ -95,7 +95,7 @@ class LayerStacks(nn.Module):
 
         return l3x_
 
-    def get_coalesced_layer_stacks(self):
+    def get_coalesced_layer_stacks(self) -> tuple[nn.Linear, nn.Linear, nn.LInear]:
         # During training the buckets are represented by a single, wider, layer.
         # This representation needs to be transformed into individual layers
         # for the serializer, because the buckets are interpreted as separate layers.

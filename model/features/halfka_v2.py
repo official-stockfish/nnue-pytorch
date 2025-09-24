@@ -56,7 +56,9 @@ class Features(FeatureBlock):
             OrderedDict([("HalfKAv2", NUM_PLANES_REAL * NUM_SQ)]),
         )
 
-    def get_active_features(self, board: chess.Board) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_active_features(
+        self, board: chess.Board
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         def piece_features(turn):
             indices = torch.zeros(NUM_PLANES_REAL * NUM_SQ)
             for sq, p in board.piece_map().items():
