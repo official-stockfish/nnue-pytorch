@@ -13,7 +13,7 @@ def load_model(filename, feature_set: FeatureSet, config: ModelConfig) -> NNUEMo
         model.eval()
         return model.model
 
-    elif filename.endswith("ckpt"):
+    elif filename.endswith(".ckpt"):
         model = NNUE.load_from_checkpoint(
             filename, feature_set=feature_set, config=config
         )
