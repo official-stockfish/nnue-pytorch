@@ -132,7 +132,7 @@ def main():
     elif args.target.endswith(".pt"):
         torch.save(nnue, args.target)
     elif args.target.endswith(".nnue"):
-        writer = NNUEWriter(
+        writer = M.NNUEWriter(
             nnue.model, args.description, ft_compression=args.ft_compression
         )
         with open(args.target, "wb") as f:
