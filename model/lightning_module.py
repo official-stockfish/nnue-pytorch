@@ -103,7 +103,7 @@ class NNUE(L.LightningModule):
             loss = loss * ((qf > pt) * p.qp_asymmetry + 1)
         loss = loss.mean()
 
-        self.log(loss_type, loss)
+        self.log(loss_type, loss, prog_bar=True)
 
         return loss
 
