@@ -193,7 +193,7 @@ def main():
         fens = filter_fens(next(fen_batch_provider))
 
         b = data_loader.get_sparse_batch_from_fens(
-            feature_set, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
+            feature_set.name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
         model_evals += eval_model_batch(model, b)
         data_loader.destroy_sparse_batch(b)

@@ -528,7 +528,7 @@ def gather_impl(model, dataset, count):
         fens = filter_fens(next(fen_batch_provider))
 
         b = data_loader.get_sparse_batch_from_fens(
-            quantized_model.feature_set,
+            quantized_model.feature_set.name,
             fens,
             [0] * len(fens),
             [1] * len(fens),

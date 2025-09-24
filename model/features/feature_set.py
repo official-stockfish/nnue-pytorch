@@ -34,14 +34,13 @@ class FeatureSet:
         )
         self.num_features = sum(feature.num_features for feature in features)
 
-    """
-    This method returns the feature ranges for the virtual factors of the
-    underlying feature blocks. This is useful to know during initialization,
-    when we want to zero initialize the virtual feature weights, but give some other
-    values to the real feature weights.
-    """
-
     def get_virtual_feature_ranges(self):
+        """
+        This method returns the feature ranges for the virtual factors of the
+        underlying feature blocks. This is useful to know during initialization,
+        when we want to zero initialize the virtual feature weights, but give some other
+        values to the real feature weights.
+        """
         ranges = []
         offset = 0
         for feature in self.features:
@@ -62,14 +61,13 @@ class FeatureSet:
 
         return ranges
 
-    """
-    This method goes over all of the feature blocks and gathers the active features.
-    Each block has its own index space assigned so the features from two different
-    blocks will never have the same index here. Basically the thing you would expect
-    to happen after concatenating many feature blocks.
-    """
-
     def get_active_features(self, board):
+        """
+        This method goes over all of the feature blocks and gathers the active features.
+        Each block has its own index space assigned so the features from two different
+        blocks will never have the same index here. Basically the thing you would expect
+        to happen after concatenating many feature blocks.
+        """
         w = torch.zeros(0)
         b = torch.zeros(0)
 
@@ -84,13 +82,12 @@ class FeatureSet:
 
         return w, b
 
-    """
-    This method takes a feature idx and looks for the block that owns it.
-    If it found the block it asks it to factorize the index, otherwise
-    it throws and Exception. The idx must refer to a real feature.
-    """
-
     def get_feature_factors(self, idx):
+        """
+        This method takes a feature idx and looks for the block that owns it.
+        If it found the block it asks it to factorize the index, otherwise
+        it throws and Exception. The idx must refer to a real feature.
+        """
         offset = 0
         for feature in self.features:
             if idx < offset + feature.num_real_features:
@@ -99,18 +96,17 @@ class FeatureSet:
 
         raise Exception("No feature block to factorize {}".format(idx))
 
-    """
-    This method does what get_feature_factors does but for all
-    valid features at the same time. It returns a list of length
-    self.num_real_features with ith element being a list of factors
-    of the ith feature.
-    This method is technically redundant but it allows to perform the operation
-    slightly faster when there's many feature blocks. It might be worth
-    to add a similar method to the FeatureBlock itself - to make it faster
-    for feature blocks with many factors.
-    """
-
     def get_virtual_to_real_features_gather_indices(self):
+        """
+        This method does what get_feature_factors does but for all
+        valid features at the same time. It returns a list of length
+        self.num_real_features with ith element being a list of factors
+        of the ith feature.
+        This method is technically redundant but it allows to perform the operation
+        slightly faster when there's many feature blocks. It might be worth
+        to add a similar method to the FeatureBlock itself - to make it faster
+        for feature blocks with many factors.
+        """
         indices = []
         real_offset = 0
         offset = 0
