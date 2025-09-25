@@ -61,8 +61,10 @@ class Features(FeatureBlock):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         def piece_features(turn):
             indices = torch.zeros(NUM_PLANES_REAL * NUM_SQ)
+            ksq = board.king(turn)
+            assert ksq is not None
             for sq, p in board.piece_map().items():
-                indices[halfka_idx(turn, orient(turn, board.king(turn)), sq, p)] = 1.0
+                indices[halfka_idx(turn, orient(turn, ksq), sq, p)] = 1.0
             return indices
 
         return (piece_features(chess.WHITE), piece_features(chess.BLACK))

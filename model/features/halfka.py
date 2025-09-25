@@ -11,7 +11,7 @@ NUM_PT = 12
 NUM_PLANES = NUM_SQ * NUM_PT + 1
 
 
-def orient(is_white_pov: bool, sq: int):
+def orient(is_white_pov: bool, sq: int | chess.Square):
     return (56 * (not is_white_pov)) ^ sq
 
 
@@ -54,8 +54,10 @@ class Features(FeatureBlock):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         def piece_features(turn):
             indices = torch.zeros(NUM_PLANES * NUM_SQ)
+            ksq = board.king(turn)
+            assert ksq is not None
             for sq, p in board.piece_map().items():
-                indices[halfka_idx(turn, orient(turn, board.king(turn)), sq, p)] = 1.0
+                indices[halfka_idx(turn, orient(turn, ksq), sq, p)] = 1.0
             return indices
 
         return (piece_features(chess.WHITE), piece_features(chess.BLACK))

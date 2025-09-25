@@ -26,13 +26,15 @@ class Features(FeatureBlock):
             "HalfKP", 0x5D69D5B8, OrderedDict([("HalfKP", NUM_PLANES * NUM_SQ)])
         )
 
-    def get_active_features(self, board: chess.Board) -> torch.Tensor:
+    def get_active_features(self, board: chess.Board) -> tuple[torch.Tensor, torch.Tensor]:
         def piece_features(turn):
             indices = torch.zeros(NUM_PLANES * NUM_SQ)
             for sq, p in board.piece_map().items():
                 if p.piece_type == chess.KING:
                     continue
-                indices[halfkp_idx(turn, orient(turn, board.king(turn)), sq, p)] = 1.0
+                ksq = board.king(turn)
+                assert ksq is not None
+                indices[halfkp_idx(turn, orient(turn, ksq), sq, p)] = 1.0
             return indices
 
         return (piece_features(chess.WHITE), piece_features(chess.BLACK))
@@ -52,7 +54,7 @@ class FactorizedFeatures(FeatureBlock):
         )
         self.base = Features()
 
-    def get_active_features(self, board: chess.Board) -> torch.Tensor:
+    def get_active_features(self, board: chess.Board) -> tuple[torch.Tensor, torch.Tensor]:
         white, black = self.base.get_active_features(board)
 
         def piece_features(base, color):
@@ -66,7 +68,9 @@ class FactorizedFeatures(FeatureBlock):
                 p_idx = (p.piece_type - 1) * 2 + (p.color != color)
                 indices[(p_idx + 1) * NUM_SQ + orient(color, sq)] = 1.0
             # HalfK feature
-            indices[orient(color, board.king(color))] = piece_count
+            ksq = board.king(color)
+            assert ksq is not None
+            indices[orient(color, ksq)] = piece_count
             return torch.cat((base, indices))
 
         return (piece_features(white, chess.WHITE), piece_features(black, chess.BLACK))
