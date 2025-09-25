@@ -96,5 +96,5 @@ This is used by the features module for discovery of feature blocks.
 """
 
 
-def get_feature_block_clss() -> list:
+def get_feature_block_clss() -> list[type[FeatureBlock]]:
     return [Features, FactorizedFeatures]

@@ -1,5 +1,6 @@
 import argparse
 import types
+from typing import Callable
 
 from .feature_block import FeatureBlock
 from .feature_set import FeatureSet
@@ -17,7 +18,7 @@ _feature_modules: list[types.ModuleType] = [halfkp, halfka, halfka_v2, halfka_v2
 _feature_blocks_by_name: dict[str, FeatureBlock] = dict()
 
 
-def _add_feature_block(feature_block_cls) -> None:
+def _add_feature_block(feature_block_cls: Callable[[], FeatureBlock]) -> None:
     feature_block = feature_block_cls()
     _feature_blocks_by_name[feature_block.name] = feature_block
 
