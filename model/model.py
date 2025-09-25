@@ -1,3 +1,5 @@
+from typing import Generator
+
 import torch
 from torch import nn, Tensor
 
@@ -95,7 +97,7 @@ class LayerStacks(nn.Module):
 
         return l3x_
 
-    def get_coalesced_layer_stacks(self) -> tuple[nn.Linear, nn.Linear, nn.LInear]:
+    def get_coalesced_layer_stacks(self) -> Generator[tuple[nn.Linear, nn.Linear, nn.Linear], None, None]:
         # During training the buckets are represented by a single, wider, layer.
         # This representation needs to be transformed into individual layers
         # for the serializer, because the buckets are interpreted as separate layers.

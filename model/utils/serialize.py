@@ -1,7 +1,7 @@
 from functools import reduce
 import operator
 import struct
-from typing import BinaryIO
+from typing import BinaryIO, Sequence
 
 import numpy as np
 import numpy.typing as npt
@@ -9,9 +9,11 @@ from numba import njit
 import torch
 from torch import nn
 
+
 from .coalesce_weights import coalesce_ft_weights
 from ..config import ModelConfig
 from ..features import FeatureSet
+from ..feature_transformer import BaseFeatureTransformerSlice
 from ..model import NNUEModel
 
 
@@ -29,7 +31,7 @@ def ascii_hist(name, x, bins=6):
 
 
 @njit
-def encode_leb_128_array(arr: npt.NDArray):
+def encode_leb_128_array(arr: npt.NDArray) -> list:
     res = []
     for v in arr:
         while True:
@@ -43,7 +45,7 @@ def encode_leb_128_array(arr: npt.NDArray):
 
 
 @njit
-def decode_leb_128_array(arr, n):
+def decode_leb_128_array(arr: bytes, n: int) -> npt.NDArray:
     ints = np.zeros(n)
     k = 0
     for i in range(n):
@@ -267,7 +269,7 @@ class NNUEReader:
         self.description = self.f.read(desc_len).decode("utf-8")
 
     def read_leb_128_array(
-        self, dtype: npt.DTypeLike, shape: tuple[int, ...]
+        self, dtype: npt.DTypeLike, shape: Sequence[int]
     ) -> torch.Tensor:
         l = self.read_int32()
         d = self.f.read(l)
@@ -292,7 +294,7 @@ class NNUEReader:
         else:
             return "none"
 
-    def tensor(self, dtype: npt.DTypeLike, shape: tuple[int, ...]) -> npt.NDArray:
+    def tensor(self, dtype: npt.DTypeLike, shape: Sequence[int]) -> torch.Tensor:
         compression = self.determine_compression()
 
         if compression == "none":
@@ -305,7 +307,7 @@ class NNUEReader:
         else:
             raise Exception("Invalid compression method.")
 
-    def read_feature_transformer(self, layer: nn.Linear, num_psqt_buckets: int) -> None:
+    def read_feature_transformer(self, layer: BaseFeatureTransformerSlice, num_psqt_buckets: int) -> None:
         shape = layer.weight.shape
 
         bias = self.tensor(np.int16, [layer.bias.shape[0] - num_psqt_buckets]).divide(
