@@ -120,7 +120,7 @@ class SparseBatchProvider(TrainingDataProvider):
         num_workers=1,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
     ):
-        super(SparseBatchProvider, self).__init__(
+        super().__init__(
             feature_set,
             stream.create_sparse_batch_stream,
             stream.destroy_sparse_batch_stream,
@@ -165,7 +165,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
 
 class FixedNumBatchesDataset(Dataset):
     def __init__(self, dataset, num_batches):
-        super(FixedNumBatchesDataset, self).__init__()
+        super().__init__()
         self.dataset = dataset
         self.iter = iter(self.dataset)
         self.num_batches = num_batches

@@ -1,5 +1,7 @@
 import lightning as L
 
+from .lightning_module import NNUE
+
 
 class WeightClippingCallback(L.Callback):
     def on_train_batch_start(
@@ -9,4 +11,5 @@ class WeightClippingCallback(L.Callback):
         batch,
         batch_idx: int,
     ) -> None:
+        assert isinstance(pl_module, NNUE)
         pl_module.model.clip_weights()

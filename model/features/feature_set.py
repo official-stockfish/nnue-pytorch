@@ -1,3 +1,4 @@
+import chess
 import torch
 
 from .feature_block import FeatureBlock
@@ -34,7 +35,7 @@ class FeatureSet:
         )
         self.num_features = sum(feature.num_features for feature in features)
 
-    def get_virtual_feature_ranges(self):
+    def get_virtual_feature_ranges(self) -> list[tuple[int, int]]:
         """
         This method returns the feature ranges for the virtual factors of the
         underlying feature blocks. This is useful to know during initialization,
@@ -52,7 +53,7 @@ class FeatureSet:
 
         return ranges
 
-    def get_real_feature_ranges(self):
+    def get_real_feature_ranges(self) -> list[tuple[int, int]]:
         ranges = []
         offset = 0
         for feature in self.features:
@@ -61,7 +62,7 @@ class FeatureSet:
 
         return ranges
 
-    def get_active_features(self, board):
+    def get_active_features(self, board: chess.Board) -> tuple[torch.Tensor, torch.Tensor]:
         """
         This method goes over all of the feature blocks and gathers the active features.
         Each block has its own index space assigned so the features from two different
@@ -82,7 +83,7 @@ class FeatureSet:
 
         return w, b
 
-    def get_feature_factors(self, idx):
+    def get_feature_factors(self, idx: int) -> list[int]:
         """
         This method takes a feature idx and looks for the block that owns it.
         If it found the block it asks it to factorize the index, otherwise
@@ -96,7 +97,7 @@ class FeatureSet:
 
         raise Exception("No feature block to factorize {}".format(idx))
 
-    def get_virtual_to_real_features_gather_indices(self):
+    def get_virtual_to_real_features_gather_indices(self) -> list[list[int]]:
         """
         This method does what get_feature_factors does but for all
         valid features at the same time. It returns a list of length
@@ -118,7 +119,7 @@ class FeatureSet:
             offset += feature.num_features
         return indices
 
-    def get_initial_psqt_features(self):
+    def get_initial_psqt_features(self) -> list[int]:
         init = []
         for feature in self.features:
             init += feature.get_initial_psqt_features()
