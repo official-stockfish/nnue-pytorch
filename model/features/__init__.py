@@ -17,12 +17,12 @@ _feature_modules: list[types.ModuleType] = [halfkp, halfka, halfka_v2, halfka_v2
 _feature_blocks_by_name: dict[str, FeatureBlock] = dict()
 
 
-def _add_feature_block(feature_block_cls):
+def _add_feature_block(feature_block_cls) -> None:
     feature_block = feature_block_cls()
     _feature_blocks_by_name[feature_block.name] = feature_block
 
 
-def _add_features_blocks_from_module(module: types.ModuleType):
+def _add_features_blocks_from_module(module: types.ModuleType) -> None:
     feature_block_clss = module.get_feature_block_clss()
     for feature_block_cls in feature_block_clss:
         _add_feature_block(feature_block_cls)
@@ -42,7 +42,7 @@ def get_feature_set_from_name(name: str) -> FeatureSet:
     return FeatureSet(blocks)
 
 
-def get_available_feature_blocks_names() -> list[FeatureBlock]:
+def get_available_feature_blocks_names() -> list[str]:
     return list(iter(_feature_blocks_by_name))
 
 

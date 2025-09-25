@@ -11,7 +11,7 @@ NUM_PT = 12
 NUM_PLANES = NUM_SQ * NUM_PT + 1
 
 
-def orient(is_white_pov: bool, sq: int | chess.Square):
+def orient(is_white_pov: bool, sq: int | chess.Square) -> int:
     return (56 * (not is_white_pov)) ^ sq
 
 
@@ -79,7 +79,7 @@ class FactorizedFeatures(FeatureBlock):
             "Not supported yet, you must use the c++ data loader for factorizer support during training"
         )
 
-    def get_feature_factors(self, idx: int):
+    def get_feature_factors(self, idx: int) -> list[int]:
         if idx >= self.num_real_features:
             raise Exception("Feature must be real")
 
@@ -87,7 +87,7 @@ class FactorizedFeatures(FeatureBlock):
 
         return [idx, self.get_factor_base_feature("A") + a_idx]
 
-    def get_initial_psqt_features(self):
+    def get_initial_psqt_features(self) -> list[int]:
         return halfka_psqts() + [0] * (NUM_SQ * NUM_PT)
 
 
