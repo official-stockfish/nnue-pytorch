@@ -71,8 +71,6 @@ class GameParams:
 def convert_ckpt(root_dir, features):
     """Find the list of checkpoints that are available, and convert those that have no matching .nnue"""
     # run96/run0/default/version_0/checkpoints/epoch=3.ckpt, or epoch=3-step=321151.ckpt
-    p = re.compile("epoch.*\.ckpt")
-
     ckpts = [str(file) for file in Path(root_dir).rglob("epoch*.ckpt")]
 
     # lets move the .nnue files a bit up in the tree, and get rid of the = sign.

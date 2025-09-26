@@ -19,7 +19,6 @@ from ..model import NNUEModel
 
 def ascii_hist(name, x, bins=6):
     N, X = np.histogram(x, bins=bins)
-    total = 1.0 * len(x)
     width = 50
     nmax = N.max()
 
@@ -271,12 +270,12 @@ class NNUEReader:
     def read_leb_128_array(
         self, dtype: npt.DTypeLike, shape: Sequence[int]
     ) -> torch.Tensor:
-        l = self.read_int32()
-        d = self.f.read(l)
-        if len(d) != l:
+        len_bytes = self.read_int32()
+        d = self.f.read(len_bytes)
+        if len(d) != len_bytes:
             raise Exception("Unexpected end of file when reading compressed data.")
 
-        res = torch.FloatTensor(decode_leb_128_array(d, reduce(operator.mul, shape, 1)))
+        res = torch.tensor(decode_leb_128_array(d, reduce(operator.mul, shape, 1)))
         res = res.reshape(shape)
         return res
 
@@ -307,7 +306,9 @@ class NNUEReader:
         else:
             raise Exception("Invalid compression method.")
 
-    def read_feature_transformer(self, layer: BaseFeatureTransformerSlice, num_psqt_buckets: int) -> None:
+    def read_feature_transformer(
+        self, layer: BaseFeatureTransformerSlice, num_psqt_buckets: int
+    ) -> None:
         shape = layer.weight.shape
 
         bias = self.tensor(np.int16, [layer.bias.shape[0] - num_psqt_buckets]).divide(
@@ -335,7 +336,6 @@ class NNUEReader:
         kBiasScaleOut = self.model.weight_scale_out * self.model.nnue2score
         kBiasScaleHidden = self.model.weight_scale_hidden * self.model.quantized_one
         kBiasScale = kBiasScaleOut if is_output else kBiasScaleHidden
-        kMaxWeight = self.model.quantized_one / kWeightScale
 
         # FC inputs are padded to 32 elements by spec.
         non_padded_shape = layer.weight.shape

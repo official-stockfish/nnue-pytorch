@@ -495,10 +495,8 @@ class NNUEVisualizer:
                 vmax = self.args.fc_weights_vmax
 
             if self.args.fc_weights_auto_scale or self.args.fc_weights_vmin < 0:
-                plot_abs = False
                 cmap = "coolwarm"
             else:
-                plot_abs = True
                 cmap = "viridis"
 
             for bucket_id, (l1, l2, output) in enumerate(

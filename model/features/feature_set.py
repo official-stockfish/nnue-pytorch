@@ -62,7 +62,9 @@ class FeatureSet:
 
         return ranges
 
-    def get_active_features(self, board: chess.Board) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_active_features(
+        self, board: chess.Board
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         This method goes over all of the feature blocks and gathers the active features.
         Each block has its own index space assigned so the features from two different

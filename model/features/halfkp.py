@@ -26,7 +26,9 @@ class Features(FeatureBlock):
             "HalfKP", 0x5D69D5B8, OrderedDict([("HalfKP", NUM_PLANES * NUM_SQ)])
         )
 
-    def get_active_features(self, board: chess.Board) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_active_features(
+        self, board: chess.Board
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         def piece_features(turn):
             indices = torch.zeros(NUM_PLANES * NUM_SQ)
             for sq, p in board.piece_map().items():
@@ -54,7 +56,9 @@ class FactorizedFeatures(FeatureBlock):
         )
         self.base = Features()
 
-    def get_active_features(self, board: chess.Board) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_active_features(
+        self, board: chess.Board
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         white, black = self.base.get_active_features(board)
 
         def piece_features(base, color):

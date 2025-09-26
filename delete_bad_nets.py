@@ -23,7 +23,7 @@ def parse_ordo(ordo_filename):
 def find_ckpt_files(root_dir):
     p = re.compile(".*\\.ckpt")
     ckpt_files = []
-    for path, subdirs, files in os.walk(root_dir, followlinks=False):
+    for path, _, files in os.walk(root_dir, followlinks=False):
         for filename in files:
             m = p.match(filename)
             if m:
@@ -34,7 +34,7 @@ def find_ckpt_files(root_dir):
 def find_nnue_files(root_dir):
     p = re.compile(".*\\.nnue")
     nnue_files = []
-    for path, subdirs, files in os.walk(root_dir, followlinks=False):
+    for path, _, files in os.walk(root_dir, followlinks=False):
         for filename in files:
             m = p.match(filename)
             if m:
@@ -86,7 +86,7 @@ def delete_bad_nets(root_dir, num_best_to_keep=16):
         nets = parse_ordo(ordo_filename)
         best_nets, worst_nets = split_nets_by_strength(nets, num_best_to_keep)
 
-        best_nets_by_dir, worst_nets_by_dir = get_nets_by_directory(
+        _, worst_nets_by_dir = get_nets_by_directory(
             best_nets, worst_nets, num_best_to_keep
         )
         for basedir, worst_nets_in_dir in worst_nets_by_dir.items():
