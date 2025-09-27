@@ -1,4 +1,6 @@
 import argparse
+import hashlib
+import os
 
 import torch
 
@@ -11,6 +13,12 @@ def main():
     )
     parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
     parser.add_argument("target", help="Target file (can be .pt or .nnue)")
+    parser.add_argument(
+        "--out-sha",
+        action="store_true",
+        dest="out_sha",
+        help="Ignore target file name and save as nn-<sha>.nnue. If target is a directory, the file is placed there; otherwise it goes to dirname(target) or CWD.",
+    )
     parser.add_argument(
         "--description",
         default=None,
@@ -69,6 +77,9 @@ def main():
 
     print("Converting %s to %s" % (args.source, args.target))
 
+    # Treat --out-sha as targeting .nnue even if target doesn't end with .nnue
+    target_is_nnue = args.out_sha or args.target.endswith(".nnue")
+
     if args.source.endswith(".ckpt"):
         nnue = M.NNUE.load_from_checkpoint(
             args.source,
@@ -89,7 +100,7 @@ def main():
     else:
         raise Exception("Invalid network input format.")
 
-    if args.ft_compression != "none" and not args.target.endswith(".nnue"):
+    if args.ft_compression != "none" and not target_is_nnue:
         args.ft_compression = "none"
         # raise Exception('Compression only allowed for .nnue target.')
 
@@ -99,12 +110,12 @@ def main():
     if args.ft_optimize and args.ft_perm is not None:
         raise Exception("Options --ft_perm and --ft_optimize are mutually exclusive.")
 
-    if args.ft_perm is not None and args.target.endswith(".nnue"):
+    if args.ft_perm is not None and target_is_nnue:
         import ftperm
 
         ftperm.ft_permute(nnue.model, args.ft_perm)
 
-    if args.ft_optimize and args.target.endswith(".nnue"):
+    if args.ft_optimize and target_is_nnue:
         import ftperm
 
         if args.ft_optimize_data is None:
@@ -131,12 +142,28 @@ def main():
         raise Exception("Cannot convert into .ckpt")
     elif args.target.endswith(".pt"):
         torch.save(nnue, args.target)
-    elif args.target.endswith(".nnue"):
+    elif target_is_nnue:
+        if os.path.isdir(args.target):
+            out_dir = os.path.abspath(args.target)
+        else:
+            out_dir = os.path.abspath(os.path.dirname(args.target) or os.getcwd())
+        os.makedirs(out_dir, exist_ok=True)
+
         writer = M.NNUEWriter(
             nnue.model, args.description, ft_compression=args.ft_compression
         )
-        with open(args.target, "wb") as f:
-            f.write(writer.buf)
+        buf = writer.buf
+
+        if args.out_sha:
+            sha = hashlib.sha256(buf).hexdigest()
+            final_path = os.path.join(out_dir, f"nn-{sha[:12]}.nnue")
+            with open(final_path, "wb") as f:
+                f.write(buf)
+            print(f"Wrote {final_path}")
+        else:
+            with open(args.target, "wb") as f:
+                f.write(buf)
+            print(f"Wrote {args.target}")
     else:
         raise Exception("Invalid network output format.")
 
