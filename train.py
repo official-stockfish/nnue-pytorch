@@ -428,9 +428,11 @@ def main():
         t_set_num_threads(args.threads)
 
     logdir = args.default_root_dir if args.default_root_dir else "logs/"
-    print("Using log dir {}".format(logdir), flush=True)
 
     tb_logger = pl_loggers.TensorBoardLogger(logdir)
+
+    print("Using log dir {}".format(tb_logger.log_dir), flush=True)
+
     checkpoint_callback = ModelCheckpoint(
         save_last=args.save_last_network,
         every_n_epochs=args.network_save_period,
