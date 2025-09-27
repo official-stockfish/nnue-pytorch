@@ -724,11 +724,9 @@ if __name__ == "__main__":
 
         output0, output1 = layer(indices0, values0, indices1, values1)
 
-        device = indices0.device
-
         start = time.time()
 
-        for i in range(ITERS):
+        for _ in range(ITERS):
             output0, output1 = layer(indices0, values0, indices1, values1)
             output0 = torch.clamp(output0, 0.0, 1.0)
             output1 = torch.clamp(output1, 0.0, 1.0)

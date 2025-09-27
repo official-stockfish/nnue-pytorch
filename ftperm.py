@@ -197,7 +197,6 @@ def make_swaps_2(actmat, use_cupy=True):
 
     n_neurons = actmat.shape[1]
     n_samples = actmat.shape[0]
-    n_blocks = n_neurons // ZERO_BLOCK_SIZE
 
     # Compute the score change of swapping i-th and j-th neurons
     score_change = get_score_change(actmat, use_cupy=use_cupy)
@@ -268,7 +267,6 @@ def make_swaps_3(actmat, use_cupy=True):
         + (score_changes.T)[:, None, :]
     )
 
-    orig_shape = (n_neurons,) * 3
     compressed_shape = (n_blocks, ZERO_BLOCK_SIZE) * 3
     cycles = []
     total_score_change = 0
