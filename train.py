@@ -392,6 +392,7 @@ def main():
             lr=args.lr,
             param_index=args.param_index,
             config=M.ModelConfig(L1=args.l1),
+            quantize_config=M.QuantizationConfig(),
         )
     else:
         nnue = torch.load(args.resume_from_model, weights_only=False)

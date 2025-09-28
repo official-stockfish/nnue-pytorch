@@ -41,7 +41,14 @@ import numpy as np
 
 import data_loader
 import model as M
-from model import FeatureSet, NNUE, NNUEModel, NNUEReader, ModelConfig
+from model import (
+    FeatureSet,
+    NNUE,
+    NNUEModel,
+    NNUEReader,
+    ModelConfig,
+    QuantizationConfig,
+)
 
 
 """
@@ -391,9 +398,14 @@ def find_perm_impl(actmat, use_cupy, L1: int):
 # -------------------------------------------------------------
 
 
-def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
+def read_model(
+    nnue_path,
+    feature_set: FeatureSet,
+    config: ModelConfig,
+    quantize_config: QuantizationConfig,
+):
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_set, config)
+        reader = NNUEReader(f, feature_set, config, quantize_config)
         return reader.model
 
 
@@ -419,9 +431,13 @@ def filter_fens(fens):
     return filtered_fens
 
 
-def quantize_ft(model):
-    model.input.weight.data = model.input.weight.data.mul(model.quantized_one).round()
-    model.input.bias.data = model.input.bias.data.mul(model.quantized_one).round()
+def quantize_ft(model: NNUEModel):
+    model.input.weight.data = model.input.weight.data.mul(
+        model.quantization.quantized_one
+    ).round()
+    model.input.bias.data = model.input.bias.data.mul(
+        model.quantization.quantized_one
+    ).round()
 
 
 def forward_ft(
@@ -508,7 +524,7 @@ def ft_permute(model, ft_perm_path):
     ft_permute_impl(model, permutation)
 
 
-def gather_impl(model, dataset, count):
+def gather_impl(model: NNUEModel, dataset, count):
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
     BATCH_SIZE = 1000
 
@@ -549,10 +565,12 @@ def command_gather(args):
         model = NNUE.load_from_checkpoint(
             args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)
         )
+        model.eval()
+        model = model.model
     else:
-        model = read_model(args.net, feature_set, ModelConfig(L1=args.l1))
-
-    model.eval()
+        model = read_model(
+            args.net, feature_set, ModelConfig(L1=args.l1), QuantizationConfig()
+        )
 
     actmat = gather_impl(model, args.data, args.count)
 
@@ -595,7 +613,7 @@ def command_find_perm(args):
     with open(args.data, "rb") as file:
         actmat = np.load(file)
 
-    perm = find_perm_impl(actmat, args.use_cupy)
+    perm = find_perm_impl(actmat, args.use_cupy, args.l1)
 
     # perm = np.random.permutation([i for i in range(L1)])
     with open(args.out, "wb") as file:
@@ -618,7 +636,7 @@ def ft_optimize(
 
     print("Finding permutation...")
     perm = find_perm_impl(actmat, use_cupy, model.L1)
-    if actmat_save_path is not None:
+    if perm_save_path is not None:
         with open(perm_save_path, "wb") as file:
             np.save(file, perm)
 
