@@ -16,10 +16,10 @@ class WeightClippingConfig(TypedDict):
 
 @dataclass
 class QuantizationConfig:
-    nnue2score: float = 600
-    weight_scale_hidden: float = 64
-    weight_scale_out: float = 16
-    quantized_one: float = 127
+    nnue2score: float = 600.0
+    weight_scale_hidden: float = 64.0
+    weight_scale_out: float = 16.0
+    quantized_one: float = 127.0
 
 
 class QuantizationManager:
