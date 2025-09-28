@@ -562,13 +562,13 @@ def gather_impl(model: NNUEModel, dataset, count):
 def command_gather(args):
     feature_set = M.get_feature_set_from_name(args.features)
     if args.checkpoint:
-        model = NNUE.load_from_checkpoint(
+        nnue = NNUE.load_from_checkpoint(
             args.checkpoint,
             feature_set=feature_set,
             config=ModelConfig(L1=args.l1),
             quantize_config=QuantizationConfig(),
         )
-        model = model.model
+        model = nnue.model
     else:
         model = read_model(
             args.net, feature_set, ModelConfig(L1=args.l1), QuantizationConfig()
