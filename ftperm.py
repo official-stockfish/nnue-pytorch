@@ -568,12 +568,13 @@ def command_gather(args):
             config=ModelConfig(L1=args.l1),
             quantize_config=QuantizationConfig(),
         )
-        model.eval()
         model = model.model
     else:
         model = read_model(
             args.net, feature_set, ModelConfig(L1=args.l1), QuantizationConfig()
         )
+
+    model.eval()
 
     actmat = gather_impl(model, args.data, args.count)
 
