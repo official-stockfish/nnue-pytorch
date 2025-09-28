@@ -22,7 +22,7 @@ def load_model(
         from ..lightning_module import NNUE
 
         model = NNUE.load_from_checkpoint(
-            filename, feature_set=feature_set, config=config
+            filename, feature_set=feature_set, config=config, quantize_config=quantize_config
         )
         model.eval()
         return model.model

@@ -563,7 +563,7 @@ def command_gather(args):
     feature_set = M.get_feature_set_from_name(args.features)
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(
-            args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)
+            args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1), quantize_config=QuantizationConfig()
         )
         model.eval()
         model = model.model

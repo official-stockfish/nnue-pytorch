@@ -85,6 +85,7 @@ def main():
             args.source,
             feature_set=feature_set,
             config=M.ModelConfig(L1=args.l1),
+            quantize_config = M.QuantizationConfig(),
             map_location=torch.device("cpu"),
         )
         nnue.eval()
@@ -92,8 +93,8 @@ def main():
         nnue = torch.load(args.source, weights_only=False)
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
-            nnue = M.NNUE(feature_set, M.ModelConfig(L1=args.l1))
-            reader = M.NNUEReader(f, feature_set, M.ModelConfig(L1=args.l1))
+            nnue = M.NNUE(feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig())
+            reader = M.NNUEReader(f, feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig())
             nnue.model = reader.model
             if args.description is None:
                 args.description = reader.description
