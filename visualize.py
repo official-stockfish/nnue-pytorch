@@ -661,7 +661,9 @@ def main():
 
     label = basename(args.model)
 
-    model = M.load_model(args.model, feature_set, M.ModelConfig(L1=args.l1))
+    model = M.load_model(
+        args.model, feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig()
+    )
 
     if args.ref_model:
         if args.ref_features:
@@ -671,7 +673,10 @@ def main():
             ref_feature_set = feature_set
 
         ref_model = M.load_model(
-            args.ref_model, ref_feature_set, M.ModelConfig(L1=args.l1)
+            args.ref_model,
+            ref_feature_set,
+            M.ModelConfig(L1=args.l1),
+            M.QuantizationConfig(),
         )
 
         print(

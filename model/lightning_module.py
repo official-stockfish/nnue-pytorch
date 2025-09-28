@@ -6,6 +6,7 @@ from torch import Tensor, nn
 from .config import LossParams, ModelConfig
 from .features import FeatureSet
 from .model import NNUEModel
+from .quantize import QuantizationConfig
 
 
 def _get_parameters(layers: list[nn.Module]):
@@ -29,6 +30,7 @@ class NNUE(L.LightningModule):
         self,
         feature_set: FeatureSet,
         config: ModelConfig,
+        quantize_config: QuantizationConfig,
         max_epoch=800,
         num_batches_per_epoch=int(100_000_000 / 16384),
         gamma=0.992,
@@ -40,7 +42,7 @@ class NNUE(L.LightningModule):
     ):
         super().__init__()
         self.model: NNUEModel = NNUEModel(
-            feature_set, config, num_psqt_buckets, num_ls_buckets
+            feature_set, config, quantize_config, num_psqt_buckets, num_ls_buckets
         )
         self.loss_params = loss_params
         self.max_epoch = max_epoch
@@ -79,7 +81,7 @@ class NNUE(L.LightningModule):
                 psqt_indices,
                 layer_stack_indices,
             )
-            * self.model.nnue2score
+            * self.model.quantization.nnue2score
         )
 
         p = self.loss_params

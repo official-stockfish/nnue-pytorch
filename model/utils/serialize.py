@@ -9,12 +9,12 @@ from numba import njit
 import torch
 from torch import nn
 
-
 from .coalesce_weights import coalesce_ft_weights
 from ..config import ModelConfig
 from ..features import FeatureSet
 from ..feature_transformer import BaseFeatureTransformerSlice
 from ..model import NNUEModel
+from ..quantize import QuantizationConfig
 
 
 def ascii_hist(name, x, bins=6):
@@ -145,22 +145,21 @@ class NNUEWriter:
         layer = model.input
 
         bias = layer.bias.data[: model.L1]
-        bias = bias.mul(model.quantized_one).round().to(torch.int16)
 
         all_weight = coalesce_ft_weights(model, layer)
         weight = all_weight[:, : model.L1]
         psqt_weight = all_weight[:, model.L1 :]
 
-        weight = weight.mul(model.quantized_one).round().to(torch.int16)
-        psqt_weight = (
-            psqt_weight.mul(model.nnue2score * model.weight_scale_out)
-            .round()
-            .to(torch.int32)
-        )
+        def histogram_callback(
+            bias: torch.Tensor, weight: torch.Tensor, psqt_weight: torch.Tensor
+        ):
+            ascii_hist("ft bias:", bias.numpy())
+            ascii_hist("ft weight:", weight.numpy())
+            ascii_hist("ft psqt weight:", psqt_weight.numpy())
 
-        ascii_hist("ft bias:", bias.numpy())
-        ascii_hist("ft weight:", weight.numpy())
-        ascii_hist("ft psqt weight:", psqt_weight.numpy())
+        bias, weight, psqt_weight = model.quantization.quantize_feature_transformer(
+            bias, weight, psqt_weight, histogram_callback
+        )
 
         # Weights stored as [num_features][outputs]
 
@@ -172,40 +171,28 @@ class NNUEWriter:
         self, model: NNUEModel, layer: nn.Linear, is_output=False
     ) -> None:
         # FC layers are stored as int8 weights, and int32 biases
-        kWeightScaleHidden = model.weight_scale_hidden
-        kWeightScaleOut = (
-            model.nnue2score * model.weight_scale_out / model.quantized_one
-        )
-        kWeightScale = kWeightScaleOut if is_output else kWeightScaleHidden
-        kBiasScaleOut = model.weight_scale_out * model.nnue2score
-        kBiasScaleHidden = model.weight_scale_hidden * model.quantized_one
-        kBiasScale = kBiasScaleOut if is_output else kBiasScaleHidden
-        kMaxWeight = model.quantized_one / kWeightScale
-
         bias = layer.bias.data
-        bias = bias.mul(kBiasScale).round().to(torch.int32)
-
         weight = layer.weight.data
-        clipped = torch.count_nonzero(weight.clamp(-kMaxWeight, kMaxWeight) - weight)
-        total_elements = torch.numel(weight)
-        clipped_max = torch.max(
-            torch.abs(weight.clamp(-kMaxWeight, kMaxWeight) - weight)
-        )
 
-        weight = (
-            weight.clamp(-kMaxWeight, kMaxWeight)
-            .mul(kWeightScale)
-            .round()
-            .to(torch.int8)
-        )
-
-        ascii_hist("fc bias:", bias.numpy())
-        print(
-            "layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(
-                clipped, total_elements, clipped_max, kMaxWeight
+        def histogram_callback(
+            bias: torch.Tensor,
+            weight: torch.Tensor,
+            clipped: torch.Tensor,
+            total_elements: int,
+            clipped_max: torch.Tensor,
+            kMaxWeight: float,
+        ):
+            ascii_hist("fc bias:", bias.numpy())
+            print(
+                "layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(
+                    clipped, total_elements, clipped_max, kMaxWeight
+                )
             )
+            ascii_hist("fc weight:", weight.numpy())
+
+        bias, weight = model.quantization.quantize_fc_layer(
+            bias, weight, is_output, histogram_callback
         )
-        ascii_hist("fc weight:", weight.numpy())
 
         # FC inputs are padded to 32 elements by spec.
         num_input = weight.shape[1]
@@ -224,10 +211,16 @@ class NNUEWriter:
 
 
 class NNUEReader:
-    def __init__(self, f: BinaryIO, feature_set: FeatureSet, config: ModelConfig):
+    def __init__(
+        self,
+        f: BinaryIO,
+        feature_set: FeatureSet,
+        config: ModelConfig,
+        quantize_config: QuantizationConfig,
+    ):
         self.f = f
         self.feature_set = feature_set
-        self.model = NNUEModel(feature_set, config)
+        self.model = NNUEModel(feature_set, config, quantize_config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
@@ -275,7 +268,9 @@ class NNUEReader:
         if len(d) != len_bytes:
             raise Exception("Unexpected end of file when reading compressed data.")
 
-        res = torch.tensor(decode_leb_128_array(d, reduce(operator.mul, shape, 1)))
+        res = torch.tensor(
+            decode_leb_128_array(d, reduce(operator.mul, shape, 1)), dtype=torch.float32
+        )
         res = res.reshape(shape)
         return res
 
@@ -311,38 +306,34 @@ class NNUEReader:
     ) -> None:
         shape = layer.weight.shape
 
-        bias = self.tensor(np.int16, [layer.bias.shape[0] - num_psqt_buckets]).divide(
-            self.model.quantized_one
-        )
+        bias = self.tensor(np.int16, [layer.bias.shape[0] - num_psqt_buckets])
         # weights stored as [num_features][outputs]
-        weights = self.tensor(np.int16, [shape[0], shape[1] - num_psqt_buckets])
-        weights = weights.divide(self.model.quantized_one)
-        psqt_weights = self.tensor(np.int32, [shape[0], num_psqt_buckets])
-        psqt_weights = psqt_weights.divide(
-            self.model.nnue2score * self.model.weight_scale_out
+        weight = self.tensor(np.int16, [shape[0], shape[1] - num_psqt_buckets])
+        psqt_weight = self.tensor(np.int32, [shape[0], num_psqt_buckets])
+
+        bias, weight, psqt_weight = (
+            self.model.quantization.dequantize_feature_transformer(
+                bias, weight, psqt_weight
+            )
         )
 
         layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
-        layer.weight.data = torch.cat([weights, psqt_weights], dim=1)
+        layer.weight.data = torch.cat([weight, psqt_weight], dim=1)
 
     def read_fc_layer(self, layer: nn.Linear, is_output: bool = False) -> None:
-        kWeightScaleHidden = self.model.weight_scale_hidden
-        kWeightScaleOut = (
-            self.model.nnue2score
-            * self.model.weight_scale_out
-            / self.model.quantized_one
-        )
-        kWeightScale = kWeightScaleOut if is_output else kWeightScaleHidden
-        kBiasScaleOut = self.model.weight_scale_out * self.model.nnue2score
-        kBiasScaleHidden = self.model.weight_scale_hidden * self.model.quantized_one
-        kBiasScale = kBiasScaleOut if is_output else kBiasScaleHidden
-
         # FC inputs are padded to 32 elements by spec.
         non_padded_shape = layer.weight.shape
         padded_shape = (non_padded_shape[0], ((non_padded_shape[1] + 31) // 32) * 32)
 
-        layer.bias.data = self.tensor(np.int32, layer.bias.shape).divide(kBiasScale)
-        layer.weight.data = self.tensor(np.int8, padded_shape).divide(kWeightScale)
+        bias = self.tensor(np.int32, layer.bias.shape)
+        weight = self.tensor(np.int8, padded_shape)
+
+        bias, weight = self.model.quantization.dequantize_fc_layer(
+            bias, weight, is_output
+        )
+
+        layer.bias.data = bias
+        layer.weight.data = weight
 
         # Strip padding.
         layer.weight.data = layer.weight.data[

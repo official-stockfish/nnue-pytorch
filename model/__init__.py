@@ -3,6 +3,7 @@ from .config import ModelConfig, LossParams
 from .features import add_feature_args, FeatureSet, get_feature_set_from_name
 from .lightning_module import NNUE
 from .model import NNUEModel
+from .quantize import QuantizationConfig
 from .utils import coalesce_ft_weights, load_model, NNUEReader, NNUEWriter
 
 
@@ -15,6 +16,7 @@ __all__ = [
     "get_feature_set_from_name",
     "NNUE",
     "NNUEModel",
+    "QuantizationConfig",
     "coalesce_ft_weights",
     "load_model",
     "NNUEReader",

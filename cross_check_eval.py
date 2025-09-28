@@ -12,12 +12,18 @@ from model import (
     NNUE,
     NNUEReader,
     ModelConfig,
+    QuantizationConfig,
 )
 
 
-def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
+def read_model(
+    nnue_path,
+    feature_set: FeatureSet,
+    config: ModelConfig,
+    quantize_config: QuantizationConfig,
+):
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_set, config)
+        reader = NNUEReader(f, feature_set, config, quantize_config)
         return reader.model
 
 
@@ -177,10 +183,15 @@ def main():
     feature_set = get_feature_set_from_name(args.features)
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(
-            args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)
+            args.checkpoint,
+            feature_set=feature_set,
+            config=ModelConfig(L1=args.l1),
+            quantize_config=QuantizationConfig(),
         )
     else:
-        model = read_model(args.net, feature_set, ModelConfig(L1=args.l1))
+        model = read_model(
+            args.net, feature_set, ModelConfig(L1=args.l1), QuantizationConfig()
+        )
     model.eval()
     fen_batch_provider = make_fen_batch_provider(args.data, batch_size)
 

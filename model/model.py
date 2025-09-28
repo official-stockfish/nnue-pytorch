@@ -6,6 +6,7 @@ from torch import nn, Tensor
 from .config import ModelConfig
 from .feature_transformer import DoubleFeatureTransformerSlice
 from .features import FeatureSet
+from .quantize import QuantizationConfig, QuantizationManager
 
 
 class LayerStacks(nn.Module):
@@ -128,6 +129,7 @@ class NNUEModel(nn.Module):
         self,
         feature_set: FeatureSet,
         config: ModelConfig,
+        quantize_config: QuantizationConfig,
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
     ):
@@ -146,33 +148,8 @@ class NNUEModel(nn.Module):
         self.feature_set = feature_set
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
 
-        self.nnue2score = 600.0
-        self.weight_scale_hidden = 64.0
-        self.weight_scale_out = 16.0
-        self.quantized_one = 127.0
-
-        max_hidden_weight = self.quantized_one / self.weight_scale_hidden
-        max_out_weight = (self.quantized_one * self.quantized_one) / (
-            self.nnue2score * self.weight_scale_out
-        )
-        self.weight_clipping = [
-            {
-                "params": [self.layer_stacks.l1.weight],
-                "min_weight": -max_hidden_weight,
-                "max_weight": max_hidden_weight,
-                "virtual_params": self.layer_stacks.l1_fact.weight,
-            },
-            {
-                "params": [self.layer_stacks.l2.weight],
-                "min_weight": -max_hidden_weight,
-                "max_weight": max_hidden_weight,
-            },
-            {
-                "params": [self.layer_stacks.output.weight],
-                "min_weight": -max_out_weight,
-                "max_weight": max_out_weight,
-            },
-        ]
+        self.quantization = QuantizationManager(quantize_config)
+        self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
         self._init_layers()
 
@@ -195,7 +172,7 @@ class NNUEModel(nn.Module):
         input_weights = self.input.weight
         input_bias = self.input.bias
         # 1.0 / kPonanzaConstant
-        scale = 1 / self.nnue2score
+        scale = 1 / self.quantization.nnue2score
 
         with torch.no_grad():
             initial_values = self.feature_set.get_initial_psqt_features()
