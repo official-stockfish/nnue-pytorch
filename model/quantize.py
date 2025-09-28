@@ -1,9 +1,10 @@
 from dataclasses import dataclass
-from typing import Callable, NotRequired, TypedDict
+from typing import Callable, NotRequired, TypedDict, TYPE_CHECKING
 
 import torch
 
-from .model import NNUEModel
+if TYPE_CHECKING:
+    from .model import NNUEModel
 
 
 class WeightClippingConfig(TypedDict):
@@ -34,7 +35,7 @@ class QuantizationManager:
         )
 
     def generate_weight_clipping_config(
-        self, model: NNUEModel
+        self, model: "NNUEModel"
     ) -> list[WeightClippingConfig]:
         return [
             {
