@@ -268,7 +268,9 @@ class NNUEReader:
         if len(d) != len_bytes:
             raise Exception("Unexpected end of file when reading compressed data.")
 
-        res = torch.tensor(decode_leb_128_array(d, reduce(operator.mul, shape, 1)))
+        res = torch.tensor(
+            decode_leb_128_array(d, reduce(operator.mul, shape, 1)), dtype=torch.float32
+        )
         res = res.reshape(shape)
         return res
 
