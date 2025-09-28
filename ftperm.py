@@ -432,13 +432,12 @@ def filter_fens(fens):
 
 
 def quantize_ft(model: NNUEModel):
-    with torch.no_grad():
-        model.input.weight = model.input.weight.mul(
-            model.quantization.quantized_one
-        ).round()
-        model.input.bias = model.input.bias.mul(
-            model.quantization.quantized_one
-        ).round()
+    model.input.weight.data = model.input.weight.data.mul(
+        model.quantization.quantized_one
+    ).round()
+    model.input.bias.data = model.input.bias.data.mul(
+        model.quantization.quantized_one
+    ).round()
 
 
 def forward_ft(
