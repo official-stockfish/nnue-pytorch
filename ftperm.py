@@ -33,8 +33,9 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --
 
 import argparse
 import copy
+from dataclasses import dataclass
 import time
-from typing import Generator
+from typing import Callable, Generator, TypeAlias
 
 import chess
 import cupy as cp
@@ -83,7 +84,7 @@ def apply_swap(perm: npt.NDArray, i: int, j: int) -> None:
     perm[i], perm[j] = perm[j], perm[i]
 
 
-def apply_rotate_right(perm: npt.NDArray, indices) -> None:
+def apply_rotate_right(perm: npt.NDArray, indices: tuple[int, ...]) -> None:
     """
     Rotates right the values in `perm` at selected indices `indices`.
     The rotation is performed as-if the selected indices were layed out in the order
@@ -202,9 +203,16 @@ def get_score_change(
     return score_change
 
 
-def make_swaps_2(
-    actmat: npt.NDArray[np.bool_], use_cupy: bool = True
-) -> tuple[list[tuple[int, int]], float]:
+@dataclass
+class SwapResult:
+    swaps: list[tuple[int, ...]]
+    score_change: float
+
+
+SwapFucntion: TypeAlias = Callable[[npt.NDArray[np.bool_], bool], SwapResult]
+
+
+def make_swaps_2(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapResult:
     """
     Returns a series of independent 2-swap operations that collectively improve the objective function.
     """
@@ -259,12 +267,10 @@ def make_swaps_2(
     print(f"Time elapsed: {time.time() - start_time:0.3f}")
     print(f"Improvement this iteration: {total_improvement:0.3f}")
 
-    return swaps, total_improvement
+    return SwapResult(swaps, total_improvement)
 
 
-def make_swaps_3(
-    actmat: npt.NDArray[np.bool_], use_cupy: bool = True
-) -> tuple[list[tuple[int, int, int]], float]:
+def make_swaps_3(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapResult:
     """
     Returns a series of independent left-rotates operations that collectively improve the objective function.
     """
@@ -353,7 +359,7 @@ def make_swaps_3(
     total_improvement = total_score_change / n_samples / (n_neurons // 4) * 100
     print(f"Time elapsed: {time.time() - start_time:0.3f}")
     print(f"Improvement this iteration: {total_improvement:0.3f}")
-    return cycles, total_improvement
+    return SwapResult(cycles, total_improvement)
 
 
 def find_perm_impl(
@@ -367,7 +373,7 @@ def find_perm_impl(
     total_score_change = 0
     perm = np.arange(L1 // 2)
 
-    stages = [make_swaps_2, make_swaps_3]
+    stages: list[SwapFucntion] = [make_swaps_2, make_swaps_3]
     # The optimization routines are deterministic, so no need to retry.
     stages_max_fails = [0, 0]
     stage_id = 0
@@ -385,15 +391,15 @@ def find_perm_impl(
 
         # Calculate a set of independent right rotates (so swaps for 2 element case)
         # that when applied improve the objective function
-        swaps, score_change = swap_fn(actmat, use_cupy)
-        for cycle in swaps:
+        swap_result = swap_fn(actmat, use_cupy)
+        for cycle in swap_result.swaps:
             # Update the current best permutation with the newly found adjustments.
             apply_rotate_right(perm, cycle)
 
-        total_score_change += score_change
+        total_score_change += swap_result.score_change
         print(f"Total improvement: {total_score_change}\n")
 
-        if score_change == 0:
+        if swap_result.score_change == 0:
             num_fails += 1
             if num_fails > stages_max_fails[stage_id]:
                 num_fails = 0
