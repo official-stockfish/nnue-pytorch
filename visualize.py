@@ -39,12 +39,14 @@ class NNUEVisualizer:
 
     def plot_input_weights(self):
         # Coalesce weights and transform them to Numpy domain.
-        weights = M.coalesce_ft_weights(self.model, self.model.input)
+        weights = M.coalesce_ft_weights(self.model.feature_set, self.model.input)
         weights = weights[:, : self.model.L1]
         weights = weights.flatten().numpy()
 
         if self.args.ref_model:
-            ref_weights = M.coalesce_ft_weights(self.ref_model, self.ref_model.input)
+            ref_weights = M.coalesce_ft_weights(
+                self.ref_model.feature_set, self.ref_model.input
+            )
             ref_weights = ref_weights[:, : self.model.L1]
             ref_weights = ref_weights.flatten().numpy()
             weights -= ref_weights
