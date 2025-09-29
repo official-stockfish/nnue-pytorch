@@ -137,9 +137,7 @@ def main():
                 ftperm.set_cupy_device(args.device)
 
         if not args.source.endswith(".nnue"):
-            nnue.model.input.weight.data = M.coalesce_ft_weights(
-                nnue.model.feature_set, nnue.model.input
-            )
+            M.coalesce_ft_weights_inplace(nnue.model.feature_set, nnue.model.input)
 
         ftperm.ft_optimize(
             nnue.model,
