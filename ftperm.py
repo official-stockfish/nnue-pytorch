@@ -520,7 +520,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor
 def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
     permutation = list(perm)
 
-    l1_size = model.layer_stacks.l1.in_features
+    l1_size = model.layer_stacks.l1.linear.in_features
     if l1_size != len(permutation) * 2:
         raise Exception(
             f"Invalid permutation size. Expected {l1_size}. Got {len(permutation) * 2}."
@@ -535,7 +535,7 @@ def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
     # Apply the permutation in place.
     model.input.weight.data = model.input.weight.data[:, ft_permutation]
     model.input.bias.data = model.input.bias.data[ft_permutation]
-    model.layer_stacks.l1.weight.data = model.layer_stacks.l1.weight.data[
+    model.layer_stacks.l1.linear.weight.data = model.layer_stacks.l1.linear.weight.data[
         :, permutation
     ]
 

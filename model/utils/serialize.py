@@ -103,9 +103,9 @@ class NNUEWriter:
 
         # Fully connected layers
         layers = [
-            model.layer_stacks.l1,
-            model.layer_stacks.l2,
-            model.layer_stacks.output,
+            model.layer_stacks.l1.linear,
+            model.layer_stacks.l2.linear,
+            model.layer_stacks.output.linear,
         ]
         for layer in layers:
             layer_hash = 0xCC03DAE4
@@ -239,20 +239,22 @@ class NNUEReader:
             self.read_fc_layer(l2)
             self.read_fc_layer(output, is_output=True)
 
-            self.model.layer_stacks.l1.weight.data[
+            self.model.layer_stacks.l1.linear.weight.data[
                 i * (self.config.L2 + 1) : (i + 1) * (self.config.L2 + 1), :
             ] = l1.weight
-            self.model.layer_stacks.l1.bias.data[
+            self.model.layer_stacks.l1.linear.bias.data[
                 i * (self.config.L2 + 1) : (i + 1) * (self.config.L2 + 1)
             ] = l1.bias
-            self.model.layer_stacks.l2.weight.data[
+            self.model.layer_stacks.l2.linear.weight.data[
                 i * self.config.L3 : (i + 1) * self.config.L3, :
             ] = l2.weight
-            self.model.layer_stacks.l2.bias.data[
+            self.model.layer_stacks.l2.linear.bias.data[
                 i * self.config.L3 : (i + 1) * self.config.L3
             ] = l2.bias
-            self.model.layer_stacks.output.weight.data[i : (i + 1), :] = output.weight
-            self.model.layer_stacks.output.bias.data[i : (i + 1)] = output.bias
+            self.model.layer_stacks.output.linear.weight.data[i : (i + 1), :] = (
+                output.weight
+            )
+            self.model.layer_stacks.output.linear.bias.data[i : (i + 1)] = output.bias
 
     def read_header(self, feature_set: FeatureSet, fc_hash: int) -> None:
         self.read_int32(VERSION)  # version

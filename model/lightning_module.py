@@ -125,14 +125,14 @@ class NNUE(L.LightningModule):
         LR = self.lr
         train_params = [
             {"params": _get_parameters([self.model.input]), "lr": LR, "gc_dim": 0},
-            {"params": [self.model.layer_stacks.l1_fact.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.l1_fact.bias], "lr": LR},
-            {"params": [self.model.layer_stacks.l1.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.l1.bias], "lr": LR},
-            {"params": [self.model.layer_stacks.l2.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.l2.bias], "lr": LR},
-            {"params": [self.model.layer_stacks.output.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.output.bias], "lr": LR},
+            {"params": [self.model.layer_stacks.l1.factorized_linear.weight], "lr": LR},
+            {"params": [self.model.layer_stacks.l1.factorized_linear.bias], "lr": LR},
+            {"params": [self.model.layer_stacks.l1.linear.weight], "lr": LR},
+            {"params": [self.model.layer_stacks.l1.linear.bias], "lr": LR},
+            {"params": [self.model.layer_stacks.l2.linear.weight], "lr": LR},
+            {"params": [self.model.layer_stacks.l2.linear.bias], "lr": LR},
+            {"params": [self.model.layer_stacks.output.linear.weight], "lr": LR},
+            {"params": [self.model.layer_stacks.output.linear.bias], "lr": LR},
         ]
 
         optimizer = ranger21.Ranger21(
