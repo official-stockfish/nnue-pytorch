@@ -209,7 +209,7 @@ class SwapResult:
     score_change: float
 
 
-SwapFucntion: TypeAlias = Callable[[npt.NDArray[np.bool_], bool], SwapResult]
+SwapFunction: TypeAlias = Callable[[npt.NDArray[np.bool_], bool], SwapResult]
 
 
 def make_swaps_2(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapResult:
@@ -229,7 +229,7 @@ def make_swaps_2(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapRe
     # Sum score_change[i, j] + score_change[j, i] to get the cumulative impact of the swap.
     score_change = score_change + score_change.T
 
-    def all_indices_in_same_block(i: int) -> list[int]:
+    def all_indices_in_same_block(i: np.int_) -> list[int]:
         """Returns a list of indices of all neurons in the same block as the i-th neuron."""
         # Floor to the start of the block.
         base = i // ZERO_BLOCK_SIZE * ZERO_BLOCK_SIZE
@@ -373,7 +373,7 @@ def find_perm_impl(
     total_score_change = 0
     perm = np.arange(L1 // 2)
 
-    stages: list[SwapFucntion] = [make_swaps_2, make_swaps_3]
+    stages: list[SwapFunction] = [make_swaps_2, make_swaps_3]
     # The optimization routines are deterministic, so no need to retry.
     stages_max_fails = [0, 0]
     stage_id = 0
