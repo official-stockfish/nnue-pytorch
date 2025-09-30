@@ -138,6 +138,7 @@ def main():
 
         if not args.source.endswith(".nnue"):
             M.coalesce_ft_weights_inplace(nnue.model.feature_set, nnue.model.input)
+            nnue.model.layer_stacks.coalesce_layer_stacks_inplace()
 
         ftperm.ft_optimize(
             nnue.model,
