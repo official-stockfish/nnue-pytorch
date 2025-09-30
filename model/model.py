@@ -98,6 +98,7 @@ class LayerStacks(nn.Module):
 
         return l3x_
 
+    @torch.no_grad()
     def get_coalesced_layer_stacks(
         self,
     ) -> Generator[tuple[nn.Linear, nn.Linear, nn.Linear], None, None]:
@@ -105,23 +106,38 @@ class LayerStacks(nn.Module):
         # This representation needs to be transformed into individual layers
         # for the serializer, because the buckets are interpreted as separate layers.
         for i in range(self.count):
-            with torch.no_grad():
-                l1 = nn.Linear(2 * self.L1 // 2, self.L2 + 1)
-                l2 = nn.Linear(self.L2 * 2, self.L3)
-                output = nn.Linear(self.L3, 1)
-                l1.weight.data = (
-                    self.l1.weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :]
-                    + self.l1_fact.weight.data
-                )
-                l1.bias.data = (
-                    self.l1.bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)]
-                    + self.l1_fact.bias.data
-                )
-                l2.weight.data = self.l2.weight[i * self.L3 : (i + 1) * self.L3, :]
-                l2.bias.data = self.l2.bias[i * self.L3 : (i + 1) * self.L3]
-                output.weight.data = self.output.weight[i : (i + 1), :]
-                output.bias.data = self.output.bias[i : (i + 1)]
-                yield l1, l2, output
+            l1 = nn.Linear(2 * self.L1 // 2, self.L2 + 1)
+            l2 = nn.Linear(self.L2 * 2, self.L3)
+            output = nn.Linear(self.L3, 1)
+            l1.weight.data = (
+                self.l1.weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :]
+                + self.l1_fact.weight.data
+            )
+            l1.bias.data = (
+                self.l1.bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)]
+                + self.l1_fact.bias.data
+            )
+            l2.weight.data = self.l2.weight[i * self.L3 : (i + 1) * self.L3, :]
+            l2.bias.data = self.l2.bias[i * self.L3 : (i + 1) * self.L3]
+            output.weight.data = self.output.weight[i : (i + 1), :]
+            output.bias.data = self.output.bias[i : (i + 1)]
+            yield l1, l2, output
+
+    @torch.no_grad()
+    def coalesce_layer_stacks_inplace(self) -> None:
+        # During training the buckets are represented by a single, wider, layer.
+        # This representation needs to be transformed into individual layers
+        # for the serializer, because the buckets are interpreted as separate layers.
+        for i in range(self.count):
+            self.l1.weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :].add_(
+                self.l1_fact.weight
+            )
+            self.l1.bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)].add_(
+                self.l1_fact.bias
+            )
+
+        self.l1_fact.weight.zero_()
+        self.l1_fact.bias.zero_()
 
 
 class NNUEModel(nn.Module):

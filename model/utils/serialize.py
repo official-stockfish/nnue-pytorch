@@ -146,7 +146,7 @@ class NNUEWriter:
 
         bias = layer.bias.data[: model.L1]
 
-        all_weight = coalesce_ft_weights(model, layer)
+        all_weight = coalesce_ft_weights(model.feature_set, layer)
         weight = all_weight[:, : model.L1]
         psqt_weight = all_weight[:, model.L1 :]
 
