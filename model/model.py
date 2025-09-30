@@ -129,14 +129,15 @@ class LayerStacks(nn.Module):
         # This representation needs to be transformed into individual layers
         # for the serializer, because the buckets are interpreted as separate layers.
         for i in range(self.count):
-            self.l1.weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :] = (
-                self.l1.weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :]
-                + self.l1_fact.weight.data
+            self.l1.weight[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1), :].add_(
+                self.l1_fact.weight
             )
-            self.l1.bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)] = (
-                self.l1.bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)]
-                + self.l1_fact.bias.data
+            self.l1.bias[i * (self.L2 + 1) : (i + 1) * (self.L2 + 1)].add_(
+                self.l1_fact.bias
             )
+
+        self.l1_fact.weight.zero_()
+        self.l1_fact.bias.zero_()
 
 
 class NNUEModel(nn.Module):
