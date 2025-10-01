@@ -39,18 +39,18 @@ class QuantizationManager:
     ) -> list[WeightClippingConfig]:
         return [
             {
-                "params": [model.layer_stacks.l1.weight],
+                "params": [model.layer_stacks.l1.linear.weight],
                 "min_weight": -self.max_hidden_weight,
                 "max_weight": self.max_hidden_weight,
-                "virtual_params": model.layer_stacks.l1_fact.weight,
+                "virtual_params": model.layer_stacks.l1.factorized_linear.weight,
             },
             {
-                "params": [model.layer_stacks.l2.weight],
+                "params": [model.layer_stacks.l2.linear.weight],
                 "min_weight": -self.max_hidden_weight,
                 "max_weight": self.max_hidden_weight,
             },
             {
-                "params": [model.layer_stacks.output.weight],
+                "params": [model.layer_stacks.output.linear.weight],
                 "min_weight": -self.max_out_weight,
                 "max_weight": self.max_out_weight,
             },
