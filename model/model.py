@@ -2,6 +2,7 @@ from typing import Generator
 
 import torch
 from torch import nn, Tensor
+import torch.nn.functional as F
 
 from .config import ModelConfig
 from .feature_transformer import DoubleFeatureTransformerSlice
@@ -34,10 +35,14 @@ class StackedLinear(nn.Module):
 
     def forward(self, x: Tensor, ls_indices: Tensor) -> Tensor:
         stacked_output = self.linear(x)
+
+        return self.select_output(stacked_output, ls_indices)
+
+    def select_output(self, stacked_output: Tensor, ls_indices: Tensor) -> Tensor:
         reshaped_output = stacked_output.reshape(-1, self.out_features)
 
         idx_offset = torch.arange(
-            0, x.shape[0] * self.count, self.count, device=x.device
+            0, ls_indices.shape[0] * self.count, self.count, device=stacked_output.device
         )
         indices = ls_indices.flatten() + idx_offset
 
@@ -69,10 +74,12 @@ class FactorizedStackedLinear(StackedLinear):
             self.factorized_linear.bias.zero_()
 
     def forward(self, x: Tensor, ls_indices: Tensor) -> Tensor:
-        stacked_output = super().forward(x, ls_indices)
-        factorized_output = self.factorized_linear(x)
+        merged_weight = self.linear.weight + self.factorized_linear.weight.repeat(self.count)
+        merged_bias = self.linear.bias + self.factorized_linear.bias.repeat(self.count)
 
-        return stacked_output + factorized_output
+        stacked_output = F.linear(x, merged_weight, merged_bias)
+
+        return self.select_output(stacked_output, ls_indices)
 
     @torch.no_grad()
     def at_index(self, index: int) -> nn.Linear:
