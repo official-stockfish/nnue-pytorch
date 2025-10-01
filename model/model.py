@@ -74,7 +74,7 @@ class FactorizedStackedLinear(StackedLinear):
             self.factorized_linear.bias.zero_()
 
     def forward(self, x: Tensor, ls_indices: Tensor) -> Tensor:
-        merged_weight = self.linear.weight + self.factorized_linear.weight.repeat(self.count)
+        merged_weight = self.linear.weight + self.factorized_linear.weight.repeat(self.count, 1)
         merged_bias = self.linear.bias + self.factorized_linear.bias.repeat(self.count)
 
         stacked_output = F.linear(x, merged_weight, merged_bias)
