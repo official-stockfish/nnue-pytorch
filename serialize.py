@@ -118,6 +118,10 @@ def main():
     if args.ft_perm is not None and target_is_nnue:
         import ftperm
 
+        if not args.source.endswith(".nnue"):
+            M.coalesce_ft_weights_inplace(nnue.model.feature_set, nnue.model.input)
+            nnue.model.layer_stacks.coalesce_layer_stacks_inplace()
+
         ftperm.ft_permute(nnue.model, args.ft_perm)
 
     if args.ft_optimize and target_is_nnue:
