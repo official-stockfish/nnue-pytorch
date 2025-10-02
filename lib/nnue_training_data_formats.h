@@ -54,6 +54,8 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #ifdef HAS_BMI2
 #include <immintrin.h> // _pdep_u64
+#elif defined(__ARM_FEATURE_SVE2)
+#include <arm_sve.h>
 #endif
 
 #include "rng.h"
@@ -273,6 +275,15 @@ namespace chess
     {
     #ifdef HAS_BMI2
         return intrin::msb(_pdep_u64(1ULL << n, v));
+    #elif defined(__ARM_FEATURE_SVE2)
+        uint64_t src = 1ULL << n;
+
+        svuint64_t vec_src = svdup_n_u64(src);
+        svuint64_t vec_mask = svdup_n_u64(v);
+
+        svuint64_t result = svbdep_u64(vec_src, vec_mask);
+
+        return intrin::lsb(svlastb_u64(svptrue_b64(), result));
     #endif
 
         std::uint64_t shift = 0;
