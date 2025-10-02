@@ -10,6 +10,12 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-g -O3 -march=native -DNDEBUG")
 
+# PGO Flags
+set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data" CACHE PATH "Directory for PGO profile data")
+set(CMAKE_CXX_FLAGS_PGO_GENERATE "${CMAKE_CXX_FLAGS_RELEASE} -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR}")
+set(CMAKE_EXE_LINKER_FLAGS_PGO_GENERATE "-fprofile-generate=${PGO_PROFILE_DATA_DIR}")
+set(CMAKE_CXX_FLAGS_PGO_USE "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED 17)
 
@@ -44,31 +50,6 @@ function(check_bmi2_support)
     endif()
 endfunction()
 
-function(check_sve2_support)
-    execute_process(
-        COMMAND bash -c "grep -m1 -o 'sve2' /proc/cpuinfo"
-        OUTPUT_VARIABLE CPU_SVE2
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-
-    if(CPU_SVE2 STREQUAL "sve2")
-        set(CPU_SUPPORTS_SVE2 TRUE PARENT_SCOPE)
-    else()
-        set(CPU_SUPPORTS_SVE2 FALSE PARENT_SCOPE)
-    endif()
-endfunction()
-
-check_sve2_support()
-
-if(CPU_SUPPORTS_SVE2)
-    message(STATUS "Adding SVE2 support")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=armv8-a+sve2-bitperm -DNDEBUG")
-    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-g -O3 -march=armv8-a+sve2-bitperm -DNDEBUG")
-    add_definitions(-DHAS_SVE2)
-else()
-    message(STATUS "No SVE2 support")
-endif()
-
 check_bmi2_support()
 
 if(CPU_SUPPORTS_BMI2)
@@ -77,12 +58,6 @@ if(CPU_SUPPORTS_BMI2)
 else()
     message(STATUS "No BMI2 support")
 endif()
-
-# PGO Flags
-set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data" CACHE PATH "Directory for PGO profile data")
-set(CMAKE_CXX_FLAGS_PGO_GENERATE "${CMAKE_CXX_FLAGS_RELEASE} -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR}")
-set(CMAKE_EXE_LINKER_FLAGS_PGO_GENERATE "-fprofile-generate=${PGO_PROFILE_DATA_DIR}")
-set(CMAKE_CXX_FLAGS_PGO_USE "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction")
 
 find_package(Threads REQUIRED)
 
