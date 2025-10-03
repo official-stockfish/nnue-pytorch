@@ -597,7 +597,7 @@ class BaseFeatureTransformerSlice(nn.Module):
         self.virtual_weights = nn.ParameterList()
 
         for module, offset in feature_set.get_virtual_feature_modules():
-            self.virtual_weights.append(module(offset))
+            self.virtual_weights.append(module(num_outputs, offset))
 
     def get_coalesced_weights(self) -> torch.Tensor:
         coalesced_weight = self.weight.clone()

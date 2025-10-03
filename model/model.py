@@ -195,7 +195,7 @@ class NNUEModel(nn.Module):
 
         with torch.no_grad():
             initial_values = self.feature_set.get_initial_psqt_features()
-            assert len(initial_values) == self.feature_set.num_features
+            assert len(initial_values) == self.feature_set.num_real_features
 
             new_weights = (
                 torch.tensor(

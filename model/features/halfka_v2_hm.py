@@ -98,15 +98,15 @@ class VirtualWeights(nn.Module):
 
     def apply_to(self, target: torch.Tensor) -> None:
         for i in range(NUM_SQ // 2):
-            begin = self.offset.item() + NUM_PLANES_REAL * i
-            end_pieces = self.offset.item() + NUM_PLANES_REAL * (i + 1) - NUM_SQ
-            end = self.offset.item() + NUM_PLANES_REAL * (i + 1)
+            begin = self.offset + NUM_PLANES_REAL * i
+            end_pieces = self.offset + NUM_PLANES_REAL * (i + 1) - NUM_SQ
+            end = self.offset + NUM_PLANES_REAL * (i + 1)
 
             # Merge non-king pieces
             target[begin:end_pieces] += self.weight[: (NUM_PT_REAL - 1) * NUM_SQ]
 
             # Extract weights for other king
-            merged_king = self.weight[NUM_PT_REAL * NUM_SQ, NUM_PT_VIRTUAL * NUM_SQ]
+            merged_king = self.weight[NUM_PT_REAL * NUM_SQ : NUM_PT_VIRTUAL * NUM_SQ].clone()
 
             # Patch in our king's weight at point
             merged_king[i] = self.weight[i + (NUM_PT_REAL - 1) * NUM_SQ]
@@ -142,7 +142,7 @@ class FactorizedFeatures(FeatureBlock):
         return [idx, self.get_factor_base_feature("A") + a_idx]
 
     def get_initial_psqt_features(self) -> list[int]:
-        return halfka_psqts() + [0] * NUM_PLANES_VIRTUAL
+        return halfka_psqts()
 
 
 """
