@@ -35,7 +35,7 @@ class FeatureSet:
         )
         self.num_features = sum(feature.num_features for feature in features)
 
-    def get_virtual_feature_ranges(self) -> list[tuple[int, int]]:
+    def get_virtual_feature_ranges(self) -> list[tuple[int, int, int]]:
         """
         This method returns the feature ranges for the virtual factors of the
         underlying feature blocks. This is useful to know during initialization,
@@ -47,9 +47,13 @@ class FeatureSet:
         for feature in self.features:
             if feature.num_virtual_features:
                 ranges.append(
-                    (offset + feature.num_real_features, offset + feature.num_features)
+                    (
+                        feature.num_virtual_features,
+                        offset,
+                        feature.num_real_features,
+                    )
                 )
-            offset += feature.num_features
+            offset += feature.num_real_features
 
         return ranges
 

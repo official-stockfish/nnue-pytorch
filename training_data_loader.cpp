@@ -240,21 +240,7 @@ struct HalfKAv2Factorized {
 
     static std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color)
     {
-        const auto [start_j, offset] = HalfKAv2::fill_features_sparse(e, features, values, color);
-        auto& pos = e.pos;
-        auto pieces = pos.piecesBB();
-
-        int j = start_j;
-        for(Square sq : pieces)
-        {
-            auto p = pos.pieceAt(sq);
-            auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-            values[j] = 1.0f;
-            features[j] = offset + (p_idx * HalfKAv2::NUM_SQ) + static_cast<int>(orient_flip(color, sq));
-            ++j;
-        }
-
-        return { j, INPUTS };
+        return HalfKAv2::fill_features_sparse(e, features, values, color);
     }
 };
 

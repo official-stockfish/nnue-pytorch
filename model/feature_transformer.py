@@ -1,9 +1,12 @@
+from dataclasses import dataclass
 import math
 
 import torch
 from torch import nn
 from torch import autograd
 import cupy as cp
+
+from .features import FeatureSet
 
 
 def _find_nearest_divisor(value, target):
@@ -574,27 +577,74 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
         return None, None, None, None, weight_grad, bias_grad
 
 
-class BaseFeatureTransformerSlice(nn.Module):
-    def __init__(self, num_inputs, num_outputs):
+@dataclass
+class VirtualFeaturePosition:
+    offset: int
+    count: int
+
+
+class VirtualWeights(nn.Module):
+    offset: torch.Tensor
+    count: torch.Tensor
+    weight: nn.Parameter
+
+    def __init__(self, length, num_outputs, offset, count):
         super().__init__()
-        self.num_inputs = num_inputs
+
+        self.register_buffer("offset", torch.tensor(offset, dtype=torch.int64))
+        self.register_buffer("count", torch.tensor(count, dtype=torch.int64))
+        self.weight = nn.Parameter(
+            torch.zeros(length, num_outputs, dtype=torch.float32)
+        )
+
+    def apply_to(self, target: torch.Tensor) -> None:
+        count = self.count.item()
+        assert isinstance(count, int)
+
+        begin = self.offset.item()
+        end = self.offset.item() + self.count.item() * self.weight.shape[0]
+
+        target[begin:end] += self.weight.repeat(count, 1)
+
+
+class BaseFeatureTransformerSlice(nn.Module):
+    def __init__(self, feature_set: FeatureSet, num_outputs):
+        super().__init__()
+        self.num_inputs = feature_set.num_real_features
         self.num_outputs = num_outputs
 
-        sigma = math.sqrt(1 / num_inputs)
+        sigma = math.sqrt(1 / feature_set.num_features)
 
         self.weight = nn.Parameter(
-            torch.rand(num_inputs, num_outputs, dtype=torch.float32) * (2 * sigma)
+            torch.rand(feature_set.num_real_features, num_outputs, dtype=torch.float32)
+            * (2 * sigma)
             - sigma
         )
         self.bias = nn.Parameter(
             torch.rand(num_outputs, dtype=torch.float32) * (2 * sigma) - sigma
         )
 
+        self.virtual_weights = nn.ParameterList()
+
+        for length, offset, span in feature_set.get_virtual_feature_ranges():
+            assert length % span == 0
+            self.virtual_weights.append(
+                VirtualWeights(length, num_outputs, offset, span // length)
+            )
+
+    def get_coalesced_weights(self) -> torch.Tensor:
+        coalesced_weight = self.weight.clone()
+
+        for virtual_weight in self.virtual_weights:
+            virtual_weight.apply_to(coalesced_weight)
+
+        return coalesced_weight
+
 
 class FeatureTransformerSlice(BaseFeatureTransformerSlice):
     def forward(self, feature_indices, feature_values):
         return FeatureTransformerSliceFunction.apply(
-            feature_indices, feature_values, self.weight, self.bias
+            feature_indices, feature_values, self.get_coalesced_weights(), self.bias
         )
 
 
@@ -607,7 +657,7 @@ class DoubleFeatureTransformerSlice(BaseFeatureTransformerSlice):
             feature_values_0,
             feature_indices_1,
             feature_values_1,
-            self.weight,
+            self.get_coalesced_weights(),
             self.bias,
         )
 

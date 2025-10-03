@@ -174,7 +174,7 @@ class NNUEModel(nn.Module):
         self.num_ls_buckets = num_ls_buckets
 
         self.input = DoubleFeatureTransformerSlice(
-            feature_set.num_features, self.L1 + self.num_psqt_buckets
+            feature_set, self.L1 + self.num_psqt_buckets
         )
         self.feature_set = feature_set
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
