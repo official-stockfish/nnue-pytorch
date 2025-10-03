@@ -1,3 +1,5 @@
+from typing import Any
+
 import chess
 import torch
 
@@ -35,7 +37,7 @@ class FeatureSet:
         )
         self.num_features = sum(feature.num_features for feature in features)
 
-    def get_virtual_feature_ranges(self) -> list[tuple[int, int]]:
+    def get_virtual_feature_modules(self) -> list[tuple[Any, int]]:
         """
         This method returns the feature ranges for the virtual factors of the
         underlying feature blocks. This is useful to know during initialization,
@@ -46,10 +48,8 @@ class FeatureSet:
         offset = 0
         for feature in self.features:
             if feature.num_virtual_features:
-                ranges.append(
-                    (offset + feature.num_real_features, offset + feature.num_features)
-                )
-            offset += feature.num_features
+                ranges.append((feature.virtual_weight_module_type, offset))
+            offset += feature.num_real_features
 
         return ranges
 

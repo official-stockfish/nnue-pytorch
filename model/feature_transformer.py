@@ -1,9 +1,12 @@
+from dataclasses import dataclass
 import math
 
 import torch
 from torch import nn
 from torch import autograd
 import cupy as cp
+
+from .features import FeatureSet
 
 
 def _find_nearest_divisor(value, target):
@@ -575,26 +578,40 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
 
 
 class BaseFeatureTransformerSlice(nn.Module):
-    def __init__(self, num_inputs, num_outputs):
+    def __init__(self, feature_set: FeatureSet, num_outputs):
         super().__init__()
-        self.num_inputs = num_inputs
+        self.num_inputs = feature_set.num_real_features
         self.num_outputs = num_outputs
 
-        sigma = math.sqrt(1 / num_inputs)
+        sigma = math.sqrt(1 / feature_set.num_features)
 
         self.weight = nn.Parameter(
-            torch.rand(num_inputs, num_outputs, dtype=torch.float32) * (2 * sigma)
+            torch.rand(feature_set.num_real_features, num_outputs, dtype=torch.float32)
+            * (2 * sigma)
             - sigma
         )
         self.bias = nn.Parameter(
             torch.rand(num_outputs, dtype=torch.float32) * (2 * sigma) - sigma
         )
 
+        self.virtual_weights = nn.ParameterList()
+
+        for module, offset in feature_set.get_virtual_feature_modules():
+            self.virtual_weights.append(module(num_outputs, offset))
+
+    def get_coalesced_weights(self) -> torch.Tensor:
+        coalesced_weight = self.weight.clone()
+
+        for virtual_weight in self.virtual_weights:
+            virtual_weight.apply_to(coalesced_weight)
+
+        return coalesced_weight
+
 
 class FeatureTransformerSlice(BaseFeatureTransformerSlice):
     def forward(self, feature_indices, feature_values):
         return FeatureTransformerSliceFunction.apply(
-            feature_indices, feature_values, self.weight, self.bias
+            feature_indices, feature_values, self.get_coalesced_weights(), self.bias
         )
 
 
@@ -607,7 +624,7 @@ class DoubleFeatureTransformerSlice(BaseFeatureTransformerSlice):
             feature_values_0,
             feature_indices_1,
             feature_values_1,
-            self.weight,
+            self.get_coalesced_weights(),
             self.bias,
         )
 

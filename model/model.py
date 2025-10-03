@@ -174,7 +174,7 @@ class NNUEModel(nn.Module):
         self.num_ls_buckets = num_ls_buckets
 
         self.input = DoubleFeatureTransformerSlice(
-            feature_set.num_features, self.L1 + self.num_psqt_buckets
+            feature_set, self.L1 + self.num_psqt_buckets
         )
         self.feature_set = feature_set
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
@@ -185,19 +185,7 @@ class NNUEModel(nn.Module):
         self._init_layers()
 
     def _init_layers(self):
-        self._zero_virtual_feature_weights()
         self._init_psqt()
-
-    def _zero_virtual_feature_weights(self):
-        """
-        We zero all virtual feature weights because there's not need for them
-        to be initialized; they only aid the training of correlated features.
-        """
-        weights = self.input.weight
-        with torch.no_grad():
-            for a, b in self.feature_set.get_virtual_feature_ranges():
-                weights[a:b, :] = 0.0
-        self.input.weight = nn.Parameter(weights)
 
     def _init_psqt(self):
         input_weights = self.input.weight
@@ -207,7 +195,7 @@ class NNUEModel(nn.Module):
 
         with torch.no_grad():
             initial_values = self.feature_set.get_initial_psqt_features()
-            assert len(initial_values) == self.feature_set.num_features
+            assert len(initial_values) == self.feature_set.num_real_features
 
             new_weights = (
                 torch.tensor(
