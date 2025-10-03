@@ -26,12 +26,8 @@ class StackedLinear(nn.Module):
         init_weight = self.linear.weight[0 : self.out_features, :]
         init_bias = self.linear.bias[0 : self.out_features]
 
-        for i in range(1, self.count):
-            begin = i * self.out_features
-            end = (i + 1) * self.out_features
-
-            self.linear.weight[begin:end, :] = init_weight
-            self.linear.bias[begin:end] = init_bias
+        self.linear.weight.copy_(init_weight.repeat(self.count, 1))
+        self.linear.bias.copy_(init_bias.repeat(self.count))
 
     def forward(self, x: Tensor, ls_indices: Tensor) -> Tensor:
         stacked_output = self.linear(x)
