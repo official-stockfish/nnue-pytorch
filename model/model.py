@@ -185,19 +185,7 @@ class NNUEModel(nn.Module):
         self._init_layers()
 
     def _init_layers(self):
-        self._zero_virtual_feature_weights()
         self._init_psqt()
-
-    def _zero_virtual_feature_weights(self):
-        """
-        We zero all virtual feature weights because there's not need for them
-        to be initialized; they only aid the training of correlated features.
-        """
-        weights = self.input.weight
-        with torch.no_grad():
-            for a, b in self.feature_set.get_virtual_feature_ranges():
-                weights[a:b, :] = 0.0
-        self.input.weight = nn.Parameter(weights)
 
     def _init_psqt(self):
         input_weights = self.input.weight

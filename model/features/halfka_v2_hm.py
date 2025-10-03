@@ -1,6 +1,8 @@
 from collections import OrderedDict
 
 import chess
+import torch
+from torch import nn
 
 from .feature_block import FeatureBlock
 
@@ -82,6 +84,37 @@ class Features(FeatureBlock):
         return halfka_psqts()
 
 
+class VirtualWeights(nn.Module):
+    offset: torch.Tensor
+    weight: nn.Parameter
+
+    def __init__(self, num_outputs, offset):
+        super().__init__()
+
+        self.register_buffer("offset", torch.tensor(offset, dtype=torch.int64))
+        self.weight = nn.Parameter(
+            torch.zeros(NUM_PLANES_VIRTUAL, num_outputs, dtype=torch.float32)
+        )
+
+    def apply_to(self, target: torch.Tensor) -> None:
+        for i in range(NUM_SQ // 2):
+            begin = self.offset.item() + NUM_PLANES_REAL * i
+            end_pieces = self.offset.item() + NUM_PLANES_REAL * (i + 1) - NUM_SQ
+            end = self.offset.item() + NUM_PLANES_REAL * (i + 1)
+
+            # Merge non-king pieces
+            target[begin:end_pieces] += self.weight[: (NUM_PT_REAL - 1) * NUM_SQ]
+
+            # Extract weights for other king
+            merged_king = self.weight[NUM_PT_REAL * NUM_SQ, NUM_PT_VIRTUAL * NUM_SQ]
+
+            # Patch in our king's weight at point
+            merged_king[i] = self.weight[i + (NUM_PT_REAL - 1) * NUM_SQ]
+
+            # Merge in king weights
+            target[end_pieces:end] += merged_king
+
+
 class FactorizedFeatures(FeatureBlock):
     def __init__(self):
         super().__init__(
@@ -89,6 +122,7 @@ class FactorizedFeatures(FeatureBlock):
             0x7F234CB8,
             OrderedDict([("HalfKAv2_hm", NUM_INPUTS), ("A", NUM_PLANES_VIRTUAL)]),
         )
+        self.virtual_weight_module_type = VirtualWeights
 
     def get_active_features(self, board: chess.Board):
         raise Exception(

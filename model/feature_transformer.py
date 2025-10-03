@@ -577,36 +577,6 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
         return None, None, None, None, weight_grad, bias_grad
 
 
-@dataclass
-class VirtualFeaturePosition:
-    offset: int
-    count: int
-
-
-class VirtualWeights(nn.Module):
-    offset: torch.Tensor
-    count: torch.Tensor
-    weight: nn.Parameter
-
-    def __init__(self, length, num_outputs, offset, count):
-        super().__init__()
-
-        self.register_buffer("offset", torch.tensor(offset, dtype=torch.int64))
-        self.register_buffer("count", torch.tensor(count, dtype=torch.int64))
-        self.weight = nn.Parameter(
-            torch.zeros(length, num_outputs, dtype=torch.float32)
-        )
-
-    def apply_to(self, target: torch.Tensor) -> None:
-        count = self.count.item()
-        assert isinstance(count, int)
-
-        begin = self.offset.item()
-        end = self.offset.item() + self.count.item() * self.weight.shape[0]
-
-        target[begin:end] += self.weight.repeat(count, 1)
-
-
 class BaseFeatureTransformerSlice(nn.Module):
     def __init__(self, feature_set: FeatureSet, num_outputs):
         super().__init__()
@@ -626,11 +596,8 @@ class BaseFeatureTransformerSlice(nn.Module):
 
         self.virtual_weights = nn.ParameterList()
 
-        for length, offset, span in feature_set.get_virtual_feature_ranges():
-            assert length % span == 0
-            self.virtual_weights.append(
-                VirtualWeights(length, num_outputs, offset, span // length)
-            )
+        for module, offset in feature_set.get_virtual_feature_modules():
+            self.virtual_weights.append(module(offset))
 
     def get_coalesced_weights(self) -> torch.Tensor:
         coalesced_weight = self.weight.clone()
