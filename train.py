@@ -395,7 +395,13 @@ def main():
             quantize_config=M.QuantizationConfig(),
         )
     else:
-        nnue = torch.load(args.resume_from_model, weights_only=False)
+        assert os.path.exists(args.resume_from_model)
+        try:
+            nnue = torch.load(args.resume_from_model, weights_only=False)
+        except ModuleNotFoundError as e:
+            raise RuntimeError(
+                f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
+            )
         nnue.model.set_feature_set(feature_set)
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
