@@ -848,8 +848,6 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
                 return tot;
             }();
 
-            static thread_local std::mt19937 gen(std::random_device{}());
-
             // keep stats on passing pieces
             static thread_local double alpha = 1;
             static thread_local double piece_count_history_all[33] = {0};
