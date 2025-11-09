@@ -1,7 +1,10 @@
 import torch
 from torch import autograd
 
-from .kernel import make_feature_transformer_slice_forward_kernel, make_feature_transformer_slice_backward_kernel
+from .kernel import (
+    make_feature_transformer_slice_forward_kernel,
+    make_feature_transformer_slice_backward_kernel,
+)
 
 
 class FeatureTransformerSliceFunction(autograd.Function):
@@ -261,4 +264,3 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
         )
 
         return None, None, None, None, weight_grad, bias_grad
-

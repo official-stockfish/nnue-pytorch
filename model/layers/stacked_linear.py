@@ -27,7 +27,9 @@ class StackedLinear(nn.Module):
 
         return self.select_output(stacked_output, ls_indices)
 
-    def select_output(self, stacked_output: torch.Tensor, ls_indices: torch.Tensor) -> torch.Tensor:
+    def select_output(
+        self, stacked_output: torch.Tensor, ls_indices: torch.Tensor
+    ) -> torch.Tensor:
         reshaped_output = stacked_output.reshape(-1, self.out_features)
 
         idx_offset = torch.arange(

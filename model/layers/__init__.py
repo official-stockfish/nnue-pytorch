@@ -1,4 +1,8 @@
-from .feature_transformer import BaseFeatureTransformerSlice, DoubleFeatureTransformerSlice, FeatureTransformerSlice
+from .feature_transformer import (
+    BaseFeatureTransformerSlice,
+    DoubleFeatureTransformerSlice,
+    FeatureTransformerSlice,
+)
 from .layer_stacks import LayerStacks
 
 __all__ = [

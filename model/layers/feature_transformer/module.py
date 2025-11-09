@@ -3,7 +3,10 @@ import math
 import torch
 from torch import nn
 
-from .functions import FeatureTransformerSliceFunction, DoubleFeatureTransformerSliceFunction
+from .functions import (
+    FeatureTransformerSliceFunction,
+    DoubleFeatureTransformerSliceFunction,
+)
 
 
 class BaseFeatureTransformerSlice(nn.Module):
