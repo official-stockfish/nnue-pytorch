@@ -1,158 +1,10 @@
-from typing import Generator
-
 import torch
-from torch import nn, Tensor
-import torch.nn.functional as F
+from torch import nn
 
 from .config import ModelConfig
-from .feature_transformer import DoubleFeatureTransformerSlice
 from .features import FeatureSet
+from .layers import DoubleFeatureTransformerSlice, LayerStacks
 from .quantize import QuantizationConfig, QuantizationManager
-
-
-class StackedLinear(nn.Module):
-    def __init__(self, in_features: int, out_features: int, count: int):
-        super().__init__()
-
-        self.in_features = in_features
-        self.out_features = out_features
-        self.count = count
-        self.linear = nn.Linear(in_features, out_features * count)
-
-        self._init_uniformly()
-
-    @torch.no_grad()
-    def _init_uniformly(self) -> None:
-        init_weight = self.linear.weight[0 : self.out_features, :]
-        init_bias = self.linear.bias[0 : self.out_features]
-
-        self.linear.weight.copy_(init_weight.repeat(self.count, 1))
-        self.linear.bias.copy_(init_bias.repeat(self.count))
-
-    def forward(self, x: Tensor, ls_indices: Tensor) -> Tensor:
-        stacked_output = self.linear(x)
-
-        return self.select_output(stacked_output, ls_indices)
-
-    def select_output(self, stacked_output: Tensor, ls_indices: Tensor) -> Tensor:
-        reshaped_output = stacked_output.reshape(-1, self.out_features)
-
-        idx_offset = torch.arange(
-            0,
-            ls_indices.shape[0] * self.count,
-            self.count,
-            device=stacked_output.device,
-        )
-        indices = ls_indices.flatten() + idx_offset
-
-        selected_output = reshaped_output[indices]
-
-        return selected_output
-
-    @torch.no_grad()
-    def at_index(self, index: int) -> nn.Linear:
-        layer = nn.Linear(self.in_features, self.out_features)
-
-        begin = index * self.out_features
-        end = (index + 1) * self.out_features
-
-        layer.weight.copy_(self.linear.weight[begin:end, :])
-        layer.bias.copy_(self.linear.bias[begin:end])
-
-        return layer
-
-
-class FactorizedStackedLinear(StackedLinear):
-    def __init__(self, in_features: int, out_features: int, count: int):
-        super().__init__(in_features, out_features, count)
-
-        self.factorized_linear = nn.Linear(in_features, out_features)
-
-        with torch.no_grad():
-            self.factorized_linear.weight.zero_()
-            self.factorized_linear.bias.zero_()
-
-    def forward(self, x: Tensor, ls_indices: Tensor) -> Tensor:
-        merged_weight = self.linear.weight + self.factorized_linear.weight.repeat(
-            self.count, 1
-        )
-        merged_bias = self.linear.bias + self.factorized_linear.bias.repeat(self.count)
-
-        stacked_output = F.linear(x, merged_weight, merged_bias)
-
-        return self.select_output(stacked_output, ls_indices)
-
-    @torch.no_grad()
-    def at_index(self, index: int) -> nn.Linear:
-        layer = super().at_index(index)
-
-        layer.weight.add_(self.factorized_linear.weight)
-        layer.bias.add_(self.factorized_linear.bias)
-
-        return layer
-
-    @torch.no_grad()
-    def coalesce_weights(self) -> None:
-        for i in range(self.count):
-            begin = i * self.out_features
-            end = (i + 1) * self.out_features
-
-            self.linear.weight[begin:end, :].add_(self.factorized_linear.weight)
-            self.linear.bias[begin:end].add_(self.factorized_linear.bias)
-
-        self.factorized_linear.weight.zero_()
-        self.factorized_linear.bias.zero_()
-
-
-class LayerStacks(nn.Module):
-    def __init__(self, count: int, config: ModelConfig):
-        super().__init__()
-
-        self.count = count
-        self.L1 = config.L1
-        self.L2 = config.L2
-        self.L3 = config.L3
-
-        # Factorizer only for the first layer because later
-        # there's a non-linearity and factorization breaks.
-        # This is by design. The weights in the further layers should be
-        # able to diverge a lot.
-        self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2 + 1, count)
-        self.l2 = StackedLinear(self.L2 * 2, self.L3, count)
-        self.output = StackedLinear(self.L3, 1, count)
-
-        with torch.no_grad():
-            self.output.linear.bias.zero_()
-
-    def forward(self, x: Tensor, ls_indices: Tensor):
-        l1c_ = self.l1(x, ls_indices)
-        l1x_, l1x_out = l1c_.split(self.L2, dim=1)
-        # multiply sqr crelu result by (127/128) to match quantized version
-        l1x_ = torch.clamp(
-            torch.cat([torch.pow(l1x_, 2.0) * (127 / 128), l1x_], dim=1), 0.0, 1.0
-        )
-
-        l2c_ = self.l2(l1x_, ls_indices)
-        l2x_ = torch.clamp(l2c_, 0.0, 1.0)
-
-        l3c_ = self.output(l2x_, ls_indices)
-        l3x_ = l3c_ + l1x_out
-
-        return l3x_
-
-    @torch.no_grad()
-    def get_coalesced_layer_stacks(
-        self,
-    ) -> Generator[tuple[nn.Linear, nn.Linear, nn.Linear], None, None]:
-        # During training the buckets are represented by a single, wider, layer.
-        # This representation needs to be transformed into individual layers
-        # for the serializer, because the buckets are interpreted as separate layers.
-        for i in range(self.count):
-            yield self.l1.at_index(i), self.l2.at_index(i), self.output.at_index(i)
-
-    @torch.no_grad()
-    def coalesce_layer_stacks_inplace(self) -> None:
-        self.l1.coalesce_weights()
 
 
 class NNUEModel(nn.Module):
@@ -315,14 +167,14 @@ class NNUEModel(nn.Module):
 
     def forward(
         self,
-        us: Tensor,
-        them: Tensor,
-        white_indices: Tensor,
-        white_values: Tensor,
-        black_indices: Tensor,
-        black_values: Tensor,
-        psqt_indices: Tensor,
-        layer_stack_indices: Tensor,
+        us: torch.Tensor,
+        them: torch.Tensor,
+        white_indices: torch.Tensor,
+        white_values: torch.Tensor,
+        black_indices: torch.Tensor,
+        black_values: torch.Tensor,
+        psqt_indices: torch.Tensor,
+        layer_stack_indices: torch.Tensor,
     ):
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
         w, wpsqt = torch.split(wp, self.L1, dim=1)

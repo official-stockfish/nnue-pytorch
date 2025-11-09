@@ -1,7 +1,7 @@
 import torch
 
 from ..features import FeatureSet
-from ..feature_transformer import BaseFeatureTransformerSlice
+from ..layers import BaseFeatureTransformerSlice
 
 
 def coalesce_ft_weights(

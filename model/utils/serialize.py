@@ -12,7 +12,7 @@ from torch import nn
 from .coalesce_weights import coalesce_ft_weights
 from ..config import ModelConfig
 from ..features import FeatureSet
-from ..feature_transformer import BaseFeatureTransformerSlice
+from ..layers import BaseFeatureTransformerSlice
 from ..model import NNUEModel
 from ..quantize import QuantizationConfig
 
