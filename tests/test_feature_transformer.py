@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.modules import DoubleFeatureTransformerSlice
 from model.modules.feature_transformer.functions import (
-    DoubleFeatureTransformerSliceFunction,
+    FeatureTransformerSliceFunction,
 )
 
 
@@ -58,15 +58,11 @@ def test():
     output01 = FeatureTransformerSliceFunctionEmulate(
         indices1.clone(), values1.clone(), weight0, bias0
     )
-    # output10 = FeatureTransformerSliceFunction.apply(indices0.clone().cuda(), values0.clone().cuda(), weight1.cuda(), bias1.cuda())
-    # output11 = FeatureTransformerSliceFunction.apply(indices1.clone().cuda(), values1.clone().cuda(), weight1.cuda(), bias1.cuda())
-    output10, output11 = DoubleFeatureTransformerSliceFunction.apply(
-        indices0.clone().cuda(),
-        values0.clone().cuda(),
-        indices1.clone().cuda(),
-        values1.clone().cuda(),
-        weight1.cuda(),
-        bias1.cuda(),
+    output10 = FeatureTransformerSliceFunction.apply(
+        indices0.clone().cuda(), values0.clone().cuda(), weight1.cuda(), bias1.cuda()
+    )
+    output11 = FeatureTransformerSliceFunction.apply(
+        indices1.clone().cuda(), values1.clone().cuda(), weight1.cuda(), bias1.cuda()
     )
 
     assert torch.max(torch.abs(output00.cpu() - output10.cpu())) < MAX_ERROR
