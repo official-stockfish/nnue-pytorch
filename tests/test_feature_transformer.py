@@ -7,7 +7,9 @@ import torch
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.modules import DoubleFeatureTransformerSlice
-from model.modules.feature_transformer.functions import DoubleFeatureTransformerSliceFunction
+from model.modules.feature_transformer.functions import (
+    DoubleFeatureTransformerSliceFunction,
+)
 
 
 def FeatureTransformerSliceFunctionEmulate(
@@ -27,6 +29,7 @@ def FeatureTransformerSliceFunctionEmulate(
 
     return torch.mm(inputs, weight) + bias
 
+
 def test():
     BATCH_SIZE = 16
     INPUT_SIZE = 10
@@ -35,14 +38,10 @@ def test():
     MAX_ERROR = 1e-4
 
     torch.manual_seed(0)
-    weight0 = torch.rand(
-        INPUT_SIZE, STRIDE, dtype=torch.float32, requires_grad=True
-    )
+    weight0 = torch.rand(INPUT_SIZE, STRIDE, dtype=torch.float32, requires_grad=True)
     bias0 = torch.rand(STRIDE, dtype=torch.float32, requires_grad=True)
     torch.manual_seed(0)
-    weight1 = torch.rand(
-        INPUT_SIZE, STRIDE, dtype=torch.float32, requires_grad=True
-    )
+    weight1 = torch.rand(INPUT_SIZE, STRIDE, dtype=torch.float32, requires_grad=True)
     bias1 = torch.rand(STRIDE, dtype=torch.float32, requires_grad=True)
     indices0 = (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES) * INPUT_SIZE).to(
         dtype=torch.int32
@@ -78,6 +77,7 @@ def test():
     assert torch.max(bias0.grad.cpu() - bias1.grad.cpu()) < MAX_ERROR
     print("Tests passed.")
 
+
 def bench():
     INPUT_SIZE = 40960
     BATCH_SIZE = 8192
@@ -92,30 +92,22 @@ def bench():
                 (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4) * INPUT_SIZE),
                 dim=1,
             )[0].to(dtype=torch.int32),
-            torch.full(
-                (BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32
-            ),
+            torch.full((BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32),
         ],
         dim=1,
     ).cuda()
-    values0 = torch.rand(
-        BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32
-    ).cuda()
+    values0 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
     indices1 = torch.cat(
         [
             torch.sort(
                 (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4)) * INPUT_SIZE,
                 dim=1,
             )[0].to(dtype=torch.int32),
-            torch.full(
-                (BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32
-            ),
+            torch.full((BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32),
         ],
         dim=1,
     ).cuda()
-    values1 = torch.rand(
-        BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32
-    ).cuda()
+    values1 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
 
     output0, output1 = layer(indices0, values0, indices1, values1)
 
@@ -137,6 +129,7 @@ def bench():
     #    print(param.grad)
 
     print("{} pos/s".format((ITERS * BATCH_SIZE) / (end - start)))
+
 
 if __name__ == "__main__":
     test()
