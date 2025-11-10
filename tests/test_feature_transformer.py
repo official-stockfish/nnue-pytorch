@@ -69,12 +69,12 @@ def test():
         bias1.cuda(),
     )
 
-    assert torch.max(output00.cpu() - output10.cpu()) < MAX_ERROR
-    assert torch.max(output01.cpu() - output11.cpu()) < MAX_ERROR
+    assert torch.max(torch.abs(output00.cpu() - output10.cpu())) < MAX_ERROR
+    assert torch.max(torch.abs(output01.cpu() - output11.cpu())) < MAX_ERROR
     (output00 - output01).sum().backward()
     (output10 - output11).sum().backward()
-    assert torch.max(weight0.grad.cpu() - weight1.grad.cpu()) < MAX_ERROR
-    assert torch.max(bias0.grad.cpu() - bias1.grad.cpu()) < MAX_ERROR
+    assert torch.max(torch.abs(weight0.grad.cpu() - weight1.grad.cpu())) < MAX_ERROR
+    assert torch.max(torch.abs(bias0.grad.cpu() - bias1.grad.cpu())) < MAX_ERROR
     print("Tests passed.")
 
 
@@ -85,31 +85,24 @@ def bench():
     STRIDE = 264
     MAX_ACTIVE_FEATURES = 64
 
-    layer = DoubleFeatureTransformerSlice(INPUT_SIZE, STRIDE).cuda()
-    indices0 = torch.cat(
-        [
-            torch.sort(
-                (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4) * INPUT_SIZE),
+    def get_fake_indices():
+        return torch.cat(
+                [
+                    torch.sort(
+                        (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4)) * INPUT_SIZE,
+                        dim=1,
+                    )[0].to(dtype=torch.int32),
+                    torch.full((BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32),
+                ],
                 dim=1,
-            )[0].to(dtype=torch.int32),
-            torch.full((BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32),
-        ],
-        dim=1,
-    ).cuda()
-    values0 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
-    indices1 = torch.cat(
-        [
-            torch.sort(
-                (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4)) * INPUT_SIZE,
-                dim=1,
-            )[0].to(dtype=torch.int32),
-            torch.full((BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32),
-        ],
-        dim=1,
-    ).cuda()
-    values1 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
+            ).cuda()
 
-    output0, output1 = layer(indices0, values0, indices1, values1)
+
+    layer = DoubleFeatureTransformerSlice(INPUT_SIZE, STRIDE).cuda()
+    indices0 = get_fake_indices()
+    values0 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
+    indices1 = get_fake_indices()
+    values1 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
 
     start = time.time()
 
@@ -124,9 +117,6 @@ def bench():
         torch.cuda.synchronize()
 
     end = time.time()
-
-    # for param in layer.parameters():
-    #    print(param.grad)
 
     print("{} pos/s".format((ITERS * BATCH_SIZE) / (end - start)))
 

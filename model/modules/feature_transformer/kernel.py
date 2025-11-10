@@ -178,7 +178,7 @@ _feature_transformer_slice_backward_kernel_cache = dict()
 
 @torch.compiler.disable(recursive=False)
 def make_feature_transformer_slice_backward_kernel(max_active_features, output_size):
-    """'
+    """
     @param: max_active_features
         The maximum number of features that are active
         (non-zero) for a single position. This value determines
