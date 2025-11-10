@@ -3,7 +3,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .features import FeatureSet
-from .layers import DoubleFeatureTransformerSlice, LayerStacks
+from .modules import DoubleFeatureTransformerSlice, LayerStacks
 from .quantize import QuantizationConfig, QuantizationManager
 
 
