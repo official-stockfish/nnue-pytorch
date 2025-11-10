@@ -30,9 +30,9 @@ class LayerStacks(nn.Module):
     def forward(self, x: torch.Tensor, ls_indices: torch.Tensor):
         l1c_ = self.l1(x, ls_indices)
         l1x_, l1x_out = l1c_.split(self.L2, dim=1)
-        # multiply sqr crelu result by (255/256) to match quantized version
+        # multiply sqr crelu result by (127/128) to match quantized version
         l1x_ = torch.clamp(
-            torch.cat([torch.pow(l1x_, 2.0) * (255 / 256), l1x_], dim=1), 0.0, 1.0
+            torch.cat([torch.pow(l1x_, 2.0) * (127 / 128), l1x_], dim=1), 0.0, 1.0
         )
 
         l2c_ = self.l2(l1x_, ls_indices)
