@@ -3,10 +3,7 @@ import math
 import torch
 from torch import nn
 
-from .functions import (
-    FeatureTransformerSliceFunction,
-    DoubleFeatureTransformerSliceFunction,
-)
+from .functions import FeatureTransformerSliceFunction
 
 
 class BaseFeatureTransformerSlice(nn.Module):
@@ -37,11 +34,17 @@ class DoubleFeatureTransformerSlice(BaseFeatureTransformerSlice):
     def forward(
         self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
     ):
-        return DoubleFeatureTransformerSliceFunction.apply(
-            feature_indices_0,
-            feature_values_0,
-            feature_indices_1,
-            feature_values_1,
-            self.weight,
-            self.bias,
+        return (
+            FeatureTransformerSliceFunction.apply(
+                feature_indices_0,
+                feature_values_0,
+                self.weight,
+                self.bias,
+            ),
+            FeatureTransformerSliceFunction.apply(
+                feature_indices_1,
+                feature_values_1,
+                self.weight,
+                self.bias,
+            ),
         )

@@ -87,16 +87,17 @@ def bench():
 
     def get_fake_indices():
         return torch.cat(
-                [
-                    torch.sort(
-                        (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4)) * INPUT_SIZE,
-                        dim=1,
-                    )[0].to(dtype=torch.int32),
-                    torch.full((BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32),
-                ],
-                dim=1,
-            ).cuda()
-
+            [
+                torch.sort(
+                    (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4)) * INPUT_SIZE,
+                    dim=1,
+                )[0].to(dtype=torch.int32),
+                torch.full(
+                    (BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32
+                ),
+            ],
+            dim=1,
+        ).cuda()
 
     layer = DoubleFeatureTransformerSlice(INPUT_SIZE, STRIDE).cuda()
     indices0 = get_fake_indices()
