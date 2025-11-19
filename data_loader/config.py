@@ -12,6 +12,12 @@ class DataloaderSkipConfig:
     param_index: int = 0
 
 
+@dataclass
+class DataloaderDDPConfig:
+    rank: int = 0
+    world_size: int = 1
+
+
 class CDataloaderSkipConfig(ctypes.Structure):
     _fields_ = [
         ("filtered", ctypes.c_bool),
@@ -30,4 +36,17 @@ class CDataloaderSkipConfig(ctypes.Structure):
             early_fen_skipping=config.early_fen_skipping,
             simple_eval_skipping=config.simple_eval_skipping,
             param_index=config.param_index,
+        )
+
+
+class CDataloaderDDPConfig(ctypes.Structure):
+    _fields_ = [
+        ("rank", ctypes.c_int),
+        ("world_size", ctypes.c_int),
+    ]
+
+    def __init__(self, config: DataloaderDDPConfig):
+        super().__init__(
+            rank=config.rank,
+            world_size=config.world_size,
         )
