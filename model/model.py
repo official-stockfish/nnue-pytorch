@@ -117,7 +117,7 @@ class NNUEModel(nn.Module):
                     p.data.copy_(p_data_fp32)
 
     def clip_threat_weights(self):
-        if self.feature_set.name[:12] == "Full_Threats":
+        if self.feature_set.name.startswith("Full_Threats"):
             p = self.input.weight[0:79856]
             p_data_fp32 = p.data
             min_weight = -128 / 255

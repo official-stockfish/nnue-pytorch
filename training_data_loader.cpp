@@ -1352,7 +1352,7 @@ int main(int argc, char** argv)
         .simple_eval_skipping = 0,
         .param_index = 0
     };
-    auto stream = create_sparse_batch_stream("Full_Threats", concurrency, file_count, files, batch_size, cyclic, config);
+    auto stream = create_sparse_batch_stream("Full_Threats^", concurrency, file_count, files, batch_size, cyclic, config);
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
