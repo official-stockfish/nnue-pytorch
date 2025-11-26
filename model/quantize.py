@@ -22,6 +22,7 @@ class QuantizationConfig:
     ft_quantized_one: float = 255.0
     hidden_quantized_one: float = 127.0
 
+
 class QuantizationManager:
     def __init__(self, config: QuantizationConfig):
         self.nnue2score = config.nnue2score
@@ -32,7 +33,9 @@ class QuantizationManager:
 
         self.max_hidden_weight = config.hidden_quantized_one / self.weight_scale_hidden
         self.max_threat_weight = config.ft_quantized_one / 512
-        self.max_out_weight = (config.hidden_quantized_one * self.hidden_quantized_one) / (self.nnue2score * self.weight_scale_out)
+        self.max_out_weight = (
+            config.hidden_quantized_one * self.hidden_quantized_one
+        ) / (self.nnue2score * self.weight_scale_out)
 
     def generate_weight_clipping_config(
         self, model: "NNUEModel"
@@ -95,7 +98,9 @@ class QuantizationManager:
         callback: Callable = lambda *args, **kwargs: None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         kWeightScaleHidden = self.weight_scale_hidden
-        kWeightScaleOut = self.nnue2score * self.weight_scale_out / self.hidden_quantized_one
+        kWeightScaleOut = (
+            self.nnue2score * self.weight_scale_out / self.hidden_quantized_one
+        )
         kWeightScale = kWeightScaleOut if output_layer else kWeightScaleHidden
         kBiasScaleOut = self.weight_scale_out * self.nnue2score
         kBiasScaleHidden = self.weight_scale_hidden * self.hidden_quantized_one
@@ -128,7 +133,9 @@ class QuantizationManager:
         output_layer: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         kWeightScaleHidden = self.weight_scale_hidden
-        kWeightScaleOut = self.nnue2score * self.weight_scale_out / self.hidden_quantized_one
+        kWeightScaleOut = (
+            self.nnue2score * self.weight_scale_out / self.hidden_quantized_one
+        )
         kWeightScale = kWeightScaleOut if output_layer else kWeightScaleHidden
         kBiasScaleOut = self.weight_scale_out * self.nnue2score
         kBiasScaleHidden = self.weight_scale_hidden * self.hidden_quantized_one

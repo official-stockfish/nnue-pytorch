@@ -13,7 +13,13 @@ of feature block classes in that module.
 """
 from . import halfkp, halfka, halfka_v2, halfka_v2_hm, full_threats
 
-_feature_modules: list[types.ModuleType] = [halfkp, halfka, halfka_v2, halfka_v2_hm, full_threats]
+_feature_modules: list[types.ModuleType] = [
+    halfkp,
+    halfka,
+    halfka_v2,
+    halfka_v2_hm,
+    full_threats,
+]
 
 _feature_blocks_by_name: dict[str, FeatureBlock] = dict()
 

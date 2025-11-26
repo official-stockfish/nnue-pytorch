@@ -115,7 +115,7 @@ class NNUEModel(nn.Module):
                         else:
                             raise Exception("Not supported.")
                     p.data.copy_(p_data_fp32)
-    
+
     def clip_threat_weights(self):
         if self.feature_set.name[:12] == "Full_Threats":
             p = self.input.weight[0:79856]

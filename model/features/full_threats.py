@@ -8,7 +8,7 @@ SQUARE_NB = 64
 PIECE_NB = 12
 COLOR_NB = 2
 PIECE_TYPE_NB = 8
-MAX_ACTIVE_FEATURES = 128+32
+MAX_ACTIVE_FEATURES = 128 + 32
 """
 OrientTBL = [
 [ 
@@ -63,7 +63,7 @@ map = [
     [0, 1, 2, 3, -1, 4],
     [0, 1, 2, 3, -1, 4],
     [0, 1, 2, 3, 4, 5],
-    [0, 1, 2, 3, -1, -1]
+    [0, 1, 2, 3, -1, -1],
 ]
 
 NUM_SQ = 64
@@ -162,7 +162,7 @@ class FactorizedFeatures(FeatureBlock):
             raise Exception("Feature must be real")
         if idx < 79856:
             return [idx]
-        
+
         a_idx = (idx - 79856) % NUM_PLANES_REAL
         k_idx = (idx - 79856) // NUM_PLANES_REAL
 
