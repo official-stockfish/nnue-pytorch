@@ -115,6 +115,14 @@ class NNUEModel(nn.Module):
                         else:
                             raise Exception("Not supported.")
                     p.data.copy_(p_data_fp32)
+    
+    def clip_threat_weights(self):
+        p = self.input.weight[0:79856]
+        p_data_fp32 = p.data
+        min_weight = -128 / 255
+        max_weight = 127 / 255
+        p_data_fp32.clamp_(min_weight, max_weight)
+        p.data.copy_(p_data_fp32)
 
     def set_feature_set(self, new_feature_set: FeatureSet):
         """
