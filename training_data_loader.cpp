@@ -347,20 +347,25 @@ struct HalfKAv2_hmFactorized {
 };
 
 constexpr int numvalidtargets[12] = {6, 6, 12, 12, 10, 10, 10, 10, 12, 12, 8, 8};
-int threatoffsets[12][66];
-void __attribute__ ((constructor)) init_threat_offsets() {
+
+constexpr auto threatoffsets = [](){
+    std::array<std::array<int, 66>, 12> t{};
+
+    constexpr auto pseudo_attacks = bb::detail::generatePseudoAttacks();
     int pieceoffset = 0;
+
     Piece piecetbl[12] = {whitePawn, blackPawn, whiteKnight, blackKnight, whiteBishop,
     blackBishop, whiteRook, blackRook, whiteQueen, blackQueen, whiteKing, blackKing};
+
     for (int c = 0; c < 2; c++) {
         for (int pt = 0; pt < 6; pt++) {
             int piece = 2 * pt + c;
-            threatoffsets[piece][65] = pieceoffset;
+            t[piece][65] = pieceoffset;
             int squareoffset = 0;
             for (int from = (int)a1; from <= (int)h8; from++) {
-                threatoffsets[piece][from] = squareoffset;
+                t[piece][from] = squareoffset;
                 if (piecetbl[piece].type() != PieceType::Pawn) {
-                    Bitboard attacks = bb::detail::pseudoAttacks()[piecetbl[piece].type()][Square(from)];
+                    Bitboard attacks = pseudo_attacks[piecetbl[piece].type()][Square(from)];
                     squareoffset += attacks.count();
                 }
                 else if (from >= (int)a2 && from <= (int)h7) {
@@ -368,11 +373,13 @@ void __attribute__ ((constructor)) init_threat_offsets() {
                     squareoffset += attacks.count();
                 }
             }
-            threatoffsets[piece][64] = squareoffset;
+            t[piece][64] = squareoffset;
             pieceoffset += numvalidtargets[piece]*squareoffset;
         }
     }
-}
+
+    return t;
+}();
 
 struct Full_Threats {
     static constexpr int SQUARE_NB = 64;
@@ -1328,7 +1335,6 @@ long long get_rchar_self() {
 
 int main(int argc, char** argv)
 {
-    init_threat_offsets();
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " file1 [file2 ...]\n";
         return 1;

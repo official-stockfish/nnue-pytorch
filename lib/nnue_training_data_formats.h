@@ -2553,8 +2553,11 @@ namespace chess
             return bb;
         }
 
-        [[nodiscard]] inline int count() const
+        [[nodiscard]] constexpr int count() const
         {
+            if (std::is_constant_evaluated())
+                return intrin::popcount_constexpr(m_squares);
+
             return static_cast<int>(intrin::popcount(m_squares));
         }
 
@@ -2977,7 +2980,7 @@ namespace chess
             }
         }
 
-        [[nodiscard]] inline Bitboard pawnAttacks(Bitboard pawns, Color color);
+        [[nodiscard]] constexpr Bitboard pawnAttacks(Bitboard pawns, Color color);
 
         [[nodiscard]] inline Bitboard westPawnAttacks(Bitboard pawns, Color color);
 
@@ -3032,13 +3035,13 @@ namespace chess
                 offsets[West]
             };
 
-            [[nodiscard]] static EnumArray<Square, Bitboard> generatePseudoAttacks_Pawn()
+            [[nodiscard]] static constexpr EnumArray<Square, Bitboard> generatePseudoAttacks_Pawn()
             {
                 // pseudo attacks don't make sense for pawns
                 return {};
             }
 
-            [[nodiscard]] static EnumArray<Square, Bitboard> generatePseudoAttacks_Knight()
+            [[nodiscard]] static constexpr EnumArray<Square, Bitboard> generatePseudoAttacks_Knight()
             {
                 EnumArray<Square, Bitboard> bbs{};
 
@@ -3061,7 +3064,7 @@ namespace chess
                 return bbs;
             }
 
-            [[nodiscard]] static Bitboard generateSliderPseudoAttacks(const std::array<Offset, 4> & offsets_, Square fromSq)
+            [[nodiscard]] static constexpr Bitboard generateSliderPseudoAttacks(const std::array<Offset, 4> & offsets_, Square fromSq)
             {
                 assert(fromSq.isOk());
 
@@ -3087,7 +3090,7 @@ namespace chess
                 return bb;
             }
 
-            [[nodiscard]] static EnumArray<Square, Bitboard> generatePseudoAttacks_Bishop()
+            [[nodiscard]] static constexpr EnumArray<Square, Bitboard> generatePseudoAttacks_Bishop()
             {
                 EnumArray<Square, Bitboard> bbs{};
 
@@ -3099,7 +3102,7 @@ namespace chess
                 return bbs;
             }
 
-            [[nodiscard]] static EnumArray<Square, Bitboard> generatePseudoAttacks_Rook()
+            [[nodiscard]] static constexpr EnumArray<Square, Bitboard> generatePseudoAttacks_Rook()
             {
                 EnumArray<Square, Bitboard> bbs{};
 
@@ -3111,7 +3114,7 @@ namespace chess
                 return bbs;
             }
 
-            [[nodiscard]] static EnumArray<Square, Bitboard> generatePseudoAttacks_Queen()
+            [[nodiscard]] static constexpr EnumArray<Square, Bitboard> generatePseudoAttacks_Queen()
             {
                 EnumArray<Square, Bitboard> bbs{};
 
@@ -3125,7 +3128,7 @@ namespace chess
                 return bbs;
             }
 
-            [[nodiscard]] static EnumArray<Square, Bitboard> generatePseudoAttacks_King()
+            [[nodiscard]] static constexpr EnumArray<Square, Bitboard> generatePseudoAttacks_King()
             {
                 EnumArray<Square, Bitboard> bbs{};
 
@@ -3148,7 +3151,7 @@ namespace chess
                 return bbs;
             }
 
-            [[nodiscard]] static EnumArray2<PieceType, Square, Bitboard> generatePseudoAttacks()
+            [[nodiscard]] static constexpr EnumArray2<PieceType, Square, Bitboard> generatePseudoAttacks()
             {
                 return EnumArray2<PieceType, Square, Bitboard>{
                     generatePseudoAttacks_Pawn(),
@@ -3467,7 +3470,7 @@ namespace chess
             return detail::pseudoAttacks()[pt][sq];
         }
 
-        [[nodiscard]] inline Bitboard pawnAttacks(Bitboard pawns, Color color)
+        [[nodiscard]] constexpr Bitboard pawnAttacks(Bitboard pawns, Color color)
         {
             if (color == Color::White)
             {
