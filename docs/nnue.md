@@ -2861,6 +2861,28 @@ HalfKA feature set was briefly mentioned in this document as a brother of HalfKP
 
 Let's consider an example where the white king is on a1 and the black king on g1. The board will have to be mirrored horizontally for the white's perspective to put the king within the e..h files; from black's perspective, the king is already within the e..h files. At first sight it may appear that this creates discrepancies between the perspective in cases where the board is mirrored only for one perspective, but it works out remarkably well in practice - the strength difference is hardly measurable.
 
+### Full_Threats feature set.
+
+Full threat inputs models a subset of "AA" (i.e. pairs of "A" features), specifically the ones where the first piece attacks the second. For example, "white queen on d1 attacks black knight on h5" is encoded as "stm queen on d1 attacks nstm knight on h5" for white's perspective and "nstm queen on d8 attacks stm knight on h4" for black's perspective.
+
+Threat input features are also mirrored horizontally by perspective (the mirroring currently is to a..d files, a legacy of an initial design choice for ease of debugging). In practice, refreshes are uncommon, so their cost is negligible.
+
+Threat features alone are not sufficient for evaluation (how can you distinguish positions where there are no threats, for instance?) and hence function as an add-on to a feature set such as HalfKAv2_hm. One can think of "piece" features like HalfKAv2_hm as providing the foundation, while the "threat" features add many minor corrections.
+
+Since threat features have different refresh patterns (for instance, they do not need to be refreshed every king move, but only when one crosses the d-e files), they are accumulated separately. The two accumulators are combined at evaluation time.
+
+#### Deduplicating features
+
+Several threat features are redundant. For example, if a rook is attacking a queen, it is guaranteed that the queen will also be attacking the rook, and hence it is unnecessary to consider any feature of the form "rook attacks queen". Generalizing, we can remove all features where the attacking piece's attack set is a subset of the attacked piece's attack set (pb, pq, pk, bq, rq, kq). King-king threat features can never be legal, so we also remove them.
+
+If the two pieces are identical type, then one feature of the pair will also be redundant. In this case, we remove the feature where the numerical square (0 - 63) of the attacking piece is less than that of the attacked piece.
+
+Since evaluation is not called in check, attacks to a king are also redundant, though accounting for this has not gained in practice.
+
+#### I8 quantization for threat feature weights
+
+The number of active and changing threat features depends on the position, but is typically higher when more pieces (especially the queens) are on the board. In a typical midgame position, there might be 3-4x as many changing threat features as piece features, and memory bandwidth becomes a bottleneck for accumulation speed. We thus store threat features as i8 and convert them to i16 on the fly during accumulation. This process seems to increase speed much more on ARM architectures (+10%) compared to x86 (+5%). Because threat feature weights are typically not high in absolute value (see our earlier comment regarding the separation between threat and piece features), we can clip them during training with negligible loss in evaluation quality.
+
 ### A part of the feature transformer directly forwarded to the output.
 
 Normally the nets have a hard time learning high material imbalance, or even representing high evaluations at all. But we can help it with that. We already accumulate some 256 values for each piece on the board, does this ring a bell? What if we added one more and designated it to mean "PSQT"? That's what we will do. We will simply make the feature transformer weight row have 257 values, and use the last one as "PSQT". We can help it during training by initializing it to something that resembles good PSQT values (but remember to scale it according to quantization!). But we have two perspectives? What about that? Right, we do, but we can average them, like `(our - their) / 2` (keeping in mind that their must be negated). Handling it in the trainer is quite easy.
@@ -2959,11 +2981,21 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 ## Historical Stockfish evaluation network architectures
 
+### "SFNNv10" architecture
+
+Same as "SFNNv5" with Full_Threat input features added.
+
+2025-11-12 - *
+
+[Commit 8e5392d79a36aba5b997cf6fb590937e3e624e80](https://github.com/official-stockfish/Stockfish/commit/8e5392d79a36aba5b997cf6fb590937e3e624e80)
+
+Image coming soon!
+
 ### "SFNNv9" architecture
 
 Same as "SFNNv5" with L1 size increased to 3072.
 
-2024-04-01 - *
+2024-04-01 - 2025-11-12
 
 [Commit 0716b845fdef8a20102b07eaec074b8da8162523](https://github.com/official-stockfish/Stockfish/commit/0716b845fdef8a20102b07eaec074b8da8162523)
 
