@@ -116,6 +116,15 @@ class NNUEModel(nn.Module):
                             raise Exception("Not supported.")
                     p.data.copy_(p_data_fp32)
 
+    def clip_threat_weights(self):
+        if self.feature_set.name.startswith("Full_Threats"):
+            p = self.input.weight[0:79856]
+            p_data_fp32 = p.data
+            min_weight = -128 / 255
+            max_weight = 127 / 255
+            p_data_fp32.clamp_(min_weight, max_weight)
+            p.data.copy_(p_data_fp32)
+
     def set_feature_set(self, new_feature_set: FeatureSet):
         """
         This method attempts to convert the model from using the self.feature_set

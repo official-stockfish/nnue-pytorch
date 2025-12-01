@@ -456,10 +456,10 @@ def filter_fens(fens: list[str]) -> list[str]:
 
 def quantize_ft(model: NNUEModel) -> None:
     model.input.weight.data = model.input.weight.data.mul(
-        model.quantization.quantized_one
+        model.quantization.ft_quantized_one
     ).round()
     model.input.bias.data = model.input.bias.data.mul(
-        model.quantization.quantized_one
+        model.quantization.ft_quantized_one
     ).round()
 
 
@@ -478,13 +478,13 @@ def forward_ft(
     w, _ = torch.split(wp, model.L1, dim=1)
     b, _ = torch.split(bp, model.L1, dim=1)
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-    l0_ = torch.clamp(l0_, 0.0, 127.0)
+    l0_ = torch.clamp(l0_, 0.0, model.quantization.ft_quantized_one)
 
     l0_s = torch.split(l0_, model.L1 // 2, dim=1)
     l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
-    # We multiply by 127/128 because in the quantized network 1.0 is represented by 127
-    # and it's more efficient to divide by 128 instead.
-    l0_ = torch.cat(l0_s1, dim=1) * (1 / 128)
+    # We multiply by 255/512 because in the quantized network 1.0 is represented by 255
+    # and we want to scale to 1.0=127, but a shift is faster than a division (in inference)
+    l0_ = torch.cat(l0_s1, dim=1) * (1 / 512)
 
     return l0_.round()
 
