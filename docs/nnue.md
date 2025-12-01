@@ -2987,7 +2987,7 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 ### "SFNNv10" architecture
 
-Same as "SFNNv5" with Full_Threat input features added.
+Same as "SFNNv5" with Full_Threat input features added and the feature transformer quantized one changed to 255.
 
 2025-11-12 - *
 
