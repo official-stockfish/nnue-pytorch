@@ -1386,15 +1386,19 @@ int main(int argc, char** argv) {
         {
             double    sec   = (t1 - t0).count() / 1e9;
             long long bytes = get_rchar_self();
-            std::cout << "\rIter:   " << std::fixed << std::setw(8) << i
-                      << "       Time(s): " << std::fixed << std::setw(8) << std::setprecision(3)
-                      << sec << "       MPos/s:   " << std::fixed << std::setw(8)
-                      << std::setprecision(3) << i * batch_size / (sec * 1000 * 1000)
-                      << "       It/s:    " << std::fixed << std::setw(8) << std::setprecision(1)
-                      << i / sec << "       MB/s:    " << std::fixed << std::setw(8)
-                      << std::setprecision(1) << bytes / (sec * 1024 * 1024)
-                      << "       B/pos:  " << std::fixed << std::setw(8) << std::setprecision(1)
-                      << bytes / (i * batch_size) << std::flush;
+
+            double mpos = i * batch_size / (sec * 1000 * 1000);
+            double its  = i / sec;
+            double mbps = bytes / (sec * 1024 * 1024);
+            double bpos = bytes / (i * batch_size);
+
+            std::cout << "\rIter: " << std::setw(8) << i                                //
+                      << "   Time(s): " << std::setw(8) << std::setprecision(3) << sec  //
+                      << "   MPos/s: " << std::setw(8) << std::setprecision(3) << mpos  //
+                      << "   It/s: " << std::setw(8) << std::setprecision(1) << its     //
+                      << "   MB/s: " << std::setw(8) << std::setprecision(1) << mbps    //
+                      << "   B/pos: " << std::setw(8) << std::setprecision(1) << bpos   //
+                      << std::flush;
         }
     }
     std::cout << std::endl;
