@@ -20,3 +20,5 @@ class LossParams:
     end_lambda: float = 1.0
     pow_exp: float = 2.5
     qp_asymmetry: float = 0.0
+    w1: float = 0.0
+    w2: float = 0.5
