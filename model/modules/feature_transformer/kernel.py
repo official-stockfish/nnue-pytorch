@@ -180,8 +180,8 @@ _sparse_input_linear_backward_kernel_cache = dict()
 def make_sparse_input_linear_backward_kernel(max_active_indices: int, output_size: int):
     """
     @param: max_active_indices
-        The maximum number of indices that are active non-zero
-        for a single position. This value determines the shape
+        The maximum number of indices that are non-zero for
+        a single position. This value determines the shape
         of the inputs.
         This value is of type uint32_t.
 
@@ -241,7 +241,7 @@ extern "C" __global__
         An output gradient matrix of shape (BATCH_SIZE, output_size).
         Output values must have type float32.
 */
-void sprase_input_linear_backward(
+void sparse_input_linear_backward(
     const int32_t* const input_indices,
     const float*   const input_values,
           float*   const weight_grad,
