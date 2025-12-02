@@ -281,10 +281,20 @@ struct HalfKAv2_hm {
 
     static constexpr int MAX_ACTIVE_FEATURES = 32;
 
+    // clang-format off
     static constexpr int KingBuckets[64] = {
-      -1, -1, -1, -1, 31, 30, 29, 28, -1, -1, -1, -1, 27, 26, 25, 24, -1, -1, -1, -1, 23, 22,
-      21, 20, -1, -1, -1, -1, 19, 18, 17, 16, -1, -1, -1, -1, 15, 14, 13, 12, -1, -1, -1, -1,
-      11, 10, 9,  8,  -1, -1, -1, -1, 7,  6,  5,  4,  -1, -1, -1, -1, 3,  2,  1,  0};
+      -1, -1, -1, -1, 31, 30, 29, 28,
+      -1, -1, -1, -1, 27, 26, 25, 24,
+      -1, -1, -1, -1, 23, 22, 21, 20,
+      -1, -1, -1, -1, 19, 18, 17, 16,
+      -1, -1, -1, -1, 15, 14, 13, 12,
+      -1, -1, -1, -1, 11, 10, 9, 8,
+      -1, -1, -1, -1, 7, 6, 5, 4,
+      -1, -1, -1, -1, 3, 2, 1, 0
+    };
+
+    // clang-format on
+
 
     static int feature_index(Color color, Square ksq, Square sq, Piece p) {
         Square o_ksq = orient_flip_2(color, ksq, ksq);
@@ -395,26 +405,52 @@ struct Full_Threats {
     static constexpr int PIECE_TYPE_NB       = 6;
     static constexpr int MAX_ACTIVE_FEATURES = 128 + 32;
 
+    // clang-format off
     static constexpr Square OrientTBL[COLOR_NB][SQUARE_NB] = {
-      {a1, a1, a1, a1, h1, h1, h1, h1, a1, a1, a1, a1, h1, h1, h1, h1, a1, a1, a1, a1, h1, h1,
-       h1, h1, a1, a1, a1, a1, h1, h1, h1, h1, a1, a1, a1, a1, h1, h1, h1, h1, a1, a1, a1, a1,
-       h1, h1, h1, h1, a1, a1, a1, a1, h1, h1, h1, h1, a1, a1, a1, a1, h1, h1, h1, h1},
-      {a8, a8, a8, a8, h8, h8, h8, h8, a8, a8, a8, a8, h8, h8, h8, h8, a8, a8, a8, a8, h8, h8,
-       h8, h8, a8, a8, a8, a8, h8, h8, h8, h8, a8, a8, a8, a8, h8, h8, h8, h8, a8, a8, a8, a8,
-       h8, h8, h8, h8, a8, a8, a8, a8, h8, h8, h8, h8, a8, a8, a8, a8, h8, h8, h8, h8}};
+      { a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1 },
+      { a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8 }
+    };
 
     static constexpr int map[PIECE_TYPE_NB][PIECE_TYPE_NB] = {
-      {0, 1, -1, 2, -1, -1}, {0, 1, 2, 3, 4, 5}, {0, 1, 2, 3, -1, 4},
-      {0, 1, 2, 3, -1, 4},   {0, 1, 2, 3, 4, 5}, {0, 1, 2, 3, -1, -1}};
+      {0, 1, -1, 2, -1, -1},
+      {0, 1, 2, 3, 4, 5},
+      {0, 1, 2, 3, -1, 4},
+      {0, 1, 2, 3, -1, 4},
+      {0, 1, 2, 3, 4, 5},
+      {0, 1, 2, 3, -1, -1}
+    };
 
-    static constexpr int NUM_SQ          = 64;
-    static constexpr int NUM_PT          = 11;
-    static constexpr int NUM_PLANES      = NUM_SQ * NUM_PT;
-    static constexpr int INPUTS          = 79856 + NUM_PLANES * NUM_SQ / 2;
     static constexpr int KingBuckets[64] = {
-      -1, -1, -1, -1, 31, 30, 29, 28, -1, -1, -1, -1, 27, 26, 25, 24, -1, -1, -1, -1, 23, 22,
-      21, 20, -1, -1, -1, -1, 19, 18, 17, 16, -1, -1, -1, -1, 15, 14, 13, 12, -1, -1, -1, -1,
-      11, 10, 9,  8,  -1, -1, -1, -1, 7,  6,  5,  4,  -1, -1, -1, -1, 3,  2,  1,  0};
+      -1, -1, -1, -1, 31, 30, 29, 28,
+      -1, -1, -1, -1, 27, 26, 25, 24,
+      -1, -1, -1, -1, 23, 22, 21, 20,
+      -1, -1, -1, -1, 19, 18, 17, 16,
+      -1, -1, -1, -1, 15, 14, 13, 12,
+      -1, -1, -1, -1, 11, 10, 9, 8,
+      -1, -1, -1, -1, 7, 6, 5, 4,
+      -1, -1, -1, -1, 3, 2, 1, 0
+    };
+    // clang-format on
+
+    static constexpr int NUM_SQ     = 64;
+    static constexpr int NUM_PT     = 11;
+    static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
+    static constexpr int INPUTS     = 79856 + NUM_PLANES * NUM_SQ / 2;
+
 
     static int psq_index(Color color, Square ksq, Square sq, Piece p) {
         Square o_ksq = orient_flip_2(color, ksq, ksq);
