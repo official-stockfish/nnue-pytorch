@@ -1029,12 +1029,13 @@ struct FenBatchStream: Stream<FenBatch> {
 };
 
 struct DataloaderSkipConfig {
-    bool filtered;
-    int  random_fen_skipping;
-    bool wld_filtered;
-    int  early_fen_skipping;
-    int  simple_eval_skipping;
-    int  param_index;
+    bool   filtered;
+    int    random_fen_skipping;
+    bool   wld_filtered;
+    int    early_fen_skipping;
+    int    simple_eval_skipping;
+    int    param_index;
+    double pc_y1, pc_y2, pc_y3;
 };
 
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
@@ -1049,19 +1050,17 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             // compression ability.
             static constexpr int VALUE_NONE = 32002;
 
-            static constexpr double desired_piece_count_weights[33] = {
-              1.000000, 1.121094, 1.234375, 1.339844, 1.437500, 1.527344, 1.609375,
-              1.683594, 1.750000, 1.808594, 1.859375, 1.902344, 1.937500, 1.964844,
-              1.984375, 1.996094, 2.000000, 1.996094, 1.984375, 1.964844, 1.937500,
-              1.902344, 1.859375, 1.808594, 1.750000, 1.683594, 1.609375, 1.527344,
-              1.437500, 1.339844, 1.234375, 1.121094, 1.000000};
-
-            static constexpr double desired_piece_count_weights_total = []() {
-                double tot = 0;
-                for (auto w : desired_piece_count_weights)
-                    tot += w;
-                return tot;
-            }();
+            // lagrange interpolation weights for desired piece count distribution
+            auto desired_piece_count_weights = [&config](int pc) -> double {
+                double x  = pc;
+                double x1 = 0, y1 = config.pc_y1;
+                double x2 = 16, y2 = config.pc_y2;
+                double x3 = 32, y3 = config.pc_y3;
+                double l1 = (x - x2) * (x - x3) / ((x1 - x2) * (x1 - x3));
+                double l2 = (x - x1) * (x - x3) / ((x2 - x1) * (x2 - x3));
+                double l3 = (x - x1) * (x - x2) / ((x3 - x1) * (x3 - x2));
+                return l1 * y1 + l2 * y2 + l3 * y3;
+            };
 
             // keep stats on passing pieces
             static thread_local double alpha                            = 1;
@@ -1123,16 +1122,23 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             piece_count_history_all[pc] += 1;
             piece_count_history_all_total += 1;
 
+            double desired_piece_count_weights_total = [&desired_piece_count_weights]() {
+                double tot = 0;
+                for (int i = 0; i < 33; i++)
+                    tot += desired_piece_count_weights(i);
+                return tot;
+            }();
+
             // update alpha, which scales the filtering probability, to a maximum rate.
             if (uint64_t(piece_count_history_all_total) % 10000 == 0)
             {
                 double pass = piece_count_history_all_total * desired_piece_count_weights_total;
                 for (int i = 0; i < 33; ++i)
                 {
-                    if (desired_piece_count_weights[pc] > 0)
+                    if (desired_piece_count_weights(pc) > 0)
                     {
                         double tmp =
-                          piece_count_history_all_total * desired_piece_count_weights[pc]
+                          piece_count_history_all_total * desired_piece_count_weights(pc)
                           / (desired_piece_count_weights_total * piece_count_history_all[pc]);
                         if (tmp < pass)
                             pass = tmp;
@@ -1141,7 +1147,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
                 alpha = 1.0 / (pass * max_skipping_rate);
             }
 
-            double tmp = alpha * piece_count_history_all_total * desired_piece_count_weights[pc]
+            double tmp = alpha * piece_count_history_all_total * desired_piece_count_weights(pc)
                        / (desired_piece_count_weights_total * piece_count_history_all[pc]);
             tmp = std::min(1.0, tmp);
             std::bernoulli_distribution distrib(1.0 - tmp);
@@ -1366,7 +1372,10 @@ int main(int argc, char** argv) {
                                              .wld_filtered         = true,
                                              .early_fen_skipping   = 5,
                                              .simple_eval_skipping = 0,
-                                             .param_index          = 0};
+                                             .param_index          = 0,
+                                             .pc_y1                = 1.0,
+                                             .pc_y2                = 2.0,
+                                             .pc_y3                = 1.0};
     auto stream = create_sparse_batch_stream("Full_Threats^", concurrency, file_count, files,
                                              batch_size, cyclic, config);
 

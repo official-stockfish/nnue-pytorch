@@ -333,6 +333,42 @@ def main():
         dest="simple_eval_skipping",
         help="Skip positions that have abs(simple_eval(pos)) < n",
     )
+    parser.add_argument(
+        "--pc-y1",
+        type=float,
+        default=1.0,
+        dest="pc_y1",
+        help="piece count parameter y1 (default=1.0)",
+    )
+    parser.add_argument(
+        "--pc-y2",
+        type=float,
+        default=2.0,
+        dest="pc_y2",
+        help="piece count parameter y2 (default=2.0)",
+    )
+    parser.add_argument(
+        "--pc-y3",
+        type=float,
+        default=1.0,
+        dest="pc_y3",
+        help="piece count parameter y3 (default=1.0)",
+    )
+    parser.add_argument(
+        "--w1",
+        type=float,
+        default=0.0,
+        dest="w1",
+        help="weight boost parameter 1 (default=0.0)",
+    )
+    parser.add_argument(
+        "--w2",
+        type=float,
+        default=0.5,
+        dest="w2",
+        help="weight boost parameter 2 (default=0.5)",
+    )
+
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
     M.add_feature_args(parser)
     args = parser.parse_args()
@@ -377,6 +413,8 @@ def main():
         end_lambda=args.end_lambda or args.lambda_,
         pow_exp=args.pow_exp,
         qp_asymmetry=args.qp_asymmetry,
+        w1=args.w1,
+        w2=args.w2,
     )
     print("Loss parameters:")
     print(loss_params)
@@ -429,6 +467,11 @@ def main():
     print("Skip early plies: {}".format(args.early_fen_skipping))
     print("Skip simple eval : {}".format(args.simple_eval_skipping))
     print("Param index: {}".format(args.param_index))
+    print("piececount param y1 : {}".format(args.pc_y1))
+    print("piececount param y2 : {}".format(args.pc_y2))
+    print("piececount param y3 : {}".format(args.pc_y3))
+    print("Weighting param w1 : {}".format(args.w1))
+    print("Weighting param w2 : {}".format(args.w2))
 
     if args.threads > 0:
         print("limiting torch to {} threads.".format(args.threads))
@@ -481,6 +524,9 @@ def main():
             early_fen_skipping=args.early_fen_skipping,
             simple_eval_skipping=args.simple_eval_skipping,
             param_index=args.param_index,
+            pc_y1=args.pc_y1,
+            pc_y2=args.pc_y2,
+            pc_y3=args.pc_y3,
         ),
         args.epoch_size,
         args.validation_size,

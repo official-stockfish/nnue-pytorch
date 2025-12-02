@@ -106,7 +106,9 @@ class NNUE(L.LightningModule):
         loss = torch.pow(torch.abs(pt - qf), p.pow_exp)
         if p.qp_asymmetry != 0.0:
             loss = loss * ((qf > pt) * p.qp_asymmetry + 1)
-        loss = loss.mean()
+
+        weights = 1 + (2.0**p.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), p.w2)
+        loss = (loss * weights).sum() / weights.sum()
 
         self.log(loss_type, loss, prog_bar=True)
 
