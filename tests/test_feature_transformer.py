@@ -6,25 +6,28 @@ import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model.modules import DoubleFeatureTransformerSlice
+from model.modules import DoubleFeatureTransformer
 from model.modules.feature_transformer.functions import (
-    FeatureTransformerSliceFunction,
+    SparseLinearFunction,
 )
 
 
-def FeatureTransformerSliceFunctionEmulate(
-    feature_indices, feature_values, weight, bias
-):
-    batch_size = feature_indices.shape[0]
+def SparseLinearFunctionEmulate(
+    input_indices: torch.Tensor,
+    input_values: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+) -> torch.Tensor:
+    batch_size = input_indices.shape[0]
     num_inputs = weight.shape[0]
-    max_active_features = feature_indices.shape[1]
+    max_active_indices = input_indices.shape[1]
     inputs = torch.zeros(
         batch_size, num_inputs, dtype=torch.float32, device=weight.device
     )
     for i in range(batch_size):
-        for j in range(max_active_features):
-            feature = feature_indices[i, j]
-            value = feature_values[i, j]
+        for j in range(max_active_indices):
+            feature = input_indices[i, j]
+            value = input_values[i, j]
             inputs[i, feature] += value
 
     return torch.mm(inputs, weight) + bias
@@ -52,16 +55,16 @@ def test():
     values0 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32)
     values1 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32)
 
-    output00 = FeatureTransformerSliceFunctionEmulate(
+    output00 = SparseLinearFunctionEmulate(
         indices0.clone(), values0.clone(), weight0, bias0
     )
-    output01 = FeatureTransformerSliceFunctionEmulate(
+    output01 = SparseLinearFunctionEmulate(
         indices1.clone(), values1.clone(), weight0, bias0
     )
-    output10 = FeatureTransformerSliceFunction.apply(
+    output10 = SparseLinearFunction.apply(
         indices0.clone().cuda(), values0.clone().cuda(), weight1.cuda(), bias1.cuda()
     )
-    output11 = FeatureTransformerSliceFunction.apply(
+    output11 = SparseLinearFunction.apply(
         indices1.clone().cuda(), values1.clone().cuda(), weight1.cuda(), bias1.cuda()
     )
 
@@ -95,7 +98,7 @@ def bench():
             dim=1,
         ).cuda()
 
-    layer = DoubleFeatureTransformerSlice(INPUT_SIZE, STRIDE).cuda()
+    layer = DoubleFeatureTransformer(INPUT_SIZE, STRIDE).cuda()
     indices0 = get_fake_indices()
     values0 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
     indices1 = get_fake_indices()

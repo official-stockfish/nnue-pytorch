@@ -1,13 +1,13 @@
 from .feature_transformer import (
-    BaseFeatureTransformerSlice,
-    DoubleFeatureTransformerSlice,
-    FeatureTransformerSlice,
+    BaseFeatureTransformer,
+    DoubleFeatureTransformer,
+    FeatureTransformer,
 )
 from .layer_stacks import LayerStacks
 
 __all__ = [
-    "BaseFeatureTransformerSlice",
-    "DoubleFeatureTransformerSlice",
-    "FeatureTransformerSlice",
+    "BaseFeatureTransformer",
+    "DoubleFeatureTransformer",
+    "FeatureTransformer",
     "LayerStacks",
 ]

@@ -2,12 +2,12 @@ import torch
 from torch import autograd
 
 from .kernel import (
-    make_feature_transformer_slice_forward_kernel,
-    make_feature_transformer_slice_backward_kernel,
+    make_sparse_input_linear_forward_kernel,
+    make_sparse_input_linear_backward_kernel,
 )
 
 
-class FeatureTransformerSliceFunction(autograd.Function):
+class SparseLinearFunction(autograd.Function):
     @staticmethod
     def forward(ctx, feature_indices, feature_values, weight, bias):
         ctx.save_for_backward(feature_indices, feature_values, weight, bias)
@@ -52,7 +52,7 @@ class FeatureTransformerSliceFunction(autograd.Function):
             requires_grad=True,
         )
 
-        kernel = make_feature_transformer_slice_forward_kernel(
+        kernel = make_sparse_input_linear_forward_kernel(
             max_active_features, output_size
         )
         kernel(
@@ -87,7 +87,7 @@ class FeatureTransformerSliceFunction(autograd.Function):
         )
         bias_grad = torch.zeros(output_size, dtype=torch.float32, device=device)
 
-        kernel = make_feature_transformer_slice_backward_kernel(
+        kernel = make_sparse_input_linear_backward_kernel(
             max_active_features, output_size
         )
         kernel(

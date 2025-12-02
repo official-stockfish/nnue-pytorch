@@ -1,11 +1,11 @@
 from .module import (
-    BaseFeatureTransformerSlice,
-    DoubleFeatureTransformerSlice,
-    FeatureTransformerSlice,
+    BaseFeatureTransformer,
+    DoubleFeatureTransformer,
+    FeatureTransformer,
 )
 
 __all__ = [
-    "BaseFeatureTransformerSlice",
-    "DoubleFeatureTransformerSlice",
-    "FeatureTransformerSlice",
+    "BaseFeatureTransformer",
+    "DoubleFeatureTransformer",
+    "FeatureTransformer",
 ]
