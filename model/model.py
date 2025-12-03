@@ -3,7 +3,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .features import FeatureSet
-from .modules import DoubleFeatureTransformerSlice, LayerStacks
+from .modules import DoubleFeatureTransformer, LayerStacks
 from .quantize import QuantizationConfig, QuantizationManager
 
 
@@ -25,7 +25,7 @@ class NNUEModel(nn.Module):
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
-        self.input = DoubleFeatureTransformerSlice(
+        self.input = DoubleFeatureTransformer(
             feature_set.num_features, self.L1 + self.num_psqt_buckets
         )
         self.feature_set = feature_set

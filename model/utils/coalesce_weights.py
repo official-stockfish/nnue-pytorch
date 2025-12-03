@@ -1,11 +1,11 @@
 import torch
 
 from ..features import FeatureSet
-from ..modules import BaseFeatureTransformerSlice
+from ..modules import BaseFeatureTransformer
 
 
 def coalesce_ft_weights(
-    feature_set: FeatureSet, layer: BaseFeatureTransformerSlice
+    feature_set: FeatureSet, layer: BaseFeatureTransformer
 ) -> torch.Tensor:
     weight = layer.weight.data
     indices = feature_set.get_virtual_to_real_features_gather_indices()
@@ -20,7 +20,7 @@ def coalesce_ft_weights(
 
 
 def coalesce_ft_weights_inplace(
-    feature_set: FeatureSet, layer: BaseFeatureTransformerSlice
+    feature_set: FeatureSet, layer: BaseFeatureTransformer
 ) -> None:
     weight = layer.weight.data
     indices = feature_set.get_virtual_to_real_features_gather_indices()

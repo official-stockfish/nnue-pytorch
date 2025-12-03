@@ -13,7 +13,7 @@ from .coalesce_weights import coalesce_ft_weights
 from ..config import ModelConfig
 from ..features import FeatureSet
 from ..model import NNUEModel
-from ..modules import BaseFeatureTransformerSlice
+from ..modules import BaseFeatureTransformer
 from ..quantize import QuantizationConfig
 
 
@@ -304,7 +304,7 @@ class NNUEReader:
             raise Exception("Invalid compression method.")
 
     def read_feature_transformer(
-        self, layer: BaseFeatureTransformerSlice, num_psqt_buckets: int
+        self, layer: BaseFeatureTransformer, num_psqt_buckets: int
     ) -> None:
         shape = layer.weight.shape
 
