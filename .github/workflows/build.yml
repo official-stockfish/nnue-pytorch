@@ -18,7 +18,7 @@ jobs:
 
       - name: Compile benchmark manually with g++
         run: >
-          g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native training_data_loader.cpp
+          g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -DPGO_BUILD -march=native training_data_loader.cpp
 
       - name: Run manually compiled benchmark
         run: ./a.out ./.pgo/small.binpack
