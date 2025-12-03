@@ -1,0 +1,24 @@
+name: training-data-loader
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  build-and-bench:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compile using cmake
+        run: bash compile_data_loader.bat
+
+      - name: Compile benchmark manually with g++
+        run: >
+          g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -DPGO_BUILD -march=native training_data_loader.cpp
+
+      - name: Run manually compiled benchmark
+        run: ./a.out ./.pgo/small.binpack
