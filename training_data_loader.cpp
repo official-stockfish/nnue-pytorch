@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -5,9 +6,11 @@
 #include <iterator>
 #include <future>
 #include <mutex>
+#include <string_view>
 #include <thread>
 #include <deque>
 #include <random>
+#include <variant>
 
 #include "lib/nnue_training_data_formats.h"
 #include "lib/nnue_training_data_stream.h"
@@ -55,6 +58,8 @@ static Square orient_flip(Color color, Square sq) {
 }
 
 struct HalfKP {
+    static constexpr std::string_view NAME = "HalfKP";
+
     static constexpr int NUM_SQ     = 64;
     static constexpr int NUM_PT     = 10;
     static constexpr int NUM_PLANES = (NUM_SQ * NUM_PT + 1);
@@ -92,6 +97,8 @@ struct HalfKP {
 };
 
 struct HalfKPFactorized {
+    static constexpr std::string_view NAME = "HalfKP^";
+
     // Factorized features
     static constexpr int K_INPUTS     = HalfKP::NUM_SQ;
     static constexpr int PIECE_INPUTS = HalfKP::NUM_SQ * HalfKP::NUM_PT;
@@ -137,6 +144,8 @@ struct HalfKPFactorized {
 };
 
 struct HalfKA {
+    static constexpr std::string_view NAME = "HalfKA";
+
     static constexpr int NUM_SQ     = 64;
     static constexpr int NUM_PT     = 12;
     static constexpr int NUM_PLANES = (NUM_SQ * NUM_PT + 1);
@@ -170,6 +179,8 @@ struct HalfKA {
 };
 
 struct HalfKAFactorized {
+    static constexpr std::string_view NAME = "HalfKA^";
+
     // Factorized features
     static constexpr int PIECE_INPUTS = HalfKA::NUM_SQ * HalfKA::NUM_PT;
     static constexpr int INPUTS       = HalfKA::INPUTS + PIECE_INPUTS;
@@ -199,6 +210,8 @@ struct HalfKAFactorized {
 };
 
 struct HalfKAv2 {
+    static constexpr std::string_view NAME = "HalfKAv2";
+
     static constexpr int NUM_SQ     = 64;
     static constexpr int NUM_PT     = 11;
     static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
@@ -234,6 +247,8 @@ struct HalfKAv2 {
 };
 
 struct HalfKAv2Factorized {
+    static constexpr std::string_view NAME = "HalfKAv2^";
+
     // Factorized features
     static constexpr int NUM_PT       = 12;
     static constexpr int PIECE_INPUTS = HalfKAv2::NUM_SQ * NUM_PT;
@@ -274,6 +289,8 @@ static Square orient_flip_2(Color color, Square sq, Square ksq) {
 }
 
 struct HalfKAv2_hm {
+    static constexpr std::string_view NAME = "HalfKAv2_hm";
+
     static constexpr int NUM_SQ     = 64;
     static constexpr int NUM_PT     = 11;
     static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
@@ -325,6 +342,8 @@ struct HalfKAv2_hm {
 };
 
 struct HalfKAv2_hmFactorized {
+    static constexpr std::string_view NAME = "HalfKAv2_hm^";
+
     // Factorized features
     static constexpr int NUM_PT       = 12;
     static constexpr int PIECE_INPUTS = HalfKAv2_hm::NUM_SQ * NUM_PT;
@@ -399,6 +418,8 @@ constexpr auto threatoffsets = []() {
 }();
 
 struct Full_Threats {
+    static constexpr std::string_view NAME = "Full_Threats";
+
     static constexpr int SQUARE_NB           = 64;
     static constexpr int PIECE_NB            = 12;
     static constexpr int COLOR_NB            = 2;
@@ -570,6 +591,8 @@ struct Full_Threats {
 };
 
 struct Full_ThreatsFactorized {
+    static constexpr std::string_view NAME = "Full_Threats^";
+
     // Factorized features
     static constexpr int PIECE_INPUTS        = 768;
     static constexpr int INPUTS              = 79856 + 22528 + 768;
@@ -605,11 +628,49 @@ struct FeatureSet {
     static constexpr int INPUTS              = T::INPUTS;
     static constexpr int MAX_ACTIVE_FEATURES = T::MAX_ACTIVE_FEATURES;
 
+    static constexpr std::string_view NAME = T::NAME;
+
     static std::pair<int, int>
     fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
         return T::fill_features_sparse(e, features, values, color);
     }
 };
+
+
+template<typename... Ts>
+auto find_feature(std::string_view name) {
+    using Variant = std::variant<std::monostate, Ts...>;
+    using Factory = Variant (*)();
+
+    struct Entry {
+        std::string_view name;
+        Factory          make;
+    };
+
+    static constexpr Entry factories[] = {{Ts::NAME, +[]() -> Variant { return Ts{}; }}...};
+
+    for (auto& f : factories)
+    {
+        if (name == f.name)
+            return f.make();
+    }
+
+    return Variant{std::monostate{}};
+}
+
+auto get_feature(std::string_view name) {
+    return find_feature<HalfKP,                 //
+                        HalfKPFactorized,       //
+                        HalfKA,                 //
+                        HalfKAFactorized,       //
+                        HalfKAv2,               //
+                        HalfKAv2Factorized,     //
+                        HalfKAv2_hm,            //
+                        HalfKAv2_hmFactorized,  //
+                        Full_Threats,           //
+                        Full_ThreatsFactorized  //
+                        >(name);
+}
 
 struct SparseBatch {
     static constexpr bool IS_BATCH = true;
@@ -1185,49 +1246,21 @@ EXPORT SparseBatch* get_sparse_batch_from_fens(const char*        feature_set_c,
         e.result = results[i];
     }
 
-    std::string_view feature_set(feature_set_c);
-    if (feature_set == "HalfKP")
-    {
-        return new SparseBatch(FeatureSet<HalfKP>{}, entries);
-    }
-    else if (feature_set == "HalfKP^")
-    {
-        return new SparseBatch(FeatureSet<HalfKPFactorized>{}, entries);
-    }
-    else if (feature_set == "HalfKA")
-    {
-        return new SparseBatch(FeatureSet<HalfKA>{}, entries);
-    }
-    else if (feature_set == "HalfKA^")
-    {
-        return new SparseBatch(FeatureSet<HalfKAFactorized>{}, entries);
-    }
-    else if (feature_set == "HalfKAv2")
-    {
-        return new SparseBatch(FeatureSet<HalfKAv2>{}, entries);
-    }
-    else if (feature_set == "HalfKAv2^")
-    {
-        return new SparseBatch(FeatureSet<HalfKAv2Factorized>{}, entries);
-    }
-    else if (feature_set == "HalfKAv2_hm")
-    {
-        return new SparseBatch(FeatureSet<HalfKAv2_hm>{}, entries);
-    }
-    else if (feature_set == "HalfKAv2_hm^")
-    {
-        return new SparseBatch(FeatureSet<HalfKAv2_hmFactorized>{}, entries);
-    }
-    else if (feature_set == "Full_Threats")
-    {
-        return new SparseBatch(FeatureSet<Full_Threats>{}, entries);
-    }
-    else if (feature_set == "Full_Threats^")
-    {
-        return new SparseBatch(FeatureSet<Full_ThreatsFactorized>{}, entries);
-    }
-    fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
-    return nullptr;
+    auto feature_variant = get_feature(feature_set_c);
+
+    return std::visit(
+      [&](const auto fs) -> SparseBatch* {
+          using F = std::decay_t<decltype(fs)>;
+          if constexpr (std::is_same_v<F, std::monostate>)
+          {
+              return nullptr;
+          }
+          else
+          {
+              return new SparseBatch(FeatureSet<decltype(fs)>{}, entries);
+          }
+      },
+      feature_variant);
 }
 
 // changing the signature needs matching changes in data_loader/_native.py
@@ -1256,59 +1289,22 @@ EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char*        
     auto skipPredicate = make_skip_predicate(config);
     auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
-    std::string_view feature_set(feature_set_c);
-    if (feature_set == "HalfKP")
-    {
-        return new FeaturedBatchStream<FeatureSet<HalfKP>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    else if (feature_set == "HalfKP^")
-    {
-        return new FeaturedBatchStream<FeatureSet<HalfKPFactorized>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    else if (feature_set == "HalfKA")
-    {
-        return new FeaturedBatchStream<FeatureSet<HalfKA>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    else if (feature_set == "HalfKA^")
-    {
-        return new FeaturedBatchStream<FeatureSet<HalfKAFactorized>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    else if (feature_set == "HalfKAv2")
-    {
-        return new FeaturedBatchStream<FeatureSet<HalfKAv2>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    else if (feature_set == "HalfKAv2^")
-    {
-        return new FeaturedBatchStream<FeatureSet<HalfKAv2Factorized>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    else if (feature_set == "HalfKAv2_hm")
-    {
-        return new FeaturedBatchStream<FeatureSet<HalfKAv2_hm>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    else if (feature_set == "HalfKAv2_hm^")
-    {
-        return new FeaturedBatchStream<FeatureSet<HalfKAv2_hmFactorized>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    else if (feature_set == "Full_Threats")
-    {
-        return new FeaturedBatchStream<FeatureSet<Full_Threats>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    else if (feature_set == "Full_Threats^")
-    {
-        return new FeaturedBatchStream<FeatureSet<Full_ThreatsFactorized>, SparseBatch>(
-          concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
-    }
-    fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
-    return nullptr;
+    auto feature_variant = get_feature(feature_set_c);
+
+    return std::visit(
+      [&](const auto fs) -> Stream<SparseBatch>* {
+          using F = std::decay_t<decltype(fs)>;
+          if constexpr (std::is_same_v<F, std::monostate>)
+          {
+              return nullptr;
+          }
+          else
+          {
+              return new FeaturedBatchStream<FeatureSet<decltype(fs)>, SparseBatch>(
+                concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
+          }
+      },
+      feature_variant);
 }
 
 EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream) { delete stream; }
