@@ -75,12 +75,16 @@ def make_data_loaders(
         batch_size=None,
         batch_sampler=None,
     )
-    val = DataLoader(
-        data_loader.FixedNumBatchesDataset(
-            val_infinite, (val_size + batch_size - 1) // batch_size
-        ),
-        batch_size=None,
-        batch_sampler=None,
+    val = (
+        None
+        if val_size == 0
+        else DataLoader(
+            data_loader.FixedNumBatchesDataset(
+                val_infinite, (val_size + batch_size - 1) // batch_size
+            ),
+            batch_size=None,
+            batch_sampler=None,
+        )
     )
     return train, val
 
@@ -308,7 +312,7 @@ def main():
     parser.add_argument(
         "--validation-size",
         type=int,
-        default=1000000,
+        default=0,
         dest="validation_size",
         help="Number of positions per validation step.",
     )
@@ -506,6 +510,7 @@ def main():
         enable_progress_bar=True,
         enable_checkpointing=True,
         benchmark=True,
+        num_sanity_val_steps=0,
     )
 
     nnue = torch.compile(nnue, backend=args.compile_backend)
