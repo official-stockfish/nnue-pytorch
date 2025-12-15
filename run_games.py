@@ -182,7 +182,7 @@ def run_match(
             f"option.EvalFile={evalfile}",
         ]
 
-    # Attempt to run the match multiple times in case of unforseen
+    # Attempt to run the match multiple times in case of unforeseen
     # errors like engine hanging or c-chess-cli having an error...
     for i in range(tries):
         print_atomic(" ".join(command))
