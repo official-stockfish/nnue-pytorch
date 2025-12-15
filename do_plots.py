@@ -113,7 +113,7 @@ def do_plots(out_filename, root_dirs, elo_range, loss_range, split):
     ax_train_loss.set_ylabel("train_loss")
 
     for user_root_dir in root_dirs:
-        # if asked to split we split the roto dir into a number of user root dirs,
+        # if asked to split we split the root dir into a number of user root dirs,
         # i.e. all direct subdirectories containing tfevent files.
         # we use the ordo file in the root dir, but split the content.
         split_root_dirs = [user_root_dir]
