@@ -6572,7 +6572,7 @@ namespace binpack
                 // Side to move.
                 stream.write_one_bit((int)(pos.sideToMove()));
 
-                // 7-bit positions for leading and trailing balls
+                // 7-bit positions for leading and trailing pieces
                 // White king and black king, 6 bits for each.
                 stream.write_n_bit(static_cast<int>(pos.kingSquare(chess::Color::White)), 6);
                 stream.write_n_bit(static_cast<int>(pos.kingSquare(chess::Color::Black)), 6);
@@ -6682,7 +6682,7 @@ namespace binpack
             // Active color
             pos.setSideToMove((chess::Color)stream.read_one_bit());
 
-            // First the position of the ball
+            // First the position of the Kings
             pos.place(chess::Piece(chess::PieceType::King, chess::Color::White), static_cast<chess::Square>(stream.read_n_bit(6)));
             pos.place(chess::Piece(chess::PieceType::King, chess::Color::Black), static_cast<chess::Square>(stream.read_n_bit(6)));
 
@@ -6693,7 +6693,7 @@ namespace binpack
                 {
                     auto sq = chess::Square(f, r);
 
-                    // it seems there are already balls
+                    // Check if the square is already occupied by a King
                     chess::Piece pc;
                     if (pos.pieceAt(sq).type() != chess::PieceType::King)
                     {
