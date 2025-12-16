@@ -182,7 +182,7 @@ def run_match(
             f"option.EvalFile={evalfile}",
         ]
 
-    # Attempt to run the match multiple times in case of unforseen
+    # Attempt to run the match multiple times in case of unforeseen
     # errors like engine hanging or c-chess-cli having an error...
     for i in range(tries):
         print_atomic(" ".join(command))
@@ -279,7 +279,7 @@ class EngineResults:
 
 def run_approximate_ordo(root_dir):
     """run an approximate ordo-like calculation on an existing pgn file"""
-    """ it takes advantege of the fact that all matches are ran against master """
+    """ it takes advantage of the fact that all matches are ran against master """
     pgn_file_name = os.path.join(root_dir, "out.pgn")
     ordo_file_name = os.path.join(root_dir, "ordo.out")
     ordo_file_name_temp = os.path.join(root_dir, "ordo_temp.out")

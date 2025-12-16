@@ -1044,7 +1044,7 @@ def requests_get_content(url, *args, **kwargs):
 
 def get_zipfile_members_strip_common_prefix(zipfile):
     """
-    Removes a common previx from zipfile entries.
+    Removes a common prefix from zipfile entries.
     So for example will remove the top-level directory.
     """
     parts = []
@@ -1536,7 +1536,7 @@ class NetworkTesting(Thread):
         try:
             with open(ordo_file_path, "r") as ordo_file:
                 lines = ordo_file.readlines()
-                # Pring the first few lines for the CLI interface.
+                # Print the first few lines for the CLI interface.
                 for line in lines[:7]:
                     LOGGER.info(line.strip())
                 for line in lines:
@@ -2719,7 +2719,7 @@ def main():
         )
     else:
         LOGGER.info(
-            "Not doing network testing. Either engines no provided or explicitely disabled."
+            "Not doing network testing. Either engines not provided or explicitly disabled."
         )
 
     nnue_pytorch_repo = "/".join(args.nnue_pytorch_branch.split("/")[:2])

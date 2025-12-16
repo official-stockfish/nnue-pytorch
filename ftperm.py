@@ -1,6 +1,6 @@
 """
 
-NOTE: This script uses CUDA and may requires large amounts of VRAM. Decrease --count if encountering problems.
+NOTE: This script uses CUDA and may require large amounts of VRAM. Decrease --count if encountering problems.
 
 Example use:
 

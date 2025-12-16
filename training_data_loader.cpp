@@ -1147,7 +1147,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 
             auto do_filter = [&]() { return (e.isCapturingMove() || e.isInCheck()); };
 
-            // Allow for predermined filtering without the need to remove positions from the dataset.
+            // Allow for predetermined filtering without the need to remove positions from the dataset.
             if (e.score == VALUE_NONE)
                 return true;
 
