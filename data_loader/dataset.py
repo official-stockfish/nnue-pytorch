@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import Dataset
 
 from . import stream
-from .config import DataloaderSkipConfig
+from .config import DataloaderSkipConfig, DataloaderDDPConfig
 
 
 class FenBatchProvider:
@@ -16,6 +16,7 @@ class FenBatchProvider:
         num_workers,
         batch_size=None,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
+        ddp_config: DataloaderDDPConfig = None,
     ):
         self.filename = filename
         self.cyclic = cyclic
@@ -25,7 +26,7 @@ class FenBatchProvider:
 
         if batch_size:
             self.stream = stream.create_fen_batch_stream(
-                self.num_workers, [self.filename], batch_size, cyclic, config
+                self.num_workers, [self.filename], batch_size, cyclic, config, ddp_config
             )
         else:
             # doesnt work yet
@@ -67,6 +68,7 @@ class TrainingDataProvider:
         num_workers,
         batch_size=None,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
+        ddp_config: DataloaderDDPConfig = None,
     ):
         self.feature_set = feature_set.encode("utf-8")
         self.create_stream = create_stream
@@ -87,10 +89,11 @@ class TrainingDataProvider:
                 batch_size,
                 cyclic,
                 config,
+                ddp_config,
             )
         else:
             self.stream = self.create_stream(
-                self.feature_set, self.num_workers, self.filenames, cyclic, config
+                self.feature_set, self.num_workers, self.filenames, cyclic, config, ddp_config
             )
 
     def __iter__(self):
@@ -119,6 +122,7 @@ class SparseBatchProvider(TrainingDataProvider):
         cyclic=True,
         num_workers=1,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
+        ddp_config: DataloaderDDPConfig = None,
     ):
         super().__init__(
             feature_set,
@@ -131,6 +135,7 @@ class SparseBatchProvider(TrainingDataProvider):
             num_workers,
             batch_size,
             config,
+            ddp_config,
         )
 
 
@@ -143,6 +148,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         cyclic=True,
         num_workers=1,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
+        ddp_config: DataloaderDDPConfig = None,
     ):
         super().__init__()
         self.feature_set = feature_set
@@ -151,6 +157,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         self.cyclic = cyclic
         self.num_workers = num_workers
         self.config = config
+        self.ddp_config = ddp_config
 
     def __iter__(self):
         return SparseBatchProvider(
@@ -160,6 +167,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             cyclic=self.cyclic,
             num_workers=self.num_workers,
             config=self.config,
+            ddp_config=self.ddp_config,
         )
 
 
