@@ -6572,8 +6572,7 @@ namespace binpack
                 // Side to move.
                 stream.write_one_bit((int)(pos.sideToMove()));
 
-                // 7-bit positions for leading and trailing pieces
-                // White king and black king, 6 bits for each.
+                // 6-bit positions for White and Black Kings
                 stream.write_n_bit(static_cast<int>(pos.kingSquare(chess::Color::White)), 6);
                 stream.write_n_bit(static_cast<int>(pos.kingSquare(chess::Color::Black)), 6);
 
