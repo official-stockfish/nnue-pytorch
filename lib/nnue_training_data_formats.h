@@ -6610,11 +6610,11 @@ namespace binpack
 
                 // Write high bits of half move. This is a fix for the
                 // limited range of half move counter.
-                // This is backwards compatibile.
+                // This is backwards compatible.
                 stream.write_n_bit(pos.fullMove() >> 8, 8);
 
                 // Write the highest bit of rule50 at the end. This is a backwards
-                // compatibile fix for rule50 having only 6 bits stored.
+                // compatible fix for rule50 having only 6 bits stored.
                 // This bit is just ignored by the old parsers.
                 stream.write_n_bit(pos.rule50Counter() >> 6, 1);
 
@@ -6748,7 +6748,7 @@ namespace binpack
 
             // Fullmove number, high bits
             // This was added as a fix for fullmove clock
-            // overflowing at 256. This change is backwards compatibile.
+            // overflowing at 256. This change is backwards compatible.
             fullmove |= stream.read_n_bit(8) << 8;
 
             // Read the highest bit of rule50. This was added as a fix for rule50
