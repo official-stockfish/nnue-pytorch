@@ -319,7 +319,7 @@ class NNUEReader:
         if self.feature_set.name.startswith("Full_Threats"):
             threat_weight = self.tensor(np.int8, [79856, shape[1] - num_psqt_buckets])
             psq_weight = self.tensor(np.int16, [shape[0] - 79856, shape[1] - num_psqt_buckets])
-            weight = torch.cat(threat_weight, psq_weight, dim=0)
+            weight = torch.cat([threat_weight, psq_weight], dim=0)
         else:
             weight = self.tensor(np.int16, [shape[0], shape[1] - num_psqt_buckets])
         psqt_weight = self.tensor(np.int32, [shape[0], num_psqt_buckets])
