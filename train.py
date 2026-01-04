@@ -32,7 +32,7 @@ class TimeLimitAfterCheckpoint(Callback):
     def on_fit_start(self, trainer, pl_module):
         self.start_time = time.time()
 
-    def on_validation_end(self, trainer, pl_module):
+    def on_train_epoch_end(self, trainer, pl_module):
         elapsed = time.time() - self.start_time
         if elapsed >= self.max_duration:
             trainer.should_stop = True
