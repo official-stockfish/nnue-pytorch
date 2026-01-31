@@ -376,7 +376,7 @@ struct HalfKAv2_hmFactorized {
     }
 };
 
-constexpr int numvalidtargets[12] = {6, 6, 12, 12, 10, 10, 10, 10, 12, 12, 8, 8};
+constexpr int numvalidtargets[12] = {6, 6, 10, 10, 8, 8, 8, 8, 10, 10, 8, 8};
 
 constexpr auto threatoffsets = []() {
     std::array<std::array<int, 66>, 12> t{};
@@ -448,10 +448,10 @@ struct Full_Threats {
 
     static constexpr int map[PIECE_TYPE_NB][PIECE_TYPE_NB] = {
       {0, 1, -1, 2, -1, -1},
-      {0, 1, 2, 3, 4, 5},
-      {0, 1, 2, 3, -1, 4},
-      {0, 1, 2, 3, -1, 4},
-      {0, 1, 2, 3, 4, 5},
+      {0, 1, 2, 3, 4, -1},
+      {0, 1, 2, 3, -1, -1},
+      {0, 1, 2, 3, -1, -1},
+      {0, 1, 2, 3, 4, -1},
       {0, 1, 2, 3, -1, -1}
     };
 
