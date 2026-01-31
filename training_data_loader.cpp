@@ -470,7 +470,7 @@ struct Full_Threats {
     static constexpr int NUM_SQ     = 64;
     static constexpr int NUM_PT     = 11;
     static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
-    static constexpr int INPUTS     = 79856 + NUM_PLANES * NUM_SQ / 2;
+    static constexpr int INPUTS     = 66864 + NUM_PLANES * NUM_SQ / 2;
 
 
     static int psq_index(Color color, Square ksq, Square sq, Piece p) {
@@ -478,7 +478,7 @@ struct Full_Threats {
         auto   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
         if (p_idx == 11)
             --p_idx;  // pack the opposite king into the same NUM_SQ * NUM_SQ
-        return 79856 + static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
+        return 66864 + static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
              + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
     }
 
@@ -595,7 +595,7 @@ struct Full_ThreatsFactorized {
 
     // Factorized features
     static constexpr int PIECE_INPUTS        = 768;
-    static constexpr int INPUTS              = 79856 + 22528 + 768;
+    static constexpr int INPUTS              = 66864 + 22528 + 768;
     static constexpr int MAX_ACTIVE_FEATURES = 128 + 32 + 32;
 
     static std::pair<int, int>
