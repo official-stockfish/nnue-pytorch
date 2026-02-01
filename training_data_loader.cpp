@@ -426,6 +426,7 @@ constexpr auto threatfeaturecalc = []() {
 
 constexpr ThreatOffsetTable threatoffsets = threatfeaturecalc.table;
 constexpr int threatfeatures = threatfeaturecalc.totalfeatures;
+static_assert(threatfeatures == 66864);
 
 struct Full_Threats {
     static constexpr std::string_view NAME = "Full_Threats";
