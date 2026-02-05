@@ -376,10 +376,17 @@ struct HalfKAv2_hmFactorized {
     }
 };
 
-constexpr int numvalidtargets[12] = {6, 6, 12, 12, 10, 10, 10, 10, 12, 12, 8, 8};
+constexpr int numvalidtargets[12] = {6, 6, 10, 10, 8, 8, 8, 8, 10, 10, 8, 8};
 
-constexpr auto threatoffsets = []() {
-    std::array<std::array<int, 66>, 12> t{};
+using ThreatOffsetTable = std::array<std::array<int, 66>, 12>;
+
+struct ThreatFeatureCalculation {
+    ThreatOffsetTable table;
+    int totalfeatures;
+};
+
+constexpr auto threatfeaturecalc = []() {
+    ThreatOffsetTable t{};
 
     constexpr auto pseudo_attacks = bb::detail::generatePseudoAttacks();
     int            pieceoffset    = 0;
@@ -414,8 +421,12 @@ constexpr auto threatoffsets = []() {
         }
     }
 
-    return t;
+    return ThreatFeatureCalculation{t, pieceoffset};
 }();
+
+constexpr ThreatOffsetTable threatoffsets = threatfeaturecalc.table;
+constexpr int threatfeatures = threatfeaturecalc.totalfeatures;
+static_assert(threatfeatures == 66864);
 
 struct Full_Threats {
     static constexpr std::string_view NAME = "Full_Threats";
@@ -448,10 +459,10 @@ struct Full_Threats {
 
     static constexpr int map[PIECE_TYPE_NB][PIECE_TYPE_NB] = {
       {0, 1, -1, 2, -1, -1},
-      {0, 1, 2, 3, 4, 5},
-      {0, 1, 2, 3, -1, 4},
-      {0, 1, 2, 3, -1, 4},
-      {0, 1, 2, 3, 4, 5},
+      {0, 1, 2, 3, 4, -1},
+      {0, 1, 2, 3, -1, -1},
+      {0, 1, 2, 3, -1, -1},
+      {0, 1, 2, 3, 4, -1},
       {0, 1, 2, 3, -1, -1}
     };
 
@@ -470,7 +481,9 @@ struct Full_Threats {
     static constexpr int NUM_SQ     = 64;
     static constexpr int NUM_PT     = 11;
     static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
-    static constexpr int INPUTS     = 79856 + NUM_PLANES * NUM_SQ / 2;
+
+    static constexpr int NUM_THREAT_FEATURES = threatfeatures;
+    static constexpr int INPUTS     = NUM_THREAT_FEATURES + NUM_PLANES * NUM_SQ / 2;
 
 
     static int psq_index(Color color, Square ksq, Square sq, Piece p) {
@@ -478,7 +491,7 @@ struct Full_Threats {
         auto   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
         if (p_idx == 11)
             --p_idx;  // pack the opposite king into the same NUM_SQ * NUM_SQ
-        return 79856 + static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
+        return NUM_THREAT_FEATURES + static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
              + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
     }
 
@@ -595,7 +608,7 @@ struct Full_ThreatsFactorized {
 
     // Factorized features
     static constexpr int PIECE_INPUTS        = 768;
-    static constexpr int INPUTS              = 79856 + 22528 + 768;
+    static constexpr int INPUTS              = threatfeatures + 22528 + 768;
     static constexpr int MAX_ACTIVE_FEATURES = 128 + 32 + 32;
 
     static std::pair<int, int>

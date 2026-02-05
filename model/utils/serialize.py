@@ -165,8 +165,8 @@ class NNUEWriter:
 
         self.write_tensor(bias.flatten().numpy(), ft_compression)
         if model.feature_set.name.startswith("Full_Threats"):
-            threat_weight = weight[:79856].to(torch.int8)
-            psq_weight = weight[79856:]
+            threat_weight = weight[:model.threat_features].to(torch.int8)
+            psq_weight = weight[model.threat_features:]
             self.write_tensor(threat_weight.flatten().numpy())
             self.write_tensor(psq_weight.flatten().numpy(), ft_compression)
         else:
@@ -317,8 +317,8 @@ class NNUEReader:
         bias = self.tensor(np.int16, [layer.bias.shape[0] - num_psqt_buckets])
         # weights stored as [num_features][outputs]
         if self.feature_set.name.startswith("Full_Threats"):
-            threat_weight = self.tensor(np.int8, [79856, shape[1] - num_psqt_buckets])
-            psq_weight = self.tensor(np.int16, [shape[0] - 79856, shape[1] - num_psqt_buckets])
+            threat_weight = self.tensor(np.int8, [self.config.threat_features, shape[1] - num_psqt_buckets])
+            psq_weight = self.tensor(np.int16, [shape[0] - self.config.threat_features, shape[1] - num_psqt_buckets])
             weight = torch.cat([threat_weight, psq_weight], dim=0)
         else:
             weight = self.tensor(np.int16, [shape[0], shape[1] - num_psqt_buckets])

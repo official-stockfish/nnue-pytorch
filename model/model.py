@@ -18,6 +18,7 @@ class NNUEModel(nn.Module):
     ):
         super().__init__()
 
+        self.threat_features = config.threat_features
         self.L1 = config.L1
         self.L2 = config.L2
         self.L3 = config.L3
@@ -118,7 +119,7 @@ class NNUEModel(nn.Module):
 
     def clip_threat_weights(self):
         if self.feature_set.name.startswith("Full_Threats"):
-            p = self.input.weight[0:79856]
+            p = self.input.weight[0:self.threat_features]
             p_data_fp32 = p.data
             min_weight = -128 / 255
             max_weight = 127 / 255

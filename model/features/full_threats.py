@@ -4,74 +4,14 @@ import chess
 
 from .feature_block import FeatureBlock
 
-SQUARE_NB = 64
-PIECE_NB = 12
-COLOR_NB = 2
-PIECE_TYPE_NB = 8
-MAX_ACTIVE_FEATURES = 128 + 32
-"""
-OrientTBL = [
-[ 
-    a1, a1, a1, a1, h1, h1, h1, h1,
-    a1, a1, a1, a1, h1, h1, h1, h1,
-    a1, a1, a1, a1, h1, h1, h1, h1,
-    a1, a1, a1, a1, h1, h1, h1, h1,
-    a1, a1, a1, a1, h1, h1, h1, h1,
-    a1, a1, a1, a1, h1, h1, h1, h1,
-    a1, a1, a1, a1, h1, h1, h1, h1,
-    a1, a1, a1, a1, h1, h1, h1, h1 ],
-[ 
-    a8, a8, a8, a8, h8, h8, h8, h8,
-    a8, a8, a8, a8, h8, h8, h8, h8,
-    a8, a8, a8, a8, h8, h8, h8, h8,
-    a8, a8, a8, a8, h8, h8, h8, h8,
-    a8, a8, a8, a8, h8, h8, h8, h8,
-    a8, a8, a8, a8, h8, h8, h8, h8,
-    a8, a8, a8, a8, h8, h8, h8, h8,
-    a8, a8, a8, a8, h8, h8, h8, h8 ]
-]
-
-    
-int threatoffsets[PIECE_NB][SQUARE_NB+2];
-void init_threat_offsets() {
-    int pieceoffset = 0;
-    Piece piecetbl[12] = {whitePawn, blackPawn, whiteKnight, blackKnight, whiteBishop,
-    blackBishop, whiteRook, blackRook, whiteQueen, blackQueen, whiteKing, blackKing};
-    for (int piece = 0; piece < 12; piece++) {
-        threatoffsets[piece][65] = pieceoffset;
-        int squareoffset = 0;
-        for (int from = (int)a1; from <= (int)h8; from++) {
-            threatoffsets[piece][from] = squareoffset;
-            if (piecetbl[piece].type() != PieceType::Pawn) {
-                Bitboard attacks = bb::detail::pseudoAttacks()[piecetbl[piece].type()][Square(from)];
-                squareoffset += attacks.count();
-            }
-            else if (from >= (int)a2 && from <= (int)h7) {
-                Bitboard attacks = bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color());
-                squareoffset += attacks.count();
-            }
-        }
-        threatoffsets[piece][64] = squareoffset;
-        pieceoffset += numvalidtargets[piece]*squareoffset;
-    }
-}
-"""
-numvalidtargets = [6, 6, 12, 12, 10, 10, 10, 10, 12, 12, 8, 8]
-map = [
-    [0, 1, -1, 2, -1, -1],
-    [0, 1, 2, 3, 4, 5],
-    [0, 1, 2, 3, -1, 4],
-    [0, 1, 2, 3, -1, 4],
-    [0, 1, 2, 3, 4, 5],
-    [0, 1, 2, 3, -1, -1],
-]
 
 NUM_SQ = 64
 NUM_PT_REAL = 11
 NUM_PT_VIRTUAL = 12
 NUM_PLANES_REAL = NUM_SQ * NUM_PT_REAL
 NUM_PLANES_VIRTUAL = NUM_SQ * NUM_PT_VIRTUAL
-NUM_INPUTS = 79856 + NUM_PLANES_REAL * NUM_SQ // 2
+NUM_THREAT_FEATURES = 66864
+NUM_INPUTS = NUM_THREAT_FEATURES + NUM_PLANES_REAL * NUM_SQ // 2
 
 # fmt: off
 KingBuckets = [
@@ -99,7 +39,7 @@ def halfka_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece) -> int
     if p_idx == 11:
         p_idx -= 1
     return (
-        79856
+        NUM_THREAT_FEATURES
         + orient(is_white_pov, sq, king_sq)
         + p_idx * NUM_SQ
         + KingBuckets[o_ksq] * NUM_PLANES_REAL
@@ -160,11 +100,11 @@ class FactorizedFeatures(FeatureBlock):
     def get_feature_factors(self, idx: int) -> list[int]:
         if idx >= self.num_real_features:
             raise Exception("Feature must be real")
-        if idx < 79856:
+        if idx < NUM_THREAT_FEATURES:
             return [idx]
 
-        a_idx = (idx - 79856) % NUM_PLANES_REAL
-        k_idx = (idx - 79856) // NUM_PLANES_REAL
+        a_idx = (idx - NUM_THREAT_FEATURES) % NUM_PLANES_REAL
+        k_idx = (idx - NUM_THREAT_FEATURES) // NUM_PLANES_REAL
 
         if a_idx // NUM_SQ == 10 and k_idx != KingBuckets[a_idx % NUM_SQ]:
             a_idx += NUM_SQ
