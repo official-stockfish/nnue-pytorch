@@ -4,7 +4,11 @@ from dataclasses import dataclass
 # 3 layer fully connected network
 @dataclass
 class ModelConfig:
+<<<<<<< HEAD
     threat_features: int = 60144
+=======
+    threat_features: int = 66864
+>>>>>>> 24cfc75467ea7cb9c0d2de5a6b9a3e13a59303dc
     L1: int = 3072
     L2: int = 15
     L3: int = 32
