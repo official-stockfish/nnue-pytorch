@@ -376,7 +376,7 @@ struct HalfKAv2_hmFactorized {
     }
 };
 
-constexpr int numvalidtargets[12] = {6, 6, 10, 10, 8, 8, 8, 8, 10, 10, 8, 8};
+constexpr int numvalidtargets[12] = {6, 6, 10, 10, 8, 8, 8, 8, 10, 10, 0, 0};
 
 using ThreatOffsetTable = std::array<std::array<int, 66>, 12>;
 
@@ -426,7 +426,7 @@ constexpr auto threatfeaturecalc = []() {
 
 constexpr ThreatOffsetTable threatoffsets = threatfeaturecalc.table;
 constexpr int threatfeatures = threatfeaturecalc.totalfeatures;
-static_assert(threatfeatures == 66864);
+static_assert(threatfeatures == 60144);
 
 struct Full_Threats {
     static constexpr std::string_view NAME = "Full_Threats";
@@ -463,7 +463,7 @@ struct Full_Threats {
       {0, 1, 2, 3, -1, -1},
       {0, 1, 2, 3, -1, -1},
       {0, 1, 2, 3, 4, -1},
-      {0, 1, 2, 3, -1, -1}
+      {-1, -1, -1, -1, -1, -1}
     };
 
     static constexpr int KingBuckets[64] = {
