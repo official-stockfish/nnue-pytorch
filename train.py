@@ -496,12 +496,6 @@ def main():
     devices = (
         [int(x) for x in args.gpus.rstrip(",").split(",") if x] if args.gpus else "auto"
     )
-    world_size = (
-        len(devices) if isinstance(devices, list) else torch.cuda.device_count()
-    )
-    # TODO fix hack for data loader, to work for the first process,
-    # where this is not yet set correctly at loader construction time
-    os.environ["WORLD_SIZE"] = str(world_size)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"

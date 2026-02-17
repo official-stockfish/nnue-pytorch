@@ -175,7 +175,7 @@ class FixedNumBatchesDataset(Dataset):
     def __init__(self, dataset, num_batches):
         super().__init__()
         self.dataset = dataset
-        self.iter = iter(self.dataset)
+        self.iter = None  # Deferred to _start_prefetching
         self.num_batches = num_batches
 
         self._prefetch_queue = queue.Queue(maxsize=100)
@@ -201,6 +201,7 @@ class FixedNumBatchesDataset(Dataset):
     def _start_prefetching(self):
         with self._lock:
             if not self._prefetch_started:
+                self.iter = iter(self.dataset)
                 self._prefetch_thread = threading.Thread(
                     target=self._prefetch_worker, daemon=True
                 )

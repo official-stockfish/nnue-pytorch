@@ -11,9 +11,16 @@ from .config import (
 
 
 def _get_ddp_rank_and_world_size():
-    """Get DDP rank and world size from environment variables."""
-    rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
-    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    """Get DDP rank and world size from torch.distributed if available."""
+    import torch.distributed as dist
+
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+    else:
+        rank = 0
+        world_size = 1
+
     print(f"DDP rank: {rank}, world size: {world_size}", flush=True)
     return rank, world_size
 
