@@ -29,7 +29,7 @@ class BaseFeatureTransformer(nn.Module):
             return
 
         with torch.no_grad():
-            new_weight = F.pad(self.weight.data, (0, 0, 0, additional_features), value=0)
+            new_weight = F.pad(self.weight, (0, 0, 0, additional_features), value=0)
             
             self.weight = nn.Parameter(new_weight)
             self.num_inputs += additional_features

@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from .config import ModelConfig
@@ -46,7 +47,6 @@ class NNUEModel(nn.Module):
         We zero all virtual feature weights because there's not need for them
         to be initialized; they only aid the training of correlated features.
         """
-        weights = self.input.weight
         with torch.no_grad():
             for a, b in self.feature_set.get_virtual_feature_ranges():
                 self.input.weight[a:b, :].zero_()
