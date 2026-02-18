@@ -49,8 +49,7 @@ class NNUEModel(nn.Module):
         weights = self.input.weight
         with torch.no_grad():
             for a, b in self.feature_set.get_virtual_feature_ranges():
-                weights[a:b, :] = 0.0
-        self.input.weight = nn.Parameter(weights)
+                self.input.weight[a:b, :].zero_()
 
     def _init_psqt(self):
         input_weights = self.input.weight
@@ -79,9 +78,6 @@ class NNUEModel(nn.Module):
                 # due to gradient imprecision but it won't change anything.
                 input_bias[self.L1 + i] = 0.0
 
-        self.input.weight = nn.Parameter(input_weights)
-        self.input.bias = nn.Parameter(input_bias)
-
     def clip_weights(self):
         """
         Clips the weights of the model based on the min/max values allowed
@@ -99,32 +95,23 @@ class NNUEModel(nn.Module):
                         ys = p_data_fp32.shape[1] // virtual_params.shape[1]
                         expanded_virtual_layer = virtual_params.repeat(xs, ys)
                         if min_weight is not None:
-                            min_weight_t = (
+                            min_weight = (
                                 p_data_fp32.new_full(p_data_fp32.shape, min_weight)
                                 - expanded_virtual_layer
                             )
-                            p_data_fp32 = torch.max(p_data_fp32, min_weight_t)
                         if max_weight is not None:
-                            max_weight_t = (
+                            max_weight = (
                                 p_data_fp32.new_full(p_data_fp32.shape, max_weight)
                                 - expanded_virtual_layer
                             )
-                            p_data_fp32 = torch.min(p_data_fp32, max_weight_t)
-                    else:
-                        if min_weight is not None and max_weight is not None:
-                            p_data_fp32.clamp_(min_weight, max_weight)
-                        else:
-                            raise Exception("Not supported.")
-                    p.data.copy_(p_data_fp32)
+                    p_data_fp32.clamp_(min_weight, max_weight)
 
     def clip_threat_weights(self):
         if self.feature_set.name.startswith("Full_Threats"):
             p = self.input.weight[0:self.threat_features]
-            p_data_fp32 = p.data
             min_weight = -128 / 255
             max_weight = 127 / 255
-            p_data_fp32.clamp_(min_weight, max_weight)
-            p.data.copy_(p_data_fp32)
+            p.data.clamp_(min_weight, max_weight)
 
     def set_feature_set(self, new_feature_set: FeatureSet):
         """
@@ -161,12 +148,7 @@ class NNUEModel(nn.Module):
         # we only have to add the virtual feature on top of the already existing real ones.
         if old_feature_block.name == next(iter(new_feature_block.factors)):
             # We can just extend with zeros since it's unfactorized -> factorized
-            weights = self.input.weight
-            padding = weights.new_zeros(
-                (new_feature_block.num_virtual_features, weights.shape[1])
-            )
-            weights = torch.cat([weights, padding], dim=0)
-            self.input.weight = nn.Parameter(weights)
+            self.input.expand_input_layer(new_feature_block.num_virtual_features)
             self.feature_set = new_feature_set
         else:
             raise Exception(

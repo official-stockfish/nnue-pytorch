@@ -12,15 +12,27 @@ class BaseFeatureTransformer(nn.Module):
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
 
-        sigma = math.sqrt(1 / num_inputs)
+        self.weight = nn.Parameter(torch.empty((num_inputs, num_outputs), dtype=torch.float32))
+        self.bias = nn.Parameter(torch.empty(num_outputs, dtype=torch.float32))
+        
+        self.reset_parameters()
 
-        self.weight = nn.Parameter(
-            torch.rand(num_inputs, num_outputs, dtype=torch.float32) * (2 * sigma)
-            - sigma
-        )
-        self.bias = nn.Parameter(
-            torch.rand(num_outputs, dtype=torch.float32) * (2 * sigma) - sigma
-        )
+    def reset_parameters(self):
+        sigma = math.sqrt(1 / self.num_inputs)
+        with torch.no_grad():
+            self.weight.uniform_(-sigma, sigma)
+            self.bias.uniform_(-sigma, sigma)
+
+    def expand_input_layer(self, additional_features):
+        assert additional_features >= 0
+        if additional_features == 0:
+            return
+
+        with torch.no_grad():
+            new_weight = F.pad(self.weight.data, (0, 0, 0, additional_features), value=0)
+            
+            self.weight = nn.Parameter(new_weight)
+            self.num_inputs += additional_features
 
 
 class FeatureTransformer(BaseFeatureTransformer):
