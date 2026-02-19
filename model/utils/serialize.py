@@ -235,32 +235,20 @@ class NNUEReader:
             feature_set.hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
-        for i in range(self.model.num_ls_buckets):
-            l1 = nn.Linear(2 * self.config.L1 // 2, self.config.L2 + 1)
-            l2 = nn.Linear(self.config.L2 * 2, self.config.L3)
-            output = nn.Linear(self.config.L3, 1)
 
-            self.read_int32(fc_hash)  # FC layers hash
-            self.read_fc_layer(l1)
-            self.read_fc_layer(l2)
-            self.read_fc_layer(output, is_output=True)
-
-            self.model.layer_stacks.l1.linear.weight.data[
-                i * (self.config.L2 + 1) : (i + 1) * (self.config.L2 + 1), :
-            ] = l1.weight
-            self.model.layer_stacks.l1.linear.bias.data[
-                i * (self.config.L2 + 1) : (i + 1) * (self.config.L2 + 1)
-            ] = l1.bias
-            self.model.layer_stacks.l2.linear.weight.data[
-                i * self.config.L3 : (i + 1) * self.config.L3, :
-            ] = l2.weight
-            self.model.layer_stacks.l2.linear.bias.data[
-                i * self.config.L3 : (i + 1) * self.config.L3
-            ] = l2.bias
-            self.model.layer_stacks.output.linear.weight.data[i : (i + 1), :] = (
-                output.weight
-            )
-            self.model.layer_stacks.output.linear.bias.data[i : (i + 1)] = output.bias
+        layers = [
+            self.model.layer_stacks.l1,
+            self.model.layer_stacks.l2,
+            self.model.layer_stacks.output,
+        ]
+        num_ls_buckets = self.model.num_ls_buckets
+        l_w_slices = [torch.chunk(l.linear.weight.data, num_ls_buckets, dim=0) for l in layers]
+        l_b_slices = [torch.chunk(l.linear.bias.data, num_ls_buckets, dim=0) for l in layers]
+        
+        for b in range(num_ls_buckets):
+            self.read_int32(fc_hash) # FC layers hash
+            for l in range(len(layers)):
+                self.read_fc_layer(l_w_slices[l][b], l_b_slices[l][b], is_output=(l == len(layers) - 1))
 
     def read_header(self, feature_set: FeatureSet, fc_hash: int) -> None:
         self.read_int32(VERSION)  # version
@@ -333,26 +321,24 @@ class NNUEReader:
         layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
         layer.weight.data = torch.cat([weight, psqt_weight], dim=1)
 
-    def read_fc_layer(self, layer: nn.Linear, is_output: bool = False) -> None:
+    def read_fc_layer(self, layer_weight_t: torch.Tensor, layer_bias_t: torch.Tensor, is_output: bool = False) -> None:
         # FC inputs are padded to 32 elements by spec.
-        non_padded_shape = layer.weight.shape
+        non_padded_shape = layer_weight_t.shape
         padded_shape = (non_padded_shape[0], ((non_padded_shape[1] + 31) // 32) * 32)
 
-        bias = self.tensor(np.int32, layer.bias.shape)
+        bias = self.tensor(np.int32, layer_bias_t.shape)
         weight = self.tensor(np.int8, padded_shape)
 
         bias, weight = self.model.quantization.dequantize_fc_layer(
             bias, weight, is_output
         )
 
-        layer.bias.data = bias
-        layer.weight.data = weight
-
+        layer_bias = bias
         # Strip padding.
-        layer.weight.data = layer.weight.data[
+        layer_weight = weight[
             : non_padded_shape[0], : non_padded_shape[1]
         ]
-
+    
     def read_int32(self, expected: int | None = None) -> int:
         v = struct.unpack("<I", self.f.read(4))[0]
         if expected is not None and v != expected:
