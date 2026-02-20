@@ -33,10 +33,19 @@ read DATA_PATH
 DATA_PATH=${DATA_PATH}
 echo "Using data path: $DATA_PATH"
 
+# Checking if docker is in rootless mode.
+if docker info 2>/dev/null | grep -iq "rootless"; then
+    echo "Rootless mode detected."
+    USER_FLAG="--user 0:0"
+else
+    echo "Standard mode detected."
+    USER_FLAG="--user $(id -u):$(id -g)"
+fi
+
 echo "Creating new container 'nnue-container'..."
 docker run -it \
   $GPU_FLAGS \
-  -u `id -u` \
+  $USER_FLAG \
   -v "$(pwd)":/workspace/nnue-pytorch \
   -v "$DATA_PATH":/data \
   --ipc=host \
