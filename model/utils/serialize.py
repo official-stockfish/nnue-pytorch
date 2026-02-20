@@ -244,9 +244,9 @@ class NNUEReader:
         num_ls_buckets = self.model.num_ls_buckets
         l_w_slices = [torch.chunk(l.linear.weight.data, num_ls_buckets, dim=0) for l in layers]
         l_b_slices = [torch.chunk(l.linear.bias.data, num_ls_buckets, dim=0) for l in layers]
-        
+
         for b in range(num_ls_buckets):
-            self.read_int32(fc_hash) # FC layers hash
+            self.read_int32(fc_hash)  # FC layers hash
             for l in range(len(layers)):
                 self.read_fc_layer(l_w_slices[l][b], l_b_slices[l][b], is_output=(l == len(layers) - 1))
 
@@ -338,7 +338,10 @@ class NNUEReader:
         layer_weight = weight[
             : non_padded_shape[0], : non_padded_shape[1]
         ]
-    
+
+        layer_weight_t.data.copy_(layer_weight)
+        layer_bias_t.data.copy_(layer_bias)
+
     def read_int32(self, expected: int | None = None) -> int:
         v = struct.unpack("<I", self.f.read(4))[0]
         if expected is not None and v != expected:
