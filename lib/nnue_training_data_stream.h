@@ -185,8 +185,8 @@ namespace training_data {
         static constexpr auto openmode = std::ios::in | std::ios::binary;
         static inline const std::string extension = "binpack";
 
-        BinpackSfenInputParallelStream(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate) :
-            m_stream(std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(concurrency, filenames, openmode, cyclic, skipPredicate)),
+        BinpackSfenInputParallelStream(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate, int rank = 0, int world_size = 1) :
+            m_stream(std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(concurrency, filenames, openmode, cyclic, skipPredicate, rank, world_size)),
             m_filenames(filenames),
             m_concurrency(concurrency),
             m_eof(false),
@@ -243,13 +243,13 @@ namespace training_data {
         return nullptr;
     }
 
-    inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file_parallel(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr)
+    inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file_parallel(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr, int rank = 0, int world_size = 1)
     {
         // TODO (low priority): optimize and parallelize .bin reading.
         if (has_extension(filenames[0], BinSfenInputStream::extension))
             return std::make_unique<BinSfenInputStream>(filenames[0], cyclic, std::move(skipPredicate));
         else if (has_extension(filenames[0], BinpackSfenInputParallelStream::extension))
-            return std::make_unique<BinpackSfenInputParallelStream>(concurrency, filenames, cyclic, std::move(skipPredicate));
+            return std::make_unique<BinpackSfenInputParallelStream>(concurrency, filenames, cyclic, std::move(skipPredicate), rank, world_size);
 
         return nullptr;
     }

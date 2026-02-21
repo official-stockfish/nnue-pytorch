@@ -110,7 +110,7 @@ class NNUE(L.LightningModule):
         weights = 1 + (2.0**p.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), p.w2)
         loss = (loss * weights).sum() / weights.sum()
 
-        self.log(loss_type, loss, prog_bar=True)
+        self.log(loss_type, loss, prog_bar=True, sync_dist=True)
 
         return loss
 
