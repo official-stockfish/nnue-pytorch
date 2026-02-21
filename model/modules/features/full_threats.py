@@ -165,10 +165,10 @@ class FullThreats(DoubleFeatureTransformer):
         self.weight.data.copy_(expanded)
         self.virtual_weight.zero_()
 
-    def clip_weights(self) -> None:
-        """Clamp threat weight slice to int8 range."""
+    def clip_weights(self, quantization) -> None:
+        """Clamp threat weight slice to quantization-safe range."""
         p = self.weight[: self.NUM_THREAT_FEATURES]
-        p.data.clamp_(-128 / 255, 127 / 255)
+        p.data.clamp_(quantization.min_threat_weight, quantization.max_threat_weight)
 
     @staticmethod
     def halfka_psqts() -> list[int]:

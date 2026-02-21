@@ -26,6 +26,10 @@ class BaseFeatureTransformer(nn.Module):
             self.weight.uniform_(-sigma, sigma)
             self.bias.uniform_(-sigma, sigma)
 
+    def clip_weights(self, quantization) -> None:
+        """Clip weights to quantization-safe range. Override in subclasses."""
+        pass
+
     def expand_input_layer(self, additional_features):
         assert additional_features >= 0
         if additional_features == 0:

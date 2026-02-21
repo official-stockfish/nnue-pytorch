@@ -180,10 +180,6 @@ class HalfKav2Hm(DoubleFeatureTransformer):
         self.weight.data.copy_(expanded)
         self.virtual_weight.zero_()
 
-    def clip_weights(self) -> None:
-        """No special clipping needed for HalfKav2Hm."""
-        pass
-
     @staticmethod
     def halfka_psqts() -> list[int]:
         """PSQT initial values using 12 piece types (24,576 values)."""

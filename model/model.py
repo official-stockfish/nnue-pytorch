@@ -63,9 +63,7 @@ class NNUEModel(nn.Module):
                                 - expanded_virtual_layer
                             )
                     p_data_fp32.clamp_(min_weight, max_weight)
-
-    def clip_threat_weights(self):
-        self.input.clip_weights()
+        self.input.clip_weights(self.quantization)
 
     def forward(
         self,
