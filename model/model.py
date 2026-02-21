@@ -1,17 +1,16 @@
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 from .config import ModelConfig
-from .features import FeatureSet
-from .modules import DoubleFeatureTransformer, LayerStacks
+from .modules import LayerStacks
+from .modules.features import get_feature_cls
 from .quantize import QuantizationConfig, QuantizationManager
 
 
 class NNUEModel(nn.Module):
     def __init__(
         self,
-        feature_set: FeatureSet,
+        feature_name: str,
         config: ModelConfig,
         quantize_config: QuantizationConfig,
         num_psqt_buckets: int = 8,
@@ -19,7 +18,7 @@ class NNUEModel(nn.Module):
     ):
         super().__init__()
 
-        self.threat_features = config.threat_features
+        self.feature_name = feature_name
         self.L1 = config.L1
         self.L2 = config.L2
         self.L3 = config.L3
@@ -27,56 +26,15 @@ class NNUEModel(nn.Module):
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
-        self.input = DoubleFeatureTransformer(
-            feature_set.num_features, self.L1 + self.num_psqt_buckets
-        )
-        self.feature_set = feature_set
+        feature_cls = get_feature_cls(feature_name)
+        self.input = feature_cls(self.L1 + self.num_psqt_buckets)
+        self.feature_hash = feature_cls.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
 
         self.quantization = QuantizationManager(quantize_config)
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
-        self._init_layers()
-
-    def _init_layers(self):
-        self._zero_virtual_feature_weights()
-        self._init_psqt()
-
-    def _zero_virtual_feature_weights(self):
-        """
-        We zero all virtual feature weights because there's not need for them
-        to be initialized; they only aid the training of correlated features.
-        """
-        with torch.no_grad():
-            for a, b in self.feature_set.get_virtual_feature_ranges():
-                self.input.weight[a:b, :].zero_()
-
-    def _init_psqt(self):
-        input_weights = self.input.weight
-        input_bias = self.input.bias
-        # 1.0 / kPonanzaConstant
-        scale = 1 / self.quantization.nnue2score
-
-        with torch.no_grad():
-            initial_values = self.feature_set.get_initial_psqt_features()
-            assert len(initial_values) == self.feature_set.num_features
-
-            new_weights = (
-                torch.tensor(
-                    initial_values,
-                    device=input_weights.device,
-                    dtype=input_weights.dtype,
-                )
-                * scale
-            )
-
-            for i in range(self.num_psqt_buckets):
-                input_weights[:, self.L1 + i] = new_weights
-                # Bias doesn't matter because it cancels out during
-                # inference during perspective averaging. We set it to 0
-                # just for the sake of it. It might still diverge away from 0
-                # due to gradient imprecision but it won't change anything.
-                input_bias[self.L1 + i] = 0.0
+        self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
 
     def clip_weights(self):
         """
@@ -107,55 +65,7 @@ class NNUEModel(nn.Module):
                     p_data_fp32.clamp_(min_weight, max_weight)
 
     def clip_threat_weights(self):
-        if self.feature_set.name.startswith("Full_Threats"):
-            p = self.input.weight[0:self.threat_features]
-            min_weight = -128 / 255
-            max_weight = 127 / 255
-            p.data.clamp_(min_weight, max_weight)
-
-    def set_feature_set(self, new_feature_set: FeatureSet):
-        """
-        This method attempts to convert the model from using the self.feature_set
-        to new_feature_set. Currently only works for adding virtual features.
-        """
-        if self.feature_set.name == new_feature_set.name:
-            return
-
-        # TODO: Implement this for more complicated conversions.
-        #       Currently we support only a single feature block.
-        if len(self.feature_set.features) > 1:
-            raise Exception(
-                "Cannot change feature set from {} to {}.".format(
-                    self.feature_set.name, new_feature_set.name
-                )
-            )
-
-        # Currently we only support conversion for feature sets with
-        # one feature block each so we'll dig the feature blocks directly
-        # and forget about the set.
-        old_feature_block = self.feature_set.features[0]
-        new_feature_block = new_feature_set.features[0]
-
-        # next(iter(new_feature_block.factors)) is the way to get the
-        # first item in a OrderedDict. (the ordered dict being str : int
-        # mapping of the factor name to its size).
-        # It is our new_feature_factor_name.
-        # For example old_feature_block.name == "HalfKP"
-        # and new_feature_factor_name == "HalfKP^"
-        # We assume here that the "^" denotes factorized feature block
-        # and we would like feature block implementers to follow this convention.
-        # So if our current feature_set matches the first factor in the new_feature_set
-        # we only have to add the virtual feature on top of the already existing real ones.
-        if old_feature_block.name == next(iter(new_feature_block.factors)):
-            # We can just extend with zeros since it's unfactorized -> factorized
-            self.input.expand_input_layer(new_feature_block.num_virtual_features)
-            self.feature_set = new_feature_set
-        else:
-            raise Exception(
-                "Cannot change feature set from {} to {}.".format(
-                    self.feature_set.name, new_feature_set.name
-                )
-            )
+        self.input.clip_weights()
 
     def forward(
         self,

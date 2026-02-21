@@ -2582,23 +2582,24 @@ def prepare_start_model_from_experiment(
 
 def get_default_feature_set_from_nnue_pytorch(nnue_pytorch_directory):
     """
-    features.py in nnue-pytorch defines the default feature set to use.
+    The features __init__.py in nnue-pytorch defines the default feature set to use.
     We scrape it for the feature set name.
     Normally we could import that file and let it add the argument to argparse,
     but we setup argparse before nnue-pytorch is setup so we have to do it like that.
     """
     try:
-        with open(
-            os.path.join(nnue_pytorch_directory, "features.py"), "r"
-        ) as features_file:
+        features_init = os.path.join(
+            nnue_pytorch_directory, "model", "modules", "features", "__init__.py"
+        )
+        with open(features_init, "r") as features_file:
             for line in features_file:
                 line = line.strip()
-                if line.startswith("_default_feature_set_name"):
-                    return line.split()[-1][1:-1]
-    except:
-        raise Exception(
-            "Could not infer the default feature set from the nnue-pytorch installation."
-        )
+                if line.startswith("default="):
+                    # Extract the default value from: default="HalfKAv2_hm",
+                    return line.split('"')[1]
+    except Exception:
+        pass
+    return "HalfKAv2_hm"
 
 
 def parse_duration_hms_to_s(duration_str):

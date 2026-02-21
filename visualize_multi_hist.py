@@ -69,9 +69,7 @@ def main():
     M.add_feature_args(parser)
     args = parser.parse_args()
 
-    supported_features = ("HalfKAv2", "HalfKAv2^", "HalfKAv2_hm", "HalfKAv2_hm^")
-    assert args.features in supported_features
-    feature_set = M.get_feature_set_from_name(args.features)
+    feature_name = args.features
 
     from os.path import basename
 
@@ -85,13 +83,11 @@ def main():
         labels.append("\n".join(label.split("-")))
 
     models = [
-        M.load_model(m, feature_set, M.ModelConfig(L1=args.l1, L2=args.l2), M.QuantizationConfig())
+        M.load_model(m, feature_name, M.ModelConfig(L1=args.l1, L2=args.l2), M.QuantizationConfig())
         for m in args.models
     ]
 
-    coalesced_ins = [
-        M.coalesce_ft_weights(model.feature_set, model.input) for model in models
-    ]
+    coalesced_ins = [model.input.get_export_weights() for model in models]
     input_weights = [
         coalesced_in[:, : args.l1].flatten().numpy() for coalesced_in in coalesced_ins
     ]

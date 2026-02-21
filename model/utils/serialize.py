@@ -9,11 +9,11 @@ from numba import njit
 import torch
 from torch import nn
 
-from .coalesce_weights import coalesce_ft_weights
 from ..config import ModelConfig
-from ..features import FeatureSet
 from ..model import NNUEModel
 from ..modules import BaseFeatureTransformer
+from ..modules.features import get_feature_cls
+from ..modules.features.full_threats import FullThreats
 from ..quantize import QuantizationConfig
 
 
@@ -82,12 +82,9 @@ class NNUEWriter:
 
         self.buf = bytearray()
 
-        # NOTE: model.clip_weights() should probably be called here. It's not necessary now
-        # because it doesn't have more restrictive bounds than these defined by quantization,
-        # but it might be necessary in the future.
         fc_hash = self.fc_hash(model)
         self.write_header(model, fc_hash, description)
-        self.int32(model.feature_set.hash ^ (model.L1 * 2))  # Feature transformer hash
+        self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model, ft_compression)
         for l1, l2, output in model.layer_stacks.get_coalesced_layer_stacks():
             self.int32(fc_hash)  # FC layers hash
@@ -120,9 +117,7 @@ class NNUEWriter:
 
     def write_header(self, model: NNUEModel, fc_hash: int, description: str) -> None:
         self.int32(VERSION)  # version
-        self.int32(
-            fc_hash ^ model.feature_set.hash ^ (model.L1 * 2)
-        )  # halfkp network hash
+        self.int32(fc_hash ^ model.feature_hash ^ (model.L1 * 2))  # halfkp network hash
         encoded_description = description.encode("utf-8")
         self.int32(len(encoded_description))  # Network definition
         self.buf.extend(encoded_description)
@@ -146,9 +141,10 @@ class NNUEWriter:
 
         bias = layer.bias.data[: model.L1]
 
-        all_weight = coalesce_ft_weights(model.feature_set, layer)
-        weight = all_weight[:, : model.L1]
-        psqt_weight = all_weight[:, model.L1 :]
+        # Get export weights (coalesced + remapped 12→11 piece types)
+        export_weight = layer.get_export_weights()
+        weight = export_weight[:, : model.L1]
+        psqt_weight = export_weight[:, model.L1 :]
 
         def histogram_callback(
             bias: torch.Tensor, weight: torch.Tensor, psqt_weight: torch.Tensor
@@ -162,11 +158,10 @@ class NNUEWriter:
         )
 
         # Weights stored as [num_features][outputs]
-
         self.write_tensor(bias.flatten().numpy(), ft_compression)
-        if model.feature_set.name.startswith("Full_Threats"):
-            threat_weight = weight[:model.threat_features].to(torch.int8)
-            psq_weight = weight[model.threat_features:]
+        if isinstance(layer, FullThreats):
+            threat_weight = weight[: layer.NUM_THREAT_FEATURES].to(torch.int8)
+            psq_weight = weight[layer.NUM_THREAT_FEATURES :]
             self.write_tensor(threat_weight.flatten().numpy())
             self.write_tensor(psq_weight.flatten().numpy(), ft_compression)
         else:
@@ -220,19 +215,20 @@ class NNUEReader:
     def __init__(
         self,
         f: BinaryIO,
-        feature_set: FeatureSet,
+        feature_name: str,
         config: ModelConfig,
         quantize_config: QuantizationConfig,
     ):
         self.f = f
-        self.feature_set = feature_set
-        self.model = NNUEModel(feature_set, config, quantize_config)
+        self.feature_name = feature_name
+        self.model = NNUEModel(feature_name, config, quantize_config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
-        self.read_header(feature_set, fc_hash)
+        feature_cls = get_feature_cls(feature_name)
+        self.read_header(feature_cls.HASH, fc_hash)
         self.read_int32(
-            feature_set.hash ^ (self.config.L1 * 2)
+            feature_cls.HASH ^ (self.config.L1 * 2)
         )  # Feature transformer hash
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
 
@@ -242,17 +238,23 @@ class NNUEReader:
             self.model.layer_stacks.output,
         ]
         num_ls_buckets = self.model.num_ls_buckets
-        l_w_slices = [torch.chunk(l.linear.weight.data, num_ls_buckets, dim=0) for l in layers]
-        l_b_slices = [torch.chunk(l.linear.bias.data, num_ls_buckets, dim=0) for l in layers]
+        l_w_slices = [
+            torch.chunk(l.linear.weight.data, num_ls_buckets, dim=0) for l in layers
+        ]
+        l_b_slices = [
+            torch.chunk(l.linear.bias.data, num_ls_buckets, dim=0) for l in layers
+        ]
 
         for b in range(num_ls_buckets):
             self.read_int32(fc_hash)  # FC layers hash
             for l in range(len(layers)):
-                self.read_fc_layer(l_w_slices[l][b], l_b_slices[l][b], is_output=(l == len(layers) - 1))
+                self.read_fc_layer(
+                    l_w_slices[l][b], l_b_slices[l][b], is_output=(l == len(layers) - 1)
+                )
 
-    def read_header(self, feature_set: FeatureSet, fc_hash: int) -> None:
+    def read_header(self, feature_hash: int, fc_hash: int) -> None:
         self.read_int32(VERSION)  # version
-        self.read_int32(fc_hash ^ feature_set.hash ^ (self.config.L1 * 2))
+        self.read_int32(fc_hash ^ feature_hash ^ (self.config.L1 * 2))
         desc_len = self.read_int32()
         self.description = self.f.read(desc_len).decode("utf-8")
 
@@ -300,17 +302,28 @@ class NNUEReader:
     def read_feature_transformer(
         self, layer: BaseFeatureTransformer, num_psqt_buckets: int
     ) -> None:
-        shape = layer.weight.shape
+        num_export_features = layer.NUM_REAL_FEATURES
+        num_outputs = layer.num_outputs
 
-        bias = self.tensor(np.int16, [layer.bias.shape[0] - num_psqt_buckets])
+        bias = self.tensor(np.int16, [num_outputs - num_psqt_buckets])
         # weights stored as [num_features][outputs]
-        if self.feature_set.name.startswith("Full_Threats"):
-            threat_weight = self.tensor(np.int8, [self.config.threat_features, shape[1] - num_psqt_buckets])
-            psq_weight = self.tensor(np.int16, [shape[0] - self.config.threat_features, shape[1] - num_psqt_buckets])
+        if isinstance(layer, FullThreats):
+            threat_weight = self.tensor(
+                np.int8, [layer.NUM_THREAT_FEATURES, num_outputs - num_psqt_buckets]
+            )
+            psq_weight = self.tensor(
+                np.int16,
+                [
+                    num_export_features - layer.NUM_THREAT_FEATURES,
+                    num_outputs - num_psqt_buckets,
+                ],
+            )
             weight = torch.cat([threat_weight, psq_weight], dim=0)
         else:
-            weight = self.tensor(np.int16, [shape[0], shape[1] - num_psqt_buckets])
-        psqt_weight = self.tensor(np.int32, [shape[0], num_psqt_buckets])
+            weight = self.tensor(
+                np.int16, [num_export_features, num_outputs - num_psqt_buckets]
+            )
+        psqt_weight = self.tensor(np.int32, [num_export_features, num_psqt_buckets])
 
         bias, weight, psqt_weight = (
             self.model.quantization.dequantize_feature_transformer(
@@ -318,10 +331,17 @@ class NNUEReader:
             )
         )
 
+        # Combine weight and psqt_weight into export format, then expand 11→12
+        export_weight = torch.cat([weight, psqt_weight], dim=1)
+        layer.load_export_weights(export_weight)
         layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
-        layer.weight.data = torch.cat([weight, psqt_weight], dim=1)
 
-    def read_fc_layer(self, layer_weight_t: torch.Tensor, layer_bias_t: torch.Tensor, is_output: bool = False) -> None:
+    def read_fc_layer(
+        self,
+        layer_weight_t: torch.Tensor,
+        layer_bias_t: torch.Tensor,
+        is_output: bool = False,
+    ) -> None:
         # FC inputs are padded to 32 elements by spec.
         non_padded_shape = layer_weight_t.shape
         padded_shape = (non_padded_shape[0], ((non_padded_shape[1] + 31) // 32) * 32)
@@ -335,9 +355,7 @@ class NNUEReader:
 
         layer_bias = bias
         # Strip padding.
-        layer_weight = weight[
-            : non_padded_shape[0], : non_padded_shape[1]
-        ]
+        layer_weight = weight[: non_padded_shape[0], : non_padded_shape[1]]
 
         layer_weight_t.data.copy_(layer_weight)
         layer_bias_t.data.copy_(layer_bias)

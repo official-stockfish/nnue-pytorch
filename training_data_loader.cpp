@@ -32,252 +32,6 @@
 using namespace binpack;
 using namespace chess;
 
-static Square orient(Color color, Square sq) {
-    if (color == Color::White)
-    {
-        return sq;
-    }
-    else
-    {
-        // IMPORTANT: for now we use rotate180 instead of rank flip
-        //            for compatibility with the stockfish master branch.
-        //            Note that this is inconsistent with nodchip/master.
-        return sq.flippedVertically().flippedHorizontally();
-    }
-}
-
-static Square orient_flip(Color color, Square sq) {
-    if (color == Color::White)
-    {
-        return sq;
-    }
-    else
-    {
-        return sq.flippedVertically();
-    }
-}
-
-struct HalfKP {
-    static constexpr std::string_view NAME = "HalfKP";
-
-    static constexpr int NUM_SQ     = 64;
-    static constexpr int NUM_PT     = 10;
-    static constexpr int NUM_PLANES = (NUM_SQ * NUM_PT + 1);
-    static constexpr int INPUTS     = NUM_PLANES * NUM_SQ;
-
-    static constexpr int MAX_ACTIVE_FEATURES = 32;
-
-    static int feature_index(Color color, Square ksq, Square sq, Piece p) {
-        auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-        return 1 + static_cast<int>(orient(color, sq)) + p_idx * NUM_SQ
-             + static_cast<int>(ksq) * NUM_PLANES;
-    }
-
-    static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
-        auto& pos    = e.pos;
-        auto  pieces = pos.piecesBB()
-                    & ~(pos.piecesBB(Piece(PieceType::King, Color::White))
-                        | pos.piecesBB(Piece(PieceType::King, Color::Black)));
-        auto ksq = pos.kingSquare(color);
-
-        // We order the features so that the resulting sparse
-        // tensor is coalesced.
-        int j = 0;
-        for (Square sq : pieces)
-        {
-            auto p      = pos.pieceAt(sq);
-            values[j]   = 1.0f;
-            features[j] = feature_index(color, orient(color, ksq), sq, p);
-            ++j;
-        }
-
-        return {j, INPUTS};
-    }
-};
-
-struct HalfKPFactorized {
-    static constexpr std::string_view NAME = "HalfKP^";
-
-    // Factorized features
-    static constexpr int K_INPUTS     = HalfKP::NUM_SQ;
-    static constexpr int PIECE_INPUTS = HalfKP::NUM_SQ * HalfKP::NUM_PT;
-    static constexpr int INPUTS       = HalfKP::INPUTS + K_INPUTS + PIECE_INPUTS;
-
-    static constexpr int MAX_K_FEATURES     = 1;
-    static constexpr int MAX_PIECE_FEATURES = 32;
-    static constexpr int MAX_ACTIVE_FEATURES =
-      HalfKP::MAX_ACTIVE_FEATURES + MAX_K_FEATURES + MAX_PIECE_FEATURES;
-
-    static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
-        auto [start_j, offset] = HalfKP::fill_features_sparse(e, features, values, color);
-        int   j                = start_j;
-        auto& pos              = e.pos;
-        {
-            // king square factor
-            auto ksq    = pos.kingSquare(color);
-            features[j] = offset + static_cast<int>(orient(color, ksq));
-            values[j]   = static_cast<float>(start_j);
-            ++j;
-        }
-        offset += K_INPUTS;
-        auto pieces = pos.piecesBB()
-                    & ~(pos.piecesBB(Piece(PieceType::King, Color::White))
-                        | pos.piecesBB(Piece(PieceType::King, Color::Black)));
-
-        // We order the features so that the resulting sparse
-        // tensor is coalesced. Note that we can just sort
-        // the parts where values are all 1.0f and leave the
-        // halfk feature where it was.
-        for (Square sq : pieces)
-        {
-            auto p      = pos.pieceAt(sq);
-            auto p_idx  = static_cast<int>(p.type()) * 2 + (p.color() != color);
-            values[j]   = 1.0f;
-            features[j] = offset + (p_idx * HalfKP::NUM_SQ) + static_cast<int>(orient(color, sq));
-            ++j;
-        }
-
-        return {j, INPUTS};
-    }
-};
-
-struct HalfKA {
-    static constexpr std::string_view NAME = "HalfKA";
-
-    static constexpr int NUM_SQ     = 64;
-    static constexpr int NUM_PT     = 12;
-    static constexpr int NUM_PLANES = (NUM_SQ * NUM_PT + 1);
-    static constexpr int INPUTS     = NUM_PLANES * NUM_SQ;
-
-    static constexpr int MAX_ACTIVE_FEATURES = 32;
-
-    static int feature_index(Color color, Square ksq, Square sq, Piece p) {
-        auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-        return 1 + static_cast<int>(orient_flip(color, sq)) + p_idx * NUM_SQ
-             + static_cast<int>(ksq) * NUM_PLANES;
-    }
-
-    static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
-        auto& pos    = e.pos;
-        auto  pieces = pos.piecesBB();
-        auto  ksq    = pos.kingSquare(color);
-
-        int j = 0;
-        for (Square sq : pieces)
-        {
-            auto p      = pos.pieceAt(sq);
-            values[j]   = 1.0f;
-            features[j] = feature_index(color, orient_flip(color, ksq), sq, p);
-            ++j;
-        }
-
-        return {j, INPUTS};
-    }
-};
-
-struct HalfKAFactorized {
-    static constexpr std::string_view NAME = "HalfKA^";
-
-    // Factorized features
-    static constexpr int PIECE_INPUTS = HalfKA::NUM_SQ * HalfKA::NUM_PT;
-    static constexpr int INPUTS       = HalfKA::INPUTS + PIECE_INPUTS;
-
-    static constexpr int MAX_PIECE_FEATURES  = 32;
-    static constexpr int MAX_ACTIVE_FEATURES = HalfKA::MAX_ACTIVE_FEATURES + MAX_PIECE_FEATURES;
-
-    static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
-        const auto [start_j, offset] = HalfKA::fill_features_sparse(e, features, values, color);
-        auto& pos                    = e.pos;
-        auto  pieces                 = pos.piecesBB();
-
-        int j = start_j;
-        for (Square sq : pieces)
-        {
-            auto p     = pos.pieceAt(sq);
-            auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-            values[j]  = 1.0f;
-            features[j] =
-              offset + (p_idx * HalfKA::NUM_SQ) + static_cast<int>(orient_flip(color, sq));
-            ++j;
-        }
-
-        return {j, INPUTS};
-    }
-};
-
-struct HalfKAv2 {
-    static constexpr std::string_view NAME = "HalfKAv2";
-
-    static constexpr int NUM_SQ     = 64;
-    static constexpr int NUM_PT     = 11;
-    static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
-    static constexpr int INPUTS     = NUM_PLANES * NUM_SQ;
-
-    static constexpr int MAX_ACTIVE_FEATURES = 32;
-
-    static int feature_index(Color color, Square ksq, Square sq, Piece p) {
-        auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-        if (p_idx == 11)
-            --p_idx;  // pack the opposite king into the same NUM_SQ * NUM_SQ
-        return static_cast<int>(orient_flip(color, sq)) + p_idx * NUM_SQ
-             + static_cast<int>(ksq) * NUM_PLANES;
-    }
-
-    static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
-        auto& pos    = e.pos;
-        auto  pieces = pos.piecesBB();
-        auto  ksq    = pos.kingSquare(color);
-
-        int j = 0;
-        for (Square sq : pieces)
-        {
-            auto p      = pos.pieceAt(sq);
-            values[j]   = 1.0f;
-            features[j] = feature_index(color, orient_flip(color, ksq), sq, p);
-            ++j;
-        }
-
-        return {j, INPUTS};
-    }
-};
-
-struct HalfKAv2Factorized {
-    static constexpr std::string_view NAME = "HalfKAv2^";
-
-    // Factorized features
-    static constexpr int NUM_PT       = 12;
-    static constexpr int PIECE_INPUTS = HalfKAv2::NUM_SQ * NUM_PT;
-    static constexpr int INPUTS       = HalfKAv2::INPUTS + PIECE_INPUTS;
-
-    static constexpr int MAX_PIECE_FEATURES  = 32;
-    static constexpr int MAX_ACTIVE_FEATURES = HalfKAv2::MAX_ACTIVE_FEATURES + MAX_PIECE_FEATURES;
-
-    static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
-        const auto [start_j, offset] = HalfKAv2::fill_features_sparse(e, features, values, color);
-        auto& pos                    = e.pos;
-        auto  pieces                 = pos.piecesBB();
-
-        int j = start_j;
-        for (Square sq : pieces)
-        {
-            auto p     = pos.pieceAt(sq);
-            auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-            values[j]  = 1.0f;
-            features[j] =
-              offset + (p_idx * HalfKAv2::NUM_SQ) + static_cast<int>(orient_flip(color, sq));
-            ++j;
-        }
-
-        return {j, INPUTS};
-    }
-};
-
 // ksq must not be oriented
 static Square orient_flip_2(Color color, Square sq, Square ksq) {
     bool h = ksq.file() < fileE;
@@ -292,7 +46,7 @@ struct HalfKAv2_hm {
     static constexpr std::string_view NAME = "HalfKAv2_hm";
 
     static constexpr int NUM_SQ     = 64;
-    static constexpr int NUM_PT     = 11;
+    static constexpr int NUM_PT     = 12;
     static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
     static constexpr int INPUTS     = NUM_PLANES * NUM_SQ / 2;
 
@@ -316,8 +70,6 @@ struct HalfKAv2_hm {
     static int feature_index(Color color, Square ksq, Square sq, Piece p) {
         Square o_ksq = orient_flip_2(color, ksq, ksq);
         auto   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-        if (p_idx == 11)
-            --p_idx;  // pack the opposite king into the same NUM_SQ * NUM_SQ
         return static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
              + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
     }
@@ -334,41 +86,6 @@ struct HalfKAv2_hm {
             auto p      = pos.pieceAt(sq);
             values[j]   = 1.0f;
             features[j] = feature_index(color, ksq, sq, p);
-            ++j;
-        }
-
-        return {j, INPUTS};
-    }
-};
-
-struct HalfKAv2_hmFactorized {
-    static constexpr std::string_view NAME = "HalfKAv2_hm^";
-
-    // Factorized features
-    static constexpr int NUM_PT       = 12;
-    static constexpr int PIECE_INPUTS = HalfKAv2_hm::NUM_SQ * NUM_PT;
-    static constexpr int INPUTS       = HalfKAv2_hm::INPUTS + PIECE_INPUTS;
-
-    static constexpr int MAX_PIECE_FEATURES = 32;
-    static constexpr int MAX_ACTIVE_FEATURES =
-      HalfKAv2_hm::MAX_ACTIVE_FEATURES + MAX_PIECE_FEATURES;
-
-    static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
-        const auto [start_j, offset] =
-          HalfKAv2_hm::fill_features_sparse(e, features, values, color);
-        auto& pos    = e.pos;
-        auto  pieces = pos.piecesBB();
-        auto  ksq    = pos.kingSquare(color);
-
-        int j = start_j;
-        for (Square sq : pieces)
-        {
-            auto p      = pos.pieceAt(sq);
-            auto p_idx  = static_cast<int>(p.type()) * 2 + (p.color() != color);
-            values[j]   = 1.0f;
-            features[j] = offset + (p_idx * HalfKAv2_hm::NUM_SQ)
-                        + static_cast<int>(orient_flip_2(color, sq, ksq));
             ++j;
         }
 
@@ -479,7 +196,7 @@ struct Full_Threats {
     // clang-format on
 
     static constexpr int NUM_SQ     = 64;
-    static constexpr int NUM_PT     = 11;
+    static constexpr int NUM_PT     = 12;
     static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
 
     static constexpr int NUM_THREAT_FEATURES = threatfeatures;
@@ -489,8 +206,6 @@ struct Full_Threats {
     static int psq_index(Color color, Square ksq, Square sq, Piece p) {
         Square o_ksq = orient_flip_2(color, ksq, ksq);
         auto   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-        if (p_idx == 11)
-            --p_idx;  // pack the opposite king into the same NUM_SQ * NUM_SQ
         return NUM_THREAT_FEATURES + static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
              + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
     }
@@ -603,37 +318,6 @@ struct Full_Threats {
     }
 };
 
-struct Full_ThreatsFactorized {
-    static constexpr std::string_view NAME = "Full_Threats^";
-
-    // Factorized features
-    static constexpr int PIECE_INPUTS        = 768;
-    static constexpr int INPUTS              = threatfeatures + 22528 + 768;
-    static constexpr int MAX_ACTIVE_FEATURES = 128 + 32 + 32;
-
-    static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
-        const auto [start_j, offset] =
-          Full_Threats::fill_features_sparse(e, features, values, color);
-        auto& pos    = e.pos;
-        auto  pieces = pos.piecesBB();
-        auto  ksq    = pos.kingSquare(color);
-
-        int j = start_j;
-        for (Square sq : pieces)
-        {
-            auto p      = pos.pieceAt(sq);
-            auto p_idx  = static_cast<int>(p.type()) * 2 + (p.color() != color);
-            values[j]   = 1.0f;
-            features[j] = offset + (p_idx * HalfKAv2_hm::NUM_SQ)
-                        + static_cast<int>(orient_flip_2(color, sq, ksq));
-            ++j;
-        }
-
-        return {j, INPUTS};
-    }
-};
-
 template<typename T, typename... Ts>
 struct FeatureSet {
     static_assert(sizeof...(Ts) == 0, "Currently only one feature subset supported.");
@@ -672,16 +356,8 @@ auto find_feature(std::string_view name) {
 }
 
 auto get_feature(std::string_view name) {
-    return find_feature<HalfKP,                 //
-                        HalfKPFactorized,       //
-                        HalfKA,                 //
-                        HalfKAFactorized,       //
-                        HalfKAv2,               //
-                        HalfKAv2Factorized,     //
-                        HalfKAv2_hm,            //
-                        HalfKAv2_hmFactorized,  //
-                        Full_Threats,           //
-                        Full_ThreatsFactorized  //
+    return find_feature<HalfKAv2_hm,    //
+                        Full_Threats     //
                         >(name);
 }
 
@@ -1385,7 +1061,7 @@ int main(int argc, char** argv) {
                                              .pc_y1                = 1.0,
                                              .pc_y2                = 2.0,
                                              .pc_y3                = 1.0};
-    auto stream = create_sparse_batch_stream("Full_Threats^", concurrency, file_count, files,
+    auto stream = create_sparse_batch_stream("Full_Threats", concurrency, file_count, files,
                                              batch_size, cyclic, config);
 
     auto t0 = std::chrono::high_resolution_clock::now();

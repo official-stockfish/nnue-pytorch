@@ -44,7 +44,7 @@ class TimeLimitAfterCheckpoint(Callback):
 def make_data_loaders(
     train_filenames,
     val_filenames,
-    feature_set: M.FeatureSet,
+    feature_name: str,
     num_workers,
     batch_size,
     config: data_loader.DataloaderSkipConfig,
@@ -52,7 +52,7 @@ def make_data_loaders(
     val_size,
 ):
     # Epoch and validation sizes are arbitrary
-    features_name = feature_set.name
+    features_name = feature_name
     train_infinite = data_loader.SparseBatchDataset(
         features_name,
         train_filenames,
@@ -407,7 +407,8 @@ def main():
         batch_size = 16384
     print("Using batch size {}".format(batch_size))
 
-    feature_set = M.get_feature_set_from_name(args.features)
+    feature_name = args.features
+    feature_cls = M.get_feature_cls(feature_name)
 
     loss_params = M.LossParams(
         in_offset=args.in_offset,
@@ -427,7 +428,7 @@ def main():
     max_epoch = args.max_epochs or 800
     if args.resume_from_model is None:
         nnue = M.NNUE(
-            feature_set=feature_set,
+            feature_name=feature_name,
             loss_params=loss_params,
             max_epoch=max_epoch,
             num_batches_per_epoch=args.epoch_size / batch_size,
@@ -445,7 +446,6 @@ def main():
             raise RuntimeError(
                 f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
             )
-        nnue.model.set_feature_set(feature_set)
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
         nnue.num_batches_per_epoch = args.epoch_size / batch_size
@@ -455,10 +455,8 @@ def main():
         nnue.lr = args.lr
         nnue.param_index = args.param_index
 
-    print("Feature set: {}".format(feature_set.name))
-    print("Num real features: {}".format(feature_set.num_real_features))
-    print("Num virtual features: {}".format(feature_set.num_virtual_features))
-    print("Num features: {}".format(feature_set.num_features))
+    print("Feature set: {}".format(feature_name))
+    print("Num inputs: {}".format(feature_cls.NUM_INPUTS))
 
     print("Training with: {}".format(train_datasets))
     print("Validating with: {}".format(val_datasets))
@@ -520,7 +518,7 @@ def main():
     train, val = make_data_loaders(
         train_datasets,
         val_datasets,
-        feature_set,
+        feature_name,
         args.num_workers,
         batch_size,
         data_loader.DataloaderSkipConfig(
