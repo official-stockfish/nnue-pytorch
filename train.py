@@ -124,7 +124,7 @@ def main():
         type=str,
         default=None,
         dest="gpus",
-        help="List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (use all available gpus).",
+        help="List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (Use device 0 only).",
     )
     parser.add_argument(
         "--max_epochs",
@@ -401,10 +401,24 @@ def main():
             "Either both or none of start_lambda and end_lambda must be specified."
         )
 
-    batch_size = args.batch_size
-    if batch_size <= 0:
-        batch_size = 16384
-    print("Using batch size {}".format(batch_size))
+    global_batch_size_requested = args.batch_size
+    if global_batch_size_requested <= 0:
+        global_batch_size_requested = 16384
+    # temporarily default to using only device 0 if user didn't specify --gpus
+    # doing this so that batch size is consistent since if we rely on "auto" behavior
+    # we don't know at this point in the code what the world size is.
+    # TODO: refactor initialization so that we can support default behavior of "auto" with proper batch sizing
+    devices = (
+        [int(x) for x in args.gpus.rstrip(",").split(",") if x] if args.gpus else [0]
+    )
+    n_devices = len(devices)
+    if global_batch_size_requested % n_devices != 0:
+        raise ValueError(
+            f"--batch-size {global_batch_size_requested} must be divisible by number of gpus ({n_devices}). "
+            f"Got --gpus={args.gpus or '0'}"
+        )
+    per_gpu_batch_size = global_batch_size_requested // n_devices
+    print(f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}", flush=True)
 
     feature_set = M.get_feature_set_from_name(args.features)
 
@@ -429,7 +443,7 @@ def main():
             feature_set=feature_set,
             loss_params=loss_params,
             max_epoch=max_epoch,
-            num_batches_per_epoch=args.epoch_size / batch_size,
+            num_batches_per_epoch=args.epoch_size / global_batch_size_requested,
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
@@ -493,9 +507,6 @@ def main():
         save_top_k=-1,
     )
 
-    devices = (
-        [int(x) for x in args.gpus.rstrip(",").split(",") if x] if args.gpus else "auto"
-    )
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
@@ -504,6 +515,7 @@ def main():
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
         accelerator="cuda",
+        strategy="ddp" if len(devices) > 1 else "auto",
         devices=devices,
         logger=tb_logger,
         callbacks=[
@@ -526,7 +538,7 @@ def main():
         val_datasets,
         feature_set,
         args.num_workers,
-        batch_size,
+        per_gpu_batch_size,
         data_loader.DataloaderSkipConfig(
             filtered=not args.no_smart_fen_skipping,
             random_fen_skipping=args.random_fen_skipping,
