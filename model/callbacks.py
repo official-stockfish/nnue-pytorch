@@ -13,3 +13,5 @@ class WeightClippingCallback(L.Callback):
     ) -> None:
         assert isinstance(pl_module, NNUE)
         pl_module.model.clip_weights()
+        if batch_idx == 0:
+            pl_module.model.clip_input_weights()
