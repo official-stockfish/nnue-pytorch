@@ -10,6 +10,16 @@ _FEATURES: dict[str, type] = {
 
 
 def get_feature_cls(name: str) -> type:
+    if name.endswith("^"):
+        stripped = name[:-1]
+        import warnings
+
+        warnings.warn(
+            f"Feature name '{name}' is deprecated, use '{stripped}' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        name = stripped
     if name not in _FEATURES:
         raise KeyError(f"Unknown feature '{name}'. Available: {', '.join(_FEATURES)}")
     return _FEATURES[name]

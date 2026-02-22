@@ -18,7 +18,8 @@ class NNUEModel(nn.Module):
     ):
         super().__init__()
 
-        self.feature_name = feature_name
+        feature_cls = get_feature_cls(feature_name)
+        self.feature_name = feature_cls.FEATURE_NAME
         self.L1 = config.L1
         self.L2 = config.L2
         self.L3 = config.L3
@@ -26,7 +27,6 @@ class NNUEModel(nn.Module):
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
-        feature_cls = get_feature_cls(feature_name)
         self.input = feature_cls(self.L1 + self.num_psqt_buckets)
         self.feature_hash = feature_cls.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config)

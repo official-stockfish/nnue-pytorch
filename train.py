@@ -407,8 +407,8 @@ def main():
         batch_size = 16384
     print("Using batch size {}".format(batch_size))
 
-    feature_name = args.features
-    feature_cls = M.get_feature_cls(feature_name)
+    feature_cls = M.get_feature_cls(args.features)
+    feature_name = feature_cls.FEATURE_NAME
 
     loss_params = M.LossParams(
         in_offset=args.in_offset,
