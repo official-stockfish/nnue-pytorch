@@ -26,11 +26,11 @@ class FullThreats(DoubleFeatureTransformer):
     NUM_REAL_FEATURES = NUM_THREAT_FEATURES + 704 * 32  # 82,672
 
     def __init__(self, num_outputs: int):
+        super().__init__(self.NUM_INPUTS, num_outputs)
+
         self.virtual_weight = nn.Parameter(
             torch.zeros(self.NUM_INPUTS_VIRTUAL, num_outputs, dtype=torch.float32)
         )
-
-        super().__init__(self.NUM_INPUTS, num_outputs)
 
     def forward(
         self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
