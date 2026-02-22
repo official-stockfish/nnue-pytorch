@@ -9,7 +9,8 @@ from .halfka_v2_hm import _halfka_idx
 
 class FullThreats(DoubleFeatureTransformer):
     HASH = 0x8F234CB8
-    FEATURE_NAME = "Full_Threats"
+    FEATURE_NAME = "Full_Threats^"
+    INPUT_FEATURE_NAME = "Full_Threats"
     MAX_ACTIVE_FEATURES = 128 + 32
 
     NUM_SQ = 64

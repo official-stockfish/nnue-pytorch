@@ -564,7 +564,7 @@ def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bo
         fens = filter_fens(next(fen_batch_provider))
 
         b = data_loader.get_sparse_batch_from_fens(
-            quantized_model.feature_name,
+            quantized_model.input_feature_name,
             fens,
             [0] * len(fens),
             [1] * len(fens),

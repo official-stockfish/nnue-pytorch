@@ -4,22 +4,21 @@ from .halfka_v2_hm import HalfKav2Hm
 from .full_threats import FullThreats
 
 _FEATURES: dict[str, type] = {
-    "HalfKAv2_hm": HalfKav2Hm,
-    "Full_Threats": FullThreats,
+    "HalfKAv2_hm^": HalfKav2Hm,
+    "Full_Threats^": FullThreats,
 }
 
 
 def get_feature_cls(name: str) -> type:
-    if name.endswith("^"):
-        stripped = name[:-1]
+    if not name.endswith("^") and name + "^" in _FEATURES:
         import warnings
 
         warnings.warn(
-            f"Feature name '{name}' is deprecated, use '{stripped}' instead.",
+            f"Feature name '{name}' is deprecated, use '{name}^' instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        name = stripped
+        name = name + "^"
     if name not in _FEATURES:
         raise KeyError(f"Unknown feature '{name}'. Available: {', '.join(_FEATURES)}")
     return _FEATURES[name]
@@ -33,7 +32,7 @@ def add_feature_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--features",
         dest="features",
-        default="HalfKAv2_hm",
+        default="HalfKAv2_hm^",
         help="The feature set to use. Available: "
         + ", ".join(get_available_features()),
     )

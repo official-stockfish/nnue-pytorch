@@ -409,6 +409,7 @@ def main():
 
     feature_cls = M.get_feature_cls(args.features)
     feature_name = feature_cls.FEATURE_NAME
+    input_feature_name = feature_cls.INPUT_FEATURE_NAME
 
     loss_params = M.LossParams(
         in_offset=args.in_offset,
@@ -518,7 +519,7 @@ def main():
     train, val = make_data_loaders(
         train_datasets,
         val_datasets,
-        feature_name,
+        input_feature_name,
         args.num_workers,
         batch_size,
         data_loader.DataloaderSkipConfig(

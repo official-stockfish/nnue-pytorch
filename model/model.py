@@ -20,6 +20,7 @@ class NNUEModel(nn.Module):
 
         feature_cls = get_feature_cls(feature_name)
         self.feature_name = feature_cls.FEATURE_NAME
+        self.input_feature_name = feature_cls.INPUT_FEATURE_NAME
         self.L1 = config.L1
         self.L2 = config.L2
         self.L3 = config.L3

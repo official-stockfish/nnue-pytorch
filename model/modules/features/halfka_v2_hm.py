@@ -34,7 +34,8 @@ def _halfka_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece) -> in
 
 class HalfKav2Hm(DoubleFeatureTransformer):
     HASH = 0x7F234CB8
-    FEATURE_NAME = "HalfKAv2_hm"
+    FEATURE_NAME = "HalfKAv2_hm^"
+    INPUT_FEATURE_NAME = "HalfKAv2_hm"
     MAX_ACTIVE_FEATURES = 32
 
     NUM_SQ = 64

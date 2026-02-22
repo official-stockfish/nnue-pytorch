@@ -7,6 +7,7 @@ import chess
 import data_loader
 from model import (
     add_feature_args,
+    get_feature_cls,
     NNUE,
     NNUEReader,
     ModelConfig,
@@ -179,7 +180,9 @@ def main():
 
     batch_size = 1000
 
-    feature_name = args.features
+    feature_cls = get_feature_cls(args.features)
+    feature_name = feature_cls.FEATURE_NAME
+    input_feature_name = feature_cls.INPUT_FEATURE_NAME
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(
             args.checkpoint,
@@ -203,7 +206,7 @@ def main():
         fens = filter_fens(next(fen_batch_provider))
 
         b = data_loader.get_sparse_batch_from_fens(
-            feature_name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
+            input_feature_name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
         model_evals += eval_model_batch(model, b)
         data_loader.destroy_sparse_batch(b)
