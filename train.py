@@ -461,7 +461,7 @@ def main():
         nnue.model.set_feature_set(feature_set)
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch = args.epoch_size / batch_size
+        nnue.num_batches_per_epoch = args.epoch_size / global_batch_size_requested
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
