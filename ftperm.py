@@ -420,10 +420,11 @@ def find_perm_impl(
 def read_model(
     nnue_path: str,
     feature_name: str,
+    config: M.ModelConfig,
     quantize_config: QuantizationConfig,
 ) -> NNUEModel:
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_name, quantize_config)
+        reader = NNUEReader(f, feature_name, config, quantize_config)
         return reader.model
 
 
@@ -585,11 +586,17 @@ def command_gather(args: argparse.Namespace) -> None:
         nnue = NNUE.load_from_checkpoint(
             args.checkpoint,
             feature_name=feature_name,
+            config=M.ModelConfig.get_model_config(args),
             quantize_config=QuantizationConfig(),
         )
         model = nnue.model
     else:
-        model = read_model(args.net, feature_name, QuantizationConfig())
+        model = read_model(
+            args.net,
+            feature_name,
+            M.ModelConfig.get_model_config(args),
+            QuantizationConfig(),
+        )
 
     model.eval()
 

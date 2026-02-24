@@ -660,7 +660,12 @@ def main():
 
     label = basename(args.model)
 
-    model = M.load_model(args.model, feature_name, M.QuantizationConfig())
+    model = M.load_model(
+        args.model,
+        feature_name,
+        M.ModelConfig.get_model_config(args),
+        M.QuantizationConfig(),
+    )
 
     if args.ref_model:
         ref_feature_name = args.ref_features if args.ref_features else feature_name
@@ -668,6 +673,7 @@ def main():
         ref_model = M.load_model(
             args.ref_model,
             ref_feature_name,
+            M.ModelConfig.get_model_config(args),
             M.QuantizationConfig(),
         )
 

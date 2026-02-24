@@ -148,13 +148,7 @@ def main():
         dest="validation_datasets",
         help="Validation data to use for validation instead of the training data.",
     )
-    parser.add_argument(
-        "--lambda",
-        default=1.0,
-        type=float,
-        dest="lambda_",
-        help="lambda=1.0 = train on evaluations, lambda=0.0 = train on game results, interpolates between (default=1.0).",
-    )
+
 
     parser.add_argument(
         "--gamma",
