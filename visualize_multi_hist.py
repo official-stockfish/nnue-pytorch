@@ -82,11 +82,12 @@ def main():
             label = label[:-5]
         labels.append("\n".join(label.split("-")))
 
+    config = M.ModelConfig.get_model_config(args)
     models = [
         M.load_model(
             m,
             feature_name,
-            M.ModelConfig.get_model_config(args),
+            config,
             M.QuantizationConfig(),
         )
         for m in args.models
@@ -94,10 +95,10 @@ def main():
 
     coalesced_ins = [model.input.get_export_weights() for model in models]
     input_weights = [
-        coalesced_in[:, : args.l1].flatten().numpy() for coalesced_in in coalesced_ins
+        coalesced_in[:, : config.L1].flatten().numpy() for coalesced_in in coalesced_ins
     ]
     input_weights_psqt = [
-        (coalesced_in[:, args.l1 :] * 600).flatten().numpy()
+        (coalesced_in[:, config.L1 :] * 600).flatten().numpy()
         for coalesced_in in coalesced_ins
     ]
     plot_hists(
