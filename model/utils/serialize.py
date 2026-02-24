@@ -222,7 +222,6 @@ class NNUEReader:
         self.feature_name = feature_name
         self.model = NNUEModel(feature_name, config, quantize_config)
         self.config = config
-
         fc_hash = NNUEWriter.fc_hash(self.model)
 
         feature_cls = get_feature_cls(feature_name)
