@@ -10,8 +10,8 @@ from model import (
     get_feature_cls,
     NNUE,
     NNUEReader,
-    QuantizationConfig,
     ModelConfig,
+    QuantizationConfig,
 )
 
 

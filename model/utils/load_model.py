@@ -1,9 +1,9 @@
 import torch
 
 from .serialize import NNUEReader
+from ..config import ModelConfig
 from ..model import NNUEModel
 from ..quantize import QuantizationConfig
-from ..config import ModelConfig
 
 
 def load_model(
