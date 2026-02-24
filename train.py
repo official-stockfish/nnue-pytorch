@@ -149,7 +149,6 @@ def main():
         help="Validation data to use for validation instead of the training data.",
     )
 
-
     parser.add_argument(
         "--gamma",
         default=0.992,
@@ -279,7 +278,7 @@ def main():
     feature_name = feature_cls.FEATURE_NAME
     input_feature_name = feature_cls.INPUT_FEATURE_NAME
 
-    loss_params = M.LossParams()
+    loss_params = M.LossParams.get_loss_params_from_args(args)
     print("Loss parameters:")
     print(loss_params)
 
@@ -293,6 +292,7 @@ def main():
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
+            config=M.ModelConfig.get_model_config(args),
             quantize_config=M.QuantizationConfig(),
         )
     else:

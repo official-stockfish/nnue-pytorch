@@ -1,4 +1,8 @@
+from dataclasses import dataclass
+
+
 # 3 layer fully connected network
+@dataclass
 class ModelConfig:
     L1: int = 1024
     L2: int = 31
@@ -26,6 +30,7 @@ class ModelConfig:
 
 
 # parameters needed for the definition of the loss
+@dataclass
 class LossParams:
     in_offset: float = 270
     out_offset: float = 270
