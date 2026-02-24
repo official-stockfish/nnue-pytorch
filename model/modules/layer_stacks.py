@@ -8,13 +8,13 @@ from .stacked_linear import FactorizedStackedLinear, StackedLinear
 
 
 class LayerStacks(nn.Module):
-    def __init__(self, count: int, config: ModelConfig):
+    def __init__(self, count: int):
         super().__init__()
 
         self.count = count
-        self.L1 = config.L1
-        self.L2 = config.L2
-        self.L3 = config.L3
+        self.L1 = ModelConfig.L1
+        self.L2 = ModelConfig.L2
+        self.L3 = ModelConfig.L3
 
         # Factorizer only for the first layer because later
         # there's a non-linearity and factorization breaks.

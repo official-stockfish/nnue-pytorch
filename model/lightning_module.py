@@ -3,7 +3,7 @@ import ranger21
 import torch
 from torch import Tensor, nn
 
-from .config import LossParams, ModelConfig
+from .config import LossParams
 from .model import NNUEModel
 from .quantize import QuantizationConfig
 
@@ -28,7 +28,6 @@ class NNUE(L.LightningModule):
     def __init__(
         self,
         feature_name: str,
-        config: ModelConfig,
         quantize_config: QuantizationConfig,
         max_epoch=800,
         num_batches_per_epoch=int(100_000_000 / 16384),
@@ -41,7 +40,7 @@ class NNUE(L.LightningModule):
     ):
         super().__init__()
         self.model: NNUEModel = NNUEModel(
-            feature_name, config, quantize_config, num_psqt_buckets, num_ls_buckets
+            feature_name, quantize_config, num_psqt_buckets, num_ls_buckets
         )
         self.loss_params = loss_params
         self.max_epoch = max_epoch

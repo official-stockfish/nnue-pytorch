@@ -10,7 +10,6 @@ class NNUEModel(nn.Module):
     def __init__(
         self,
         feature_name: str,
-        config: ModelConfig,
         quantize_config: QuantizationConfig,
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
@@ -20,16 +19,16 @@ class NNUEModel(nn.Module):
         feature_cls = get_feature_cls(feature_name)
         self.feature_name = feature_cls.FEATURE_NAME
         self.input_feature_name = feature_cls.INPUT_FEATURE_NAME
-        self.L1 = config.L1
-        self.L2 = config.L2
-        self.L3 = config.L3
+        self.L1 = ModelConfig.L1
+        self.L2 = ModelConfig.L2
+        self.L3 = ModelConfig.L3
 
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
         self.input = feature_cls(self.L1 + self.num_psqt_buckets)
         self.feature_hash = feature_cls.HASH
-        self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
+        self.layer_stacks = LayerStacks(self.num_ls_buckets)
 
         self.quantization = QuantizationManager(quantize_config)
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)

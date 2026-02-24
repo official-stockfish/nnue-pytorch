@@ -10,19 +10,18 @@ from model import (
     get_feature_cls,
     NNUE,
     NNUEReader,
-    ModelConfig,
     QuantizationConfig,
+    ModelConfig,
 )
 
 
 def read_model(
     nnue_path,
     feature_name: str,
-    config: ModelConfig,
     quantize_config: QuantizationConfig,
 ):
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_name, config, quantize_config)
+        reader = NNUEReader(f, feature_name, quantize_config)
         return reader.model
 
 
@@ -173,8 +172,9 @@ def main():
     parser.add_argument(
         "--count", type=int, default=100, help="number of datapoints to process"
     )
-    parser.add_argument("--l1", type=int, default=ModelConfig().L1)
-    parser.add_argument("--l2", type=int, default=ModelConfig().L2)
+
+    ModelConfig.add_model_args(parser)
+
     add_feature_args(parser)
     args = parser.parse_args()
 
@@ -187,13 +187,10 @@ def main():
         model = NNUE.load_from_checkpoint(
             args.checkpoint,
             feature_name=feature_name,
-            config=ModelConfig(L1=args.l1, L2=args.l2),
             quantize_config=QuantizationConfig(),
         )
     else:
-        model = read_model(
-            args.net, feature_name, ModelConfig(L1=args.l1, L2=args.l2), QuantizationConfig()
-        )
+        model = read_model(args.net, feature_name, QuantizationConfig())
     model.eval()
     fen_batch_provider = make_fen_batch_provider(args.data, batch_size)
 

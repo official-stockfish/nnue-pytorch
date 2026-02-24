@@ -1,7 +1,6 @@
 import torch
 
 from .serialize import NNUEReader
-from ..config import ModelConfig
 from ..model import NNUEModel
 from ..quantize import QuantizationConfig
 
@@ -9,7 +8,6 @@ from ..quantize import QuantizationConfig
 def load_model(
     filename: str,
     feature_name: str,
-    config: ModelConfig,
     quantize_config: QuantizationConfig,
 ) -> NNUEModel:
     if filename.endswith(".pt"):
@@ -23,7 +21,6 @@ def load_model(
         model = NNUE.load_from_checkpoint(
             filename,
             feature_name=feature_name,
-            config=config,
             quantize_config=quantize_config,
         )
         model.eval()
@@ -31,7 +28,7 @@ def load_model(
 
     elif filename.endswith(".nnue"):
         with open(filename, "rb") as f:
-            reader = NNUEReader(f, feature_name, config, quantize_config)
+            reader = NNUEReader(f, feature_name, quantize_config)
         return reader.model
 
     else:

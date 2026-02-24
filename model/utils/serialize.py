@@ -215,19 +215,17 @@ class NNUEReader:
         self,
         f: BinaryIO,
         feature_name: str,
-        config: ModelConfig,
         quantize_config: QuantizationConfig,
     ):
         self.f = f
         self.feature_name = feature_name
-        self.model = NNUEModel(feature_name, config, quantize_config)
-        self.config = config
+        self.model = NNUEModel(feature_name, quantize_config)
         fc_hash = NNUEWriter.fc_hash(self.model)
 
         feature_cls = get_feature_cls(feature_name)
         self.read_header(feature_cls.HASH, fc_hash)
         self.read_int32(
-            feature_cls.HASH ^ (self.config.L1 * 2)
+            feature_cls.HASH ^ (ModelConfig.L1 * 2)
         )  # Feature transformer hash
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
 
@@ -253,7 +251,7 @@ class NNUEReader:
 
     def read_header(self, feature_hash: int, fc_hash: int) -> None:
         self.read_int32(VERSION)  # version
-        self.read_int32(fc_hash ^ feature_hash ^ (self.config.L1 * 2))
+        self.read_int32(fc_hash ^ feature_hash ^ (ModelConfig.L1 * 2))
         desc_len = self.read_int32()
         self.description = self.f.read(desc_len).decode("utf-8")
 

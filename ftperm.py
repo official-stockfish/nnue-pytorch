@@ -49,7 +49,6 @@ from model import (
     NNUE,
     NNUEModel,
     NNUEReader,
-    ModelConfig,
     QuantizationConfig,
 )
 
@@ -421,11 +420,10 @@ def find_perm_impl(
 def read_model(
     nnue_path: str,
     feature_name: str,
-    config: ModelConfig,
     quantize_config: QuantizationConfig,
 ) -> NNUEModel:
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_name, config, quantize_config)
+        reader = NNUEReader(f, feature_name, quantize_config)
         return reader.model
 
 
@@ -587,14 +585,11 @@ def command_gather(args: argparse.Namespace) -> None:
         nnue = NNUE.load_from_checkpoint(
             args.checkpoint,
             feature_name=feature_name,
-            config=ModelConfig(L1=args.l1, L2=args.l2),
             quantize_config=QuantizationConfig(),
         )
         model = nnue.model
     else:
-        model = read_model(
-            args.net, feature_name, ModelConfig(L1=args.l1, L2=args.l2), QuantizationConfig()
-        )
+        model = read_model(args.net, feature_name, QuantizationConfig())
 
     model.eval()
 
@@ -709,9 +704,10 @@ def main() -> None:
     parser_gather.add_argument(
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
-    parser_gather.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    parser_gather.add_argument("--l2", type=int, default=M.ModelConfig().L2)
+
+    M.ModelConfig.add_model_args(parser_gather)
     M.add_feature_args(parser_gather)
+
     parser_gather.set_defaults(func=command_gather)
 
     parser_gather = subparsers.add_parser("find_perm", help="a help")

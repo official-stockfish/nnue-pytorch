@@ -69,8 +69,8 @@ def main():
     parser.add_argument(
         "--device", type=int, default="0", help="Device to use for cupy"
     )
-    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    parser.add_argument("--l2", type=int, default=M.ModelConfig().L2)
+
+    M.ModelConfig.add_model_args(parser)
     M.add_feature_args(parser)
     args = parser.parse_args()
 
@@ -84,8 +84,12 @@ def main():
     if args.source.endswith(".ckpt"):
         nnue = M.NNUE.load_from_checkpoint(
             args.source,
+<<<<<<< HEAD
             feature_name=feature_name,
             config=M.ModelConfig(L1=args.l1, L2=args.l2),
+=======
+            feature_set=feature_set,
+>>>>>>> fb600a3 (Update Args Parsing for Configs)
             quantize_config=M.QuantizationConfig(),
             map_location=torch.device("cpu"),
         )
@@ -95,10 +99,20 @@ def main():
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
             nnue = M.NNUE(
+<<<<<<< HEAD
                 feature_name, M.ModelConfig(L1=args.l1, L2=args.l2), M.QuantizationConfig()
             )
             reader = M.NNUEReader(
                 f, feature_name, M.ModelConfig(L1=args.l1, L2=args.l2), M.QuantizationConfig()
+=======
+                feature_set,
+                M.QuantizationConfig(),
+            )
+            reader = M.NNUEReader(
+                f,
+                feature_set,
+                M.QuantizationConfig(),
+>>>>>>> fb600a3 (Update Args Parsing for Configs)
             )
             nnue.model = reader.model
             if args.description is None:
