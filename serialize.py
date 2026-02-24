@@ -69,8 +69,8 @@ def main():
     parser.add_argument(
         "--device", type=int, default="0", help="Device to use for cupy"
     )
-    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    parser.add_argument("--l2", type=int, default=M.ModelConfig().L2)
+
+    M.ModelConfig.add_model_args(parser)
     M.add_feature_args(parser)
     args = parser.parse_args()
 
@@ -85,7 +85,7 @@ def main():
         nnue = M.NNUE.load_from_checkpoint(
             args.source,
             feature_name=feature_name,
-            config=M.ModelConfig(L1=args.l1, L2=args.l2),
+            config=M.ModelConfig.get_model_config(args),
             quantize_config=M.QuantizationConfig(),
             map_location=torch.device("cpu"),
         )
@@ -95,10 +95,15 @@ def main():
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
             nnue = M.NNUE(
-                feature_name, M.ModelConfig(L1=args.l1, L2=args.l2), M.QuantizationConfig()
+                feature_name,
+                M.ModelConfig.get_model_config(args),
+                M.QuantizationConfig(),
             )
             reader = M.NNUEReader(
-                f, feature_name, M.ModelConfig(L1=args.l1, L2=args.l2), M.QuantizationConfig()
+                f,
+                feature_name,
+                M.ModelConfig.get_model_config(args),
+                M.QuantizationConfig(),
             )
             nnue.model = reader.model
             if args.description is None:

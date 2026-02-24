@@ -148,69 +148,7 @@ def main():
         dest="validation_datasets",
         help="Validation data to use for validation instead of the training data.",
     )
-    parser.add_argument(
-        "--lambda",
-        default=1.0,
-        type=float,
-        dest="lambda_",
-        help="lambda=1.0 = train on evaluations, lambda=0.0 = train on game results, interpolates between (default=1.0).",
-    )
-    parser.add_argument(
-        "--start-lambda",
-        default=None,
-        type=float,
-        dest="start_lambda",
-        help="lambda to use at first epoch.",
-    )
-    parser.add_argument(
-        "--end-lambda",
-        default=None,
-        type=float,
-        dest="end_lambda",
-        help="lambda to use at last epoch.",
-    )
-    parser.add_argument(
-        "--qp-asymmetry",
-        default=0.0,
-        type=float,
-        dest="qp_asymmetry",
-        help="Adjust to loss for those if q (prediction) > p (reference) (default=0.0)",
-    )
-    parser.add_argument(
-        "--pow-exp",
-        default=2.5,
-        type=float,
-        dest="pow_exp",
-        help="exponent of the power law used for the mean error (default=2.5)",
-    )
-    parser.add_argument(
-        "--in-offset",
-        default=270,
-        type=float,
-        dest="in_offset",
-        help="offset for conversion to win on input (default=270.0)",
-    )
-    parser.add_argument(
-        "--out-offset",
-        default=270,
-        type=float,
-        dest="out_offset",
-        help="offset for conversion to win on input (default=270.0)",
-    )
-    parser.add_argument(
-        "--in-scaling",
-        default=340,
-        type=float,
-        dest="in_scaling",
-        help="scaling for conversion to win on input (default=340.0)",
-    )
-    parser.add_argument(
-        "--out-scaling",
-        default=380,
-        type=float,
-        dest="out_scaling",
-        help="scaling for conversion to win on input (default=380.0)",
-    )
+
     parser.add_argument(
         "--gamma",
         default=0.992,
@@ -259,25 +197,9 @@ def main():
         dest="smart_fen_skipping_deprecated",
         help="If enabled positions that are bad training targets will be skipped during loading. Default: True, kept for backwards compatibility. This option is ignored",
     )
-    parser.add_argument(
-        "--no-smart-fen-skipping",
-        action="store_true",
-        dest="no_smart_fen_skipping",
-        help="If used then no smart fen skipping will be done. By default smart fen skipping is done.",
-    )
-    parser.add_argument(
-        "--no-wld-fen-skipping",
-        action="store_true",
-        dest="no_wld_fen_skipping",
-        help="If used then no wld fen skipping will be done. By default wld fen skipping is done.",
-    )
-    parser.add_argument(
-        "--random-fen-skipping",
-        default=3,
-        type=int,
-        dest="random_fen_skipping",
-        help="skip fens randomly on average random_fen_skipping before using one.",
-    )
+
+    data_loader.DataloaderSkipConfig.add_dataloader_skip_args(parser)
+
     parser.add_argument(
         "--resume-from-model",
         dest="resume_from_model",
@@ -316,66 +238,11 @@ def main():
         dest="validation_size",
         help="Number of positions per validation step.",
     )
-    parser.add_argument(
-        "--param-index",
-        type=int,
-        default=0,
-        dest="param_index",
-        help="Indexing for parameter scans.",
-    )
-    parser.add_argument(
-        "--early-fen-skipping",
-        type=int,
-        default=-1,
-        dest="early_fen_skipping",
-        help="Skip n plies from the start.",
-    )
-    parser.add_argument(
-        "--simple-eval-skipping",
-        type=int,
-        default=-1,
-        dest="simple_eval_skipping",
-        help="Skip positions that have abs(simple_eval(pos)) < n",
-    )
-    parser.add_argument(
-        "--pc-y1",
-        type=float,
-        default=1.0,
-        dest="pc_y1",
-        help="piece count parameter y1 (default=1.0)",
-    )
-    parser.add_argument(
-        "--pc-y2",
-        type=float,
-        default=2.0,
-        dest="pc_y2",
-        help="piece count parameter y2 (default=2.0)",
-    )
-    parser.add_argument(
-        "--pc-y3",
-        type=float,
-        default=1.0,
-        dest="pc_y3",
-        help="piece count parameter y3 (default=1.0)",
-    )
-    parser.add_argument(
-        "--w1",
-        type=float,
-        default=0.0,
-        dest="w1",
-        help="weight boost parameter 1 (default=0.0)",
-    )
-    parser.add_argument(
-        "--w2",
-        type=float,
-        default=0.5,
-        dest="w2",
-        help="weight boost parameter 2 (default=0.5)",
-    )
 
-    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    parser.add_argument("--l2", type=int, default=M.ModelConfig().L2)
+    M.LossParams.add_loss_args(parser)
+    M.ModelConfig.add_model_args(parser)
     M.add_feature_args(parser)
+
     args = parser.parse_args()
 
     args.datasets = flatten_once(args.datasets)
@@ -411,18 +278,7 @@ def main():
     feature_name = feature_cls.FEATURE_NAME
     input_feature_name = feature_cls.INPUT_FEATURE_NAME
 
-    loss_params = M.LossParams(
-        in_offset=args.in_offset,
-        in_scaling=args.in_scaling,
-        out_offset=args.out_offset,
-        out_scaling=args.out_scaling,
-        start_lambda=args.start_lambda or args.lambda_,
-        end_lambda=args.end_lambda or args.lambda_,
-        pow_exp=args.pow_exp,
-        qp_asymmetry=args.qp_asymmetry,
-        w1=args.w1,
-        w2=args.w2,
-    )
+    loss_params = M.LossParams.get_loss_params_from_args(args)
     print("Loss parameters:")
     print(loss_params)
 
@@ -436,7 +292,7 @@ def main():
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
-            config=M.ModelConfig(L1=args.l1, L2=args.l2),
+            config=M.ModelConfig.get_model_config(args),
             quantize_config=M.QuantizationConfig(),
         )
     else:
@@ -522,17 +378,7 @@ def main():
         input_feature_name,
         args.num_workers,
         batch_size,
-        data_loader.DataloaderSkipConfig(
-            filtered=not args.no_smart_fen_skipping,
-            random_fen_skipping=args.random_fen_skipping,
-            wld_filtered=not args.no_wld_fen_skipping,
-            early_fen_skipping=args.early_fen_skipping,
-            simple_eval_skipping=args.simple_eval_skipping,
-            param_index=args.param_index,
-            pc_y1=args.pc_y1,
-            pc_y2=args.pc_y2,
-            pc_y3=args.pc_y3,
-        ),
+        data_loader.DataloaderSkipConfig.get_dataloader_skip_config_from_args(args),
         args.epoch_size,
         args.validation_size,
     )

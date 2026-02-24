@@ -64,8 +64,8 @@ def main():
     parser.add_argument(
         "--dont-show", action="store_true", help="Don't show the plots."
     )
-    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
-    parser.add_argument("--l2", type=int, default=M.ModelConfig().L2)
+
+    M.ModelConfig.add_model_args(parser)
     M.add_feature_args(parser)
     args = parser.parse_args()
 
@@ -82,17 +82,23 @@ def main():
             label = label[:-5]
         labels.append("\n".join(label.split("-")))
 
+    config = M.ModelConfig.get_model_config(args)
     models = [
-        M.load_model(m, feature_name, M.ModelConfig(L1=args.l1, L2=args.l2), M.QuantizationConfig())
+        M.load_model(
+            m,
+            feature_name,
+            config,
+            M.QuantizationConfig(),
+        )
         for m in args.models
     ]
 
     coalesced_ins = [model.input.get_export_weights() for model in models]
     input_weights = [
-        coalesced_in[:, : args.l1].flatten().numpy() for coalesced_in in coalesced_ins
+        coalesced_in[:, : config.L1].flatten().numpy() for coalesced_in in coalesced_ins
     ]
     input_weights_psqt = [
-        (coalesced_in[:, args.l1 :] * 600).flatten().numpy()
+        (coalesced_in[:, config.L1 :] * 600).flatten().numpy()
         for coalesced_in in coalesced_ins
     ]
     plot_hists(
