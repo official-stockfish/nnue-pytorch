@@ -9,6 +9,7 @@ from .features import (
     get_feature_cls,
     get_available_features,
     add_feature_args,
+    FeatureConfig,
 )
 from .layer_stacks import LayerStacks
 
@@ -21,5 +22,6 @@ __all__ = [
     "get_feature_cls",
     "get_available_features",
     "add_feature_args",
+    "FeatureConfig",
     "LayerStacks",
 ]

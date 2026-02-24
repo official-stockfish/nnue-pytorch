@@ -4,92 +4,31 @@ from dataclasses import dataclass
 
 @dataclass
 class DataloaderSkipConfig:
-    filtered: bool = False
+    filtered: bool = True
+    """If disabled, no smart fen skipping will be done."""
+    wld_filtered: bool = True
+    """If disabled, WLD-based fen skipping is turned off."""
     random_fen_skipping: int = 0
-    wld_filtered: bool = False
+    """Skip a random fraction of positions. 0 = disabled."""
     early_fen_skipping: int = -1
+    """Skip positions from the start of the game. -1 = disabled."""
     simple_eval_skipping: int = -1
+    """Skip positions based on simple eval. -1 = disabled."""
     param_index: int = 0
+    """Parameter index for piecewise cubic scaling."""
     pc_y1: float = 1.0
+    """Piecewise cubic y1 parameter."""
     pc_y2: float = 2.0
+    """Piecewise cubic y2 parameter."""
     pc_y3: float = 1.0
-
-    @staticmethod
-    def add_dataloader_skip_args(parser):
-        parser.add_argument(
-            "--no-smart-fen-skipping",
-            action="store_true",
-            dest="no_smart_fen_skipping",
-            help="If used then no smart fen skipping will be done. By default smart fen skipping is done.",
-        )
-
-        parser.add_argument(
-            "--random-fen-skipping",
-            default=3,
-            type=int,
-            dest="random_fen_skipping",
-            help="skip fens randomly on average random_fen_skipping before using one.",
-        )
-
-        parser.add_argument(
-            "--no-wld-fen-skipping",
-            action="store_true",
-            dest="no_wld_fen_skipping",
-            help="If used then no wld fen skipping will be done. By default wld fen skipping is done.",
-        )
-
-        parser.add_argument(
-            "--early-fen-skipping",
-            type=int,
-            default=-1,
-            dest="early_fen_skipping",
-            help="Skip n plies from the start.",
-        )
-
-        parser.add_argument(
-            "--simple-eval-skipping",
-            type=int,
-            default=-1,
-            dest="simple_eval_skipping",
-            help="Skip positions that have abs(simple_eval(pos)) < n",
-        )
-
-        parser.add_argument(
-            "--param-index",
-            type=int,
-            default=0,
-            dest="param_index",
-            help="Indexing for parameter scans.",
-        )
-
-        parser.add_argument(
-            "--pc-y1",
-            type=float,
-            default=1.0,
-            dest="pc_y1",
-            help="piece count parameter y1 (default=1.0)",
-        )
-        parser.add_argument(
-            "--pc-y2",
-            type=float,
-            default=2.0,
-            dest="pc_y2",
-            help="piece count parameter y2 (default=2.0)",
-        )
-        parser.add_argument(
-            "--pc-y3",
-            type=float,
-            default=1.0,
-            dest="pc_y3",
-            help="piece count parameter y3 (default=1.0)",
-        )
+    """Piecewise cubic y3 parameter."""
 
     @staticmethod
     def get_dataloader_skip_config_from_args(args) -> "DataloaderSkipConfig":
         return DataloaderSkipConfig(
-            filtered=not args.no_smart_fen_skipping,
+            filtered=args.filtered,
             random_fen_skipping=args.random_fen_skipping,
-            wld_filtered=not args.no_wld_fen_skipping,
+            wld_filtered=args.wld_filtered,
             early_fen_skipping=args.early_fen_skipping,
             simple_eval_skipping=args.simple_eval_skipping,
             param_index=args.param_index,

@@ -1,7 +1,12 @@
 import argparse
+from dataclasses import dataclass
 
 from .halfka_v2_hm import HalfKav2Hm
 from .full_threats import FullThreats
+
+import tyro
+from typing import Annotated
+
 
 _FEATURES: dict[str, type] = {
     "HalfKAv2_hm^": HalfKav2Hm,
@@ -28,6 +33,17 @@ def get_available_features() -> list[str]:
     return list(_FEATURES.keys())
 
 
+@dataclass
+class FeatureConfig:
+    features: Annotated[
+        str,
+        tyro.conf.arg(
+            help="The feature set to use. Available: "
+            + ", ".join(get_available_features())
+        ),
+    ] = "HalfKAv2_hm^"
+
+
 def add_feature_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--features",
@@ -44,4 +60,5 @@ __all__ = [
     "get_feature_cls",
     "get_available_features",
     "add_feature_args",
+    "FeatureConfig",
 ]
