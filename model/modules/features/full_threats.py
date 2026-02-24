@@ -38,15 +38,9 @@ class FullThreats(DoubleFeatureTransformer):
     ):
         # Virtual weight applies only to the PSQ portion (repeated across buckets),
         # offset past the threat features
+        self.merged_weight = self.weight.clone()
         psq_virtual = self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
-        threat_zeros = torch.zeros(
-            self.NUM_THREAT_FEATURES,
-            self.virtual_weight.shape[1],
-            device=self.virtual_weight.device,
-            dtype=self.virtual_weight.dtype,
-        )
-        full_virtual = torch.cat([threat_zeros, psq_virtual], dim=0)
-        self.merged_weight = self.weight + full_virtual
+        self.merged_weight[self.NUM_THREAT_FEATURES :].add_(psq_virtual)
         return (
             SparseLinearFunction.apply(
                 feature_indices_0,
