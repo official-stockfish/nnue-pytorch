@@ -65,6 +65,7 @@ def main():
         "--dont-show", action="store_true", help="Don't show the plots."
     )
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
+    parser.add_argument("--l2", type=int, default=M.ModelConfig().L2)
     M.add_feature_args(parser)
     args = parser.parse_args()
 
@@ -84,7 +85,7 @@ def main():
         labels.append("\n".join(label.split("-")))
 
     models = [
-        M.load_model(m, feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig())
+        M.load_model(m, feature_set, M.ModelConfig(L1=args.l1, L2=args.l2), M.QuantizationConfig())
         for m in args.models
     ]
 
