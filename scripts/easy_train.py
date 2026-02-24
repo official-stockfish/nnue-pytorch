@@ -2587,19 +2587,23 @@ def get_default_feature_set_from_nnue_pytorch(nnue_pytorch_directory):
     Normally we could import that file and let it add the argument to argparse,
     but we setup argparse before nnue-pytorch is setup so we have to do it like that.
     """
+    features_init = os.path.join(
+        nnue_pytorch_directory, "model", "modules", "features", "__init__.py"
+    )
     try:
-        features_init = os.path.join(
-            nnue_pytorch_directory, "model", "modules", "features", "__init__.py"
-        )
         with open(features_init, "r") as features_file:
             for line in features_file:
                 line = line.strip()
                 if line.startswith("default="):
-                    # Extract the default value from: default="HalfKAv2_hm",
+                    # Extract the default value from: default="HalfKAv2_hm^",
                     return line.split('"')[1]
     except Exception:
-        pass
-    return "HalfKAv2_hm"
+        LOGGER.warning(
+            "Could not read default feature set from %s, using fallback.",
+            features_init,
+            exc_info=True,
+        )
+    return "HalfKAv2_hm^"
 
 
 def parse_duration_hms_to_s(duration_str):
