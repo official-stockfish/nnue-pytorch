@@ -1,3 +1,4 @@
+from .functions import SparseLinearFunction
 from .module import (
     BaseFeatureTransformer,
     DoubleFeatureTransformer,
@@ -5,6 +6,7 @@ from .module import (
 )
 
 __all__ = [
+    "SparseLinearFunction",
     "BaseFeatureTransformer",
     "DoubleFeatureTransformer",
     "FeatureTransformer",

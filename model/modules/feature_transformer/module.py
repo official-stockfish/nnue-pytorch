@@ -1,6 +1,7 @@
 import math
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from .functions import SparseLinearFunction
@@ -12,9 +13,11 @@ class BaseFeatureTransformer(nn.Module):
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
 
-        self.weight = nn.Parameter(torch.empty((num_inputs, num_outputs), dtype=torch.float32))
+        self.weight = nn.Parameter(
+            torch.empty((num_inputs, num_outputs), dtype=torch.float32)
+        )
         self.bias = nn.Parameter(torch.empty(num_outputs, dtype=torch.float32))
-        
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -23,6 +26,10 @@ class BaseFeatureTransformer(nn.Module):
             self.weight.uniform_(-sigma, sigma)
             self.bias.uniform_(-sigma, sigma)
 
+    def clip_weights(self, quantization) -> None:
+        """Clip weights to quantization-safe range. Override in subclasses."""
+        pass
+
     def expand_input_layer(self, additional_features):
         assert additional_features >= 0
         if additional_features == 0:
@@ -30,7 +37,7 @@ class BaseFeatureTransformer(nn.Module):
 
         with torch.no_grad():
             new_weight = F.pad(self.weight, (0, 0, 0, additional_features), value=0)
-            
+
             self.weight = nn.Parameter(new_weight)
             self.num_inputs += additional_features
 

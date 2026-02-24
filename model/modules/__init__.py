@@ -3,11 +3,23 @@ from .feature_transformer import (
     DoubleFeatureTransformer,
     FeatureTransformer,
 )
+from .features import (
+    HalfKav2Hm,
+    FullThreats,
+    get_feature_cls,
+    get_available_features,
+    add_feature_args,
+)
 from .layer_stacks import LayerStacks
 
 __all__ = [
     "BaseFeatureTransformer",
     "DoubleFeatureTransformer",
     "FeatureTransformer",
+    "HalfKav2Hm",
+    "FullThreats",
+    "get_feature_cls",
+    "get_available_features",
+    "add_feature_args",
     "LayerStacks",
 ]
