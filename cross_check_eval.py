@@ -175,6 +175,7 @@ def main():
         "--count", type=int, default=100, help="number of datapoints to process"
     )
     parser.add_argument("--l1", type=int, default=ModelConfig().L1)
+    parser.add_argument("--l2", type=int, default=ModelConfig().L2)
     add_feature_args(parser)
     args = parser.parse_args()
 
@@ -185,12 +186,12 @@ def main():
         model = NNUE.load_from_checkpoint(
             args.checkpoint,
             feature_set=feature_set,
-            config=ModelConfig(L1=args.l1),
+            config=ModelConfig(L1=args.l1, L2=args.l2),
             quantize_config=QuantizationConfig(),
         )
     else:
         model = read_model(
-            args.net, feature_set, ModelConfig(L1=args.l1), QuantizationConfig()
+            args.net, feature_set, ModelConfig(L1=args.l1, L2=args.l2), QuantizationConfig()
         )
     model.eval()
     fen_batch_provider = make_fen_batch_provider(args.data, batch_size)

@@ -652,6 +652,7 @@ def main():
         help="Override the label used in plot titles and as prefix of saved files.",
     )
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
+    parser.add_argument("--l2", type=int, default=M.ModelConfig().L2)
     M.add_feature_args(parser)
     args = parser.parse_args()
 
@@ -664,7 +665,7 @@ def main():
     label = basename(args.model)
 
     model = M.load_model(
-        args.model, feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig()
+        args.model, feature_set, M.ModelConfig(L1=args.l1, L2=args.l2), M.QuantizationConfig()
     )
 
     if args.ref_model:
@@ -677,7 +678,7 @@ def main():
         ref_model = M.load_model(
             args.ref_model,
             ref_feature_set,
-            M.ModelConfig(L1=args.l1),
+            M.ModelConfig(L1=args.l1, L2=args.l2),
             M.QuantizationConfig(),
         )
 

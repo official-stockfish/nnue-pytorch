@@ -374,6 +374,7 @@ def main():
     )
 
     parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
+    parser.add_argument("--l2", type=int, default=M.ModelConfig().L2)
     M.add_feature_args(parser)
     args = parser.parse_args()
 
@@ -433,7 +434,7 @@ def main():
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
-            config=M.ModelConfig(L1=args.l1),
+            config=M.ModelConfig(L1=args.l1, L2=args.l2),
             quantize_config=M.QuantizationConfig(),
         )
     else:

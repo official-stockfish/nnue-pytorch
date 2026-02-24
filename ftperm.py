@@ -588,13 +588,13 @@ def command_gather(args: argparse.Namespace) -> None:
         nnue = NNUE.load_from_checkpoint(
             args.checkpoint,
             feature_set=feature_set,
-            config=ModelConfig(L1=args.l1),
+            config=ModelConfig(L1=args.l1, L2=args.l2),
             quantize_config=QuantizationConfig(),
         )
         model = nnue.model
     else:
         model = read_model(
-            args.net, feature_set, ModelConfig(L1=args.l1), QuantizationConfig()
+            args.net, feature_set, ModelConfig(L1=args.l1, L2=args.l2), QuantizationConfig()
         )
 
     model.eval()
@@ -711,6 +711,7 @@ def main() -> None:
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
     parser_gather.add_argument("--l1", type=int, default=M.ModelConfig().L1)
+    parser_gather.add_argument("--l2", type=int, default=M.ModelConfig().L2)
     M.add_feature_args(parser_gather)
     parser_gather.set_defaults(func=command_gather)
 
