@@ -4,7 +4,7 @@ from torch import nn
 
 
 from ..feature_transformer import DoubleFeatureTransformer, SparseLinearFunction
-from .halfka_v2_hm import _halfka_idx
+from .halfka_v2_hm import InverseKingBuckets, _halfka_idx
 
 
 class FullThreats(DoubleFeatureTransformer):
@@ -124,11 +124,14 @@ class FullThreats(DoubleFeatureTransformer):
             own_king_src = src_offset + 10 * 64
             opp_king_src = src_offset + 11 * 64
             dst_king = dst_offset + 10 * 64
+            ksq = InverseKingBuckets[b]
 
-            psq_export[dst_king : dst_king + 64] = (
-                psq_weight[own_king_src : own_king_src + 64]
-                + psq_weight[opp_king_src : opp_king_src + 64]
-            )
+            # Opponent king weights for all 64 squares, then overwrite ksq
+            # with own king weight (kings never share the same square)
+            psq_export[dst_king : dst_king + 64] = psq_weight[
+                opp_king_src : opp_king_src + 64
+            ]
+            psq_export[dst_king + ksq] = psq_weight[own_king_src + ksq]
 
         return torch.cat([threat_weight, psq_export], dim=0)
 
@@ -153,14 +156,18 @@ class FullThreats(DoubleFeatureTransformer):
                 src_offset : src_offset + 640
             ]
 
-            # Split merged king block
+            # Split merged king block back into p_idx 10 and 11
             src_king = src_offset + 10 * 64
-            psq_expanded[dst_offset + 10 * 64 : dst_offset + 11 * 64] = psq_export[
-                src_king : src_king + 64
-            ]
+            ksq = InverseKingBuckets[b]
+
+            # Own king: only weight at ksq matters (rest stays zero)
+            psq_expanded[dst_offset + 10 * 64 + ksq] = psq_export[src_king + ksq]
+
+            # Opponent king: all squares from merged, except ksq → 0
             psq_expanded[dst_offset + 11 * 64 : dst_offset + 12 * 64] = psq_export[
                 src_king : src_king + 64
             ]
+            psq_expanded[dst_offset + 11 * 64 + ksq] = 0
 
         expanded = torch.cat([threat_weight, psq_expanded], dim=0)
         self.weight.data.copy_(expanded)

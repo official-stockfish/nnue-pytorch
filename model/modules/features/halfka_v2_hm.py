@@ -19,6 +19,12 @@ KingBuckets = [
 ]
 # fmt: on
 
+# Inverse mapping: bucket → oriented king square
+InverseKingBuckets = [0] * 32
+for _sq, _bucket in enumerate(KingBuckets):
+    if _bucket >= 0:
+        InverseKingBuckets[_bucket] = _sq
+
 
 def _orient(is_white_pov: bool, sq: int, ksq: int) -> int:
     kfile = ksq % 8
@@ -106,12 +112,10 @@ class HalfKav2Hm(DoubleFeatureTransformer):
             self.bias[L1 + i] = 0.0
 
     @torch.no_grad()
-    def get_export_weights(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_export_weights(self) -> torch.Tensor:
         """Return coalesced weight remapped from 12→11 piece types for export.
 
-        Returns (weight, psqt_weight) where weight has NUM_REAL_FEATURES rows
-        and psqt_weight has NUM_REAL_FEATURES rows. Both are float tensors.
-        The caller handles quantization.
+        Returns a float tensor with NUM_REAL_FEATURES rows.
         """
         # Coalesce virtual weights into a temporary copy
         coalesced = self.weight.data + self.virtual_weight.data.repeat(
@@ -134,17 +138,14 @@ class HalfKav2Hm(DoubleFeatureTransformer):
             # p_idx 10 in 12pt: own king at all squares
             own_king_src = src_offset + 10 * 64
             opp_king_src = src_offset + 11 * 64
-            dst_king = dst_offset + 10 * 64  # p_idx 10 in 11pt
+            dst_king = dst_offset + 10 * 64
+            ksq = InverseKingBuckets[b]
 
             # For each square, the merged king block contains:
-            # - own king at ksq (from p_idx 10, sq=ksq) — but ksq is implicit from bucket
+            # - own king at ksq (from p_idx 10, sq=ksq)
             # - opponent king at all other squares (from p_idx 11)
-            # Since both kings map to the same p_idx in 11pt,
-            # we just add them (they never overlap for the same position)
-            export[dst_king : dst_king + 64] = (
-                coalesced[own_king_src : own_king_src + 64]
-                + coalesced[opp_king_src : opp_king_src + 64]
-            )
+            export[dst_king : dst_king + 64] = coalesced[opp_king_src : opp_king_src + 64]
+            export[dst_king + ksq] = coalesced[own_king_src + ksq]
 
         return export
 
@@ -168,15 +169,17 @@ class HalfKav2Hm(DoubleFeatureTransformer):
             ]
 
             # Split merged king block back into p_idx 10 and 11
-            # We can't perfectly reconstruct, so we put the merged weights
-            # into both p_idx 10 and 11 (same as the old behavior)
             src_king = src_offset + 10 * 64
-            expanded[dst_offset + 10 * 64 : dst_offset + 11 * 64] = export_weight[
-                src_king : src_king + 64
-            ]
+            ksq = InverseKingBuckets[b]
+
+            # Own king: only weight at ksq matters (rest stays zero)
+            expanded[dst_offset + 10 * 64 + ksq] = export_weight[src_king + ksq]
+
+            # Opponent king: all squares from merged, except ksq → 0
             expanded[dst_offset + 11 * 64 : dst_offset + 12 * 64] = export_weight[
                 src_king : src_king + 64
             ]
+            expanded[dst_offset + 11 * 64 + ksq] = 0
 
         self.weight.data.copy_(expanded)
         self.virtual_weight.zero_()
