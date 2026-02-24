@@ -36,3 +36,12 @@ def add_feature_args(parser: argparse.ArgumentParser) -> None:
         help="The feature set to use. Available: "
         + ", ".join(get_available_features()),
     )
+
+
+__all__ = [
+    "HalfKav2Hm",
+    "FullThreats",
+    "get_feature_cls",
+    "get_available_features",
+    "add_feature_args",
+]

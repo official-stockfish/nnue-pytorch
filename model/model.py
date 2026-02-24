@@ -2,8 +2,7 @@ import torch
 from torch import nn
 
 from .config import ModelConfig
-from .modules import LayerStacks
-from .modules.features import get_feature_cls
+from .modules import LayerStacks, get_feature_cls
 from .quantize import QuantizationConfig, QuantizationManager
 
 

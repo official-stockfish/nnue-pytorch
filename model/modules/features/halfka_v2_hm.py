@@ -144,7 +144,9 @@ class HalfKav2Hm(DoubleFeatureTransformer):
             # For each square, the merged king block contains:
             # - own king at ksq (from p_idx 10, sq=ksq)
             # - opponent king at all other squares (from p_idx 11)
-            export[dst_king : dst_king + 64] = coalesced[opp_king_src : opp_king_src + 64]
+            export[dst_king : dst_king + 64] = coalesced[
+                opp_king_src : opp_king_src + 64
+            ]
             export[dst_king + ksq] = coalesced[own_king_src + ksq]
 
         return export

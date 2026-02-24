@@ -11,8 +11,7 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
-from ..modules import BaseFeatureTransformer
-from ..modules.features import get_feature_cls
+from ..modules import BaseFeatureTransformer, get_feature_cls
 from ..modules.features.full_threats import FullThreats
 from ..quantize import QuantizationConfig
 
