@@ -1096,7 +1096,7 @@ int main(int argc, char** argv) {
                                              .pc_y2                = 2.0,
                                              .pc_y3                = 1.0};
     const DataloaderDDPConfig  ddp_config = {.rank = 0, .world_size = 1};
-    auto stream = create_sparse_batch_stream("Full_Threats", concurrency, file_count, files,
+    auto stream = create_sparse_batch_stream("Full_Threatsv2", concurrency, file_count, files,
                                              batch_size, cyclic, config, ddp_config);
 
     auto t0 = std::chrono::high_resolution_clock::now();
