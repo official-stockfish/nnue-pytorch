@@ -4,7 +4,6 @@ from dataclasses import dataclass
 # 3 layer fully connected network
 @dataclass
 class ModelConfig:
-    threat_features: int = 60144
     L1: int = 1024
     L2: int = 31
     L3: int = 32
