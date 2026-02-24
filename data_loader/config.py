@@ -1,4 +1,3 @@
-import argparse
 import ctypes
 from dataclasses import dataclass
 
@@ -125,11 +124,3 @@ class CDataloaderSkipConfig(ctypes.Structure):
             pc_y2=config.pc_y2,
             pc_y3=config.pc_y3,
         )
-
-
-def make_action(class_name, field_name):
-    class SetConfig(argparse.Action):
-        def __call__(self, parser, namespace, values, option_string=None):
-            setattr(class_name, field_name, values)
-
-    return SetConfig
