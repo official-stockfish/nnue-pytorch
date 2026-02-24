@@ -143,10 +143,10 @@ constexpr auto threatfeaturecalc = []() {
 
 constexpr ThreatOffsetTable threatoffsets = threatfeaturecalc.table;
 constexpr int threatfeatures = threatfeaturecalc.totalfeatures;
-static_assert(threatfeatures == 60144);
+static_assert(threatfeatures == 53564);
 
-struct Full_Threats {
-    static constexpr std::string_view NAME = "Full_Threats";
+struct Full_Threatsv2 {
+    static constexpr std::string_view NAME = "Full_Threatsv2";
 
     static constexpr int SQUARE_NB           = 64;
     static constexpr int PIECE_NB            = 12;
@@ -175,11 +175,11 @@ struct Full_Threats {
     };
 
     static constexpr int map[PIECE_TYPE_NB][PIECE_TYPE_NB] = {
-      {0, 1, -1, 2, -1, -1},
-      {0, 1, 2, 3, 4, -1},
-      {0, 1, 2, 3, -1, -1},
-      {0, 1, 2, 3, -1, -1},
-      {0, 1, 2, 3, 4, -1},
+      { 0,  1, -1,  2, -1, -1},
+      { 0,  1,  2,  3,  4, -1},
+      { 0,  1,  2,  3, -1, -1},
+      { 0,  1,  2,  3, -1, -1},
+      { 0,  1,  2,  3,  4, -1},
       {-1, -1, -1, -1, -1, -1}
     };
 
@@ -196,7 +196,7 @@ struct Full_Threats {
     // clang-format on
 
     static constexpr int NUM_SQ     = 64;
-    static constexpr int NUM_PT     = 12;
+    static constexpr int NUM_PT     = 11;
     static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
 
     static constexpr int NUM_THREAT_FEATURES = threatfeatures;
@@ -226,14 +226,29 @@ struct Full_Threats {
         {
             return -1;
         }
+
+        if (enemy && (attkr.type() == attkd.type()) && (attkr.type() != PieceType::Pawn))
+        {
+            attkd = attkr;
+            std::swap(from, to);
+        }
+
+        int targetindex = int((attkr == attkd) ? Color::White : attkd.color()) 
+        * ((1 + numvalidtargets[(int) attkr])/ 2) + map[(int) attkr.type()][(int) attkd.type()];
+
+        if ((8 * (int)attkd.color() + (int)attkd.type()) > (8 + (int)attkr.type())
+            && attkr != Piece(PieceType::Pawn, Color::Black)) 
+        {
+            targetindex--;
+        }
+
+
         Bitboard attacks = (attkr.type() == PieceType::Pawn)
                            ? bb::pawnAttacks(Bitboard::square(Square(from)), attkr.color())
                            : bb::detail::pseudoAttacks()[attkr.type()][Square(from)];
-        Bitboard upto    = Bitboard::square(to);
+
         return int(threatoffsets[(int) attkr][65]
-                   + (int(attkd.color()) * (numvalidtargets[(int) attkr] / 2)
-                      + map[(int) attkr.type()][(int) attkd.type()])
-                       * threatoffsets[(int) attkr][64]
+                   + targetindex * threatoffsets[(int) attkr][64]
                    + threatoffsets[(int) attkr][(int) from]
                    + (Bitboard::fromBits((1ULL << (int) to) - 1) & attacks).count());
     }
@@ -357,7 +372,7 @@ auto find_feature(std::string_view name) {
 
 auto get_feature(std::string_view name) {
     return find_feature<HalfKAv2_hm,    //
-                        Full_Threats     //
+                        Full_Threatsv2  //
                         >(name);
 }
 

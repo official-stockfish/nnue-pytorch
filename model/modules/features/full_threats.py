@@ -8,9 +8,9 @@ from .halfka_v2_hm import InverseKingBuckets, _halfka_idx
 
 
 class FullThreats(DoubleFeatureTransformer):
-    HASH = 0x8F234CB8
-    FEATURE_NAME = "Full_Threats^"
-    INPUT_FEATURE_NAME = "Full_Threats"
+    HASH = 0x8F234CB9
+    FEATURE_NAME = "Full_Threatsv2^"
+    INPUT_FEATURE_NAME = "Full_Threatsv2"
     MAX_ACTIVE_FEATURES = 128 + 32
 
     NUM_SQ = 64
@@ -18,13 +18,13 @@ class FullThreats(DoubleFeatureTransformer):
     NUM_PLANES = NUM_SQ * NUM_PT  # 768
     NUM_BUCKETS = NUM_SQ // 2  # 32
 
-    NUM_THREAT_FEATURES = 60144
+    NUM_THREAT_FEATURES = 53564
     NUM_PSQ_FEATURES = NUM_PLANES * NUM_BUCKETS  # 24,576
-    NUM_INPUTS = NUM_THREAT_FEATURES + NUM_PSQ_FEATURES  # 84,720
+    NUM_INPUTS = NUM_THREAT_FEATURES + NUM_PSQ_FEATURES  # 78,140
     NUM_INPUTS_VIRTUAL = NUM_PLANES  # 768
 
     # Export size: threats + 11-piece-type PSQ (704 * 32 = 22,528)
-    NUM_REAL_FEATURES = NUM_THREAT_FEATURES + 704 * 32  # 82,672
+    NUM_REAL_FEATURES = NUM_THREAT_FEATURES + 704 * 32  # 76,092
 
     def __init__(self, num_outputs: int):
         super().__init__(self.NUM_INPUTS, num_outputs)
@@ -186,17 +186,18 @@ class FullThreats(DoubleFeatureTransformer):
             chess.QUEEN: 2538,
         }
 
+        num_threats = 53564
         num_psq = 768 * 32  # 24,576
-        num_total = 60_144 + num_psq
+        num_total = num_threats + num_psq
         values = [0] * num_total
 
         for ksq in range(64):
             for s in range(64):
                 for pt, val in piece_values.items():
-                    idxw = 60_144 + _halfka_idx(
+                    idxw = num_threats + _halfka_idx(
                         True, ksq, s, chess.Piece(pt, chess.WHITE)
                     )
-                    idxb = 60_144 + _halfka_idx(
+                    idxb = num_threats + _halfka_idx(
                         True, ksq, s, chess.Piece(pt, chess.BLACK)
                     )
                     values[idxw] = val
