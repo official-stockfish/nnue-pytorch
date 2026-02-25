@@ -1,6 +1,7 @@
 __pycache__/
 env/
 build/
+build-pgo-generate/
 logs/
 testing
 libtraining_data_loader.*

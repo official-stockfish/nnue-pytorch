@@ -69,11 +69,12 @@ def main():
     parser.add_argument(
         "--device", type=int, default="0", help="Device to use for cupy"
     )
-    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
+
+    M.ModelConfig.add_model_args(parser)
     M.add_feature_args(parser)
     args = parser.parse_args()
 
-    feature_set = M.get_feature_set_from_name(args.features)
+    feature_name = args.features
 
     print("Converting %s to %s" % (args.source, args.target))
 
@@ -83,8 +84,8 @@ def main():
     if args.source.endswith(".ckpt"):
         nnue = M.NNUE.load_from_checkpoint(
             args.source,
-            feature_set=feature_set,
-            config=M.ModelConfig(L1=args.l1),
+            feature_name=feature_name,
+            config=M.ModelConfig.get_model_config(args),
             quantize_config=M.QuantizationConfig(),
             map_location=torch.device("cpu"),
         )
@@ -94,10 +95,15 @@ def main():
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
             nnue = M.NNUE(
-                feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig()
+                feature_name,
+                M.ModelConfig.get_model_config(args),
+                M.QuantizationConfig(),
             )
             reader = M.NNUEReader(
-                f, feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig()
+                f,
+                feature_name,
+                M.ModelConfig.get_model_config(args),
+                M.QuantizationConfig(),
             )
             nnue.model = reader.model
             if args.description is None:
@@ -107,7 +113,6 @@ def main():
 
     if args.ft_compression != "none" and not target_is_nnue:
         args.ft_compression = "none"
-        # raise Exception('Compression only allowed for .nnue target.')
 
     if args.ft_compression not in ["none", "leb128"]:
         raise Exception("Invalid compression method.")
@@ -119,7 +124,7 @@ def main():
         import ftperm
 
         if not args.source.endswith(".nnue"):
-            M.coalesce_ft_weights_inplace(nnue.model.feature_set, nnue.model.input)
+            nnue.model.input.coalesce()
             nnue.model.layer_stacks.coalesce_layer_stacks_inplace()
 
         ftperm.ft_permute(nnue.model, args.ft_perm)
@@ -141,7 +146,7 @@ def main():
                 ftperm.set_cupy_device(args.device)
 
         if not args.source.endswith(".nnue"):
-            M.coalesce_ft_weights_inplace(nnue.model.feature_set, nnue.model.input)
+            nnue.model.input.coalesce()
             nnue.model.layer_stacks.coalesce_layer_stacks_inplace()
 
         ftperm.ft_optimize(

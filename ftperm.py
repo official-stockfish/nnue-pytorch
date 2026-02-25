@@ -46,11 +46,9 @@ import torch
 import data_loader
 import model as M
 from model import (
-    FeatureSet,
     NNUE,
     NNUEModel,
     NNUEReader,
-    ModelConfig,
     QuantizationConfig,
 )
 
@@ -421,12 +419,12 @@ def find_perm_impl(
 
 def read_model(
     nnue_path: str,
-    feature_set: FeatureSet,
-    config: ModelConfig,
+    feature_name: str,
+    config: M.ModelConfig,
     quantize_config: QuantizationConfig,
 ) -> NNUEModel:
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_set, config, quantize_config)
+        reader = NNUEReader(f, feature_name, config, quantize_config)
         return reader.model
 
 
@@ -565,7 +563,7 @@ def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bo
         fens = filter_fens(next(fen_batch_provider))
 
         b = data_loader.get_sparse_batch_from_fens(
-            quantized_model.feature_set.name,
+            quantized_model.input_feature_name,
             fens,
             [0] * len(fens),
             [1] * len(fens),
@@ -583,18 +581,21 @@ def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bo
 
 
 def command_gather(args: argparse.Namespace) -> None:
-    feature_set = M.get_feature_set_from_name(args.features)
+    feature_name = args.features
     if args.checkpoint:
         nnue = NNUE.load_from_checkpoint(
             args.checkpoint,
-            feature_set=feature_set,
-            config=ModelConfig(L1=args.l1),
+            feature_name=feature_name,
+            config=M.ModelConfig.get_model_config(args),
             quantize_config=QuantizationConfig(),
         )
         model = nnue.model
     else:
         model = read_model(
-            args.net, feature_set, ModelConfig(L1=args.l1), QuantizationConfig()
+            args.net,
+            feature_name,
+            M.ModelConfig.get_model_config(args),
+            QuantizationConfig(),
         )
 
     model.eval()
@@ -710,8 +711,10 @@ def main() -> None:
     parser_gather.add_argument(
         "--out", type=str, help="Filename under which to save the resulting ft matrix"
     )
-    parser_gather.add_argument("--l1", type=int, default=M.ModelConfig().L1)
+
+    M.ModelConfig.add_model_args(parser_gather)
     M.add_feature_args(parser_gather)
+
     parser_gather.set_defaults(func=command_gather)
 
     parser_gather = subparsers.add_parser("find_perm", help="a help")

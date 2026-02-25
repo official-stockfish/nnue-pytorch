@@ -39,14 +39,12 @@ class NNUEVisualizer:
 
     def plot_input_weights(self):
         # Coalesce weights and transform them to Numpy domain.
-        weights = M.coalesce_ft_weights(self.model.feature_set, self.model.input)
+        weights = self.model.input.get_export_weights()
         weights = weights[:, : self.model.L1]
         weights = weights.flatten().numpy()
 
         if self.args.ref_model:
-            ref_weights = M.coalesce_ft_weights(
-                self.ref_model.feature_set, self.ref_model.input
-            )
+            ref_weights = self.ref_model.input.get_export_weights()
             ref_weights = ref_weights[:, : self.model.L1]
             ref_weights = ref_weights.flatten().numpy()
             weights -= ref_weights
@@ -316,7 +314,7 @@ class NNUEVisualizer:
 
     def plot_fc_weights(self):
         if not self.args.no_fc_weights:
-            num_buckets = self.model.feature_set.num_ls_buckets
+            num_buckets = self.model.num_ls_buckets
             fig, axs = plt.subplots(3, num_buckets, dpi=self.dpi)
 
             extra_info = ""
@@ -481,7 +479,7 @@ class NNUEVisualizer:
                     self.ref_model.layer_stacks.get_coalesced_layer_stacks()
                 )
 
-            num_buckets = self.model.feature_set.num_ls_buckets
+            num_buckets = self.model.num_ls_buckets
             fig, axs = plt.subplots(3, num_buckets, dpi=self.dpi)
             extra_info = ""
             if self.args.sort_input_neurons:
@@ -651,33 +649,31 @@ def main():
         required=False,
         help="Override the label used in plot titles and as prefix of saved files.",
     )
-    parser.add_argument("--l1", type=int, default=M.ModelConfig().L1)
+
+    M.ModelConfig.add_model_args(parser)
     M.add_feature_args(parser)
     args = parser.parse_args()
 
-    supported_features = ("HalfKAv2_hm", "HalfKAv2_hm^")
-    assert args.features in supported_features
-    feature_set = M.get_feature_set_from_name(args.features)
+    feature_name = args.features
 
     from os.path import basename
 
     label = basename(args.model)
 
     model = M.load_model(
-        args.model, feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig()
+        args.model,
+        feature_name,
+        M.ModelConfig.get_model_config(args),
+        M.QuantizationConfig(),
     )
 
     if args.ref_model:
-        if args.ref_features:
-            assert args.ref_features in supported_features
-            ref_feature_set = M.get_feature_set_from_name(args.ref_features)
-        else:
-            ref_feature_set = feature_set
+        ref_feature_name = args.ref_features if args.ref_features else feature_name
 
         ref_model = M.load_model(
             args.ref_model,
-            ref_feature_set,
-            M.ModelConfig(L1=args.l1),
+            ref_feature_name,
+            M.ModelConfig.get_model_config(args),
             M.QuantizationConfig(),
         )
 

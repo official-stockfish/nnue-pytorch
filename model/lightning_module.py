@@ -4,7 +4,6 @@ import torch
 from torch import Tensor, nn
 
 from .config import LossParams, ModelConfig
-from .features import FeatureSet
 from .model import NNUEModel
 from .quantize import QuantizationConfig
 
@@ -15,7 +14,7 @@ def _get_parameters(layers: list[nn.Module]):
 
 class NNUE(L.LightningModule):
     """
-    feature_set - an instance of FeatureSet defining the input features
+    feature_name - a string identifying the feature transformer (e.g. "HalfKAv2_hm")
 
     lambda_ = 0.0 - purely based on game results
     0.0 < lambda_ < 1.0 - interpolated score and result
@@ -28,7 +27,7 @@ class NNUE(L.LightningModule):
 
     def __init__(
         self,
-        feature_set: FeatureSet,
+        feature_name: str,
         config: ModelConfig,
         quantize_config: QuantizationConfig,
         max_epoch=800,
@@ -42,7 +41,7 @@ class NNUE(L.LightningModule):
     ):
         super().__init__()
         self.model: NNUEModel = NNUEModel(
-            feature_set, config, quantize_config, num_psqt_buckets, num_ls_buckets
+            feature_name, config, quantize_config, num_psqt_buckets, num_ls_buckets
         )
         self.loss_params = loss_params
         self.max_epoch = max_epoch
