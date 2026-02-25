@@ -1,4 +1,3 @@
-import argparse
 import time
 import warnings
 import os
@@ -92,30 +91,11 @@ def make_data_loaders(
     return train, val
 
 
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ("yes", "true", "t", "y", "1"):
-        return True
-    elif v.lower() in ("no", "false", "f", "n", "0"):
-        return False
-    else:
-        raise argparse.ArgumentTypeError("Boolean value expected.")
-
-
-def flatten_once(lst):
-    return sum(lst, [])
-
-
 def main():
     args = tyro.cli(TrainingConfig)
 
-    datasets = flatten_once(args.datasets)
+    datasets = args.datasets
     val_datasets = args.validation_datasets
-    if val_datasets:
-        val_datasets = flatten_once(val_datasets)
-    else:
-        val_datasets = []
 
     for dataset in datasets:
         if not os.path.exists(dataset):
