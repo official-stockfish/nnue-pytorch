@@ -144,25 +144,32 @@ def main():
         try:
             devices = [int(x) for x in args.gpus.rstrip(",").split(",") if x]
         except ValueError:
-            parser.error(
+            print(
                 f"Invalid --gpus argument: '{args.gpus}'. "
-                "Expected a comma separated list of ints, e.g. 0,1"
+                "Expected a comma separated list of ints, e.g. 0,1",
+                file=sys.stderr,
             )
+            return
     else:
         devices = [0]
     n_devices = len(devices)
     if n_devices == 0:
-        parser.error(
+        print(
             f"Invalid --gpus argument: '{args.gpus}'. "
-            "Expected a comma separated list of ints, e.g. 0,1"
+            "Expected a comma separated list of ints, e.g. 0,1",
+            file=sys.stderr,
         )
+        return
     if global_batch_size_requested % n_devices != 0:
         raise ValueError(
             f"--batch-size {global_batch_size_requested} must be divisible by number of gpus ({n_devices}). "
             f"Got --gpus={args.gpus or '0'}"
         )
     per_gpu_batch_size = global_batch_size_requested // n_devices
-    print(f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}", flush=True)
+    print(
+        f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}",
+        flush=True,
+    )
 
     feature_cls = M.get_feature_cls(args.features)
     feature_name = feature_cls.FEATURE_NAME
@@ -178,7 +185,9 @@ def main():
             feature_name=feature_name,
             loss_params=loss_params,
             max_epoch=max_epoch,
-            num_batches_per_epoch=max(1, args.epoch_size // global_batch_size_requested),
+            num_batches_per_epoch=max(
+                1, args.epoch_size // global_batch_size_requested
+            ),
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
@@ -195,7 +204,9 @@ def main():
             )
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch = max(1, args.epoch_size // global_batch_size_requested)
+        nnue.num_batches_per_epoch = max(
+            1, args.epoch_size // global_batch_size_requested
+        )
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
