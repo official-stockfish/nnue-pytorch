@@ -1,5 +1,4 @@
 import ctypes
-import os
 
 from ._native import c_lib, SparseBatchPtr, FenBatchPtr
 from .config import (
