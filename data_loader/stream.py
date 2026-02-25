@@ -1,7 +1,27 @@
 import ctypes
 
 from ._native import c_lib, SparseBatchPtr, FenBatchPtr
-from .config import CDataloaderSkipConfig, DataloaderSkipConfig
+from .config import (
+    CDataloaderSkipConfig,
+    DataloaderSkipConfig,
+    CDataloaderDDPConfig,
+    DataloaderDDPConfig,
+)
+
+
+def _get_ddp_rank_and_world_size():
+    """Get DDP rank and world size from torch.distributed if available."""
+    import torch.distributed as dist
+
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+    else:
+        rank = 0
+        world_size = 1
+
+    print(f"DDP rank: {rank}, world size: {world_size}", flush=True)
+    return rank, world_size
 
 
 def _to_c_str_array(str_list):
@@ -16,7 +36,12 @@ def create_fen_batch_stream(
     batch_size,
     cyclic,
     config: DataloaderSkipConfig,
+    ddp_config: DataloaderDDPConfig = None,
 ) -> ctypes.c_void_p:
+    if ddp_config is None:
+        rank, world_size = _get_ddp_rank_and_world_size()
+        ddp_config = DataloaderDDPConfig(rank=rank, world_size=world_size)
+
     return c_lib.dll.create_fen_batch_stream(
         concurrency,
         len(filenames),
@@ -24,6 +49,7 @@ def create_fen_batch_stream(
         batch_size,
         cyclic,
         CDataloaderSkipConfig(config),
+        CDataloaderDDPConfig(ddp_config),
     )
 
 
@@ -46,7 +72,12 @@ def create_sparse_batch_stream(
     batch_size,
     cyclic,
     config: DataloaderSkipConfig,
+    ddp_config: DataloaderDDPConfig = None,
 ) -> ctypes.c_void_p:
+    if ddp_config is None:
+        rank, world_size = _get_ddp_rank_and_world_size()
+        ddp_config = DataloaderDDPConfig(rank=rank, world_size=world_size)
+
     return c_lib.dll.create_sparse_batch_stream(
         feature_set,
         concurrency,
@@ -55,6 +86,7 @@ def create_sparse_batch_stream(
         batch_size,
         cyclic,
         CDataloaderSkipConfig(config),
+        CDataloaderDDPConfig(ddp_config),
     )
 
 

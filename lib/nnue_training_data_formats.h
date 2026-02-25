@@ -6805,8 +6805,43 @@ namespace binpack
 
         void seek_to_start()
         {
-            m_file.seekg(0);
+            m_file.clear();
+            m_file.seekg(0, std::ios_base::beg);
         }
+
+        [[nodiscard]] bool skipChunks(std::size_t n, std::size_t* skipped_out)
+        {
+            if (skipped_out) *skipped_out = 0;
+            if (n == 0) return true;
+
+            std::size_t skipped = 0;
+
+            while (skipped < n)
+            {
+                if (!hasNextChunk())
+                {
+                    if (skipped_out) *skipped_out = skipped;
+                    return false;
+                }
+
+                auto curPos = m_file.tellg();
+                Header header = readChunkHeader();
+                m_file.seekg(header.chunkSize, std::ios_base::cur);
+
+                assert(m_file.tellg() > curPos);
+
+                ++skipped;
+            }
+
+            if (skipped_out) *skipped_out = skipped;
+            return true;
+        }
+
+        [[nodiscard]] bool skipChunks(std::size_t n)
+        {
+            return skipChunks(n, nullptr);
+        }
+
 
         [[nodiscard]] std::vector<unsigned char> readNextChunk()
         {
@@ -7619,12 +7654,16 @@ namespace binpack
             std::vector<std::string> paths,
             std::ios_base::openmode om = std::ios_base::app,
             bool cyclic = false,
-            std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr
+            std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr,
+            int rank = 0,
+            int world_size = 1
         ) :
             m_concurrency(concurrency),
             m_bufferOffset(0),
             m_cyclic(cyclic),
-            m_skipPredicate(std::move(skipPredicate))
+            m_skipPredicate(std::move(skipPredicate)),
+            m_rank(rank),
+            m_world_size(world_size)
         {
             m_numRunningWorkers.store(0);
             std::vector<double> sizes; // discrete distribution wants double weights
@@ -7641,6 +7680,10 @@ namespace binpack
             }
 
             m_inputFileDistribution = std::discrete_distribution<>(sizes.begin(), sizes.end());
+
+            // Initialize DDP seeking tracking
+            m_files_seeked_for_ddp.resize(m_inputFiles.size(), false);
+            m_ddp_chunks_to_skip_after_read.resize(m_inputFiles.size(), 0);
 
             m_stopFlag.store(false);
 
@@ -7830,6 +7873,12 @@ namespace binpack
 
         std::vector<std::thread> m_workers;
 
+        // DDP support
+        int m_rank;
+        int m_world_size;
+        std::vector<std::uint8_t> m_files_seeked_for_ddp;  // Track which files have been seeked for DDP
+        std::vector<std::size_t> m_ddp_chunks_to_skip_after_read;
+
         bool fetchNextChunkIfNeeded(std::size_t& m_offset, std::vector<unsigned char>& m_chunk)
         {
             if (m_offset + sizeof(PackedTrainingDataEntry) + 2 > m_chunk.size())
@@ -7838,20 +7887,90 @@ namespace binpack
                 const std::size_t fileId = m_inputFileDistribution(prng);
                 auto& inputFile = m_inputFiles[fileId];
 
+                auto seek_for_ddp_rank = [&](std::size_t rank) -> bool
+                {
+                    std::size_t skipped = 0;
+                    if (inputFile.skipChunks(rank, &skipped))
+                    {
+                        return true;
+                    }
+                    if (!m_cyclic)
+                    {
+                        return false;
+                    }
+                    if (skipped == 0)
+                    {
+                        return false;
+                    }
+                    inputFile.seek_to_start();
+                    const std::size_t offset = rank % skipped;
+                    const bool ok = inputFile.skipChunks(offset);
+                    assert(ok);
+                    return ok;
+                };
+
                 std::unique_lock lock(m_fileMutex);
+
+                // DDP: chunk-based skipping
+                if (m_world_size > 1)
+                {
+                    if (!m_files_seeked_for_ddp[fileId])
+                    {
+                        const std::size_t rank = static_cast<std::size_t>(m_rank);
+                        if (!seek_for_ddp_rank(rank))
+                        {
+                            return true;
+                        }
+                        m_files_seeked_for_ddp[fileId] = true;
+                    }
+                    else if (m_ddp_chunks_to_skip_after_read[fileId] > 0)
+                    {
+                        const bool success = inputFile.skipChunks(m_ddp_chunks_to_skip_after_read[fileId]);
+                        if (!success)
+                        {
+                            if (!m_cyclic)
+                            {
+                                return true;
+                            }
+                            inputFile.seek_to_start();
+                            const std::size_t rank = static_cast<std::size_t>(m_rank);
+                            if (!seek_for_ddp_rank(rank))
+                            {
+                                return true;
+                            }
+                        }
+                        m_ddp_chunks_to_skip_after_read[fileId] = 0;
+                    }
+                }
 
                 if (!inputFile.hasNextChunk())
                 {
                     if (m_cyclic)
                     {
                         inputFile.seek_to_start();
+
+                        if (m_world_size > 1)
+                        {
+                            const std::size_t rank = static_cast<std::size_t>(m_rank);
+                            if (!seek_for_ddp_rank(rank))
+                            {
+                                return true;
+                            }
+                        }
                     }
                     else
+                    {
                         return true;
+                    }
                 }
 
                 m_chunk = inputFile.readNextChunk();
                 m_offset = 0;
+
+                if (m_world_size > 1)
+                {
+                    m_ddp_chunks_to_skip_after_read[fileId] = static_cast<std::size_t>(m_world_size - 1);
+                }
             }
 
             return false;

@@ -133,10 +133,36 @@ def main():
             "Either both or none of start_lambda and end_lambda must be specified."
         )
 
-    batch_size = args.batch_size
-    if batch_size <= 0:
-        batch_size = 16384
-    print("Using batch size {}".format(batch_size))
+    global_batch_size_requested = args.batch_size
+    if global_batch_size_requested <= 0:
+        global_batch_size_requested = 16384
+    # temporarily default to using only device 0 if user didn't specify --gpus
+    # doing this so that batch size is consistent since if we rely on "auto" behavior
+    # we don't know at this point in the code what the world size is.
+    # TODO: refactor initialization so that we can support default behavior of "auto" with proper batch sizing
+    if args.gpus:
+        try:
+            devices = [int(x) for x in args.gpus.rstrip(",").split(",") if x]
+        except ValueError:
+            parser.error(
+                f"Invalid --gpus argument: '{args.gpus}'. "
+                "Expected a comma separated list of ints, e.g. 0,1"
+            )
+    else:
+        devices = [0]
+    n_devices = len(devices)
+    if n_devices == 0:
+        parser.error(
+            f"Invalid --gpus argument: '{args.gpus}'. "
+            "Expected a comma separated list of ints, e.g. 0,1"
+        )
+    if global_batch_size_requested % n_devices != 0:
+        raise ValueError(
+            f"--batch-size {global_batch_size_requested} must be divisible by number of gpus ({n_devices}). "
+            f"Got --gpus={args.gpus or '0'}"
+        )
+    per_gpu_batch_size = global_batch_size_requested // n_devices
+    print(f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}", flush=True)
 
     feature_cls = M.get_feature_cls(args.features)
     feature_name = feature_cls.FEATURE_NAME
@@ -152,7 +178,7 @@ def main():
             feature_name=feature_name,
             loss_params=loss_params,
             max_epoch=max_epoch,
-            num_batches_per_epoch=args.epoch_size // batch_size,
+            num_batches_per_epoch=max(1, args.epoch_size // global_batch_size_requested),
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
@@ -169,7 +195,7 @@ def main():
             )
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch = args.epoch_size / batch_size
+        nnue.num_batches_per_epoch = max(1, args.epoch_size // global_batch_size_requested)
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
@@ -213,13 +239,16 @@ def main():
         save_top_k=-1,
     )
 
+    # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
+    # see lightning/fabric/plugins/environments/slurm.py near line 110
+    os.environ["SLURM_JOB_NAME"] = "bash"
+
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
         accelerator="cuda",
-        devices=[int(x) for x in args.gpus.rstrip(",").split(",") if x]
-        if args.gpus
-        else "auto",
+        strategy="ddp" if len(devices) > 1 else "auto",
+        devices=devices,
         logger=tb_logger,
         callbacks=[
             checkpoint_callback,
@@ -235,13 +264,13 @@ def main():
 
     nnue = torch.compile(nnue, backend=args.compile_backend)
 
-    print("Using C++ data loader")
+    print("Using C++ data loader", flush=True)
     train, val = make_data_loaders(
         train_datasets,
         val_datasets,
         input_feature_name,
         args.num_workers,
-        batch_size,
+        per_gpu_batch_size,
         data_loader.DataloaderSkipConfig.get_dataloader_skip_config_from_args(args),
         args.epoch_size,
         args.validation_size,
