@@ -17,7 +17,7 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfi
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
 
     gpus: Optional[str] = None
-    """List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (use all available gpus)."""
+    """List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (Use device 0 only)."""
 
     max_epochs: int = 800
     """Maximum number of epochs to train for. Default 800."""
