@@ -93,7 +93,7 @@ struct HalfKAv2_hm {
     }
 };
 
-constexpr int numvalidtargets[12] = {6, 6, 10, 10, 8, 8, 8, 8, 10, 10, 0, 0};
+constexpr int numvalidtargets[12] = {5, 6, 9, 9, 7, 7, 7, 7, 9, 9, 0, 0};
 
 using ThreatOffsetTable = std::array<std::array<int, 66>, 12>;
 
