@@ -6805,20 +6805,22 @@ namespace binpack
 
         void seek_to_start()
         {
-            m_file.seekg(0);
+            m_file.clear();
+            m_file.seekg(0, std::ios_base::beg);
         }
-        
-        bool skipChunks(std::size_t n)
+
+        [[nodiscard]] bool skipChunks(std::size_t n, std::size_t* skipped_out)
         {
+            if (skipped_out) *skipped_out = 0;
             if (n == 0) return true;
 
-            bool wrapped = false;
             std::size_t skipped = 0;
 
             while (skipped < n)
             {
                 if (!hasNextChunk())
                 {
+                    if (skipped_out) *skipped_out = skipped;
                     return false;
                 }
 
@@ -6831,8 +6833,15 @@ namespace binpack
                 ++skipped;
             }
 
+            if (skipped_out) *skipped_out = skipped;
             return true;
         }
+
+        [[nodiscard]] bool skipChunks(std::size_t n)
+        {
+            return skipChunks(n, nullptr);
+        }
+
 
         [[nodiscard]] std::vector<unsigned char> readNextChunk()
         {
@@ -7863,7 +7872,7 @@ namespace binpack
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
 
         std::vector<std::thread> m_workers;
-        
+
         // DDP support
         int m_rank;
         int m_world_size;
@@ -7878,6 +7887,28 @@ namespace binpack
                 const std::size_t fileId = m_inputFileDistribution(prng);
                 auto& inputFile = m_inputFiles[fileId];
 
+                auto seek_for_ddp_rank = [&](std::size_t rank) -> bool
+                {
+                    std::size_t skipped = 0;
+                    if (inputFile.skipChunks(rank, &skipped))
+                    {
+                        return true;
+                    }
+                    if (!m_cyclic)
+                    {
+                        return false;
+                    }
+                    if (skipped == 0)
+                    {
+                        return false;
+                    }
+                    inputFile.seek_to_start();
+                    const std::size_t offset = rank % skipped;
+                    const bool ok = inputFile.skipChunks(offset);
+                    assert(ok);
+                    return ok;
+                };
+
                 std::unique_lock lock(m_fileMutex);
 
                 // DDP: chunk-based skipping
@@ -7885,18 +7916,30 @@ namespace binpack
                 {
                     if (!m_files_seeked_for_ddp[fileId])
                     {
-                        inputFile.skipChunks(static_cast<std::size_t>(m_rank));
+                        const std::size_t rank = static_cast<std::size_t>(m_rank);
+                        if (!seek_for_ddp_rank(rank))
+                        {
+                            return true;
+                        }
                         m_files_seeked_for_ddp[fileId] = true;
                     }
                     else if (m_ddp_chunks_to_skip_after_read[fileId] > 0)
                     {
                         const bool success = inputFile.skipChunks(m_ddp_chunks_to_skip_after_read[fileId]);
-                        m_ddp_chunks_to_skip_after_read[fileId] = 0;
-                        if (!success && m_cyclic)
+                        if (!success)
                         {
+                            if (!m_cyclic)
+                            {
+                                return true;
+                            }
                             inputFile.seek_to_start();
-                            inputFile.skipChunks(static_cast<std::size_t>(m_rank));
+                            const std::size_t rank = static_cast<std::size_t>(m_rank);
+                            if (!seek_for_ddp_rank(rank))
+                            {
+                                return true;
+                            }
                         }
+                        m_ddp_chunks_to_skip_after_read[fileId] = 0;
                     }
                 }
 
@@ -7906,9 +7949,13 @@ namespace binpack
                     {
                         inputFile.seek_to_start();
 
-                        if (m_world_size > 1 )
+                        if (m_world_size > 1)
                         {
-                            inputFile.skipChunks(static_cast<std::size_t>(m_rank));
+                            const std::size_t rank = static_cast<std::size_t>(m_rank);
+                            if (!seek_for_ddp_rank(rank))
+                            {
+                                return true;
+                            }
                         }
                     }
                     else
