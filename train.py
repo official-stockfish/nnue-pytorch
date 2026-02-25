@@ -408,10 +408,22 @@ def main():
     # doing this so that batch size is consistent since if we rely on "auto" behavior
     # we don't know at this point in the code what the world size is.
     # TODO: refactor initialization so that we can support default behavior of "auto" with proper batch sizing
-    devices = (
-        [int(x) for x in args.gpus.rstrip(",").split(",") if x] if args.gpus else [0]
-    )
+    if args.gpus:
+        try:
+            devices = [int(x) for x in args.gpus.rstrip(",").split(",") if x]
+        except ValueError:
+            parser.error(
+                f"Invalid --gpus argument: '{args.gpus}'. "
+                "Expected a comma separated list of ints, e.g. 0,1"
+            )
+    else:
+        devices = [0]
     n_devices = len(devices)
+    if n_devices == 0:
+        parser.error(
+            f"Invalid --gpus argument: '{args.gpus}'. "
+            "Expected a comma separated list of ints, e.g. 0,1"
+        )
     if global_batch_size_requested % n_devices != 0:
         raise ValueError(
             f"--batch-size {global_batch_size_requested} must be divisible by number of gpus ({n_devices}). "
@@ -443,7 +455,7 @@ def main():
             feature_set=feature_set,
             loss_params=loss_params,
             max_epoch=max_epoch,
-            num_batches_per_epoch=args.epoch_size / global_batch_size_requested,
+            num_batches_per_epoch=max(1, args.epoch_size // global_batch_size_requested),
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
@@ -461,7 +473,7 @@ def main():
         nnue.model.set_feature_set(feature_set)
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch = args.epoch_size / global_batch_size_requested
+        nnue.num_batches_per_epoch = max(1, args.epoch_size // global_batch_size_requested)
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
