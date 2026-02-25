@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple, Literal
 import tyro
-from tyro.conf import UseAppendAction, FlagConversionOff
+from tyro.conf import UseAppendAction, FlagConversionOff, Positional
 
 from data_loader.config import DataloaderSkipConfig
 from model.config import LossParams, ModelConfig
@@ -10,7 +10,7 @@ from model.modules.features import FeatureConfig
 
 @dataclass
 class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfig):
-    datasets: UseAppendAction[Tuple[str, ...]] = ()
+    datasets: Positional[UseAppendAction[Tuple[str, ...]]] = ()
     """Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if no validation data is specified."""
 
     default_root_dir: Optional[str] = None
@@ -70,3 +70,4 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfi
 
 if __name__ == "__main__":
     config = tyro.cli(TrainingConfig)
+    print(config)
