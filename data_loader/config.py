@@ -7,7 +7,7 @@ class DataloaderSkipConfig:
     filtered: bool = True
     """If disabled, no smart fen skipping will be done."""
     wld_filtered: bool = True
-    """If disabled, WLD-based fen skipping is turned off."""
+    """If disabled, no WLD-based fen skipping will be done."""
     random_fen_skipping: int = 0
     """Skip a random fraction of positions. 0 = disabled."""
     early_fen_skipping: int = -1

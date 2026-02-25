@@ -1,15 +1,15 @@
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Literal
 import tyro
-from tyro.conf import UseAppendAction
+from tyro.conf import UseAppendAction, FlagConversionOff
 
 from data_loader.config import DataloaderSkipConfig
-from model.config import LossParams
+from model.config import LossParams, ModelConfig
 from model.modules.features import FeatureConfig
 
 
 @dataclass
-class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig):
+class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfig):
     datasets: UseAppendAction[Tuple[str, ...]] = ()
     """Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if no validation data is specified."""
 
@@ -43,7 +43,7 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig):
     threads: int = -1
     """Number of torch threads to use. Default automatic (cores)."""
 
-    compile_backend: tyro.conf.Suppress[str] = "inductor"
+    compile_backend: Literal["inductor", "cudagraphs"] = "inductor"
     """Which backend to use for torch.compile. inductor works well with larger nets, cudagraphs with smaller nets."""
 
     seed: int = 42
@@ -58,7 +58,7 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig):
     network_save_period: int = 20
     """Number of epochs between network snapshots. None to disable."""
 
-    save_last_network: bool = True
+    save_last_network: FlagConversionOff[bool] = True
     """Whether to always save the last produced network."""
 
     epoch_size: int = 100_000_000
