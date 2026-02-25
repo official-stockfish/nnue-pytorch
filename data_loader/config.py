@@ -15,13 +15,13 @@ class DataloaderSkipConfig:
     simple_eval_skipping: int = -1
     """Skip positions based on simple eval. -1 = disabled."""
     param_index: int = 0
-    """Parameter index for piecewise cubic scaling."""
+    """Indexing for parameter scans."""
     pc_y1: float = 1.0
-    """Piecewise cubic y1 parameter."""
+    """Piecewise quadratic interpolation y1 parameter."""
     pc_y2: float = 2.0
-    """Piecewise cubic y2 parameter."""
+    """Piecewise quadratic interpolation y2 parameter."""
     pc_y3: float = 1.0
-    """Piecewise cubic y3 parameter."""
+    """Piecewise quadratic interpolation y3 parameter."""
 
     @staticmethod
     def get_dataloader_skip_config_from_args(args) -> "DataloaderSkipConfig":
