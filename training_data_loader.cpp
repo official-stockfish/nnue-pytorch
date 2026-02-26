@@ -819,16 +819,16 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
         }
 
         bool use_exponential_skip = config.early_fen_skipping > 0
-                         && config.early_fen_skipping_ply_factor >= 0.0;
+                         && config.early_fen_skipping_ply_factor > 0.0;
 
         bool use_hard_early_skip = config.early_fen_skipping > 0
-                        && config.early_fen_skipping_ply_factor < 0.0;
+                        && config.early_fen_skipping_ply_factor <= 0.0;
 
         // 2. Conditionally precalculate early skip LUT
         std::vector<uint64_t> early_skip_lut;
         if (config.early_fen_skipping > 0 && use_exponential_skip) {
             early_skip_lut.resize(config.early_fen_skipping + 2, 0);
-            double gamma = config.early_fen_skipping_ply_factor > 0.0;
+            double gamma = config.early_fen_skipping_ply_factor;
             for (int diff = 0; diff < early_skip_lut.size(); ++diff) {
                 double p_skip = 1.0 - std::pow(gamma, diff);
                 early_skip_lut[diff] = static_cast<uint64_t>(p_skip * MAX_RNG_VAL);
@@ -859,7 +859,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             pc_weights_total = 33.0;
         }
 
-       return [config, prob_threshold, early_skip_lut, pc_weights_lut,
+        return [config, prob_threshold, early_skip_lut, pc_weights_lut,
                 pc_weights_total, use_exponential_skip, use_hard_early_skip](const TrainingDataEntry& e) {
             // VALUE_NONE from Stockfish.
             // We need to allow a way to skip predetermined positions without
@@ -915,20 +915,19 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             piece_count_history_all_total += 1;
 
             // update alpha, which scales the filtering probability, to a maximum rate.
-            if (piece_count_history_all_total % 10000 == 0)
-            {
-                double d_total = static_cast<double>(piece_count_history_all_total);
-                double pass = d_total * pc_weights_total;
-                for (int i = 0; i < 33; ++i)
-                {
-                    if (pc_weights_lut[i] > 1e-8 && piece_count_history_all[i] > 0)
-                    {
-                        double ratio = d_total * pc_weights_lut[i] / (pc_weights_total * piece_count_history_all[i]);
-                        if (ratio < pass)
-                            pass = ratio;
+            if (piece_count_history_all_total % 10000 == 0) {
+                double max_overrepresentation = 0.0;
+                for (int i = 0; i < 33; ++i) {
+                    if (pc_weights_lut[i] > 1e-6 && piece_count_history_all[i] > 0) {
+                        // How many times more of this PC do we have vs what we want?
+                        double current_ratio = piece_count_history_all[i] / piece_count_history_all_total;
+                        double desired_ratio = pc_weights_lut[i] / pc_weights_total;
+                        max_overrepresentation = std::max(max_overrepresentation, current_ratio / desired_ratio);
                     }
                 }
-                alpha = 1.0 / (std::max(pass, 1e-8) * max_skipping_rate);
+                // alpha = 1.0 / max_overrepresentation ensures the most overrepresented bucket
+                // is the bottleneck, others are kept more often.
+                alpha = (max_overrepresentation > 1e-6) ? (1.0 / max_overrepresentation) : 1.0;
             }
 
             // Calculate final retention probability
@@ -943,6 +942,18 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 
             piece_count_history_passed[pc] += 1.0;
             piece_count_history_passed_total += 1;
+
+            constexpr bool do_debug_print = false;
+            if (do_debug_print)
+            {
+                if (uint64_t(piece_count_history_all_total) % 10000 == 0)
+                {
+                    std::cout << "Total : " << piece_count_history_all_total << '\n';
+                    std::cout << "Passed: " << piece_count_history_passed_total << '\n';
+                    for (int i = 0; i < 33; ++i)
+                        std::cout << i << ' ' << piece_count_history_passed[i] << '\n';
+                }
+            }
 
             return false;
         };
@@ -1108,7 +1119,7 @@ int main(int argc, char** argv) {
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    constexpr int iteration_count = 6000;
+    constexpr int iteration_count = 1000;
 
     for (int i = 1; i <= iteration_count; ++i)
     {
