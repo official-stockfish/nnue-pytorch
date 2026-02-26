@@ -795,6 +795,7 @@ struct DataloaderSkipConfig {
     int    early_fen_skipping;
     int    simple_eval_skipping;
     int    param_index;
+    double early_fen_skipping_ply_factor;
     double pc_y1, pc_y2, pc_y3;
 };
 
@@ -807,104 +808,115 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
     if (config.filtered || config.random_fen_skipping || config.wld_filtered
         || config.early_fen_skipping)
     {
-        return [config, prob = double(config.random_fen_skipping)
-                             / (config.random_fen_skipping + 1)](const TrainingDataEntry& e) {
+        constexpr uint64_t MAX_RNG_VAL = 0xFFFFFFFFFFFFFFFFull;
+
+        // 1. Conditionally precalculate standard skip
+        uint64_t prob_threshold = 0;
+        if (config.random_fen_skipping) {
+            prob_threshold = static_cast<uint64_t>(
+                (double(config.random_fen_skipping) / (config.random_fen_skipping + 1.0)) * MAX_RNG_VAL
+            );
+        }
+
+        bool use_exponential_skip = config.early_fen_skipping > 0
+                         && config.early_fen_skipping_ply_factor >= 0.0;
+
+        bool use_hard_early_skip = config.early_fen_skipping > 0
+                        && config.early_fen_skipping_ply_factor < 0.0;
+
+        // 2. Conditionally precalculate early skip LUT
+        std::vector<uint64_t> early_skip_lut;
+        if (config.early_fen_skipping > 0 && use_exponential_skip) {
+            early_skip_lut.resize(config.early_fen_skipping + 2, 0);
+            double gamma = config.early_fen_skipping_ply_factor > 0.0;
+            for (int diff = 0; diff < early_skip_lut.size(); ++diff) {
+                double p_skip = 1.0 - std::pow(gamma, diff);
+                early_skip_lut[diff] = static_cast<uint64_t>(p_skip * MAX_RNG_VAL);
+            }
+        }
+
+        // 3. Precalculate Lagrange Interpolation Weights (LUT)
+        std::array<double, 33> pc_weights_lut = {0};
+        double pc_weights_total = 0.0;
+
+        for (int pc = 0; pc < 33; ++pc) {
+            double x  = pc;
+            double x1 = 0, y1 = config.pc_y1;
+            double x2 = 16, y2 = config.pc_y2;
+            double x3 = 32, y3 = config.pc_y3;
+            double l1 = (x - x2) * (x - x3) / ((x1 - x2) * (x1 - x3));
+            double l2 = (x - x1) * (x - x3) / ((x2 - x1) * (x2 - x3));
+            double l3 = (x - x1) * (x - x2) / ((x3 - x1) * (x3 - x2));
+
+            pc_weights_lut[pc] = l1 * y1 + l2 * y2 + l3 * y3;
+            pc_weights_total += pc_weights_lut[pc];
+        }
+
+       return [config, prob_threshold, early_skip_lut, pc_weights_lut,
+                pc_weights_total, use_exponential_skip, use_hard_early_skip](const TrainingDataEntry& e) {
             // VALUE_NONE from Stockfish.
             // We need to allow a way to skip predetermined positions without
             // having to remove them from the dataset, as otherwise the we lose some
             // compression ability.
             static constexpr int VALUE_NONE = 32002;
-
-            // lagrange interpolation weights for desired piece count distribution
-            auto desired_piece_count_weights = [&config](int pc) -> double {
-                double x  = pc;
-                double x1 = 0, y1 = config.pc_y1;
-                double x2 = 16, y2 = config.pc_y2;
-                double x3 = 32, y3 = config.pc_y3;
-                double l1 = (x - x2) * (x - x3) / ((x1 - x2) * (x1 - x3));
-                double l2 = (x - x1) * (x - x3) / ((x2 - x1) * (x2 - x3));
-                double l3 = (x - x1) * (x - x2) / ((x3 - x1) * (x3 - x2));
-                return l1 * y1 + l2 * y2 + l3 * y3;
-            };
+            constexpr uint64_t MAX_RNG_VAL = 0xFFFFFFFFFFFFFFFFull;
 
             // keep stats on passing pieces
-            static thread_local double alpha                            = 1;
+            static thread_local double alpha                            = 1.0;
             static thread_local double piece_count_history_all[33]      = {0};
             static thread_local double piece_count_history_passed[33]   = {0};
-            static thread_local double piece_count_history_all_total    = 0;
-            static thread_local double piece_count_history_passed_total = 0;
+            static thread_local uint64_t piece_count_history_all_total    = 0;
+            static thread_local uint64_t piece_count_history_passed_total = 0;
 
-            // max skipping rate
             static constexpr double max_skipping_rate = 10.0;
-
-            auto do_wld_skip = [&]() {
-                std::bernoulli_distribution distrib(1.0 - e.score_result_prob());
-                auto&                       prng = rng::get_thread_local_rng();
-                return distrib(prng);
-            };
-
-            auto do_skip = [&]() {
-                std::bernoulli_distribution distrib(prob);
-                auto&                       prng = rng::get_thread_local_rng();
-                return distrib(prng);
-            };
-
-            auto do_filter = [&]() { return (e.isCapturingMove() || e.isInCheck()); };
 
             // Allow for predetermined filtering without the need to remove positions from the dataset.
             if (e.score == VALUE_NONE)
                 return true;
 
-            if (e.ply <= config.early_fen_skipping)
-                return true;
-
-            if (config.random_fen_skipping && do_skip())
-                return true;
-
-            if (config.filtered && do_filter())
-                return true;
-
-            if (config.wld_filtered && do_wld_skip())
+            if (config.filtered && (e.isCapturingMove() || e.isInCheck()))
                 return true;
 
             if (config.simple_eval_skipping > 0
                 && std::abs(e.pos.simple_eval()) < config.simple_eval_skipping)
                 return true;
 
-            constexpr bool do_debug_print = false;
-            if (do_debug_print)
-            {
-                if (uint64_t(piece_count_history_all_total) % 10000 == 0)
-                {
-                    std::cout << "Total : " << piece_count_history_all_total << '\n';
-                    std::cout << "Passed: " << piece_count_history_passed_total << '\n';
-                    for (int i = 0; i < 33; ++i)
-                        std::cout << i << ' ' << piece_count_history_passed[i] << '\n';
-                }
+            auto& prng = rng::get_thread_local_rng();
+
+            if (use_hard_early_skip && e.ply <= config.early_fen_skipping) {
+                return true;
             }
 
+            if (use_exponential_skip && e.ply <= config.early_fen_skipping) {
+                int ply_diff = config.early_fen_skipping - e.ply + 1;
+                if (prng() < early_skip_lut[ply_diff])
+                    return true;
+            }
+
+            if (config.random_fen_skipping && prng() < prob_threshold)
+                return true;
+
+            if (config.wld_filtered) {
+                uint64_t wld_threshold = static_cast<uint64_t>((1.0 - e.score_result_prob()) * MAX_RNG_VAL);
+                if (prng() < wld_threshold)
+                    return true;
+            }
+
+            // Piece count balancing logic
             const int pc = e.pos.piecesBB().count();
-            piece_count_history_all[pc] += 1;
+            piece_count_history_all[pc] += 1.0;
             piece_count_history_all_total += 1;
 
-            double desired_piece_count_weights_total = [&desired_piece_count_weights]() {
-                double tot = 0;
-                for (int i = 0; i < 33; i++)
-                    tot += desired_piece_count_weights(i);
-                return tot;
-            }();
-
             // update alpha, which scales the filtering probability, to a maximum rate.
-            if (uint64_t(piece_count_history_all_total) % 10000 == 0)
+            if (piece_count_history_all_total % 10000 == 0)
             {
-                double pass = piece_count_history_all_total * desired_piece_count_weights_total;
+                double d_total = static_cast<double>(piece_count_history_all_total);
+                double pass = d_total * pc_weights_total;
                 for (int i = 0; i < 33; ++i)
                 {
-                    if (desired_piece_count_weights(pc) > 0)
+                    if (pc_weights_lut[i] > 0 && piece_count_history_all[i] > 0)
                     {
-                        double tmp =
-                          piece_count_history_all_total * desired_piece_count_weights(pc)
-                          / (desired_piece_count_weights_total * piece_count_history_all[pc]);
+                        double tmp = d_total * pc_weights_lut[i] / (pc_weights_total * piece_count_history_all[i]);
                         if (tmp < pass)
                             pass = tmp;
                     }
@@ -912,15 +924,17 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
                 alpha = 1.0 / (pass * max_skipping_rate);
             }
 
-            double tmp = alpha * piece_count_history_all_total * desired_piece_count_weights(pc)
-                       / (desired_piece_count_weights_total * piece_count_history_all[pc]);
+            // Calculate final retention probability
+            double d_total = static_cast<double>(piece_count_history_all_total);
+            double tmp = alpha * d_total * pc_weights_lut[pc] / (pc_weights_total * piece_count_history_all[pc]);
             tmp = std::min(1.0, tmp);
-            std::bernoulli_distribution distrib(1.0 - tmp);
-            auto&                       prng = rng::get_thread_local_rng();
-            if (distrib(prng))
+
+            // Integer RNG comparison instead of bernoulli_distribution
+            uint64_t skip_threshold = static_cast<uint64_t>((1.0 - tmp) * MAX_RNG_VAL);
+            if (prng() < skip_threshold)
                 return true;
 
-            piece_count_history_passed[pc] += 1;
+            piece_count_history_passed[pc] += 1.0;
             piece_count_history_passed_total += 1;
 
             return false;
@@ -1077,6 +1091,7 @@ int main(int argc, char** argv) {
                                              .early_fen_skipping   = 5,
                                              .simple_eval_skipping = 0,
                                              .param_index          = 0,
+                                             .early_fen_skipping_ply_factor = 0.0,
                                              .pc_y1                = 1.0,
                                              .pc_y2                = 2.0,
                                              .pc_y3                = 1.0};

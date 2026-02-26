@@ -1,5 +1,5 @@
 #!/bin/bash
 
-sh compile_data_loader.bat
+python compile_data_loader.py
 
 exec "$@"

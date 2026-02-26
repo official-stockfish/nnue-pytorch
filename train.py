@@ -206,6 +206,7 @@ def main():
     print("WLD fen skipping: {}".format(args.wld_filtered))
     print("Random fen skipping: {}".format(args.random_fen_skipping))
     print("Skip early plies: {}".format(args.early_fen_skipping))
+    print("Skip early plies factor: {}".format(args.early_fen_skipping_ply_factor))
     print("Skip simple eval : {}".format(args.simple_eval_skipping))
     print("Param index: {}".format(args.param_index))
     print("piececount param y1 : {}".format(args.pc_y1))
