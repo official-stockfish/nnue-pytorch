@@ -2,8 +2,7 @@ import chess
 import torch
 from torch import nn
 
-
-from ..feature_transformer import DoubleFeatureTransformer, SparseLinearFunction
+from .input_feature import InputFeature
 
 
 # fmt: off
@@ -19,7 +18,7 @@ KingBuckets = [
 ]
 # fmt: on
 
-# Inverse mapping: bucket → oriented king square
+# Inverse mapping: bucket -> oriented king square
 InverseKingBuckets = [0] * 32
 for _sq, _bucket in enumerate(KingBuckets):
     if _bucket >= 0:
@@ -38,7 +37,7 @@ def _halfka_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece) -> in
     return _orient(is_white_pov, sq, king_sq) + p_idx * 64 + KingBuckets[o_ksq] * 768
 
 
-class HalfKav2Hm(DoubleFeatureTransformer):
+class HalfKav2Hm(InputFeature):
     HASH = 0x7F234CB8
     FEATURE_NAME = "HalfKAv2_hm^"
     INPUT_FEATURE_NAME = "HalfKAv2_hm"
@@ -55,32 +54,20 @@ class HalfKav2Hm(DoubleFeatureTransformer):
     NUM_REAL_FEATURES = 704 * 32  # 22,528
 
     def __init__(self, num_outputs: int):
-        super().__init__(self.NUM_INPUTS, num_outputs)
+        super().__init__()
 
+        self.num_outputs = num_outputs
+        self.weight = nn.Parameter(
+            torch.empty(self.NUM_INPUTS, num_outputs, dtype=torch.float32)
+        )
         self.virtual_weight = nn.Parameter(
             torch.zeros(self.NUM_INPUTS_VIRTUAL, num_outputs, dtype=torch.float32)
         )
 
-    def forward(
-        self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
-    ):
-        self.merged_weight = self.weight + self.virtual_weight.repeat(
-            self.NUM_BUCKETS, 1
-        )
-        return (
-            SparseLinearFunction.apply(
-                feature_indices_0,
-                feature_values_0,
-                self.merged_weight,
-                self.bias,
-            ),
-            SparseLinearFunction.apply(
-                feature_indices_1,
-                feature_values_1,
-                self.merged_weight,
-                self.bias,
-            ),
-        )
+        self.reset_parameters()
+
+    def merged_weight(self) -> torch.Tensor:
+        return self.weight + self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
 
     @torch.no_grad()
     def coalesce(self) -> None:
@@ -109,11 +96,11 @@ class HalfKav2Hm(DoubleFeatureTransformer):
 
         for i in range(num_psqt_buckets):
             self.weight[:, L1 + i] = new_weights
-            self.bias[L1 + i] = 0.0
+            # bias is owned by the composed transformer, not set here
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:
-        """Return coalesced weight remapped from 12→11 piece types for export.
+        """Return coalesced weight remapped from 12->11 piece types for export.
 
         Returns a float tensor with NUM_REAL_FEATURES rows.
         """
@@ -122,28 +109,24 @@ class HalfKav2Hm(DoubleFeatureTransformer):
             self.NUM_BUCKETS, 1
         )
 
-        # Remap 12 piece types → 11 piece types
+        # Remap 12 piece types -> 11 piece types
         export = coalesced.new_zeros(self.NUM_REAL_FEATURES, coalesced.shape[1])
 
         for b in range(self.NUM_BUCKETS):
             src_offset = b * self.NUM_PLANES  # 768 features per bucket
             dst_offset = b * 704  # 704 features per bucket in export
 
-            # Copy first 10 piece types (p_idx 0..9) — 640 features
+            # Copy first 10 piece types (p_idx 0..9) -- 640 features
             export[dst_offset : dst_offset + 640] = coalesced[
                 src_offset : src_offset + 640
             ]
 
             # Merge own king (p_idx=10) and opponent king (p_idx=11) into single block
-            # p_idx 10 in 12pt: own king at all squares
             own_king_src = src_offset + 10 * 64
             opp_king_src = src_offset + 11 * 64
             dst_king = dst_offset + 10 * 64
             ksq = InverseKingBuckets[b]
 
-            # For each square, the merged king block contains:
-            # - own king at ksq (from p_idx 10, sq=ksq)
-            # - opponent king at all other squares (from p_idx 11)
             export[dst_king : dst_king + 64] = coalesced[
                 opp_king_src : opp_king_src + 64
             ]
@@ -156,7 +139,7 @@ class HalfKav2Hm(DoubleFeatureTransformer):
         """Load export-format weights (11 piece types) and expand to 12.
 
         Takes a float tensor of shape (NUM_REAL_FEATURES, num_outputs).
-        Expands 11→12 piece types and assigns to self.weight.
+        Expands 11->12 piece types and assigns to self.weight.
         Zeros self.virtual_weight.
         """
         expanded = export_weight.new_zeros(self.NUM_INPUTS, export_weight.shape[1])
@@ -177,7 +160,7 @@ class HalfKav2Hm(DoubleFeatureTransformer):
             # Own king: only weight at ksq matters (rest stays zero)
             expanded[dst_offset + 10 * 64 + ksq] = export_weight[src_king + ksq]
 
-            # Opponent king: all squares from merged, except ksq → 0
+            # Opponent king: all squares from merged, except ksq -> 0
             expanded[dst_offset + 11 * 64 : dst_offset + 12 * 64] = export_weight[
                 src_king : src_king + 64
             ]
