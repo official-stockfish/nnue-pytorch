@@ -1108,11 +1108,7 @@ int main(int argc, char** argv) {
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    #ifdef PGO_BUILD
-    constexpr int iteration_count = 30;
-    #else
     constexpr int iteration_count = 6000;
-    #endif
 
     for (int i = 1; i <= iteration_count; ++i)
     {
