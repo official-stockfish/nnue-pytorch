@@ -11,6 +11,9 @@
 #include <deque>
 #include <random>
 #include <variant>
+#include <vector>
+#include <cstddef>
+#include <type_traits>
 
 #include "lib/nnue_training_data_formats.h"
 #include "lib/nnue_training_data_stream.h"
@@ -76,13 +79,12 @@ struct HalfKAv2_hm {
 
     static std::pair<int, int>
     fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
-        auto& pos    = e.pos;
-        auto  pieces = pos.piecesBB();
-        auto  ksq    = pos.kingSquare(color);
+        const auto& pos    = e.pos;
+        const auto  pieces = pos.piecesBB();
+        const auto  ksq    = pos.kingSquare(color);
 
         int j = 0;
-        for (Square sq : pieces)
-        {
+        for (Square sq : pieces) {
             auto p      = pos.pieceAt(sq);
             values[j]   = 1.0f;
             features[j] = feature_index(color, ksq, sq, p);
@@ -361,92 +363,90 @@ auto get_feature(std::string_view name) {
                         >(name);
 }
 
-struct SparseBatch {
+template<bool KeepMetadata>
+struct BatchMetadata {
+    std::vector<TrainingDataEntry> entries;
+};
+
+template<>
+struct BatchMetadata<false> {};
+
+template<bool KeepMetadata>
+struct SparseBatchImpl : public BatchMetadata<KeepMetadata> {
     static constexpr bool IS_BATCH = true;
 
+    int num_inputs{0};
+    int size{0};
+    int num_active_white_features{0};
+    int num_active_black_features{0};
+    int max_active_features{0};
+
+    std::vector<float> is_white;
+    std::vector<float> outcome;
+    std::vector<float> score;
+    std::vector<int>   white;
+    std::vector<int>   black;
+    std::vector<float> white_values;
+    std::vector<float> black_values;
+    std::vector<int>   psqt_indices;
+    std::vector<int>   layer_stack_indices;
+
     template<typename... Ts>
-    SparseBatch(FeatureSet<Ts...>, const std::vector<TrainingDataEntry>& entries) {
+    SparseBatchImpl(FeatureSet<Ts...> fs, const std::vector<TrainingDataEntry>& input_entries) {
         num_inputs          = FeatureSet<Ts...>::INPUTS;
-        size                = entries.size();
-        is_white            = new float[size];
-        outcome             = new float[size];
-        score               = new float[size];
-        white               = new int[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES];
-        black               = new int[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES];
-        white_values        = new float[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES];
-        black_values        = new float[size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES];
-        psqt_indices        = new int[size];
-        layer_stack_indices = new int[size];
+        size                = input_entries.size();
+        max_active_features = FeatureSet<Ts...>::MAX_ACTIVE_FEATURES;
 
-        num_active_white_features = 0;
-        num_active_black_features = 0;
-        max_active_features       = FeatureSet<Ts...>::MAX_ACTIVE_FEATURES;
+        is_white.resize(size);
+        outcome.resize(size);
+        score.resize(size);
+        psqt_indices.resize(size);
+        layer_stack_indices.resize(size);
 
-        for (std::size_t i = 0; i < size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES; ++i)
-            white[i] = -1;
-        for (std::size_t i = 0; i < size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES; ++i)
-            black[i] = -1;
-        for (std::size_t i = 0; i < size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES; ++i)
-            white_values[i] = 0.0f;
-        for (std::size_t i = 0; i < size * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES; ++i)
-            black_values[i] = 0.0f;
+        const std::size_t feature_capacity = size * max_active_features;
+        white.assign(feature_capacity, -1);
+        black.assign(feature_capacity, -1);
+        white_values.assign(feature_capacity, 1.0f);
+        black_values.assign(feature_capacity, 1.0f);
 
-        for (int i = 0; i < entries.size(); ++i)
-        {
-            fill_entry(FeatureSet<Ts...>{}, i, entries[i]);
+        if constexpr (KeepMetadata) {
+            this->entries = input_entries;
         }
-    }
 
-    int num_inputs;
-    int size;
-
-    float* is_white;
-    float* outcome;
-    float* score;
-    int    num_active_white_features;
-    int    num_active_black_features;
-    int    max_active_features;
-    int*   white;
-    int*   black;
-    float* white_values;
-    float* black_values;
-    int*   psqt_indices;
-    int*   layer_stack_indices;
-
-    ~SparseBatch() {
-        delete[] is_white;
-        delete[] outcome;
-        delete[] score;
-        delete[] white;
-        delete[] black;
-        delete[] white_values;
-        delete[] black_values;
-        delete[] psqt_indices;
-        delete[] layer_stack_indices;
+        for (int i = 0; i < size; ++i) {
+            fill_entry(fs, i, input_entries[i]);
+        }
     }
 
    private:
     template<typename... Ts>
-    void fill_entry(FeatureSet<Ts...>, int i, const TrainingDataEntry& e) {
+    void fill_entry(FeatureSet<Ts...> fs, int i, const TrainingDataEntry& e) {
         is_white[i]            = static_cast<float>(e.pos.sideToMove() == Color::White);
         outcome[i]             = (e.result + 1.0f) / 2.0f;
         score[i]               = e.score;
         psqt_indices[i]        = (e.pos.piecesBB().count() - 1) / 4;
         layer_stack_indices[i] = psqt_indices[i];
-        fill_features(FeatureSet<Ts...>{}, i, e);
+
+        fill_features(fs, i, e);
     }
 
     template<typename... Ts>
     void fill_features(FeatureSet<Ts...>, int i, const TrainingDataEntry& e) {
-        const int offset = i * FeatureSet<Ts...>::MAX_ACTIVE_FEATURES;
+        const int offset = i * max_active_features;
+
         num_active_white_features += FeatureSet<Ts...>::fill_features_sparse(
-                                       e, white + offset, white_values + offset, Color::White)
+                                       e, white.data() + offset, white_values.data() + offset, Color::White)
                                        .first;
+
         num_active_black_features += FeatureSet<Ts...>::fill_features_sparse(
-                                       e, black + offset, black_values + offset, Color::Black)
+                                       e, black.data() + offset, black_values.data() + offset, Color::Black)
                                        .first;
     }
 };
+
+// Aliases for minimal codebase disruption
+using SparseBatch = SparseBatchImpl<true>;
+using SparseBatchWithMeta = SparseBatchImpl<true>;
 
 struct AnyStream {
     virtual ~AnyStream() = default;
@@ -930,6 +930,38 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
     return nullptr;
 }
 
+// changing the signature needs matching changes in data_loader/_native.py
+template<typename SparseBatchType>
+Stream<SparseBatchType>* create_sparse_batch_stream_impl(const char*          feature_set_c,
+                                                             int                  concurrency,
+                                                             int                  num_files,
+                                                             const char* const*   filenames,
+                                                             int                  batch_size,
+                                                             bool                 cyclic,
+                                                             DataloaderSkipConfig config,
+                                                             DataloaderDDPConfig  ddp_config) {
+    auto skipPredicate = make_skip_predicate(config);
+    auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
+
+    auto feature_variant = get_feature(feature_set_c);
+
+    return std::visit(
+      [&](const auto fs) -> Stream<SparseBatch>* {
+          using F = std::decay_t<decltype(fs)>;
+          if constexpr (std::is_same_v<F, std::monostate>)
+          {
+              return nullptr;
+          }
+          else
+          {
+              return new FeaturedBatchStream<FeatureSet<decltype(fs)>, SparseBatch>(
+                concurrency, filenames_vec, batch_size, cyclic, skipPredicate, ddp_config.rank,
+                ddp_config.world_size);
+          }
+      },
+      feature_variant);
+}
+
 extern "C" {
 
 EXPORT SparseBatch* get_sparse_batch_from_fens(const char*        feature_set_c,
@@ -984,35 +1016,17 @@ EXPORT FenBatchStream* CDECL create_fen_batch_stream(int                  concur
 
 EXPORT void CDECL destroy_fen_batch_stream(FenBatchStream* stream) { delete stream; }
 
-// changing the signature needs matching changes in data_loader/_native.py
 EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char*          feature_set_c,
-                                                             int                  concurrency,
-                                                             int                  num_files,
-                                                             const char* const*   filenames,
-                                                             int                  batch_size,
-                                                             bool                 cyclic,
-                                                             DataloaderSkipConfig config,
-                                                             DataloaderDDPConfig  ddp_config) {
-    auto skipPredicate = make_skip_predicate(config);
-    auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
-
-    auto feature_variant = get_feature(feature_set_c);
-
-    return std::visit(
-      [&](const auto fs) -> Stream<SparseBatch>* {
-          using F = std::decay_t<decltype(fs)>;
-          if constexpr (std::is_same_v<F, std::monostate>)
-          {
-              return nullptr;
-          }
-          else
-          {
-              return new FeaturedBatchStream<FeatureSet<decltype(fs)>, SparseBatch>(
-                concurrency, filenames_vec, batch_size, cyclic, skipPredicate, ddp_config.rank,
-                ddp_config.world_size);
-          }
-      },
-      feature_variant);
+                                               int                  concurrency,
+                                               int                  num_files,
+                                               const char* const*   filenames,
+                                               int                  batch_size,
+                                               bool                 cyclic,
+                                               DataloaderSkipConfig config,
+                                               DataloaderDDPConfig  ddp_config) {
+    return create_sparse_batch_stream_impl<SparseBatch>(feature_set_c, concurrency, num_files,
+                                                        filenames, batch_size, cyclic, config,
+                                                        ddp_config);
 }
 
 EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream) { delete stream; }
@@ -1035,11 +1049,48 @@ EXPORT void CDECL destroy_fen_batch(FenBatch* e) { delete e; }
      g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native training_data_loader.cpp && ./a.out /path/to/binpack
 */
 
-    #include <chrono>
-    #include <iostream>
-    #include <iomanip>
-    #include <fstream>
-    #include <string>
+#include <iostream>
+#include <iomanip>
+#include <vector>
+#include <chrono>
+#include <map>
+#include <fstream>
+#include <string>
+
+// --- Statistics Report ---
+
+struct DistributionReport {
+    uint64_t pc_counts[33] = {0};
+    uint64_t total_count = 0;
+
+    void add_batch(const SparseBatch& batch, int batch_size) {
+        // Replace this with the actual iteration logic for your SparseBatch type
+        for (int i = 0; i < batch_size; ++i) {
+            int pc = batch.entries[i].pos.piecesBB().count();
+            if (pc >= 0 && pc <= 32) {
+                pc_counts[pc]++;
+                total_count++;
+            }
+        }
+    }
+
+    void print() const {
+        std::cout << std::endl << "=== Final Data Distribution ===" << std::endl;
+        std::cout << std::setw(4) << "PC" << " | " << std::setw(10) << "Count" << " | Share" << std::endl;
+        std::cout << "------------------------------------------" << std::endl;
+        for (int i = 0; i < 33; ++i) {
+            if (pc_counts[i] == 0) continue;
+            double share = (total_count > 0) ? (double)pc_counts[i] / total_count : 0;
+            int bar_width = static_cast<int>(share * 80); // Scale for 80-char width
+
+            std::cout << std::setw(4) << i << " | "
+                      << std::setw(10) << pc_counts[i] << " | "
+                      << std::fixed << std::setprecision(2) << (share * 100.0) << "% "
+                      << std::string(bar_width, '#') << std::endl;
+        }
+        std::cout << "------------------------------------------" << std::endl;
+    }
+};
 
 long long get_rchar_self() {
     std::ifstream io_file("/proc/self/io");
@@ -1053,6 +1104,46 @@ long long get_rchar_self() {
     }
     return -1;  // Error or not found
 }
+
+// --- Execution Phases ---
+
+void run_speed_benchmark(auto& stream, int iterations, int batch_size, auto t0) {
+    std::cout << "Running Speed Benchmark (" << iterations << " iterations)..." << std::endl;
+    for (int i = 1; i <= iterations; ++i) {
+        destroy_sparse_batch(stream->next());
+
+        if (i % 10 == 0 || i == iterations) {
+            auto      t1    = std::chrono::high_resolution_clock::now();
+            double    sec   = std::chrono::duration<double>(t1 - t0).count();
+            long long bytes = get_rchar_self();
+
+            double mpos = i * batch_size / (sec * 1000 * 1000);
+            double its  = i / sec;
+            double mbps = bytes / (sec * 1024 * 1024);
+            double bpos = bytes / (i * batch_size);
+
+            std::cout << "\rIter: " << std::setw(8) << i                                //
+                      << "   Time(s): " << std::setw(8) << std::setprecision(3) << sec  //
+                      << "   MPos/s: " << std::setw(8) << std::setprecision(3) << mpos  //
+                      << "   It/s: " << std::setw(8) << std::setprecision(1) << its     //
+                      << "   MB/s: " << std::setw(8) << std::setprecision(1) << mbps    //
+                      << "   B/pos: " << std::setw(8) << std::setprecision(1) << bpos   //
+                      << std::flush;
+        }
+    }
+    std::cout << std::endl << "Speed Benchmark Complete." << std::endl;
+}
+
+void run_distribution_probe(DistributionReport& report, auto& stream, int iterations, int batch_size) {
+    std::cout << "Probing Distribution (" << iterations << " iterations)..." << std::endl;
+
+    for (int i = 0; i < iterations; ++i) {
+        std::unique_ptr<SparseBatchWithMeta> batch(stream->next());
+        report.add_batch(*batch, batch_size);
+    }
+}
+
+// --- Main ---
 
 int main(int argc, char** argv) {
     if (argc < 2)
@@ -1081,41 +1172,23 @@ int main(int argc, char** argv) {
                                              .pc_y2                = 2.0,
                                              .pc_y3                = 1.0};
     const DataloaderDDPConfig  ddp_config = {.rank = 0, .world_size = 1};
-    auto stream = create_sparse_batch_stream("Full_Threats", concurrency, file_count, files,
+
+    auto stream1 = create_sparse_batch_stream_impl<SparseBatchWithMeta>("Full_Threats", concurrency, file_count, files,
                                              batch_size, cyclic, config, ddp_config);
 
+    auto stream2 = create_sparse_batch_stream_impl<SparseBatch>("Full_Threats", concurrency, file_count, files,
+                                             batch_size, cyclic, config, ddp_config);
+
+    // run qualitative analysis first and then the speed benchmark with warmed system
+    DistributionReport report;
+    run_distribution_probe(report, stream1, 500, batch_size);
+    destroy_sparse_batch_stream(stream1);
+
     auto t0 = std::chrono::high_resolution_clock::now();
+    run_speed_benchmark(stream2, 500, batch_size, t0);
+    destroy_sparse_batch_stream(stream2);
 
-    #ifdef PGO_BUILD
-    constexpr int iteration_count = 30;
-    #else
-    constexpr int iteration_count = 6000;
-    #endif
-
-    for (int i = 1; i <= iteration_count; ++i)
-    {
-        destroy_sparse_batch(stream->next());
-        auto t1 = std::chrono::high_resolution_clock::now();
-        if (i % 1 == 0)
-        {
-            double    sec   = (t1 - t0).count() / 1e9;
-            long long bytes = get_rchar_self();
-
-            double mpos = i * batch_size / (sec * 1000 * 1000);
-            double its  = i / sec;
-            double mbps = bytes / (sec * 1024 * 1024);
-            double bpos = bytes / (i * batch_size);
-
-            std::cout << "\rIter: " << std::setw(8) << i                                //
-                      << "   Time(s): " << std::setw(8) << std::setprecision(3) << sec  //
-                      << "   MPos/s: " << std::setw(8) << std::setprecision(3) << mpos  //
-                      << "   It/s: " << std::setw(8) << std::setprecision(1) << its     //
-                      << "   MB/s: " << std::setw(8) << std::setprecision(1) << mbps    //
-                      << "   B/pos: " << std::setw(8) << std::setprecision(1) << bpos   //
-                      << std::flush;
-        }
-    }
-    std::cout << std::endl;
+    report.print();
 
     return 0;
 }
