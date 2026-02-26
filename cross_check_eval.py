@@ -7,7 +7,6 @@ import chess
 import data_loader
 from model import (
     add_feature_args,
-    get_feature_cls,
     NNUE,
     NNUEReader,
     ModelConfig,
@@ -181,9 +180,7 @@ def main():
 
     batch_size = 1000
 
-    feature_cls = get_feature_cls(args.features)
-    feature_name = feature_cls.FEATURE_NAME
-    input_feature_name = feature_cls.INPUT_FEATURE_NAME
+    feature_name = args.features
     if args.checkpoint:
         model = NNUE.load_from_checkpoint(
             args.checkpoint,
@@ -199,6 +196,7 @@ def main():
             QuantizationConfig(),
         )
     model.eval()
+    input_feature_name = model.model.input_feature_name
     fen_batch_provider = make_fen_batch_provider(args.data, batch_size)
 
     model_evals = []

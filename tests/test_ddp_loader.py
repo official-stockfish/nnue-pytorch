@@ -51,8 +51,10 @@ class TestGetDDPRankAndWorldSize(unittest.TestCase):
 
     @patch("data_loader.stream.os.environ", {})
     def test_no_dist_returns_defaults(self):
-        with patch("torch.distributed.is_available", return_value=True), \
-             patch("torch.distributed.is_initialized", return_value=False):
+        with (
+            patch("torch.distributed.is_available", return_value=True),
+            patch("torch.distributed.is_initialized", return_value=False),
+        ):
             rank, world_size = _get_ddp_rank_and_world_size()
 
         self.assertEqual(rank, 0)
@@ -60,10 +62,12 @@ class TestGetDDPRankAndWorldSize(unittest.TestCase):
 
     @patch("data_loader.stream.os.environ", {})
     def test_dist_initialized_returns_dist_values(self):
-        with patch("torch.distributed.is_available", return_value=True), \
-             patch("torch.distributed.is_initialized", return_value=True), \
-             patch("torch.distributed.get_rank", return_value=3), \
-             patch("torch.distributed.get_world_size", return_value=4):
+        with (
+            patch("torch.distributed.is_available", return_value=True),
+            patch("torch.distributed.is_initialized", return_value=True),
+            patch("torch.distributed.get_rank", return_value=3),
+            patch("torch.distributed.get_world_size", return_value=4),
+        ):
             rank, world_size = _get_ddp_rank_and_world_size()
 
         self.assertEqual(rank, 3)
