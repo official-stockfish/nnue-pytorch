@@ -305,12 +305,13 @@ class NNUEReader:
         L1 = num_outputs - num_psqt_buckets
 
         bias = self.tensor(np.int16, [L1])
-        # weights stored as [num_features][outputs], read per-feature segments
         segments = []
-        for f in layer.features:
-            dtype = np.int8 if f.EXPORT_WEIGHT_DTYPE == torch.int8 else np.int16
-            s = self.tensor(dtype, [f.NUM_REAL_FEATURES, L1])
+
+        for feature in layer.features:
+            dtype = np.int8 if feature.EXPORT_WEIGHT_DTYPE == torch.int8 else np.int16
+            s = self.tensor(dtype, [feature.NUM_REAL_FEATURES, L1])
             segments.append(s)
+
         weight = torch.cat(segments, dim=0)
         psqt_weight = self.tensor(np.int32, [num_export_features, num_psqt_buckets])
 

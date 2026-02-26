@@ -377,11 +377,13 @@ static std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
         auto pos  = name.find('+', start);
         auto part = name.substr(start, pos == std::string_view::npos ? pos : pos - start);
         auto ext  = make_single_extractor(part);
+
         if (!ext)
         {
             std::cerr << "Unknown feature component: " << part << std::endl;
             return nullptr;
         }
+
         components.push_back(std::move(ext));
         start = (pos == std::string_view::npos) ? name.size() : pos + 1;
     }

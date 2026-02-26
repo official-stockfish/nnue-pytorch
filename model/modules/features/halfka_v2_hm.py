@@ -96,7 +96,6 @@ class HalfKav2Hm(InputFeature):
 
         for i in range(num_psqt_buckets):
             self.weight[:, L1 + i] = new_weights
-            # bias is owned by the composed transformer, not set here
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:
@@ -104,7 +103,7 @@ class HalfKav2Hm(InputFeature):
 
         Returns a float tensor with NUM_REAL_FEATURES rows.
         """
-        # Coalesce virtual weights into a temporary copy
+        # Coalesce virtual weights
         coalesced = self.weight.data + self.virtual_weight.data.repeat(
             self.NUM_BUCKETS, 1
         )
