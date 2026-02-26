@@ -26,9 +26,7 @@ class ComposedFeatureTransformer(nn.Module):
         self.NUM_REAL_FEATURES = sum(f.NUM_REAL_FEATURES for f in features)
 
         self.FEATURE_NAME = "+".join(f.FEATURE_NAME for f in features)
-        self.INPUT_FEATURE_NAME = "+".join(
-            f.INPUT_FEATURE_NAME for f in features
-        )
+        self.INPUT_FEATURE_NAME = "+".join(f.INPUT_FEATURE_NAME for f in features)
 
         self.HASH = self._compute_hash()
 
