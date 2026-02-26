@@ -914,39 +914,20 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             piece_count_history_all[pc] += 1.0;
             piece_count_history_all_total += 1;
 
-            // lagrange interpolation weights for desired piece count distribution
-            auto desired_piece_count_weights = [&config](int pc) -> double {
-                double x  = pc;
-                double x1 = 0, y1 = config.pc_y1;
-                double x2 = 16, y2 = config.pc_y2;
-                double x3 = 32, y3 = config.pc_y3;
-                double l1 = (x - x2) * (x - x3) / ((x1 - x2) * (x1 - x3));
-                double l2 = (x - x1) * (x - x3) / ((x2 - x1) * (x2 - x3));
-                double l3 = (x - x1) * (x - x2) / ((x3 - x1) * (x3 - x2));
-                return l1 * y1 + l2 * y2 + l3 * y3;
-            };
-            double desired_piece_count_weights_total = [&desired_piece_count_weights]() {
-                double tot = 0;
-                for (int i = 0; i < 33; i++)
-                    tot += desired_piece_count_weights(i);
-                return tot;
-            }();
             // update alpha, which scales the filtering probability, to a maximum rate.
-            if (uint64_t(piece_count_history_all_total) % 10000 == 0)
-            {
-                double pass = piece_count_history_all_total * desired_piece_count_weights_total;
-                for (int i = 0; i < 33; ++i)
-                {
-                    if (desired_piece_count_weights(pc) > 0)
-                    {
-                        double tmp =
-                          piece_count_history_all_total * desired_piece_count_weights(pc)
-                          / (desired_piece_count_weights_total * piece_count_history_all[pc]);
-                        if (tmp < pass)
-                            pass = tmp;
+            if (piece_count_history_all_total % 10000 == 0) {
+                double max_overrepresentation = 0.0;
+                for (int i = 0; i < 33; ++i) {
+                    if (pc_weights_lut[i] > 1e-6 && piece_count_history_all[i] > 0) {
+                        // How many times more of this PC do we have vs what we want?
+                        double current_ratio = piece_count_history_all[i] / piece_count_history_all_total;
+                        double desired_ratio = pc_weights_lut[i] / pc_weights_total;
+                        max_overrepresentation = std::max(max_overrepresentation, current_ratio / desired_ratio);
                     }
                 }
-                alpha = 1.0 / (pass * max_skipping_rate);
+                // alpha = 1.0 / max_overrepresentation ensures the most overrepresented bucket
+                // is the bottleneck, others are kept more often.
+                alpha = (max_overrepresentation > 1e-6) ? (1.0 / max_overrepresentation) : 1.0;
             }
 
             // Calculate final retention probability
