@@ -11,7 +11,9 @@ class DataloaderSkipConfig:
     random_fen_skipping: int = 0
     """Skip a random fraction of positions. 0 = disabled."""
     early_fen_skipping: int = -1
-    """Skip positions from the start of the game. -1 = disabled."""
+    """Skip positions from the start of the game `pos.ply <= early_fen_skipping`. -1 = disabled."""
+    early_fen_skipping_ply_factor: float = 0.0
+    """Multiply probabilitys of early fens by `early_fen_skipping_ply_factor^(early_fen_skipping - pos.ply + 1)`. 0.0 = skip all early fens."""
     simple_eval_skipping: int = -1
     """Skip positions based on simple eval. -1 = disabled."""
     param_index: int = 0
@@ -30,6 +32,7 @@ class DataloaderSkipConfig:
             random_fen_skipping=args.random_fen_skipping,
             wld_filtered=args.wld_filtered,
             early_fen_skipping=args.early_fen_skipping,
+            early_fen_skipping_ply_factor=args.early_fen_skipping_ply_factor,
             simple_eval_skipping=args.simple_eval_skipping,
             param_index=args.param_index,
             pc_y1=args.pc_y1,
@@ -52,6 +55,7 @@ class CDataloaderSkipConfig(ctypes.Structure):
         ("early_fen_skipping", ctypes.c_int),
         ("simple_eval_skipping", ctypes.c_int),
         ("param_index", ctypes.c_int),
+        ("early_fen_skipping_ply_factor", ctypes.c_double),
         ("pc_y1", ctypes.c_double),
         ("pc_y2", ctypes.c_double),
         ("pc_y3", ctypes.c_double),
