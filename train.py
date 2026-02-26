@@ -151,9 +151,7 @@ def main():
         flush=True,
     )
 
-    feature_cls = M.get_feature_cls(args.features)
-    feature_name = feature_cls.FEATURE_NAME
-    input_feature_name = feature_cls.INPUT_FEATURE_NAME
+    feature_name = args.features
 
     loss_params = M.LossParams.get_loss_params_from_args(args)
     print("Loss parameters:")
@@ -193,8 +191,9 @@ def main():
         nnue.lr = args.lr
         nnue.param_index = args.param_index
 
+    input_feature_name = nnue.model.input_feature_name
     print("Feature set: {}".format(feature_name))
-    print("Num inputs: {}".format(feature_cls.NUM_INPUTS))
+    print("Num inputs: {}".format(nnue.model.input.NUM_INPUTS))
 
     print("Training with: {}".format(train_datasets))
     print("Validating with: {}".format(val_datasets))

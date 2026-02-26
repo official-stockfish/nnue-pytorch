@@ -11,8 +11,6 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
-from ..modules import BaseFeatureTransformer, get_feature_cls
-from ..modules.features.full_threats import FullThreats
 from ..quantize import QuantizationConfig
 
 
@@ -158,13 +156,15 @@ class NNUEWriter:
 
         # Weights stored as [num_features][outputs]
         self.write_tensor(bias.flatten().numpy(), ft_compression)
-        if isinstance(layer, FullThreats):
-            threat_weight = weight[: layer.NUM_THREAT_FEATURES].to(torch.int8)
-            psq_weight = weight[layer.NUM_THREAT_FEATURES :]
-            self.write_tensor(threat_weight.flatten().numpy())
-            self.write_tensor(psq_weight.flatten().numpy(), ft_compression)
-        else:
-            self.write_tensor(weight.flatten().numpy(), ft_compression)
+        offset = 0
+        for f in layer.features:
+            n = f.NUM_REAL_FEATURES
+            segment = weight[offset : offset + n]
+            if f.EXPORT_WEIGHT_DTYPE == torch.int8:
+                self.write_tensor(segment.to(torch.int8).flatten().numpy())
+            else:
+                self.write_tensor(segment.flatten().numpy(), ft_compression)
+            offset += n
         self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
 
     def write_fc_layer(
@@ -224,10 +224,9 @@ class NNUEReader:
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
-        feature_cls = get_feature_cls(feature_name)
-        self.read_header(feature_cls.HASH, fc_hash)
+        self.read_header(self.model.feature_hash, fc_hash)
         self.read_int32(
-            feature_cls.HASH ^ (self.config.L1 * 2)
+            self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
 
@@ -299,29 +298,20 @@ class NNUEReader:
             raise Exception("Invalid compression method.")
 
     def read_feature_transformer(
-        self, layer: BaseFeatureTransformer, num_psqt_buckets: int
+        self, layer, num_psqt_buckets: int
     ) -> None:
         num_export_features = layer.NUM_REAL_FEATURES
         num_outputs = layer.num_outputs
+        L1 = num_outputs - num_psqt_buckets
 
-        bias = self.tensor(np.int16, [num_outputs - num_psqt_buckets])
-        # weights stored as [num_features][outputs]
-        if isinstance(layer, FullThreats):
-            threat_weight = self.tensor(
-                np.int8, [layer.NUM_THREAT_FEATURES, num_outputs - num_psqt_buckets]
-            )
-            psq_weight = self.tensor(
-                np.int16,
-                [
-                    num_export_features - layer.NUM_THREAT_FEATURES,
-                    num_outputs - num_psqt_buckets,
-                ],
-            )
-            weight = torch.cat([threat_weight, psq_weight], dim=0)
-        else:
-            weight = self.tensor(
-                np.int16, [num_export_features, num_outputs - num_psqt_buckets]
-            )
+        bias = self.tensor(np.int16, [L1])
+        # weights stored as [num_features][outputs], read per-feature segments
+        segments = []
+        for f in layer.features:
+            dtype = np.int8 if f.EXPORT_WEIGHT_DTYPE == torch.int8 else np.int16
+            s = self.tensor(dtype, [f.NUM_REAL_FEATURES, L1])
+            segments.append(s)
+        weight = torch.cat(segments, dim=0)
         psqt_weight = self.tensor(np.int32, [num_export_features, num_psqt_buckets])
 
         bias, weight, psqt_weight = (
@@ -330,7 +320,7 @@ class NNUEReader:
             )
         )
 
-        # Combine weight and psqt_weight into export format, then expand 11→12
+        # Combine weight and psqt_weight into export format, then expand
         export_weight = torch.cat([weight, psqt_weight], dim=1)
         layer.load_export_weights(export_weight)
         layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
