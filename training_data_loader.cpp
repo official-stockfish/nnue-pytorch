@@ -848,8 +848,15 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             double l2 = (x - x1) * (x - x3) / ((x2 - x1) * (x2 - x3));
             double l3 = (x - x1) * (x - x2) / ((x3 - x1) * (x3 - x2));
 
-            pc_weights_lut[pc] = l1 * y1 + l2 * y2 + l3 * y3;
+            double weight = l1 * y1 + l2 * y2 + l3 * y3;
+            pc_weights_lut[pc] = std::max(0.0, weight);
             pc_weights_total += pc_weights_lut[pc];
+        }
+
+        // If the whole curve is zero/negative, default to uniform
+        if (pc_weights_total <= 0.0) {
+            std::fill(pc_weights_lut.begin(), pc_weights_lut.end(), 1.0);
+            pc_weights_total = 33.0;
         }
 
        return [config, prob_threshold, early_skip_lut, pc_weights_lut,
@@ -914,23 +921,23 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
                 double pass = d_total * pc_weights_total;
                 for (int i = 0; i < 33; ++i)
                 {
-                    if (pc_weights_lut[i] > 0 && piece_count_history_all[i] > 0)
+                    if (pc_weights_lut[i] > 1e-8 && piece_count_history_all[i] > 0)
                     {
-                        double tmp = d_total * pc_weights_lut[i] / (pc_weights_total * piece_count_history_all[i]);
-                        if (tmp < pass)
-                            pass = tmp;
+                        double ratio = d_total * pc_weights_lut[i] / (pc_weights_total * piece_count_history_all[i]);
+                        if (ratio < pass)
+                            pass = ratio;
                     }
                 }
-                alpha = 1.0 / (pass * max_skipping_rate);
+                alpha = 1.0 / (std::max(pass, 1e-8) * max_skipping_rate);
             }
 
             // Calculate final retention probability
             double d_total = static_cast<double>(piece_count_history_all_total);
-            double tmp = alpha * d_total * pc_weights_lut[pc] / (pc_weights_total * piece_count_history_all[pc]);
-            tmp = std::min(1.0, tmp);
+            double denominator = std::max(pc_weights_total * piece_count_history_all[pc], 1e-8);
+            double keep_prob = alpha * d_total * pc_weights_lut[pc] / denominator;
+            keep_prob = std::min(1.0, keep_prob);
 
-            // Integer RNG comparison instead of bernoulli_distribution
-            uint64_t skip_threshold = static_cast<uint64_t>((1.0 - tmp) * MAX_RNG_VAL);
+            uint64_t skip_threshold = static_cast<uint64_t>((1.0 - keep_prob) * MAX_RNG_VAL);
             if (prng() < skip_threshold)
                 return true;
 
