@@ -342,25 +342,23 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
                                              Color                    color) const override {
         int total_written = 0;
         int input_offset  = 0;
+
         for (auto& ext : extractors)
         {
             auto [written, ext_inputs] =
               ext->fill_features_sparse(e, features + total_written, values + total_written, color);
+
             // Offset the feature indices for this component
             for (int i = 0; i < written; ++i)
-            {
                 features[total_written + i] += input_offset;
-            }
+
             input_offset += ext_inputs;
             total_written += written;
         }
+
         return {total_written, m_inputs};
     }
 };
-
-// ============================================================
-// Feature lookup by name (supports "+" composition)
-// ============================================================
 
 static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view name) {
     if (name == "HalfKAv2_hm")
@@ -373,6 +371,7 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
 static std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
     std::vector<std::unique_ptr<IFeatureExtractor>> components;
     std::size_t                                     start = 0;
+
     while (start < name.size())
     {
         auto pos  = name.find('+', start);
