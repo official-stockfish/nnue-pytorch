@@ -2,10 +2,10 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .halfka_v2_hm import HalfKav2Hm
-from .full_threats import FullThreats
-from .input_feature import InputFeature
 from .composed import ComposedFeatureTransformer, combine_input_features
+from .full_threats import FullThreats
+from .halfka_v2_hm import HalfKav2Hm
+from .input_feature import InputFeature
 
 import tyro
 from typing import Annotated
@@ -50,11 +50,11 @@ def add_feature_args(parser: argparse.ArgumentParser) -> None:
 
 
 __all__ = [
+    "ComposedFeatureTransformer",
+    "combine_input_features",
     "HalfKav2Hm",
     "FullThreats",
     "InputFeature",
-    "ComposedFeatureTransformer",
-    "combine_input_features",
     "get_feature_cls",
     "get_available_features",
     "add_feature_args",
