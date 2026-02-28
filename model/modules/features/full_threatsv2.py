@@ -7,7 +7,7 @@ from ..feature_transformer import DoubleFeatureTransformer, SparseLinearFunction
 from .halfka_v2_hm import InverseKingBuckets, _halfka_idx
 
 
-class FullThreats(DoubleFeatureTransformer):
+class FullThreatsv2(DoubleFeatureTransformer):
     HASH = 0x8F234CB9
     FEATURE_NAME = "Full_Threatsv2^"
     INPUT_FEATURE_NAME = "Full_Threatsv2"

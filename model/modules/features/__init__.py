@@ -2,7 +2,7 @@ import argparse
 from dataclasses import dataclass
 
 from .halfka_v2_hm import HalfKav2Hm
-from .full_threats import FullThreats
+from .full_threatsv2 import FullThreatsv2
 
 import tyro
 from typing import Annotated
@@ -10,7 +10,7 @@ from typing import Annotated
 
 _FEATURES: dict[str, type] = {
     "HalfKAv2_hm^": HalfKav2Hm,
-    "Full_Threats^": FullThreats,
+    "Full_Threatsv2^": FullThreatsv2,
 }
 
 

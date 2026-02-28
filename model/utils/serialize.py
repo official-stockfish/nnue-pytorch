@@ -12,7 +12,7 @@ from torch import nn
 from ..config import ModelConfig
 from ..model import NNUEModel
 from ..modules import BaseFeatureTransformer, get_feature_cls
-from ..modules.features.full_threats import FullThreats
+from ..modules.features.full_threatsv2 import FullThreatsv2
 from ..quantize import QuantizationConfig
 
 
