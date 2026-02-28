@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.13)
 project(training_data_loader CXX)
 
 if(NOT DEFINED CMAKE_BUILD_TYPE)
@@ -16,6 +16,13 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-g -O3 -march=native -DNDEBUG")
 set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data"
     CACHE PATH "Directory for PGO profile data")
 set(PGO_INPUT "" CACHE STRING "Input file passed to training_data_loader_bench for profile generation")
+
+# Fail at configure time if PGO_Generate is requested without a valid input file.
+if(CMAKE_BUILD_TYPE STREQUAL "PGO_Generate" AND NOT PGO_INPUT)
+  message(FATAL_ERROR
+    "PGO_Generate build requires a non-empty PGO_INPUT.\n"
+    "Re-run CMake with -DPGO_INPUT=<path-to-input-file>.")
+endif()
 
 set(CMAKE_CXX_FLAGS_PGO_GENERATE
     "${CMAKE_CXX_FLAGS_RELEASE} -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR}")

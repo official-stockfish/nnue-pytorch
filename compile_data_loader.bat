@@ -48,4 +48,4 @@ cmake --build "$BUILD_DIR" --target training_data_loader
 
 echo "PGO build complete."
 
-rm -rf pgo_data
+rm -rf "$PGO_DIR"

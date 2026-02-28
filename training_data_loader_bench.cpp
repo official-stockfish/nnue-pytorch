@@ -1,9 +1,16 @@
 /*
-standalone dataloader bench
 
+// Option 1: build by compiling the implementation directly into the binary
+// (uses training_data_loader.cpp)
 g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
     training_data_loader_bench.cpp \
     training_data_loader.cpp \
+    -o bench
+// Option 2: build by linking against the shared library (recommended to
+// match the README examples and typical usage)
+g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
+    training_data_loader_bench.cpp \
+    -L. -ltraining_data_loader -Wl,-rpath,'$ORIGIN' \
     -o bench
 
 ./bench /path/to/binpack
