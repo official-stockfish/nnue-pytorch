@@ -13,11 +13,13 @@ set -euo pipefail
 # If no argument is provided the default is `.pgo/small.binpack` in the repo root.
 
 ROOT_DIR=$(pwd)
+SRC_DIR=${SRC_DIR:-data_loader/cpp/}
 BUILD_DIR=${BUILD_DIR:-build}
 PGO_DIR=${PGO_DIR:-pgo_data}
 PGO_INPUT=${1:-$ROOT_DIR/.pgo/small.binpack}
 
 echo "ROOT_DIR: $ROOT_DIR"
+echo "SRC_DIR: $SRC_DIR"
 echo "BUILD_DIR: $BUILD_DIR"
 echo "PGO_DIR: $PGO_DIR"
 echo "PGO_INPUT: $PGO_INPUT"
@@ -26,7 +28,7 @@ echo "Cleaning previous build and profile data..."
 rm -rf "$BUILD_DIR" "$PGO_DIR"
 
 echo "Configuring PGO_Generate build (instrumentation)..."
-cmake -S . -B "$BUILD_DIR" \
+cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=PGO_Generate \
   -DPGO_PROFILE_DATA_DIR="$ROOT_DIR/$PGO_DIR" \
   -DPGO_INPUT="$PGO_INPUT"
@@ -38,7 +40,7 @@ echo "Running bench to generate profile data (pgo_run)..."
 cmake --build "$BUILD_DIR" --target pgo_run
 
 echo "Re-configuring for PGO_Use (use collected profiles)..."
-cmake -S . -B "$BUILD_DIR" \
+cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=PGO_Use \
   -DPGO_PROFILE_DATA_DIR="$ROOT_DIR/$PGO_DIR" \
   -DCMAKE_INSTALL_PREFIX="./"
