@@ -3,15 +3,20 @@
 // Option 1: build by compiling the implementation directly into the binary
 // (uses training_data_loader.cpp)
 g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
-    training_data_loader_bench.cpp \
-    training_data_loader.cpp \
-    -o bench
+    data_loader/cpp/training_data_loader_bench.cpp \
+    data_loader/cpp/training_data_loader.cpp \
+    -o bench_static
 // Option 2: build by linking against the shared library (recommended to
 // match the README examples and typical usage)
+// if you haven't built the shared library yet, do so first with:
+g++ -std=c++20 -g3 -O3 -DNDEBUG -march=native -fPIC -shared \
+    data_loader/cpp/training_data_loader.cpp \
+    -o build/libtraining_data_loader.so
+// then build the benchmark linking against the shared library:
 g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
-    training_data_loader_bench.cpp \
-    -L. -ltraining_data_loader -Wl,-rpath,'$ORIGIN' \
-    -o bench
+    data_loader/cpp/training_data_loader_bench.cpp \
+    -L./build -ltraining_data_loader -Wl,-rpath,'$ORIGIN/build' \
+    -o bench_shared
 
 ./bench /path/to/binpack
 */
@@ -38,20 +43,56 @@ long long get_rchar_self() {
     return -1;  // Error or not found
 }
 
+struct SparseBatchDeleter {
+    void operator()(SparseBatch* b) const {
+        destroy_sparse_batch(b);
+    }
+};
+
+struct SparseBatchStreamDeleter {
+    void operator()(SparseBatchStream* s) const {
+        destroy_sparse_batch_stream(s);
+    }
+};
+
 int main(int argc, char** argv) {
-    if (argc < 2)
-    {
-        std::cerr << "Usage: " << argv[0] << " file1 [file2 ...]\n";
+#ifdef PGO_BUILD
+    int concurrency = 1;
+    size_t iteration_count = 10;
+#else
+    int concurrency = std::thread::hardware_concurrency();
+    size_t iteration_count = 6000;
+#endif
+
+    int i = 1;
+    for (; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg == "-p" && i + 1 < argc) {
+            concurrency = std::stoi(argv[++i]);
+        } else if (arg == "-i" && i + 1 < argc) {
+            iteration_count = std::stoul(argv[++i]);
+        } else if (arg[0] == '-') {
+            std::cerr << "Unknown option: " << arg << "\n";
+            return 1;
+        } else {
+            break;
+        }
+    }
+
+    if (i >= argc) {
+        std::cerr << "Usage: " << argv[0] << " [-i iterations] [-p concurrency] file1 [file2 ...]\n";
         return 1;
     }
-    const char** files      = const_cast<const char**>(&argv[1]);
-    int          file_count = argc - 1;
 
-#ifdef PGO_BUILD
-    const int concurrency = 1;
-#else
-    const int concurrency = std::thread::hardware_concurrency();
-#endif
+    const char** files = const_cast<const char**>(&argv[i]);
+    int file_count = argc - i;
+
+    std::cout << "Threads: " << concurrency << " | Iterations: " << iteration_count << "\n";
+
+    if (concurrency < 1) concurrency = 1;
+    if (iteration_count < 1) iteration_count = 1;
+
     // some typical numbers, more skipping means more load
     const int                  batch_size = 65536;
     const bool                 cyclic     = true;
@@ -65,22 +106,17 @@ int main(int argc, char** argv) {
                                              .pc_y2                = 2.0,
                                              .pc_y3                = 1.0};
     const DataloaderDDPConfig  ddp_config = {.rank = 0, .world_size = 1};
-    auto stream = create_sparse_batch_stream("Full_Threats", concurrency, file_count, files,
-                                             batch_size, cyclic, config, ddp_config);
+    std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(
+        create_sparse_batch_stream("Full_Threats", concurrency, file_count, files,
+            batch_size, cyclic, config, ddp_config));
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
-#ifdef PGO_BUILD
-    constexpr size_t iteration_count = 10;
-#else
-    constexpr size_t iteration_count = 6000;
-#endif
-
     for (size_t i = 1; i <= iteration_count; ++i)
     {
-        if (auto* b = fetch_next_sparse_batch(stream))
         {
-            destroy_sparse_batch(b);
+            std::unique_ptr<SparseBatch, SparseBatchDeleter> b(
+                fetch_next_sparse_batch(stream.get()));
         }
 
         auto t1 = std::chrono::high_resolution_clock::now();

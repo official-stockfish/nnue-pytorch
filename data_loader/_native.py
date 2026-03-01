@@ -129,7 +129,7 @@ class CDataLoaderAPI:
         self._define_prototypes()
 
     def _load_library(self):
-        for lib in glob.glob("./*training_data_loader.*"):
+        for lib in glob.glob("./build/*training_data_loader.*"):
             if not (
                 lib.endswith(".so") or lib.endswith("dll") or lib.endswith(".dylib")
             ):

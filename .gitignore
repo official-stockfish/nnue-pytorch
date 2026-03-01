@@ -9,3 +9,4 @@ easy_train_data
 *.yaml
 pgo_data/
 bench
+bench_*
