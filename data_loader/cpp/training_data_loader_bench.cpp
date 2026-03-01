@@ -43,6 +43,18 @@ long long get_rchar_self() {
     return -1;  // Error or not found
 }
 
+struct SparseBatchDeleter {
+    void operator()(SparseBatch* b) const {
+        destroy_sparse_batch(b);
+    }
+};
+
+struct SparseBatchStreamDeleter {
+    void operator()(SparseBatchStream* s) const {
+        destroy_sparse_batch_stream(s);
+    }
+};
+
 int main(int argc, char** argv) {
     if (argc < 2)
     {
@@ -70,9 +82,9 @@ int main(int argc, char** argv) {
                                              .pc_y2                = 2.0,
                                              .pc_y3                = 1.0};
     const DataloaderDDPConfig  ddp_config = {.rank = 0, .world_size = 1};
-    std::unique_ptr<SparseBatchStream, decltype(&destroy_sparse_batch_stream)> stream(
-        create_sparse_batch_stream("Full_Threats", concurrency, file_count, files, batch_size, cyclic, config, ddp_config),
-        &destroy_sparse_batch_stream);
+    std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(
+        create_sparse_batch_stream("Full_Threats", concurrency, file_count, files,
+            batch_size, cyclic, config, ddp_config));
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -85,8 +97,8 @@ int main(int argc, char** argv) {
     for (int i = 1; i <= iteration_count; ++i)
     {
         {
-            std::unique_ptr<SparseBatch, decltype(&destroy_sparse_batch)> b(
-                fetch_next_sparse_batch(stream.get()), &destroy_sparse_batch);
+            std::unique_ptr<SparseBatch, SparseBatchDeleter> b(
+                fetch_next_sparse_batch(stream.get()));
         }
 
         auto t1 = std::chrono::high_resolution_clock::now();
