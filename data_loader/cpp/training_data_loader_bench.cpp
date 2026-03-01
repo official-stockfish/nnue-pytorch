@@ -8,6 +8,11 @@ g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
     -o bench_static
 // Option 2: build by linking against the shared library (recommended to
 // match the README examples and typical usage)
+// if you haven't built the shared library yet, do so first with:
+g++ -std=c++20 -g3 -O3 -DNDEBUG -march=native -fPIC -shared \
+    data_loader/cpp/training_data_loader.cpp \
+    -o build/libtraining_data_loader.so
+// then build the benchmark linking against the shared library:
 g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
     data_loader/cpp/training_data_loader_bench.cpp \
     -L./build -ltraining_data_loader -Wl,-rpath,'$ORIGIN/build' \
