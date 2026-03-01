@@ -29,6 +29,12 @@
     #endif
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+    #define NNUE_COLD __attribute__((cold))
+#else
+    #define NNUE_COLD
+#endif
+
 using namespace binpack;
 using namespace chess;
 
@@ -981,7 +987,7 @@ EXPORT FenBatchStream* CDECL create_fen_batch_stream(int                  concur
                               ddp_config.rank, ddp_config.world_size);
 }
 
-EXPORT void CDECL destroy_fen_batch_stream(FenBatchStream* stream) { delete stream; }
+EXPORT NNUE_COLD void CDECL destroy_fen_batch_stream(FenBatchStream* stream) { delete stream; }
 
 // changing the signature needs matching changes in data_loader/_native.py
 EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char*          feature_set_c,
@@ -1002,7 +1008,7 @@ EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char*        
                                    cyclic, skipPredicate, ddp_config.rank, ddp_config.world_size);
 }
 
-EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream) { delete stream; }
+EXPORT NNUE_COLD void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream) { delete stream; }
 
 EXPORT SparseBatch* CDECL fetch_next_sparse_batch(Stream<SparseBatch>* stream) {
     return stream->next();
