@@ -5,13 +5,13 @@
 g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
     data_loader/cpp/training_data_loader_bench.cpp \
     data_loader/cpp/training_data_loader.cpp \
-    -o bench
+    -o bench_static
 // Option 2: build by linking against the shared library (recommended to
 // match the README examples and typical usage)
 g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
     data_loader/cpp/training_data_loader_bench.cpp \
-    -L. -l build/training_data_loader -Wl,-rpath,'$ORIGIN' \
-    -o bench
+    -L./build -ltraining_data_loader -Wl,-rpath,'$ORIGIN/build' \
+    -o bench_shared
 
 ./bench /path/to/binpack
 */
