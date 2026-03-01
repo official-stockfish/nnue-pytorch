@@ -3,14 +3,14 @@
 // Option 1: build by compiling the implementation directly into the binary
 // (uses training_data_loader.cpp)
 g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
-    training_data_loader_bench.cpp \
-    training_data_loader.cpp \
+    data_loader/cpp/training_data_loader_bench.cpp \
+    data_loader/cpp/training_data_loader.cpp \
     -o bench
 // Option 2: build by linking against the shared library (recommended to
 // match the README examples and typical usage)
 g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
-    training_data_loader_bench.cpp \
-    -L. -ltraining_data_loader -Wl,-rpath,'$ORIGIN' \
+    data_loader/cpp/training_data_loader_bench.cpp \
+    -L. -l build/training_data_loader -Wl,-rpath,'$ORIGIN' \
     -o bench
 
 ./bench /path/to/binpack
@@ -65,8 +65,9 @@ int main(int argc, char** argv) {
                                              .pc_y2                = 2.0,
                                              .pc_y3                = 1.0};
     const DataloaderDDPConfig  ddp_config = {.rank = 0, .world_size = 1};
-    auto stream = create_sparse_batch_stream("Full_Threats", concurrency, file_count, files,
-                                             batch_size, cyclic, config, ddp_config);
+    std::unique_ptr<SparseBatchStream, decltype(&destroy_sparse_batch_stream)> stream(
+        create_sparse_batch_stream("Full_Threats", concurrency, file_count, files, batch_size, cyclic, config, ddp_config),
+        &destroy_sparse_batch_stream);
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -78,9 +79,9 @@ int main(int argc, char** argv) {
 
     for (int i = 1; i <= iteration_count; ++i)
     {
-        if (auto* b = fetch_next_sparse_batch(stream))
         {
-            destroy_sparse_batch(b);
+            std::unique_ptr<SparseBatch, decltype(&destroy_sparse_batch)> b(
+                fetch_next_sparse_batch(stream.get()), &destroy_sparse_batch);
         }
 
         auto t1 = std::chrono::high_resolution_clock::now();

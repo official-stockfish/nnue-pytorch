@@ -48,13 +48,25 @@ find_package(Threads REQUIRED)
 
 # ---- Targets ----
 
-if(UPPER_BUILD_TYPE MATCHES "^PGO_")
-    add_library(training_data_loader STATIC training_data_loader.cpp)
-    set_property(TARGET training_data_loader PROPERTY POSITION_INDEPENDENT_CODE ON)
+set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data" CACHE PATH "Directory for PGO profile data")
+
+# ---- Dynamic Target Topology ----
+
+if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
+  # PHASE 1: FAST GENERATION
+  # Build as STATIC so the compiler can inline get_next() into the benchmark loop,
+  # eliminating PLT jump overhead during the slow instrumentation phase.
+  add_library(training_data_loader STATIC training_data_loader.cpp)
+
+  # CRITICAL: Force PIC on the static library so its internal Abstract Syntax Tree (AST)
+  # matches the final SHARED library as closely as possible.
+  set_property(TARGET training_data_loader PROPERTY POSITION_INDEPENDENT_CODE ON)
+
 else()
-    add_library(training_data_loader SHARED training_data_loader.cpp)
-    # Force the linker to fail at compile-time if symbols are missing
-    target_link_options(training_data_loader PRIVATE "-Wl,--no-undefined")
+  # PHASE 2: REALISTIC USE & NORMAL BUILDS
+  # Build as SHARED to strictly enforce the ABI boundary required by the Python interface.
+  add_library(training_data_loader SHARED training_data_loader.cpp)
+  target_link_options(training_data_loader PRIVATE "-Wl,--no-undefined")
 endif()
 
 target_link_libraries(training_data_loader PRIVATE Threads::Threads)
@@ -65,6 +77,7 @@ set_target_properties(training_data_loader PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+# The benchmark executable
 add_executable(training_data_loader_bench training_data_loader_bench.cpp)
 target_link_libraries(training_data_loader_bench PRIVATE training_data_loader Threads::Threads)
 
@@ -76,26 +89,31 @@ set_target_properties(training_data_loader_bench PROPERTIES
 # ---- Apply Target-Specific Build Flags ----
 
 if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
-  file(MAKE_DIRECTORY ${PGO_PROFILE_DATA_DIR})
+  # Because it is statically linked right now, we MUST instrument the benchmark executable
+  # so it links libgcov and drives the library's counters.
+  target_compile_options(training_data_loader PRIVATE
+    -O3 -march=native -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
-  target_compile_options(training_data_loader PRIVATE -O3 -march=native -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR})
-  target_link_options(training_data_loader PRIVATE -fprofile-generate=${PGO_PROFILE_DATA_DIR})
-
-  target_compile_options(training_data_loader_bench PRIVATE -O3 -march=native -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR})
-  target_link_options(training_data_loader_bench PRIVATE -fprofile-generate=${PGO_PROFILE_DATA_DIR})
+  target_compile_options(training_data_loader_bench PRIVATE
+    -O3 -march=native -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR})
+  target_link_options(training_data_loader_bench PRIVATE
+    -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
   add_custom_target(pgo_run
     COMMAND $<TARGET_FILE:training_data_loader_bench> ${PGO_INPUT}
     DEPENDS training_data_loader_bench
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Running training_data_loader_bench to generate PGO profiles in ${PGO_PROFILE_DATA_DIR}"
+    COMMENT "Running monolithic benchmark to generate PGO profiles quickly"
     VERBATIM
   )
 
 elseif(UPPER_BUILD_TYPE STREQUAL "PGO_USE")
-  target_compile_options(training_data_loader PRIVATE -g -O3 -march=native -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
-  target_link_options(training_data_loader PRIVATE -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
+  # Apply the generated profiles strictly to the SHARED library.
+  target_compile_options(training_data_loader PRIVATE
+    -g -O3 -march=native -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
+  target_link_options(training_data_loader PRIVATE
+    -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
 
-  target_compile_options(training_data_loader_bench PRIVATE -g -O3 -march=native -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
-  target_link_options(training_data_loader_bench PRIVATE -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
+  # The benchmark gets standard release flags. It respects the ABI wall.
+  target_compile_options(training_data_loader_bench PRIVATE -g -O3 -march=native)
 endif()
