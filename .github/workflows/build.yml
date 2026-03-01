@@ -14,11 +14,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Compile using cmake
-        run: bash compile_data_loader.bat
+        run: bash compile_data_loader.sh
 
       - name: Compile benchmark manually with g++
         run: >
-          g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -DPGO_BUILD -march=native training_data_loader_bench.cpp training_data_loader.cpp
-
+          g++ -std=c++20 -g3 -O3 -DNDEBUG -march=native -fPIC -shared \
+              data_loader/cpp/training_data_loader.cpp \
+              -o build/libtraining_data_loader.so && \
+          g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
+              data_loader/cpp/training_data_loader_bench.cpp \
+              -L./build -ltraining_data_loader -Wl,-rpath,'$ORIGIN/build' \
+              -o bench_shared
       - name: Run manually compiled benchmark
-        run: ./a.out ./.pgo/small.binpack
+        run: ./bench_shared ./.pgo/small.binpack
