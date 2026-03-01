@@ -70,12 +70,12 @@ int main(int argc, char** argv) {
     const int concurrency = std::thread::hardware_concurrency();
 #endif
     // some typical numbers, more skipping means more load
-    const int                  batch_size = 16384;
+    const int                  batch_size = 65536;
     const bool                 cyclic     = true;
     const DataloaderSkipConfig config     = {.filtered             = true,
-                                             .random_fen_skipping  = 3,
+                                             .random_fen_skipping  = 10,
                                              .wld_filtered         = true,
-                                             .early_fen_skipping   = 5,
+                                             .early_fen_skipping   = 28,
                                              .simple_eval_skipping = 0,
                                              .param_index          = 0,
                                              .pc_y1                = 1.0,
@@ -89,12 +89,12 @@ int main(int argc, char** argv) {
     auto t0 = std::chrono::high_resolution_clock::now();
 
 #ifdef PGO_BUILD
-    constexpr int iteration_count = 30;
+    constexpr size_t iteration_count = 10;
 #else
-    constexpr int iteration_count = 6000;
+    constexpr size_t iteration_count = 6000;
 #endif
 
-    for (int i = 1; i <= iteration_count; ++i)
+    for (size_t i = 1; i <= iteration_count; ++i)
     {
         {
             std::unique_ptr<SparseBatch, SparseBatchDeleter> b(
@@ -115,9 +115,9 @@ int main(int argc, char** argv) {
             std::cout << "\rIter: " << std::setw(8) << i                                //
                       << "   Time(s): " << std::setw(8) << std::setprecision(3) << sec  //
                       << "   MPos/s: " << std::setw(8) << std::setprecision(3) << mpos  //
-                      << "   It/s: " << std::setw(8) << std::setprecision(1) << its     //
-                      << "   MB/s: " << std::setw(8) << std::setprecision(1) << mbps    //
-                      << "   B/pos: " << std::setw(8) << std::setprecision(1) << bpos   //
+                      << "   It/s: " << std::setw(8) << std::setprecision(3) << its     //
+                      << "   MB/s: " << std::setw(8) << std::setprecision(3) << mbps    //
+                      << "   B/pos: " << std::setw(8) << std::setprecision(3) << bpos   //
                       << std::flush;
         }
     }
