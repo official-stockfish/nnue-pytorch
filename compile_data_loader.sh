@@ -31,7 +31,8 @@ echo "Configuring PGO_Generate build (instrumentation)..."
 cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=PGO_Generate \
   -DPGO_PROFILE_DATA_DIR="$ROOT_DIR/$PGO_DIR" \
-  -DPGO_INPUT="$PGO_INPUT"
+  -DPGO_INPUT="$PGO_INPUT" \
+  -DLIB_COPY_DIR="$ROOT_DIR"
 
 echo "Building instrumented targets..."
 cmake --build "$BUILD_DIR"
@@ -43,7 +44,8 @@ echo "Re-configuring for PGO_Use (use collected profiles)..."
 cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=PGO_Use \
   -DPGO_PROFILE_DATA_DIR="$ROOT_DIR/$PGO_DIR" \
-  -DCMAKE_INSTALL_PREFIX="./"
+  -DCMAKE_INSTALL_PREFIX="./" \
+  -DLIB_COPY_DIR="$ROOT_DIR"
 
 echo "Building shared library with profile data (training_data_loader)..."
 cmake --build "$BUILD_DIR" --target training_data_loader

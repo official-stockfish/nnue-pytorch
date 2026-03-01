@@ -90,7 +90,7 @@ set_target_properties(training_data_loader PROPERTIES
 
 # Platform-independent copy of the shared library
 add_custom_command(TARGET training_data_loader POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:training_data_loader> "${CMAKE_SOURCE_DIR}/"
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:training_data_loader> "${LIB_COPY_DIR}/"
 )
 
 # Target for pgo generation
