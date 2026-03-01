@@ -5,7 +5,7 @@ if(NOT DEFINED CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
-# Normalize build type for safe, case-insensitive comparisons
+# Normalize case for safe IF checks later
 string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -15,22 +15,52 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-g -O3 -march=native -DNDEBUG")
 
-# ---- PGO Configuration ----
-set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data" CACHE PATH "Directory for PGO profile data")
+# PGO
+set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data"
+    CACHE PATH "Directory for PGO profile data")
 set(PGO_INPUT "" CACHE STRING "Input file passed to training_data_loader_bench for profile generation")
 
+# Fail at configure time if PGO_Generate is requested without a valid input file.
 if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE" AND NOT PGO_INPUT)
-  message(FATAL_ERROR "PGO_GENERATE build requires a non-empty PGO_INPUT.\nRe-run CMake with -DPGO_INPUT=<path-to-input-file>.")
+  message(FATAL_ERROR
+    "PGO_Generate build requires a non-empty PGO_INPUT.\n"
+    "Re-run CMake with -DPGO_INPUT=<path-to-input-file>.")
 endif()
 
-# ---- BMI2 Detection ----
-include(CheckCXXCompilerFlag)
-execute_process(COMMAND bash -c "awk '/^vendor_id/{{print \$3; exit}}' /proc/cpuinfo" OUTPUT_VARIABLE VENDOR_ID OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND bash -c "awk '/^cpu family/{{print \$4; exit}}' /proc/cpuinfo" OUTPUT_VARIABLE CPU_FAMILY OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND bash -c "grep -m1 -o 'bmi2' /proc/cpuinfo" OUTPUT_VARIABLE CPU_BMI2 OUTPUT_STRIP_TRAILING_WHITESPACE)
+set(CMAKE_CXX_FLAGS_PGO_GENERATE
+    "${CMAKE_CXX_FLAGS_RELEASE} -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR}")
+set(CMAKE_EXE_LINKER_FLAGS_PGO_GENERATE
+    "-fprofile-generate=${PGO_PROFILE_DATA_DIR}")
 
-if(VENDOR_ID STREQUAL "AuthenticAMD" AND CPU_FAMILY GREATER_EQUAL "23" AND CPU_BMI2 STREQUAL "bmi2")
-    set(CPU_SUPPORTS_BMI2 TRUE)
+set(CMAKE_SHARED_LINKER_FLAGS_PGO_GENERATE
+    "-fprofile-generate=${PGO_PROFILE_DATA_DIR}")
+
+set(CMAKE_CXX_FLAGS_PGO_USE
+    "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction")
+
+include(CheckCXXCompilerFlag)
+
+# BMI2 detection
+execute_process(
+    COMMAND bash -c "awk '/^vendor_id/{{print \$3; exit}}' /proc/cpuinfo"
+    OUTPUT_VARIABLE VENDOR_ID
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+execute_process(
+    COMMAND bash -c "awk '/^cpu family/{{print \$4; exit}}' /proc/cpuinfo"
+    OUTPUT_VARIABLE CPU_FAMILY
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+execute_process(
+    COMMAND bash -c "grep -m1 -o 'bmi2' /proc/cpuinfo"
+    OUTPUT_VARIABLE CPU_BMI2
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if(VENDOR_ID STREQUAL "AuthenticAMD")
+    if(CPU_FAMILY GREATER_EQUAL "23" AND CPU_BMI2 STREQUAL "bmi2")
+        set(CPU_SUPPORTS_BMI2 TRUE)
+    endif()
 elseif(CPU_BMI2 STREQUAL "bmi2")
     set(CPU_SUPPORTS_BMI2 TRUE)
 else()
@@ -48,27 +78,8 @@ find_package(Threads REQUIRED)
 
 # ---- Targets ----
 
-set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data" CACHE PATH "Directory for PGO profile data")
-
-# ---- Dynamic Target Topology ----
-
-if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
-  # PHASE 1: FAST GENERATION
-  # Build as STATIC so the compiler can inline get_next() into the benchmark loop,
-  # eliminating PLT jump overhead during the slow instrumentation phase.
-  add_library(training_data_loader STATIC training_data_loader.cpp)
-
-  # CRITICAL: Force PIC on the static library so its internal Abstract Syntax Tree (AST)
-  # matches the final SHARED library as closely as possible.
-  set_property(TARGET training_data_loader PROPERTY POSITION_INDEPENDENT_CODE ON)
-
-else()
-  # PHASE 2: REALISTIC USE & NORMAL BUILDS
-  # Build as SHARED to strictly enforce the ABI boundary required by the Python interface.
-  add_library(training_data_loader SHARED training_data_loader.cpp)
-  target_link_options(training_data_loader PRIVATE "-Wl,--no-undefined")
-endif()
-
+add_library(training_data_loader SHARED training_data_loader.cpp)
+target_compile_options(training_data_loader PRIVATE)
 target_link_libraries(training_data_loader PRIVATE Threads::Threads)
 
 set_target_properties(training_data_loader PROPERTIES
@@ -77,25 +88,28 @@ set_target_properties(training_data_loader PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
-# The benchmark executable
 add_executable(training_data_loader_bench training_data_loader_bench.cpp)
-target_link_libraries(training_data_loader_bench PRIVATE training_data_loader Threads::Threads)
+target_compile_options(training_data_loader_bench PRIVATE)
+target_link_libraries(training_data_loader_bench
+  PRIVATE training_data_loader Threads::Threads)
 
 set_target_properties(training_data_loader_bench PROPERTIES
   BUILD_RPATH "$ORIGIN"
   INSTALL_RPATH "$ORIGIN"
 )
 
-# ---- Apply Target-Specific Build Flags ----
+# ---- PGO ----
 
 if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
-  # Because it is statically linked right now, we MUST instrument the benchmark executable
-  # so it links libgcov and drives the library's counters.
+  file(MAKE_DIRECTORY ${PGO_PROFILE_DATA_DIR})
+
   target_compile_options(training_data_loader PRIVATE
-    -O3 -march=native -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR})
+    -fprofile-generate=${PGO_PROFILE_DATA_DIR})
+  target_link_options(training_data_loader PRIVATE
+    -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
   target_compile_options(training_data_loader_bench PRIVATE
-    -O3 -march=native -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR})
+    -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR})
   target_link_options(training_data_loader_bench PRIVATE
     -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
@@ -103,17 +117,18 @@ if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
     COMMAND $<TARGET_FILE:training_data_loader_bench> ${PGO_INPUT}
     DEPENDS training_data_loader_bench
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Running monolithic benchmark to generate PGO profiles quickly"
+    COMMENT "Running training_data_loader_bench to generate PGO profiles in ${PGO_PROFILE_DATA_DIR}"
     VERBATIM
   )
 
-elseif(UPPER_BUILD_TYPE STREQUAL "PGO_USE")
-  # Apply the generated profiles strictly to the SHARED library.
+elseif(UPPER_BUILD_TYPE MATCHES "^PGO_USE$")
   target_compile_options(training_data_loader PRIVATE
-    -g -O3 -march=native -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
+    -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
   target_link_options(training_data_loader PRIVATE
     -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
 
-  # The benchmark gets standard release flags. It respects the ABI wall.
-  target_compile_options(training_data_loader_bench PRIVATE -g -O3 -march=native)
+  target_compile_options(training_data_loader_bench PRIVATE
+    -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
+  target_link_options(training_data_loader_bench PRIVATE
+    -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
 endif()
