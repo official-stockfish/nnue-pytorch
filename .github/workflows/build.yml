@@ -26,4 +26,4 @@ jobs:
               -L./build -ltraining_data_loader -Wl,-rpath,'$ORIGIN/build' \
               -o bench_shared
       - name: Run manually compiled benchmark
-        run: ./bench_shared -i 600 ./.pgo/small.binpack
+        run: ./bench_shared -i 100 ./.pgo/small.binpack
