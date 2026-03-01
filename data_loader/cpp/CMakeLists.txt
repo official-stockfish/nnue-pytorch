@@ -88,8 +88,26 @@ set_target_properties(training_data_loader PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+# Platform-independent copy of the shared library
+add_custom_command(TARGET training_data_loader POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:training_data_loader> "${CMAKE_SOURCE_DIR}/"
+)
+
+# Target for pgo generation
+add_executable(training_data_loader_pgo_gen training_data_loader_bench.cpp)
+target_compile_options(training_data_loader_pgo_gen PRIVATE)
+target_link_libraries(training_data_loader_pgo_gen
+  PRIVATE training_data_loader Threads::Threads)
+
+set_target_properties(training_data_loader_pgo_gen PROPERTIES
+  BUILD_RPATH "$ORIGIN"
+  INSTALL_RPATH "$ORIGIN"
+)
+
+# Actual benchmark target
 add_executable(training_data_loader_bench training_data_loader_bench.cpp)
 target_compile_options(training_data_loader_bench PRIVATE)
+target_compile_definitions(training_data_loader_bench PRIVATE BENCH)
 target_link_libraries(training_data_loader_bench
   PRIVATE training_data_loader Threads::Threads)
 
@@ -108,16 +126,16 @@ if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
   target_link_options(training_data_loader PRIVATE
     -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
-  target_compile_options(training_data_loader_bench PRIVATE
+  target_compile_options(training_data_loader_pgo_gen PRIVATE
     -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR})
-  target_link_options(training_data_loader_bench PRIVATE
+  target_link_options(training_data_loader_pgo_gen PRIVATE
     -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
   add_custom_target(pgo_run
-    COMMAND $<TARGET_FILE:training_data_loader_bench> ${PGO_INPUT}
-    DEPENDS training_data_loader_bench
+    COMMAND $<TARGET_FILE:training_data_loader_pgo_gen> ${PGO_INPUT}
+    DEPENDS training_data_loader_pgo_gen
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Running training_data_loader_bench to generate PGO profiles in ${PGO_PROFILE_DATA_DIR}"
+    COMMENT "Running training_data_loader_pgo_gen to generate PGO profiles in ${PGO_PROFILE_DATA_DIR}"
     VERBATIM
   )
 
@@ -127,8 +145,8 @@ elseif(UPPER_BUILD_TYPE MATCHES "^PGO_USE$")
   target_link_options(training_data_loader PRIVATE
     -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
 
-  target_compile_options(training_data_loader_bench PRIVATE
+  target_compile_options(training_data_loader_pgo_gen PRIVATE
     -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
-  target_link_options(training_data_loader_bench PRIVATE
+  target_link_options(training_data_loader_pgo_gen PRIVATE
     -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
 endif()
