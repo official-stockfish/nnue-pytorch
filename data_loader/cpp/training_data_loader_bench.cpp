@@ -56,19 +56,43 @@ struct SparseBatchStreamDeleter {
 };
 
 int main(int argc, char** argv) {
-    if (argc < 2)
-    {
-        std::cerr << "Usage: " << argv[0] << " file1 [file2 ...]\n";
+#ifdef PGO_BUILD
+    int concurrency = 1;
+    size_t iteration_count = 10;
+#else
+    int concurrency = std::thread::hardware_concurrency();
+    size_t iteration_count = 6000;
+#endif
+
+    int i = 1;
+    for (; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg == "-p" && i + 1 < argc) {
+            concurrency = std::stoi(argv[++i]);
+        } else if (arg == "-i" && i + 1 < argc) {
+            iteration_count = std::stoul(argv[++i]);
+        } else if (arg[0] == '-') {
+            std::cerr << "Unknown option: " << arg << "\n";
+            return 1;
+        } else {
+            break;
+        }
+    }
+
+    if (i >= argc) {
+        std::cerr << "Usage: " << argv[0] << " [-i iterations] [-p concurrency] file1 [file2 ...]\n";
         return 1;
     }
-    const char** files      = const_cast<const char**>(&argv[1]);
-    int          file_count = argc - 1;
 
-#ifdef PGO_BUILD
-    const int concurrency = 1;
-#else
-    const int concurrency = std::thread::hardware_concurrency();
-#endif
+    const char** files = const_cast<const char**>(&argv[i]);
+    int file_count = argc - i;
+
+    std::cout << "Threads: " << concurrency << " | Iterations: " << iteration_count << "\n";
+
+    if (concurrency < 1) concurrency = 1;
+    if (iteration_count < 1) iteration_count = 1;
+
     // some typical numbers, more skipping means more load
     const int                  batch_size = 65536;
     const bool                 cyclic     = true;
@@ -87,12 +111,6 @@ int main(int argc, char** argv) {
             batch_size, cyclic, config, ddp_config));
 
     auto t0 = std::chrono::high_resolution_clock::now();
-
-#ifdef PGO_BUILD
-    constexpr size_t iteration_count = 10;
-#else
-    constexpr size_t iteration_count = 6000;
-#endif
 
     for (size_t i = 1; i <= iteration_count; ++i)
     {
