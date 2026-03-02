@@ -27,8 +27,56 @@ g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
 #include <fstream>
 #include <string>
 #include <thread>
+#include <filesystem>
 
 #include "training_data_loader_abi.h"
+
+namespace fs = std::filesystem;
+
+/**
+ * Validates existence, copies files to /dev/shm for low-latency access,
+ * and returns the new RAM-based paths.
+ */
+std::vector<std::string> stage_files_to_ram(int file_count, const char** files) {
+    std::vector<std::string> ram_paths;
+    ram_paths.reserve(file_count);
+
+    // Using /dev/shm for Linux RAM-disk.
+    // For cross-platform, you would need a custom memory buffer interface.
+    const fs::path ram_base = "/dev/shm/app_cache";
+
+    try {
+        if (!fs::exists(ram_base)) {
+            fs::create_directories(ram_base);
+        }
+
+        for (int i = 0; i < file_count; ++i) {
+            if (files[i] == nullptr) continue;
+
+            fs::path original_path(files[i]);
+
+            // 1. Logic/Existence Validation
+            if (!fs::exists(original_path) || !fs::is_regular_file(original_path)) {
+                throw std::runtime_error("Invalid or missing file: " + original_path.string());
+            }
+
+            // 2. Performance: Copy to RAM
+            fs::path target_path = ram_base / original_path.filename();
+
+            // Avoid redundant copies if multiple streams use the same files
+            if (!fs::exists(target_path)) {
+                fs::copy_file(original_path, target_path, fs::copy_options::overwrite_existing);
+            }
+
+            ram_paths.push_back(target_path.string());
+        }
+    } catch (const fs::filesystem_error& e) {
+        std::cerr << "Filesystem error: " << e.what() << std::endl;
+        throw;
+    }
+
+    return ram_paths;
+}
 
 long long get_rchar_self() {
     std::ifstream io_file("/proc/self/io");
@@ -58,6 +106,8 @@ struct SparseBatchStreamDeleter {
 int main(int argc, char** argv) {
     int concurrency = std::thread::hardware_concurrency();
     size_t iteration_count = 6000;
+    size_t warmup_iterations = 5;
+    int do_cache_files = 1;
 
     int i = 1;
     for (; i < argc; ++i) {
@@ -67,6 +117,8 @@ int main(int argc, char** argv) {
             concurrency = std::stoi(argv[++i]);
         } else if (arg == "-i" && i + 1 < argc) {
             iteration_count = std::stoul(argv[++i]);
+        } else if (arg == "-c" && i + 1 < argc) {
+            do_cache_files = std::stoi(argv[++i]);
         } else if (arg[0] == '-') {
             std::cerr << "Unknown option: " << arg << "\n";
             return 1;
@@ -76,14 +128,27 @@ int main(int argc, char** argv) {
     }
 
     if (i >= argc) {
-        std::cerr << "Usage: " << argv[0] << " [-i iterations] [-p concurrency] file1 [file2 ...]\n";
+        std::cerr << "Usage: " << argv[0] << " [-i iterations] [-p concurrency] [-c do_cache_files] file1 [file2 ...]\n";
         return 1;
     }
 
     const char** files = const_cast<const char**>(&argv[i]);
     int file_count = argc - i;
+    std::vector<std::string> ram_files;
+    std::vector<const char*> c_str_paths;
 
     std::cout << "Threads: " << concurrency << " | Iterations: " << iteration_count << "\n";
+
+    if (do_cache_files == 1) {
+        std::cout << "Caching files to ram: ..." << std::endl;
+        ram_files = stage_files_to_ram(file_count, files);
+        for (const auto& path : ram_files) {
+            c_str_paths.push_back(path.c_str());
+        }
+        file_count = static_cast<int>(c_str_paths.size());
+        files = c_str_paths.data();
+        std::cout << "Caching files to ram: done" << std::endl;
+    }
 
     if (concurrency < 1) concurrency = 1;
     if (iteration_count < 1) iteration_count = 1;
@@ -106,6 +171,14 @@ int main(int argc, char** argv) {
         create_sparse_batch_stream("Full_Threats+HalfKAv2_hm", concurrency, file_count, files,
             batch_size, cyclic, config, ddp_config));
 
+
+    for (size_t i = 1; i <= warmup_iterations; ++i)
+    {
+        {
+            std::unique_ptr<SparseBatch, SparseBatchDeleter> b(
+                fetch_next_sparse_batch(stream.get()));
+        }
+    }
 
     long long bytes_before = get_rchar_self();
     auto t0 = std::chrono::high_resolution_clock::now();

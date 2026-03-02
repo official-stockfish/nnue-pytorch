@@ -100,7 +100,7 @@ if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
   )
 
   add_custom_target(pgo_run
-    COMMAND "$<TARGET_FILE:training_data_loader_pgo_gen>" -i 10 -p 1 "${PGO_INPUT}"
+    COMMAND "$<TARGET_FILE:training_data_loader_pgo_gen>" -i 5 -p 1 -c 0 "${PGO_INPUT}"
     DEPENDS training_data_loader_pgo_gen
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running training_data_loader_pgo_gen to generate PGO profiles in ${PGO_PROFILE_DATA_DIR}"
