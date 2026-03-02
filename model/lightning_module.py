@@ -38,6 +38,7 @@ class NNUE(L.LightningModule):
         num_psqt_buckets=8,
         num_ls_buckets=8,
         loss_params=LossParams(),
+        compile_backend=None,
     ):
         super().__init__()
         self.model: NNUEModel = NNUEModel(
@@ -49,6 +50,11 @@ class NNUE(L.LightningModule):
         self.gamma = gamma
         self.lr = lr
         self.param_index = param_index
+        self.compile_backend = compile_backend
+
+    def setup(self, stage=None):
+        if self.compile_backend is not None:
+            self.model = torch.compile(self.model, backend=self.compile_backend)
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)

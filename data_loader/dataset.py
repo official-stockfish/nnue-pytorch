@@ -189,14 +189,25 @@ class FixedNumBatchesDataset(Dataset):
             while not self._stop_prefetching.is_set():
                 try:
                     item = next(self.iter)
-                    self._prefetch_queue.put(item)
+                    # Use timeout to prevent indefinite blocking
+                    self._prefetch_queue.put(item, timeout=1.0)
                 except StopIteration:
-                    self._prefetch_queue.put(None)
+                    while not self._stop_prefetching.is_set():
+                        try:
+                            self._prefetch_queue.put(None, timeout=1.0)
+                            break
+                        except queue.Full:
+                            continue
                     break
                 except queue.Full:
                     continue
         except Exception as e:
-            self._prefetch_queue.put(e)
+            while not self._stop_prefetching.is_set():
+                try:
+                    self._prefetch_queue.put(e, timeout=1.0)
+                    break
+                except queue.Full:
+                    continue
 
     def _start_prefetching(self):
         with self._lock:
