@@ -28,7 +28,7 @@ if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE" AND NOT PGO_INPUT)
 endif()
 
 set(CMAKE_CXX_FLAGS_PGO_GENERATE
-    "${CMAKE_CXX_FLAGS_RELEASE} -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR}")
+    "${CMAKE_CXX_FLAGS_RELEASE} -fprofile-generate=${PGO_PROFILE_DATA_DIR}")
 set(CMAKE_EXE_LINKER_FLAGS_PGO_GENERATE
     "-fprofile-generate=${PGO_PROFILE_DATA_DIR}")
 
@@ -127,12 +127,12 @@ if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
     -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
   target_compile_options(training_data_loader_pgo_gen PRIVATE
-    -DPGO_BUILD -fprofile-generate=${PGO_PROFILE_DATA_DIR})
+    -fprofile-generate=${PGO_PROFILE_DATA_DIR})
   target_link_options(training_data_loader_pgo_gen PRIVATE
     -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
   add_custom_target(pgo_run
-    COMMAND $<TARGET_FILE:training_data_loader_pgo_gen> ${PGO_INPUT}
+    COMMAND "$<TARGET_FILE:training_data_loader_pgo_gen>" -i 10 -p 1 "${PGO_INPUT}"
     DEPENDS training_data_loader_pgo_gen
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running training_data_loader_pgo_gen to generate PGO profiles in ${PGO_PROFILE_DATA_DIR}"

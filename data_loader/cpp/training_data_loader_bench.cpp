@@ -56,13 +56,8 @@ struct SparseBatchStreamDeleter {
 };
 
 int main(int argc, char** argv) {
-#ifdef PGO_BUILD
-    int concurrency = 1;
-    size_t iteration_count = 10;
-#else
     int concurrency = std::thread::hardware_concurrency();
     size_t iteration_count = 6000;
-#endif
 
     int i = 1;
     for (; i < argc; ++i) {
