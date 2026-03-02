@@ -18,7 +18,8 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-g -O3 -march=native -DNDEBUG")
 # PGO
 set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data"
     CACHE PATH "Directory for PGO profile data")
-set(PGO_INPUT "" CACHE STRING "Input file passed to training_data_loader_bench for profile generation")
+set(PGO_INPUT ""
+    CACHE STRING "Input file passed to training_data_loader_pgo_gen for profile generation")
 
 # Fail at configure time if PGO_Generate is requested without a valid input file.
 if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE" AND NOT PGO_INPUT)
@@ -27,16 +28,8 @@ if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE" AND NOT PGO_INPUT)
     "Re-run CMake with -DPGO_INPUT=<path-to-input-file>.")
 endif()
 
-set(CMAKE_CXX_FLAGS_PGO_GENERATE
-    "${CMAKE_CXX_FLAGS_RELEASE} -fprofile-generate=${PGO_PROFILE_DATA_DIR}")
-set(CMAKE_EXE_LINKER_FLAGS_PGO_GENERATE
-    "-fprofile-generate=${PGO_PROFILE_DATA_DIR}")
-
-set(CMAKE_SHARED_LINKER_FLAGS_PGO_GENERATE
-    "-fprofile-generate=${PGO_PROFILE_DATA_DIR}")
-
-set(CMAKE_CXX_FLAGS_PGO_USE
-    "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction")
+set(CMAKE_CXX_FLAGS_PGO_GENERATE "${CMAKE_CXX_FLAGS_RELEASE}")
+set(CMAKE_CXX_FLAGS_PGO_USE "${CMAKE_CXX_FLAGS_RELEASE}")
 
 include(CheckCXXCompilerFlag)
 
