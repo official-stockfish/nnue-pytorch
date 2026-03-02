@@ -104,17 +104,18 @@ set_target_properties(training_data_loader_pgo_gen PROPERTIES
   INSTALL_RPATH "$ORIGIN"
 )
 
-# Actual benchmark target
-add_executable(training_data_loader_bench training_data_loader_bench.cpp)
-target_compile_options(training_data_loader_bench PRIVATE)
-target_compile_definitions(training_data_loader_bench PRIVATE BENCH)
-target_link_libraries(training_data_loader_bench
-  PRIVATE training_data_loader Threads::Threads)
+# Actual benchmark target - only build when not generating profiles
+if(NOT UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
+  add_executable(training_data_loader_bench training_data_loader_bench.cpp)
+  target_compile_definitions(training_data_loader_bench PRIVATE BENCH)
+  target_link_libraries(training_data_loader_bench
+    PRIVATE training_data_loader Threads::Threads)
 
-set_target_properties(training_data_loader_bench PROPERTIES
-  BUILD_RPATH "$ORIGIN"
-  INSTALL_RPATH "$ORIGIN"
-)
+  set_target_properties(training_data_loader_bench PROPERTIES
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
+  )
+endif()
 
 # ---- PGO ----
 

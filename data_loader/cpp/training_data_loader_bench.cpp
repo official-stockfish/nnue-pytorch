@@ -106,6 +106,8 @@ int main(int argc, char** argv) {
         create_sparse_batch_stream("Full_Threats+HalfKAv2_hm", concurrency, file_count, files,
             batch_size, cyclic, config, ddp_config));
 
+
+    long long bytes_before = get_rchar_self();
     auto t0 = std::chrono::high_resolution_clock::now();
 
     for (size_t i = 1; i <= iteration_count; ++i)
@@ -118,8 +120,8 @@ int main(int argc, char** argv) {
         auto t1 = std::chrono::high_resolution_clock::now();
         if (i % 1 == 0)
         {
-            double    sec   = (t1 - t0).count() / 1e9;
-            long long bytes = get_rchar_self();
+            double    sec   = std::chrono::duration<double>(t1 - t0).count();
+            long long bytes = get_rchar_self() - bytes_before;
 
             double mpos = i * batch_size / (sec * 1000 * 1000);
             double its  = i / sec;
