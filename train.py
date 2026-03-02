@@ -279,4 +279,4 @@ def main():
 if __name__ == "__main__":
     main()
     if sys.platform == "win32":
-        os.system(f'wmic process where processid="{os.getpid()}" call terminate >nul')
+        os._exit(0)
