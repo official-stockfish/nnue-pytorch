@@ -93,16 +93,27 @@ add_custom_command(TARGET training_data_loader POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:training_data_loader> "${LIB_COPY_DIR}/"
 )
 
-# Target for pgo generation
-add_executable(training_data_loader_pgo_gen training_data_loader_bench.cpp)
-target_compile_options(training_data_loader_pgo_gen PRIVATE)
-target_link_libraries(training_data_loader_pgo_gen
-  PRIVATE training_data_loader Threads::Threads)
+# pgo generation target
+if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
+  # Target for pgo generation
+  add_executable(training_data_loader_pgo_gen training_data_loader_bench.cpp)
+  target_compile_options(training_data_loader_pgo_gen PRIVATE)
+  target_link_libraries(training_data_loader_pgo_gen
+    PRIVATE training_data_loader Threads::Threads)
 
-set_target_properties(training_data_loader_pgo_gen PROPERTIES
-  BUILD_RPATH "$ORIGIN"
-  INSTALL_RPATH "$ORIGIN"
-)
+  set_target_properties(training_data_loader_pgo_gen PROPERTIES
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
+  )
+
+  add_custom_target(pgo_run
+    COMMAND "$<TARGET_FILE:training_data_loader_pgo_gen>" -i 10 -p 1 "${PGO_INPUT}"
+    DEPENDS training_data_loader_pgo_gen
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running training_data_loader_pgo_gen to generate PGO profiles in ${PGO_PROFILE_DATA_DIR}"
+    VERBATIM
+  )
+endif()
 
 # Actual benchmark target - only build when not generating profiles
 if(NOT UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
@@ -117,7 +128,7 @@ if(NOT UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
   )
 endif()
 
-# ---- PGO ----
+# ---- compile and link option for pgo ----
 
 if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
   file(MAKE_DIRECTORY ${PGO_PROFILE_DATA_DIR})
@@ -132,22 +143,9 @@ if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
   target_link_options(training_data_loader_pgo_gen PRIVATE
     -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
-  add_custom_target(pgo_run
-    COMMAND "$<TARGET_FILE:training_data_loader_pgo_gen>" -i 10 -p 1 "${PGO_INPUT}"
-    DEPENDS training_data_loader_pgo_gen
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Running training_data_loader_pgo_gen to generate PGO profiles in ${PGO_PROFILE_DATA_DIR}"
-    VERBATIM
-  )
-
 elseif(UPPER_BUILD_TYPE MATCHES "^PGO_USE$")
   target_compile_options(training_data_loader PRIVATE
     -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
   target_link_options(training_data_loader PRIVATE
-    -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
-
-  target_compile_options(training_data_loader_pgo_gen PRIVATE
-    -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
-  target_link_options(training_data_loader_pgo_gen PRIVATE
     -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
 endif()

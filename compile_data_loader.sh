@@ -48,7 +48,7 @@ cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DLIB_COPY_DIR="$ROOT_DIR"
 
 echo "Building shared library with profile data (training_data_loader)..."
-cmake --build "$BUILD_DIR" --target training_data_loader
+cmake --build "$BUILD_DIR"
 
 echo "PGO build complete."
 
