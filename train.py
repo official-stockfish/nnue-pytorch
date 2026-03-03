@@ -74,22 +74,24 @@ def make_data_loaders(
     # it currently cannot work in parallel mode but it shouldn't need to
     train = DataLoader(
         data_loader.FixedNumBatchesDataset(
-            train_infinite, (epoch_size + batch_size - 1) // batch_size
+            train_infinite, (epoch_size + batch_size - 1) // batch_size,
+            pin_memory=pin_memory,
         ),
         batch_size=None,
         batch_sampler=None,
-        pin_memory=pin_memory,
+        num_workers=0,
     )
     val = (
         None
         if val_size == 0
         else DataLoader(
             data_loader.FixedNumBatchesDataset(
-                val_infinite, (val_size + batch_size - 1) // batch_size
+                val_infinite, (val_size + batch_size - 1) // batch_size,
+                pin_memory=pin_memory,
             ),
             batch_size=None,
             batch_sampler=None,
-            pin_memory=pin_memory,
+            num_workers=0,
         )
     )
     return train, val
