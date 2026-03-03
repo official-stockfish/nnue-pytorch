@@ -204,12 +204,10 @@ class FixedNumBatchesDataset(Dataset):
                     # Pin memory on worker thread if enabled.
                     if self.pin_memory:
                         item = pin_memory(item)
-                    self._prefetch_queue.put(item, timeout=1.0)
+                    self._safe_put(item, timeout=1.0)
                 except StopIteration:
                     self._safe_put(self, None)
                     break
-                except queue.Full:
-                    continue
         except Exception as e:
             self._safe_put(e)
 
