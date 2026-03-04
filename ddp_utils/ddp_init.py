@@ -49,11 +49,28 @@ def enforce_gpu_numa_affinity():
     except ValueError:
         return get_default_core_count()
 
+    # Map LOCAL_RANK (visible device index) to the system GPU index expected by nvidia-smi.
+    cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if cuda_visible_devices:
+        # CUDA_VISIBLE_DEVICES is a comma-separated list of physical GPU indices.
+        visible_list = [d.strip() for d in cuda_visible_devices.split(",") if d.strip()]
+        # Ensure local_rank is within the range of visible devices.
+        if local_rank < 0 or local_rank >= len(visible_list):
+            return get_default_core_count()
+        try:
+            physical_gpu_index = int(visible_list[local_rank])
+        except ValueError:
+            # Malformed CUDA_VISIBLE_DEVICES entry; fall back safely.
+            return get_default_core_count()
+    else:
+        # No remapping; assume LOCAL_RANK matches the system GPU index.
+        physical_gpu_index = local_rank
+
     try:
         # 1. Fetch PCI Bus ID gracefully
         try:
             pci_bus_id_raw = subprocess.check_output(
-                ["nvidia-smi", "--query-gpu=pci.bus_id", "-i", str(local_rank), "--format=csv,noheader"],
+                ["nvidia-smi", "--query-gpu=pci.bus_id", "-i", str(physical_gpu_index), "--format=csv,noheader"],
                 text=True, stderr=subprocess.DEVNULL
             ).strip().lower()
         except (FileNotFoundError, subprocess.CalledProcessError):
