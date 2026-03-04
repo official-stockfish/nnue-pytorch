@@ -51,10 +51,12 @@ class NNUE(L.LightningModule):
         self.lr = lr
         self.param_index = param_index
         self.compile_backend = compile_backend
+        self._model_compiled = False
 
     def setup(self, stage=None):
-        if self.compile_backend is not None:
+        if self.compile_backend is not None and not self._model_compiled:
             self.model = torch.compile(self.model, backend=self.compile_backend)
+            self._model_compiled = True
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)

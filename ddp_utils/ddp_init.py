@@ -5,18 +5,17 @@ import subprocess
 
 def calculate_optimal_resources(requested_threads: int, requested_workers: int, available_cores: int):
     """Rescales resources to fill the NUMA node without oversubscription."""
-    # Allow some oversubscription if requested, but not more than 4 extra cores.
     usable_cores = max(1, available_cores - 1) # minus one for main thread.
-    usable_cores = min(usable_cores + 4, requested_threads + requested_workers)
 
     if requested_threads < 0:
         requested_threads = usable_cores
-    if requested_workers < 0:
-        requested_workers = usable_cores
 
     # Defaults and safety
     req_t = max(1, requested_threads)
     req_w = max(0, requested_workers)
+
+    # Allow some oversubscription if requested, but not more than 10% extra cores.
+    usable_cores = min(int(usable_cores * 1.1), req_t + req_w)
 
     # Scale both numbers to fit exactly into usable_cores
     scale = min(1.0, usable_cores / (req_t + req_w))

@@ -20,7 +20,7 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfi
     """List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (Use device 0 only)."""
 
     pin_memory: bool = True
-    """Whether to use pin_memory=True for DataLoader. Should generally be left on unless you encounter issues with too much RAM usage."""
+    """Whether to use pin memory in the data pipeline. Should generally be left on unless you encounter issues with too much RAM usage."""
 
     max_epochs: int = 800
     """Maximum number of epochs to train for. Default 800."""

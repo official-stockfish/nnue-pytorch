@@ -3,11 +3,18 @@ import queue
 
 import torch
 from torch.utils.data import Dataset
-from torch.utils.data._utils.pin_memory import pin_memory
 
 from . import stream
 from .config import DataloaderSkipConfig, DataloaderDDPConfig
 
+def _recursive_pin(obj):
+    if isinstance(obj, torch.Tensor):
+        return obj.pin_memory()
+    elif isinstance(obj, dict):
+        return {k: _recursive_pin(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return type(obj)(_recursive_pin(v) for v in obj)
+    return obj
 
 class FenBatchProvider:
     def __init__(
@@ -213,10 +220,10 @@ class FixedNumBatchesDataset(Dataset):
                     item = next(self.iter)
                     # Pin memory on worker thread if enabled.
                     if self.pin_memory:
-                        item = pin_memory(item)
-                    self._safe_put(item, timeout=1.0)
+                        item = _recursive_pin(item)
+                    self._safe_put(item)
                 except StopIteration:
-                    self._safe_put(self, None)
+                    self._safe_put(None)
                     break
         except Exception as e:
             self._safe_put(e)

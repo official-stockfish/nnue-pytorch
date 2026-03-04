@@ -710,7 +710,7 @@ struct FenBatchStream: Stream<FenBatch> {
                 {
                     std::unique_lock lock(m_stream_mutex);
                     BaseType::m_stream->fill(entries, m_batch_size);
-                    if (m_stop_flag.load() ||entries.empty())
+                    if (m_stop_flag.load() || entries.empty())
                     {
                         break;
                     }
