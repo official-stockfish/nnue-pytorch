@@ -27,7 +27,12 @@ class FenBatchProvider:
 
         if batch_size:
             self.stream = stream.create_fen_batch_stream(
-                self.num_workers, [self.filename], batch_size, cyclic, config, ddp_config
+                self.num_workers,
+                [self.filename],
+                batch_size,
+                cyclic,
+                config,
+                ddp_config,
             )
         else:
             # doesnt work yet
@@ -94,7 +99,12 @@ class TrainingDataProvider:
             )
         else:
             self.stream = self.create_stream(
-                self.feature_set, self.num_workers, self.filenames, cyclic, config, ddp_config
+                self.feature_set,
+                self.num_workers,
+                self.filenames,
+                cyclic,
+                config,
+                ddp_config,
             )
 
     def __iter__(self):
