@@ -28,6 +28,7 @@ g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
 #include <string>
 #include <thread>
 #include <filesystem>
+#include <vector>
 
 #include "training_data_loader_abi.h"
 
