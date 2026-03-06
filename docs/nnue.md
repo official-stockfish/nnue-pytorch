@@ -3000,7 +3000,7 @@ Same as "SFNNv12" with L2 size increased to 32.
 
 ### "SFNNv12" architecture
 
-Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 60144 indices.
+Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 82672 indices.
 
 2026-02-12 - 2026-02-18
 
@@ -3010,7 +3010,7 @@ Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 6014
 
 ### "SFNNv11" architecture
 
-Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 66864 indices.
+Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 89392 indices.
 
 2026-02-04 - 2026-02-12
 
