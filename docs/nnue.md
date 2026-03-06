@@ -130,6 +130,9 @@ What this document DOES NOT contain:
     + [A part of the feature transformer directly forwarded to the output.](#a-part-of-the-feature-transformer-directly-forwarded-to-the-output)
     + [Multiple PSQT outputs and multiple subnetworks](#multiple-psqt-outputs-and-multiple-subnetworks)
 * [Historical Stockfish evaluation network architectures](#historical-stockfish-evaluation-network-architectures)
+    + ["SFNNv13" architecture](#sfnnv13-architecture)
+    + ["SFNNv12" architecture](#sfnnv12-architecture)
+    + ["SFNNv11" architecture](#sfnnv11-architecture)
     + ["SFNNv10" architecture](#sfnnv10-architecture)
     + ["SFNNv9" architecture](#sfnnv9-architecture)
     + ["SFNNv8" architecture](#sfnnv8-architecture)
@@ -2985,15 +2988,45 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 ## Historical Stockfish evaluation network architectures
 
+### "SFNNv13" architecture
+
+Same as "SFNNv12" with L2 size increased to 32.
+
+2026-02-18 - *
+
+[Commit a6d055d7e27ab3e29a42e8b94215102824760057](https://github.com/official-stockfish/Stockfish/commit/a6d055d7e27ab3e29a42e8b94215102824760057)
+
+![](img/SFNNv13_architecture_detailed_v2.svg)
+
+### "SFNNv12" architecture
+
+Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 82672 indices.
+
+2026-02-12 - 2026-02-18
+
+[Commit 83e42045a62c3690a6ee29862679403ea1644728](https://github.com/official-stockfish/Stockfish/commit/83e42045a62c3690a6ee29862679403ea1644728)
+
+![](img/SFNNv12_architecture_detailed_v2.svg)
+
+### "SFNNv11" architecture
+
+Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 89392 indices.
+
+2026-02-04 - 2026-02-12
+
+[Commit fac506bdf3f0ed46fd0823ff1ed592824f91aa5a](https://github.com/official-stockfish/Stockfish/commit/fac506bdf3f0ed46fd0823ff1ed592824f91aa5a)
+
+![](img/SFNNv11_architecture_detailed_v2.svg)
+
 ### "SFNNv10" architecture
 
-Same as "SFNNv5" with Full_Threat input features added and the feature transformer quantized one changed to 255.
+Same as "SFNNv5" with FullThreats+HalfKAv2_hm input features, L1 size reduced to 1024, and 255 as the feature transformer quantization scale.
 
-2025-11-12 - *
+2025-11-12 - 2026-02-04
 
 [Commit 8e5392d79a36aba5b997cf6fb590937e3e624e80](https://github.com/official-stockfish/Stockfish/commit/8e5392d79a36aba5b997cf6fb590937e3e624e80)
 
-Image coming soon!
+![](img/SFNNv10_architecture_detailed_v2.svg)
 
 ### "SFNNv9" architecture
 
