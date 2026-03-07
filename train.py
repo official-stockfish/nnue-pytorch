@@ -115,8 +115,16 @@ def main():
 
     loss_params = args.loss_config
 
-    loss_params.start_lambda = loss_params.start_lambda or loss_params.lambda_
-    loss_params.end_lambda = loss_params.end_lambda or loss_params.lambda_
+     loss_params.start_lambda = (
+        loss_params.start_lambda
+        if loss_params.start_lambda is not None
+        else loss_params.lambda_
+    )
+    loss_params.end_lambda = (
+        loss_params.end_lambda
+        if loss_params.end_lambda is not None
+        else loss_params.lambda_
+    )
 
     global_batch_size_requested = args.batch_size
     if global_batch_size_requested <= 0:
