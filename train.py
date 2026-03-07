@@ -115,7 +115,7 @@ def main():
 
     loss_params = args.loss_config
 
-     loss_params.start_lambda = (
+    loss_params.start_lambda = (
         loss_params.start_lambda
         if loss_params.start_lambda is not None
         else loss_params.lambda_
