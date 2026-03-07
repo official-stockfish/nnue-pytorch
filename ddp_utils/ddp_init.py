@@ -3,7 +3,6 @@ import sys
 import subprocess
 import math
 import pathlib
-import glob
 
 def _get_numa_node_robust(pci_raw: str) -> int:
     if not pci_raw:
@@ -45,7 +44,8 @@ def _get_numa_node_robust(pci_raw: str) -> int:
     base_sys_path = pathlib.Path("/sys/bus/pci/devices")
 
     for cid in dict.fromkeys(candidates): # Deduplicate while preserving order
-        if not cid: continue
+        if not cid:
+            continue
         node_file = base_sys_path / cid / "numa_node"
         if node_file.exists():
             try:

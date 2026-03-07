@@ -73,7 +73,7 @@ class NNUE(L.LightningModule):
         elif not is_compiled and has_prefix:
             for k, v in state_dict.items():
                 new_key = k.replace("model._orig_mod.", "model.", 1)
-            new_state_dict[new_key] = v
+                new_state_dict[new_key] = v
         else:
             return
 

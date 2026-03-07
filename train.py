@@ -256,8 +256,11 @@ def main():
         num_sanity_val_steps=0,
     )
 
-    print("Set torch num_threads to {} threads.".format(actual_threads))
-    t_set_num_threads(actual_threads)
+    if actual_threads > 0:
+        print("Set torch num_threads to {} threads.".format(actual_threads))
+        t_set_num_threads(actual_threads)
+    else:
+        print("Using default torch num_threads setting.", flush=True)
     print(f"Using {actual_workers} workers for C++ data loader.", flush=True)
     train, val = make_data_loaders(
         train_datasets,
