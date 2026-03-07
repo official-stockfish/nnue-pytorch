@@ -23,20 +23,6 @@ class DataloaderSkipConfig:
     pc_y3: float = 1.0
     """Piecewise quadratic interpolation y3 parameter."""
 
-    @staticmethod
-    def get_dataloader_skip_config_from_args(args) -> "DataloaderSkipConfig":
-        return DataloaderSkipConfig(
-            filtered=args.filtered,
-            random_fen_skipping=args.random_fen_skipping,
-            wld_filtered=args.wld_filtered,
-            early_fen_skipping=args.early_fen_skipping,
-            simple_eval_skipping=args.simple_eval_skipping,
-            param_index=args.param_index,
-            pc_y1=args.pc_y1,
-            pc_y2=args.pc_y2,
-            pc_y3=args.pc_y3,
-        )
-
 
 @dataclass
 class DataloaderDDPConfig:
