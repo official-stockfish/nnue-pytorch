@@ -422,49 +422,33 @@ struct SparseBatch {
     int* psqt_indices;
     int* layer_stack_indices;
 
-    char* m_memory_block;
-
     SparseBatch(const IFeatureExtractor&              feature_set,
                 const std::vector<TrainingDataEntry>& entries) noexcept {
-        // IMPORTANT: DO NOT change alignment and prefill if you are unsure about the consequences.
         num_inputs          = feature_set.inputs();
         size                = entries.size();
         max_active_features = feature_set.max_active_features();
 
+        is_white            = new float[size];
+        outcome             = new float[size];
+        score               = new float[size];
+        white               = new int[size * max_active_features];
+        black               = new int[size * max_active_features];
+        white_values        = new float[size * max_active_features];
+        black_values        = new float[size * max_active_features];
+        psqt_indices        = new int[size];
+        layer_stack_indices = new int[size];
+
         num_active_white_features = 0;
         num_active_black_features = 0;
 
-        // 1. Calculate aligned sizes to ensure cache-line alignment and prevent UB
-        auto align_up = [](size_t v) { return (v + 63) & ~63; };
-
-        size_t sz_float      = align_up(size * sizeof(float));
-        size_t sz_int        = align_up(size * sizeof(int));
-        size_t sz_feat_int   = align_up(size * max_active_features * sizeof(int));
-        size_t sz_feat_float = align_up(size * max_active_features * sizeof(float));
-
-        size_t total_size = (sz_float * 3) + (sz_int * 2) + (sz_feat_int * 2) + (sz_feat_float * 2);
-
-        m_memory_block = new char[total_size];
-        char* ptr = m_memory_block;
-
-        is_white = reinterpret_cast<float*>(ptr); ptr += sz_float;
-        outcome  = reinterpret_cast<float*>(ptr); ptr += sz_float;
-        score    = reinterpret_cast<float*>(ptr); ptr += sz_float;
-
-        white = reinterpret_cast<int*>(ptr); ptr += sz_feat_int;
-        black = reinterpret_cast<int*>(ptr); ptr += sz_feat_int;
-
-        white_values = reinterpret_cast<float*>(ptr); ptr += sz_feat_float;
-        black_values = reinterpret_cast<float*>(ptr); ptr += sz_feat_float;
-
-        psqt_indices = reinterpret_cast<int*>(ptr); ptr += sz_int;
-        layer_stack_indices = reinterpret_cast<int*>(ptr);
-
-        // 3. Vectorize initialization (replaces 4 separate, slow loops)
-        std::fill_n(white, size * max_active_features, -1);
-        std::fill_n(black, size * max_active_features, -1);
-        std::fill_n(white_values, size * max_active_features, 0.0f);
-        std::fill_n(black_values, size * max_active_features, 0.0f);
+        for (int i = 0; i < size * max_active_features; ++i)
+            white[i] = -1;
+        for (int i = 0; i < size * max_active_features; ++i)
+            black[i] = -1;
+        for (int i = 0; i < size * max_active_features; ++i)
+            white_values[i] = 0.0f;
+        for (int i = 0; i < size * max_active_features; ++i)
+            black_values[i] = 0.0f;
 
         for (int i = 0; i < size; ++i)
         {
@@ -473,11 +457,19 @@ struct SparseBatch {
     }
 
     ~SparseBatch() {
-        delete[] m_memory_block;
+        delete[] is_white;
+        delete[] outcome;
+        delete[] score;
+        delete[] white;
+        delete[] black;
+        delete[] white_values;
+        delete[] black_values;
+        delete[] psqt_indices;
+        delete[] layer_stack_indices;
     }
 
-private:
-    void fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
+   private:
+    void fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) noexcept {
         is_white[i]            = static_cast<float>(e.pos.sideToMove() == Color::White);
         outcome[i]             = (e.result + 1.0f) / 2.0f;
         score[i]               = e.score;
@@ -486,7 +478,7 @@ private:
         fill_features(fs, i, e);
     }
 
-    void fill_features(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
+    void fill_features(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) noexcept {
         const int offset = i * max_active_features;
         num_active_white_features +=
           fs.fill_features_sparse(e, white + offset, white_values + offset, Color::White).first;
