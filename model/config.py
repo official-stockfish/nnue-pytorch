@@ -62,18 +62,3 @@ class LossParams:
     """weight boost parameter 2 (default=0.5)"""
     lambda_: Annotated[float, tyro.conf.arg(name="lambda")] = 1.0
     """1.0=train on evaluations, 0.0=train on game results, interpolates between (default=1.0)."""
-
-    @staticmethod
-    def get_loss_params_from_args(args) -> "LossParams":
-        params = LossParams()
-        params.in_offset = args.in_offset
-        params.out_offset = args.out_offset
-        params.in_scaling = args.in_scaling
-        params.out_scaling = args.out_scaling
-        params.start_lambda = args.start_lambda or args.lambda_
-        params.end_lambda = args.end_lambda or args.lambda_
-        params.pow_exp = args.pow_exp
-        params.qp_asymmetry = args.qp_asymmetry
-        params.w1 = args.w1
-        params.w2 = args.w2
-        return params
