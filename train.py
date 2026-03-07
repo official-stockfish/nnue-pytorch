@@ -108,7 +108,9 @@ def main():
     train_datasets = datasets
     val_datasets = train_datasets
 
-    if (args.start_lambda is not None) != (args.end_lambda is not None):
+    if (args.loss_config.start_lambda is not None) != (
+        args.loss_config.end_lambda is not None
+    ):
         raise Exception(
             "Either both or none of start_lambda and end_lambda must be specified."
         )
@@ -153,7 +155,7 @@ def main():
 
     feature_name = args.features
 
-    loss_params = M.LossParams.get_loss_params_from_args(args)
+    loss_params = args.loss_config
     print("Loss parameters:")
     print(loss_params)
 
@@ -170,8 +172,8 @@ def main():
             num_batches_per_epoch=num_batches_per_epoch,
             gamma=args.gamma,
             lr=args.lr,
-            param_index=args.param_index,
-            config=M.ModelConfig.get_model_config(args),
+            param_index=args.dataloader_config.param_index,
+            config=args.model_config,
             quantize_config=M.QuantizationConfig(),
         )
     else:
@@ -189,7 +191,7 @@ def main():
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
         nnue.lr = args.lr
-        nnue.param_index = args.param_index
+        nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
     print("Feature set: {}".format(feature_name))
@@ -201,17 +203,7 @@ def main():
     L.seed_everything(args.seed)
     print("Seed {}".format(args.seed))
 
-    print("Smart fen skipping: {}".format(args.filtered))
-    print("WLD fen skipping: {}".format(args.wld_filtered))
-    print("Random fen skipping: {}".format(args.random_fen_skipping))
-    print("Skip early plies: {}".format(args.early_fen_skipping))
-    print("Skip simple eval : {}".format(args.simple_eval_skipping))
-    print("Param index: {}".format(args.param_index))
-    print("piececount param y1 : {}".format(args.pc_y1))
-    print("piececount param y2 : {}".format(args.pc_y2))
-    print("piececount param y3 : {}".format(args.pc_y3))
-    print("Weighting param w1 : {}".format(args.w1))
-    print("Weighting param w2 : {}".format(args.w2))
+    print(args.dataloader_config)
 
     if args.threads > 0:
         print("limiting torch to {} threads.".format(args.threads))
@@ -262,7 +254,7 @@ def main():
         input_feature_name,
         args.num_workers,
         per_gpu_batch_size,
-        data_loader.DataloaderSkipConfig.get_dataloader_skip_config_from_args(args),
+        args.dataloader_config,
         args.epoch_size,
         args.validation_size,
     )
