@@ -113,6 +113,11 @@ def main():
             "Either both or none of start_lambda and end_lambda must be specified."
         )
 
+    loss_params = args.loss_config
+
+    loss_params.start_lambda = loss_params.start_lambda or loss_params.lambda_
+    loss_params.end_lambda = loss_params.end_lambda or loss_params.lambda_
+
     global_batch_size_requested = args.batch_size
     if global_batch_size_requested <= 0:
         global_batch_size_requested = 16384
@@ -153,7 +158,6 @@ def main():
 
     feature_name = args.features
 
-    loss_params = args.loss_config
     print("Loss parameters:")
     print(loss_params)
 
