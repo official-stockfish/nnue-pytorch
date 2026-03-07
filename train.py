@@ -53,6 +53,7 @@ def make_data_loaders(
     epoch_size,
     val_size,
     pin_memory,
+    queue_size_limit,
 ):
     # Epoch and validation sizes are arbitrary
     features_name = feature_name
@@ -75,6 +76,7 @@ def make_data_loaders(
         data_loader.FixedNumBatchesDataset(
             train_infinite, (epoch_size + batch_size - 1) // batch_size,
             pin_memory=pin_memory,
+            queue_size_limit=queue_size_limit,
         ),
         batch_size=None,
         batch_sampler=None,
@@ -87,6 +89,7 @@ def make_data_loaders(
             data_loader.FixedNumBatchesDataset(
                 val_infinite, (val_size + batch_size - 1) // batch_size,
                 pin_memory=pin_memory,
+                queue_size_limit=queue_size_limit,
             ),
             batch_size=None,
             batch_sampler=None,
@@ -271,7 +274,8 @@ def main():
         data_loader.DataloaderSkipConfig.get_dataloader_skip_config_from_args(args),
         args.epoch_size,
         args.validation_size,
-        args.pin_memory,
+        pin_memory=args.pin_memory,
+        queue_size_limit=args.data_loader_queue_size,
     )
 
     if args.resume_from_checkpoint:
