@@ -12,7 +12,6 @@ from lightning.pytorch import loggers as pl_loggers
 from lightning.pytorch.callbacks import TQDMProgressBar, Callback, ModelCheckpoint
 
 import data_loader
-from ddp_utils import calculate_optimal_resources, enforce_gpu_numa_affinity
 import model as M
 import tyro
 
@@ -98,11 +97,8 @@ def make_data_loaders(
 
 
 def main():
-    available_cores = enforce_gpu_numa_affinity()
-
     args = tyro.cli(TrainingConfig)
-    actual_threads, actual_workers = calculate_optimal_resources(
-        args.threads, args.num_workers, available_cores)
+    actual_threads, actual_workers = args.threads, args.num_workers
 
     datasets = args.datasets
     val_datasets = args.validation_datasets

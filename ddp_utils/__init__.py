@@ -1,6 +1,5 @@
-from .ddp_init import calculate_optimal_resources, enforce_gpu_numa_affinity
+from .ddp_init import setup_environment
 
 __all__ = [
-    "calculate_optimal_resources",
-    "enforce_gpu_numa_affinity",
+    "setup_environment",
 ]
