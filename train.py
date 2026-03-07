@@ -166,10 +166,14 @@ def main():
         nnue = M.NNUE(
             feature_name=feature_name,
             loss_params=loss_params,
+            optimizer_name=args.optimizer_name,
             max_epoch=max_epoch,
             num_batches_per_epoch=num_batches_per_epoch,
             gamma=args.gamma,
+            ft_weight_decay=args.ft_weight_decay,
+            dense_weight_decay=args.dense_weight_decay,
             lr=args.lr,
+            warmup_steps=args.warmup_steps,
             param_index=args.param_index,
             config=M.ModelConfig.get_model_config(args),
             quantize_config=M.QuantizationConfig(),
@@ -190,6 +194,8 @@ def main():
         nnue.gamma = args.gamma
         nnue.lr = args.lr
         nnue.param_index = args.param_index
+        nnue.ft_weight_decay = args.ft_weight_decay
+        nnue.dense_weight_decay = args.dense_weight_decay
 
     input_feature_name = nnue.model.input_feature_name
     print("Feature set: {}".format(feature_name))

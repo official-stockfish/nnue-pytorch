@@ -5,11 +5,12 @@ from tyro.conf import UseAppendAction, FlagConversionOff, Positional
 
 from data_loader.config import DataloaderSkipConfig
 from model.config import LossParams, ModelConfig
+from model.optimizers.optimizer_config import OptimizerConfig
 from model.modules.features import FeatureConfig
 
 
 @dataclass
-class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfig):
+class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfig, OptimizerConfig):
     datasets: Positional[list[str]] = field(default_factory=list)
     """Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if no validation data is specified."""
 
@@ -27,12 +28,6 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfi
 
     validation_datasets: UseAppendAction[Tuple[str, ...]] = ()
     """Validation data to use for validation instead of the training data."""
-
-    gamma: float = 0.992
-    """Multiplicative factor applied to the learning rate after every epoch."""
-
-    lr: float = 8.75e-4
-    """Initial learning rate."""
 
     num_workers: int = 1
     """Number of worker threads to use for data loading. Currently only works well for binpack."""
