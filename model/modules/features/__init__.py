@@ -27,7 +27,7 @@ def get_available_features() -> list[str]:
     return list(_FEATURE_COMPONENTS.keys())
 
 
-@dataclass
+@dataclass(kw_only=True)
 class FeatureConfig:
     features: Annotated[
         str,

@@ -35,7 +35,9 @@ import argparse
 import copy
 from dataclasses import dataclass
 import time
-from typing import Callable, Generator, TypeAlias
+from typing import Callable, Generator, TypeAlias, Annotated, Union
+
+import tyro
 
 import chess
 import cupy as cp
@@ -61,6 +63,81 @@ Algorithm by Daniel Monroe. Github @Ergodice.
 
 ZERO_BLOCK_SIZE = 4
 VERBOSE = False
+
+
+@dataclass
+class GatherConfig(M.ModelConfig, M.FeatureConfig):
+    data: str
+    """
+    path to a .bin or .binpack dataset
+    """
+    out: str
+    """
+    Filename under which to save the resulting ft matrix
+    """
+    net: str | None = None
+    """
+    path to a .nnue net
+    """
+    checkpoint: str | None = None
+    """
+    Optional checkpoint (used instead of nnue for local eval)
+    """
+    count: int = 1000
+    """
+    number of datapoints to process
+    """
+
+
+@dataclass
+class FindPermConfig:
+    data: str
+    """
+    path to the previously gathered ft activation data
+    """
+    out: str
+    """
+    path to where to save the permutation"""
+
+
+@dataclass
+class EvalPermConfig:
+    data: str
+    """
+    path to the previously gathered ft activation data
+    """
+    perm: str
+    """
+    path to the previously generated perm file"""
+
+
+@dataclass
+class FeaturePermutationConfig:
+    subcommand: Annotated[
+        Union[
+            Annotated[
+                GatherConfig,
+                tyro.conf.subcommand("gather", prefix_name=False),
+            ],
+            Annotated[
+                FindPermConfig,
+                tyro.conf.subcommand("find_perm", prefix_name=False),
+            ],
+            Annotated[
+                EvalPermConfig,
+                tyro.conf.subcommand("eval_perm", prefix_name=False),
+            ],
+        ],
+        tyro.conf.arg(name=""),
+    ]
+    use_cupy: bool = True
+    """
+    Cupy uses significant amounts of VRAM. Set to False to use numpy instead, which will be slower.
+    """
+    device: int = 0
+    """
+    Device to use for cupy
+    """
 
 
 def batched(arr: npt.NDArray, batch_size: int) -> Generator[npt.NDArray, None, None]:
@@ -580,21 +657,20 @@ def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bo
     return np.concatenate(actmats, axis=0)
 
 
-def command_gather(args: argparse.Namespace) -> None:
-    feature_name = args.features
+def command_gather(args: GatherConfig) -> None:
     if args.checkpoint:
         nnue = NNUE.load_from_checkpoint(
             args.checkpoint,
-            feature_name=feature_name,
-            config=M.ModelConfig.get_model_config(args),
+            feature_name=args.features,
+            config=args,
             quantize_config=QuantizationConfig(),
         )
         model = nnue.model
     else:
         model = read_model(
             args.net,
-            feature_name,
-            M.ModelConfig.get_model_config(args),
+            args.features,
+            args,
             QuantizationConfig(),
         )
 
@@ -683,68 +759,18 @@ def set_cupy_device(device: int) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="")
-    parser.add_argument(
-        "--no-cupy",
-        action="store_false",
-        dest="use_cupy",
-        help="Disable CUPY usage if not enough GPU memory is available. This will use numpy instead, which is slower.",
-    )
-    parser.add_argument(
-        "--device", type=int, default="0", help="Device to use for cupy"
-    )
-    subparsers = parser.add_subparsers()
+    cfg = tyro.cli(FeaturePermutationConfig)
 
-    parser_gather = subparsers.add_parser("gather", help="a help")
-    parser_gather.add_argument("--net", type=str, help="path to a .nnue net")
-    parser_gather.add_argument(
-        "--data", type=str, help="path to a .bin or .binpack dataset"
-    )
-    parser_gather.add_argument(
-        "--checkpoint",
-        type=str,
-        help="Optional checkpoint (used instead of nnue for local eval)",
-    )
-    parser_gather.add_argument(
-        "--count", type=int, default=1000, help="number of datapoints to process"
-    )
-    parser_gather.add_argument(
-        "--out", type=str, help="Filename under which to save the resulting ft matrix"
-    )
+    if cfg.use_cupy:
+        set_cupy_device(cfg.device)
 
-    M.ModelConfig.add_model_args(parser_gather)
-    M.add_feature_args(parser_gather)
-
-    parser_gather.set_defaults(func=command_gather)
-
-    parser_gather = subparsers.add_parser("find_perm", help="a help")
-    parser_gather.add_argument(
-        "--data", type=str, help="path to the previously gathered ft activation data"
-    )
-    parser_gather.add_argument(
-        "--out", type=str, help="path to where to save the permutation"
-    )
-    parser_gather.set_defaults(func=command_find_perm)
-
-    parser_gather = subparsers.add_parser("eval_perm", help="a help")
-    parser_gather.add_argument(
-        "--data", type=str, help="path to the previously gathered ft activation data"
-    )
-    parser_gather.add_argument(
-        "--perm", type=str, help="path to the previously generated perm file"
-    )
-    parser_gather.set_defaults(func=command_eval_perm)
-
-    args = parser.parse_args()
-
-    if args.use_cupy:
-        if args.device is not None:
-            set_cupy_device(args.device)
-
-    if hasattr(args, "func"):
-        args.func(args)
-    else:
-        parser.print_help()
+    match cfg.subcommand:
+        case GatherConfig():
+            command_gather(cfg.subcommand)
+        case FindPermConfig():
+            command_find_perm(cfg.subcommand)
+        case EvalPermConfig():
+            command_eval_perm(cfg.subcommand)
 
 
 if __name__ == "__main__":
