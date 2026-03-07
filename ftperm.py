@@ -31,7 +31,6 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --
 
 """
 
-import argparse
 import copy
 from dataclasses import dataclass
 import time
@@ -66,7 +65,7 @@ VERBOSE = False
 
 
 @dataclass
-class GatherConfig(M.ModelConfig, M.FeatureConfig):
+class GatherConfig:
     data: str
     """
     path to a .bin or .binpack dataset
@@ -112,7 +111,7 @@ class EvalPermConfig:
 
 
 @dataclass
-class FeaturePermutationConfig:
+class FeaturePermutationConfig(M.ModelConfig, M.FeatureConfig):
     subcommand: Annotated[
         Union[
             Annotated[
@@ -657,18 +656,20 @@ def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bo
     return np.concatenate(actmats, axis=0)
 
 
-def command_gather(args: GatherConfig) -> None:
-    if args.checkpoint:
+def command_gather(args: FeaturePermutationConfig) -> None:
+    assert isinstance(args.subcommand, GatherConfig)
+    if args.subcommand.checkpoint:
         nnue = NNUE.load_from_checkpoint(
-            args.checkpoint,
+            args.subcommand.checkpoint,
             feature_name=args.features,
             config=args,
             quantize_config=QuantizationConfig(),
         )
         model = nnue.model
     else:
+        assert args.subcommand.net is not None
         model = read_model(
-            args.net,
+            args.subcommand.net,
             args.features,
             args,
             QuantizationConfig(),
@@ -676,9 +677,9 @@ def command_gather(args: GatherConfig) -> None:
 
     model.eval()
 
-    actmat = gather_impl(model, args.data, args.count)
+    actmat = gather_impl(model, args.subcommand.data, args.subcommand.count)
 
-    with open(args.out, "wb") as file:
+    with open(args.subcommand.out, "wb") as file:  # was: args.out
         np.save(file, actmat)
 
 
@@ -702,12 +703,13 @@ def eval_perm_impl(
         print(f"Combined zeros in perm matrix: {perm_act_mat_eval * 100:0.6f}")
 
 
-def command_eval_perm(args: argparse.Namespace) -> None:
-    with open(args.data, "rb") as file:
+def command_eval_perm(args: FeaturePermutationConfig) -> None:
+    assert isinstance(args.subcommand, EvalPermConfig)
+    with open(args.subcommand.data, "rb") as file:
         actmat = np.load(file)
 
-    if args.perm is not None:
-        with open(args.perm, "rb") as file:
+    if args.subcommand.perm is not None:
+        with open(args.subcommand.perm, "rb") as file:
             perm = np.load(file)
     else:
         perm = None
@@ -715,14 +717,15 @@ def command_eval_perm(args: argparse.Namespace) -> None:
     eval_perm_impl(actmat, perm)
 
 
-def command_find_perm(args: argparse.Namespace) -> None:
-    with open(args.data, "rb") as file:
+def command_find_perm(args: FeaturePermutationConfig) -> None:
+    assert isinstance(args.subcommand, FindPermConfig)
+    with open(args.subcommand.data, "rb") as file:
         actmat = np.load(file)
 
-    perm = find_perm_impl(actmat, args.use_cupy, args.l1)
+    perm = find_perm_impl(actmat, args.use_cupy, args.L1)
 
     # perm = np.random.permutation([i for i in range(L1)])
-    with open(args.out, "wb") as file:
+    with open(args.subcommand.out, "wb") as file:
         np.save(file, perm)
 
 
@@ -766,11 +769,11 @@ def main() -> None:
 
     match cfg.subcommand:
         case GatherConfig():
-            command_gather(cfg.subcommand)
+            command_gather(cfg)
         case FindPermConfig():
-            command_find_perm(cfg.subcommand)
+            command_find_perm(cfg)
         case EvalPermConfig():
-            command_eval_perm(cfg.subcommand)
+            command_eval_perm(cfg)
 
 
 if __name__ == "__main__":
