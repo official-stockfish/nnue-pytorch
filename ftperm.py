@@ -96,7 +96,8 @@ class FindPermConfig:
     """
     out: str
     """
-    path to where to save the permutation"""
+    path to where to save the permutation
+    """
 
 
 @dataclass
