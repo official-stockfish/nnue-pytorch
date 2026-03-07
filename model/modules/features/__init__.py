@@ -27,15 +27,16 @@ def get_available_features() -> list[str]:
     return list(_FEATURE_COMPONENTS.keys())
 
 
-@dataclass
+@dataclass(kw_only=True)
 class FeatureConfig:
     features: Annotated[
         str,
         tyro.conf.arg(
             help="The feature set to use. Available: "
             + ", ".join(get_available_features())
+            + ". Combine with +, e.g. Full_Threats+HalfKAv2_hm^"
         ),
-    ] = "HalfKAv2_hm^"
+    ] = "Full_Threats+HalfKAv2_hm^"
 
 
 def add_feature_args(parser: argparse.ArgumentParser) -> None:

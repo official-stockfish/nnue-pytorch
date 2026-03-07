@@ -5,7 +5,7 @@ import tyro
 
 
 # 3 layer fully connected network
-@dataclass
+@dataclass(kw_only=True)
 class ModelConfig:
     L1: Annotated[int, tyro.conf.arg(name="l1")] = 1024
     """Size of first hidden layer."""
