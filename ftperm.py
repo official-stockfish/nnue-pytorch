@@ -105,7 +105,7 @@ class EvalPermConfig:
     """
     path to the previously gathered ft activation data
     """
-    perm: str
+    perm: str | None = None
     """
     path to the previously generated perm file"""
 
