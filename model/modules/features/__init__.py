@@ -34,8 +34,9 @@ class FeatureConfig:
         tyro.conf.arg(
             help="The feature set to use. Available: "
             + ", ".join(get_available_features())
+            + ". Combine with +, e.g. Full_Threats+HalfKAv2_hm^"
         ),
-    ] = "HalfKAv2_hm^"
+    ] = "Full_Threats+HalfKAv2_hm^"
 
 
 def add_feature_args(parser: argparse.ArgumentParser) -> None:
