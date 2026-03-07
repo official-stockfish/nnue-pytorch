@@ -544,7 +544,7 @@ struct FeaturedBatchStream: Stream<SparseBatch> {
                 {
                     std::unique_lock lock(m_stream_mutex);
                     BaseType::m_stream->fill(entries, m_batch_size);
-                    if (entries.empty())
+                    if (m_stop_flag.load() || entries.empty())
                     {
                         break;
                     }
@@ -604,6 +604,7 @@ struct FeaturedBatchStream: Stream<SparseBatch> {
     ~FeaturedBatchStream() {
         m_stop_flag.store(true);
         m_batches_not_full.notify_all();
+        m_batches_any.notify_all();
 
         for (auto& worker : m_workers)
         {
@@ -715,7 +716,7 @@ struct FenBatchStream: Stream<FenBatch> {
                 {
                     std::unique_lock lock(m_stream_mutex);
                     BaseType::m_stream->fill(entries, m_batch_size);
-                    if (entries.empty())
+                    if (m_stop_flag.load() || entries.empty())
                     {
                         break;
                     }
@@ -730,10 +731,8 @@ struct FenBatchStream: Stream<FenBatch> {
                     });
 
                     m_batches.emplace_back(batch);
-
-                    lock.unlock();
-                    m_batches_any.notify_one();
                 }
+                m_batches_any.notify_one();
             }
             m_num_workers.fetch_sub(1);
             m_batches_any.notify_one();
@@ -775,6 +774,7 @@ struct FenBatchStream: Stream<FenBatch> {
     ~FenBatchStream() {
         m_stop_flag.store(true);
         m_batches_not_full.notify_all();
+        m_batches_any.notify_all();
 
         for (auto& worker : m_workers)
         {
