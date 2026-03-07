@@ -16,24 +16,7 @@
 #include "lib/nnue_training_data_stream.h"
 #include "lib/rng.h"
 
-#if defined(__x86_64__)
-    #define EXPORT
-    #define CDECL
-#else
-    #if defined(_MSC_VER)
-        #define EXPORT __declspec(dllexport)
-        #define CDECL __cdecl
-    #else
-        #define EXPORT
-        #define CDECL __attribute__((__cdecl__))
-    #endif
-#endif
-
-#if defined(__GNUC__) || defined(__clang__)
-    #define NNUE_COLD __attribute__((cold))
-#else
-    #define NNUE_COLD
-#endif
+#include "training_data_loader_structs.h"
 
 using namespace binpack;
 using namespace chess;
@@ -804,21 +787,6 @@ struct FenBatchStream: Stream<FenBatch> {
     std::vector<std::thread> m_workers;
 };
 
-struct DataloaderSkipConfig {
-    bool   filtered;
-    int    random_fen_skipping;
-    bool   wld_filtered;
-    int    early_fen_skipping;
-    int    simple_eval_skipping;
-    int    param_index;
-    double pc_y1, pc_y2, pc_y3;
-};
-
-struct DataloaderDDPConfig {
-    int rank;
-    int world_size;
-};
-
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
     if (config.filtered || config.random_fen_skipping || config.wld_filtered
         || config.early_fen_skipping)
@@ -946,9 +914,12 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
     return nullptr;
 }
 
-extern "C" {
 
-EXPORT SparseBatch* get_sparse_batch_from_fens(const char*        feature_set_c,
+
+// External API
+#include "training_data_loader_abi.h"
+
+NNUE_API SparseBatch* CDECL get_sparse_batch_from_fens(const char*        feature_set_c,
                                                int                num_fens,
                                                const char* const* fens,
                                                int*               scores,
@@ -973,7 +944,7 @@ EXPORT SparseBatch* get_sparse_batch_from_fens(const char*        feature_set_c,
 }
 
 // changing the signature needs matching changes in data_loader/_native.py
-EXPORT FenBatchStream* CDECL create_fen_batch_stream(int                  concurrency,
+NNUE_API FenBatchStream* CDECL create_fen_batch_stream(int                  concurrency,
                                                      int                  num_files,
                                                      const char* const*   filenames,
                                                      int                  batch_size,
@@ -987,10 +958,10 @@ EXPORT FenBatchStream* CDECL create_fen_batch_stream(int                  concur
                               ddp_config.rank, ddp_config.world_size);
 }
 
-EXPORT NNUE_COLD void CDECL destroy_fen_batch_stream(FenBatchStream* stream) { delete stream; }
+NNUE_API NNUE_COLD void CDECL destroy_fen_batch_stream(FenBatchStream* stream) { delete stream; }
 
 // changing the signature needs matching changes in data_loader/_native.py
-EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char*          feature_set_c,
+NNUE_API SparseBatchStream* CDECL create_sparse_batch_stream(const char*          feature_set_c,
                                                              int                  concurrency,
                                                              int                  num_files,
                                                              const char* const*   filenames,
@@ -1004,19 +975,21 @@ EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char*        
     auto feature = get_feature(feature_set_c);
     if (!feature)
         return nullptr;
-    return new FeaturedBatchStream(std::move(feature), concurrency, filenames_vec, batch_size,
+    auto stream = new FeaturedBatchStream(std::move(feature), concurrency, filenames_vec, batch_size,
                                    cyclic, skipPredicate, ddp_config.rank, ddp_config.world_size);
+    return reinterpret_cast<SparseBatchStream*>(stream);
 }
 
-EXPORT NNUE_COLD void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream) { delete stream; }
-
-EXPORT SparseBatch* CDECL fetch_next_sparse_batch(Stream<SparseBatch>* stream) {
-    return stream->next();
+NNUE_API NNUE_COLD void CDECL destroy_sparse_batch_stream(SparseBatchStream* stream) {
+    delete reinterpret_cast<FeaturedBatchStream*>(stream);
 }
 
-EXPORT FenBatch* CDECL fetch_next_fen_batch(Stream<FenBatch>* stream) { return stream->next(); }
-
-EXPORT void CDECL destroy_sparse_batch(SparseBatch* e) { delete e; }
-
-EXPORT void CDECL destroy_fen_batch(FenBatch* e) { delete e; }
+NNUE_API SparseBatch* CDECL fetch_next_sparse_batch(SparseBatchStream* stream) {
+    return reinterpret_cast<FeaturedBatchStream*>(stream)->next();
 }
+
+NNUE_API FenBatch* CDECL fetch_next_fen_batch(FenBatchStream* stream) { return stream->next(); }
+
+NNUE_API void CDECL destroy_sparse_batch(SparseBatch* e) { delete e; }
+
+NNUE_API void CDECL destroy_fen_batch(FenBatch* e) { delete e; }
