@@ -157,15 +157,17 @@ def main():
     print("Loss parameters:")
     print(loss_params)
 
+    num_batches_per_epoch=max(
+                1, args.epoch_size // global_batch_size_requested
+            )
+
     max_epoch = args.max_epochs or 800
     if args.resume_from_model is None:
         nnue = M.NNUE(
             feature_name=feature_name,
             loss_params=loss_params,
             max_epoch=max_epoch,
-            num_batches_per_epoch=max(
-                1, args.epoch_size // global_batch_size_requested
-            ),
+            num_batches_per_epoch=num_batches_per_epoch,
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
@@ -182,9 +184,7 @@ def main():
             )
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch = max(
-            1, args.epoch_size // global_batch_size_requested
-        )
+        nnue.num_batches_per_epoch = num_batches_per_epoch
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
@@ -233,6 +233,7 @@ def main():
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
 
+    refresh_rate = max(1, (nnue.num_batches_per_epoch + 4) // 5)
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
@@ -242,7 +243,7 @@ def main():
         logger=tb_logger,
         callbacks=[
             checkpoint_callback,
-            TQDMProgressBar(refresh_rate=(nnue.num_batches_per_epoch + 4) // 5),
+            TQDMProgressBar(refresh_rate=refresh_rate),
             TimeLimitAfterCheckpoint(args.max_time),
             M.WeightClippingCallback(),
         ],
