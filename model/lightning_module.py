@@ -58,8 +58,29 @@ class NNUE(L.LightningModule):
             self.model = torch.compile(self.model, backend=self.compile_backend)
             self._model_compiled = True
 
+    def on_load_checkpoint(self, checkpoint):
+        # Clean up the state dict keys to add/remove torch.compile prefix before loading.
+        state_dict = checkpoint["state_dict"]
+
+        is_compiled = isinstance(self.model, torch._dynamo.eval_frame.OptimizedModule)
+        has_prefix = any(k.startswith("model._orig_mod.") for k in state_dict.keys())
+
+        new_state_dict = {}
+        if is_compiled and not has_prefix:
+            for k, v in state_dict.items():
+                new_key = k.replace("model.", "model._orig_mod.", 1) if k.startswith("model.") else k
+                new_state_dict[new_key] = v
+        elif not is_compiled and has_prefix:
+            for k, v in state_dict.items():
+                new_key = k.replace("model._orig_mod.", "model.", 1)
+            new_state_dict[new_key] = v
+        else:
+            return
+
+        checkpoint["state_dict"] = new_state_dict
+
     def on_save_checkpoint(self, checkpoint):
-        # Clean up the state dict keys to remove the torch.compile artifacts before saving.
+        # Clean up the state dict keys to remove torch.compile prefix before saving.
         state_dict = checkpoint["state_dict"]
         clean_state_dict = {}
         for k, v in state_dict.items():
