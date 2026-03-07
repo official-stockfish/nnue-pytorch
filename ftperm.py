@@ -129,7 +129,7 @@ class FeaturePermutationConfig(M.ModelConfig, M.FeatureConfig):
         ],
         tyro.conf.arg(name=""),
     ]
-    use_cupy: bool = True
+    use_cupy: Annotated[bool, tyro.conf.arg(name="cupy")] = True
     """
     Cupy uses significant amounts of VRAM. Set to False to use numpy instead, which will be slower.
     """
