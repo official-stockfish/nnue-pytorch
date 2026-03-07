@@ -94,19 +94,19 @@ def make_data_loaders(
 def main():
     args = tyro.cli(TrainingConfig)
 
-    datasets = args.datasets
-    val_datasets = args.validation_datasets
-
-    for dataset in datasets:
+    for dataset in args.datasets:
         if not os.path.exists(dataset):
             raise Exception("{0} does not exist".format(dataset))
 
-    for val_dataset in val_datasets:
+    for val_dataset in args.validation_datasets:
         if not os.path.exists(val_dataset):
             raise Exception("{0} does not exist".format(val_dataset))
 
-    train_datasets = datasets
+    train_datasets = args.datasets
     val_datasets = train_datasets
+
+    if len(args.validation_datasets) > 0:
+        val_datasets = args.validation_datasets
 
     if (args.start_lambda is not None) != (args.end_lambda is not None):
         raise Exception(
