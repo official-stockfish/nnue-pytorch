@@ -406,39 +406,6 @@ static std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
 struct SparseBatch {
     static constexpr bool IS_BATCH = true;
 
-    SparseBatch(const IFeatureExtractor&              feature_set,
-                const std::vector<TrainingDataEntry>& entries) {
-        num_inputs          = feature_set.inputs();
-        size                = entries.size();
-        max_active_features = feature_set.max_active_features();
-        is_white            = new float[size];
-        outcome             = new float[size];
-        score               = new float[size];
-        white               = new int[size * max_active_features];
-        black               = new int[size * max_active_features];
-        white_values        = new float[size * max_active_features];
-        black_values        = new float[size * max_active_features];
-        psqt_indices        = new int[size];
-        layer_stack_indices = new int[size];
-
-        num_active_white_features = 0;
-        num_active_black_features = 0;
-
-        for (int i = 0; i < size * max_active_features; ++i)
-            white[i] = -1;
-        for (int i = 0; i < size * max_active_features; ++i)
-            black[i] = -1;
-        for (int i = 0; i < size * max_active_features; ++i)
-            white_values[i] = 0.0f;
-        for (int i = 0; i < size * max_active_features; ++i)
-            black_values[i] = 0.0f;
-
-        for (int i = 0; i < size; ++i)
-        {
-            fill_entry(feature_set, i, entries[i]);
-        }
-    }
-
     int num_inputs;
     int size;
 
@@ -448,26 +415,68 @@ struct SparseBatch {
     int    num_active_white_features;
     int    num_active_black_features;
     int    max_active_features;
-    int*   white;
-    int*   black;
+    int* white;
+    int* black;
     float* white_values;
     float* black_values;
-    int*   psqt_indices;
-    int*   layer_stack_indices;
+    int* psqt_indices;
+    int* layer_stack_indices;
 
-    ~SparseBatch() {
-        delete[] is_white;
-        delete[] outcome;
-        delete[] score;
-        delete[] white;
-        delete[] black;
-        delete[] white_values;
-        delete[] black_values;
-        delete[] psqt_indices;
-        delete[] layer_stack_indices;
+    char* m_memory_block;
+
+    SparseBatch(const IFeatureExtractor&              feature_set,
+                const std::vector<TrainingDataEntry>& entries) noexcept {
+        // IMPORTANT: DO NOT change alignment and prefill if you are unsure about the consequences.
+        num_inputs          = feature_set.inputs();
+        size                = entries.size();
+        max_active_features = feature_set.max_active_features();
+
+        num_active_white_features = 0;
+        num_active_black_features = 0;
+
+        // 1. Calculate aligned sizes to ensure cache-line alignment and prevent UB
+        auto align_up = [](size_t v) { return (v + 63) & ~63; };
+
+        size_t sz_float      = align_up(size * sizeof(float));
+        size_t sz_int        = align_up(size * sizeof(int));
+        size_t sz_feat_int   = align_up(size * max_active_features * sizeof(int));
+        size_t sz_feat_float = align_up(size * max_active_features * sizeof(float));
+
+        size_t total_size = (sz_float * 3) + (sz_int * 2) + (sz_feat_int * 2) + (sz_feat_float * 2);
+
+        m_memory_block = new char[total_size];
+        char* ptr = m_memory_block;
+
+        is_white = reinterpret_cast<float*>(ptr); ptr += sz_float;
+        outcome  = reinterpret_cast<float*>(ptr); ptr += sz_float;
+        score    = reinterpret_cast<float*>(ptr); ptr += sz_float;
+
+        white = reinterpret_cast<int*>(ptr); ptr += sz_feat_int;
+        black = reinterpret_cast<int*>(ptr); ptr += sz_feat_int;
+
+        white_values = reinterpret_cast<float*>(ptr); ptr += sz_feat_float;
+        black_values = reinterpret_cast<float*>(ptr); ptr += sz_feat_float;
+
+        psqt_indices = reinterpret_cast<int*>(ptr); ptr += sz_int;
+        layer_stack_indices = reinterpret_cast<int*>(ptr);
+
+        // 3. Vectorize initialization (replaces 4 separate, slow loops)
+        std::fill_n(white, size * max_active_features, -1);
+        std::fill_n(black, size * max_active_features, -1);
+        std::fill_n(white_values, size * max_active_features, 0.0f);
+        std::fill_n(black_values, size * max_active_features, 0.0f);
+
+        for (int i = 0; i < size; ++i)
+        {
+            fill_entry(feature_set, i, entries[i]);
+        }
     }
 
-   private:
+    ~SparseBatch() {
+        delete[] m_memory_block;
+    }
+
+private:
     void fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
         is_white[i]            = static_cast<float>(e.pos.sideToMove() == Color::White);
         outcome[i]             = (e.result + 1.0f) / 2.0f;
@@ -666,20 +675,48 @@ struct Fen {
 };
 
 struct FenBatch {
-    FenBatch(const std::vector<TrainingDataEntry>& entries) :
-        m_size(entries.size()),
-        m_fens(new Fen[entries.size()]) {
-        for (int i = 0; i < m_size; ++i)
-        {
-            m_fens[i] = entries[i].pos.fen();
+    FenBatch(const std::vector<TrainingDataEntry>& entries) noexcept :
+        m_size(static_cast<int>(entries.size())) {
+        // IMPORTANT: DO NOT change alignment and prefill if you are unsure about the consequences.
+        // Pre-calculate total required size to avoid reallocations
+        std::vector<std::string> temp_fens;
+        temp_fens.reserve(m_size);
+        size_t total_string_bytes = 0;
+
+        for (const auto& e : entries) {
+            temp_fens.push_back(e.pos.fen());
+            total_string_bytes += temp_fens.back().size() + 1; // +1 for null terminator
+        }
+
+        // Calculate sizes and allocate
+        auto align_up = [](size_t v) { return (v + 63) & ~63; };
+        size_t pointers_size = align_up(m_size * sizeof(char*));
+        size_t total_size = pointers_size + total_string_bytes;
+
+        char* m_memory_block = new char[total_size];
+        char* ptr = m_memory_block;
+
+        m_fens = reinterpret_cast<char**>(ptr);
+
+        char* data_ptr = ptr + pointers_size;
+
+        // Pack strings into the contiguous buffer
+        for (int i = 0; i < m_size; ++i) {
+            m_fens[i] = data_ptr;
+            size_t len = temp_fens[i].size();
+            std::memcpy(data_ptr, temp_fens[i].c_str(), len + 1);
+            data_ptr += len + 1;
         }
     }
 
-    ~FenBatch() { delete[] m_fens; }
+    ~FenBatch() {
+        delete[] m_memory_block;
+    }
 
-   private:
-    int  m_size;
-    Fen* m_fens;
+private:
+    int    m_size;
+    char** m_fens;
+    char* m_memory_block;
 };
 
 struct FenBatchStream: Stream<FenBatch> {

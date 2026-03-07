@@ -4,7 +4,9 @@ RUN apt-get update && apt-get install -y \
     g++ \
     git \
     curl \
-    cmake \
+    && (apt-get install -y --no-install-recommends \
+    libjemalloc-dev \
+    libgoogle-perftools-dev || echo "Optional libs failed to install. Continuing...") \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/nnue-pytorch
