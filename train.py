@@ -242,7 +242,7 @@ def main():
         logger=tb_logger,
         callbacks=[
             checkpoint_callback,
-            TQDMProgressBar(refresh_rate=300),
+            TQDMProgressBar(refresh_rate=(nnue.num_batches_per_epoch + 4) // 5),
             TimeLimitAfterCheckpoint(args.max_time),
             M.WeightClippingCallback(),
         ],
