@@ -34,6 +34,7 @@ struct HalfKAv2_hm {
     static constexpr int INPUTS     = NUM_PLANES * NUM_SQ / 2;
     static constexpr int MAX_ACTIVE_FEATURES = 32;
 
+    // clang-format off
     static constexpr int KingBuckets[64] = {
       -1, -1, -1, -1, 31, 30, 29, 28,
       -1, -1, -1, -1, 27, 26, 25, 24,
@@ -44,6 +45,7 @@ struct HalfKAv2_hm {
       -1, -1, -1, -1, 7, 6, 5, 4,
       -1, -1, -1, -1, 3, 2, 1, 0
     };
+    // clang-format on
 
     static int feature_index(Color color, Square ksq, Square sq, Piece p) {
         Square o_ksq = orient_flip_2(color, ksq, ksq);
