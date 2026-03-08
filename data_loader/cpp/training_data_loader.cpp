@@ -313,7 +313,7 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
     return nullptr;
 }
 
-static std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
+std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
     std::vector<std::unique_ptr<IFeatureExtractor>> components;
     std::size_t                                     start = 0;
 
