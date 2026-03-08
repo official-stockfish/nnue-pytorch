@@ -730,6 +730,9 @@ struct FenBatchStream: Stream<FenBatch> {
                     });
 
                     m_batches.emplace_back(batch);
+                    
+                    lock.unlock();
+                    m_batches_any.notify_one();
                 }
             }
             m_num_workers.fetch_sub(1);
