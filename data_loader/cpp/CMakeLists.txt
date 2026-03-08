@@ -71,7 +71,7 @@ find_package(Threads REQUIRED)
 
 # ---- Targets ----
 
-add_library(training_data_loader SHARED training_data_loader.cpp training_data_loader_abi.cpp)
+add_library(training_data_loader SHARED training_data_loader.cpp)
 target_compile_options(training_data_loader PRIVATE)
 target_link_libraries(training_data_loader PRIVATE Threads::Threads)
 
