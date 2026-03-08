@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
     const int                  batch_size = 65536;
     const bool                 cyclic     = true;
     const DataloaderSkipConfig config     = {.filtered             = true,
-                                             .random_fen_skipping  = 10,
+                                             .random_fen_skipping  = 22,
                                              .wld_filtered         = true,
                                              .early_fen_skipping   = 28,
                                              .simple_eval_skipping = 0,
