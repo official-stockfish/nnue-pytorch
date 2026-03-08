@@ -919,7 +919,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 // External API
 #include "training_data_loader_abi.h"
 
-NNUE_API SparseBatch* CDECL get_sparse_batch_from_fens(const char*        feature_set_c,
+NNUE_API SparseBatch* NNUE_CDECL get_sparse_batch_from_fens(const char*        feature_set_c,
                                                int                num_fens,
                                                const char* const* fens,
                                                int*               scores,
@@ -944,7 +944,7 @@ NNUE_API SparseBatch* CDECL get_sparse_batch_from_fens(const char*        featur
 }
 
 // changing the signature needs matching changes in data_loader/_native.py
-NNUE_API FenBatchStream* CDECL create_fen_batch_stream(int                  concurrency,
+NNUE_API FenBatchStream* NNUE_CDECL create_fen_batch_stream(int                  concurrency,
                                                      int                  num_files,
                                                      const char* const*   filenames,
                                                      int                  batch_size,
@@ -958,10 +958,10 @@ NNUE_API FenBatchStream* CDECL create_fen_batch_stream(int                  conc
                               ddp_config.rank, ddp_config.world_size);
 }
 
-NNUE_API NNUE_COLD void CDECL destroy_fen_batch_stream(FenBatchStream* stream) { delete stream; }
+NNUE_API NNUE_COLD void NNUE_CDECL destroy_fen_batch_stream(FenBatchStream* stream) { delete stream; }
 
 // changing the signature needs matching changes in data_loader/_native.py
-NNUE_API SparseBatchStream* CDECL create_sparse_batch_stream(const char*          feature_set_c,
+NNUE_API SparseBatchStream* NNUE_CDECL create_sparse_batch_stream(const char*          feature_set_c,
                                                              int                  concurrency,
                                                              int                  num_files,
                                                              const char* const*   filenames,
@@ -980,16 +980,16 @@ NNUE_API SparseBatchStream* CDECL create_sparse_batch_stream(const char*        
     return reinterpret_cast<SparseBatchStream*>(stream);
 }
 
-NNUE_API NNUE_COLD void CDECL destroy_sparse_batch_stream(SparseBatchStream* stream) {
+NNUE_API NNUE_COLD void NNUE_CDECL destroy_sparse_batch_stream(SparseBatchStream* stream) {
     delete reinterpret_cast<FeaturedBatchStream*>(stream);
 }
 
-NNUE_API SparseBatch* CDECL fetch_next_sparse_batch(SparseBatchStream* stream) {
+NNUE_API SparseBatch* NNUE_CDECL fetch_next_sparse_batch(SparseBatchStream* stream) {
     return reinterpret_cast<FeaturedBatchStream*>(stream)->next();
 }
 
-NNUE_API FenBatch* CDECL fetch_next_fen_batch(FenBatchStream* stream) { return stream->next(); }
+NNUE_API FenBatch* NNUE_CDECL fetch_next_fen_batch(FenBatchStream* stream) { return stream->next(); }
 
-NNUE_API void CDECL destroy_sparse_batch(SparseBatch* e) { delete e; }
+NNUE_API void NNUE_CDECL destroy_sparse_batch(SparseBatch* e) { delete e; }
 
-NNUE_API void CDECL destroy_fen_batch(FenBatch* e) { delete e; }
+NNUE_API void NNUE_CDECL destroy_fen_batch(FenBatch* e) { delete e; }

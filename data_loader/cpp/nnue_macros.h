@@ -1,30 +1,30 @@
 #ifndef NNUE_MACROS_H
 #define NNUE_MACROS_H
 
-/* * 1. Symbol Visibility (EXPORT)
+/* * 1. Symbol Visibility (NNUE_EXPORT)
  * Ensures functions are exported to the dynamic symbol table of the .so/.dll.
  */
 #if defined(_MSC_VER)
-    #define EXPORT __declspec(dllexport)
+    #define NNUE_EXPORT __declspec(dllexport)
 #elif defined(__GNUC__) || defined(__clang__)
-    #define EXPORT __attribute__((visibility("default")))
+    #define NNUE_EXPORT __attribute__((visibility("default")))
 #else
-    #define EXPORT
+    #define NNUE_EXPORT
 #endif
 
-/* * 2. Calling Convention (CDECL)
+/* * 2. Calling Convention (NNUE_CDECL)
  * The cdecl calling convention is only applicable to 32-bit x86 architectures.
  * 64-bit x86 (x86_64) and ARM (aarch64, etc.) use unified calling conventions,
  * so explicitly defining cdecl there triggers compiler warnings or errors.
  */
 #if defined(_M_IX86) || defined(__i386__)
     #if defined(_MSC_VER)
-        #define CDECL __cdecl
+        #define NNUE_CDECL __cdecl
     #else
-        #define CDECL __attribute__((__cdecl__))
+        #define NNUE_CDECL __attribute__((__cdecl__))
     #endif
 #else
-    #define CDECL
+    #define NNUE_CDECL
 #endif
 
 /* * 3. C-Linkage (Name Mangling Prevention)
@@ -33,16 +33,16 @@
  * function by its exact string name (e.g., "destroy_fen_batch").
  */
 #ifdef __cplusplus
-    #define EXTERN_C extern "C"
+    #define NNUE_EXTERN_C extern "C"
 #else
-    #define EXTERN_C
+    #define NNUE_EXTERN_C
 #endif
 
 /*
  * 4. Combined API Macro
  * A convenience wrapper to apply both C-linkage and visibility at once.
  */
-#define NNUE_API EXTERN_C EXPORT
+#define NNUE_API NNUE_EXTERN_C NNUE_EXPORT
 
 /*
  * 5. Macros for manual branching optimization for pgo build.
