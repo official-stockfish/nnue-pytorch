@@ -22,7 +22,7 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfi
     pin_memory: bool = True
     """Whether to use pin memory in the data pipeline. Should generally be left on unless you encounter issues with too much RAM usage."""
 
-    data_loader_queue_size: int = 8
+    data_loader_queue_size: int = 16
     """Size of the prefetching queue. Should be conservative if pin_memory is active."""
 
     max_epochs: int = 800
