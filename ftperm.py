@@ -32,11 +32,15 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --
 """
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 from typing import Callable, Generator, TypeAlias, Annotated, Union
 
 import tyro
+
+from tyro.conf import (
+    OmitArgPrefixes,
+)
 
 import chess
 import cupy as cp
@@ -51,6 +55,8 @@ from model import (
     NNUEModel,
     NNUEReader,
     QuantizationConfig,
+    FeatureConfig,
+    ModelConfig,
 )
 
 
@@ -112,7 +118,7 @@ class EvalPermConfig:
 
 
 @dataclass
-class FeaturePermutationConfig(M.ModelConfig, M.FeatureConfig):
+class FeaturePermutationConfig:
     subcommand: Annotated[
         Union[
             Annotated[
@@ -138,6 +144,12 @@ class FeaturePermutationConfig(M.ModelConfig, M.FeatureConfig):
     """
     Device to use for cupy
     """
+
+    model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
+
+    feature_config: OmitArgPrefixes[FeatureConfig] = field(
+        default_factory=FeatureConfig
+    )
 
 
 def batched(arr: npt.NDArray, batch_size: int) -> Generator[npt.NDArray, None, None]:
@@ -662,7 +674,7 @@ def command_gather(args: FeaturePermutationConfig) -> None:
     if args.subcommand.checkpoint:
         nnue = NNUE.load_from_checkpoint(
             args.subcommand.checkpoint,
-            feature_name=args.features,
+            feature_name=args.feature_config.features,
             config=args,
             quantize_config=QuantizationConfig(),
         )
@@ -671,7 +683,7 @@ def command_gather(args: FeaturePermutationConfig) -> None:
         assert args.subcommand.net is not None
         model = read_model(
             args.subcommand.net,
-            args.features,
+            args.feature_config.features,
             args,
             QuantizationConfig(),
         )
@@ -723,7 +735,7 @@ def command_find_perm(args: FeaturePermutationConfig) -> None:
     with open(args.subcommand.data, "rb") as file:
         actmat = np.load(file)
 
-    perm = find_perm_impl(actmat, args.use_cupy, args.L1)
+    perm = find_perm_impl(actmat, args.use_cupy, args.model_config.L1)
 
     # perm = np.random.permutation([i for i in range(L1)])
     with open(args.subcommand.out, "wb") as file:
