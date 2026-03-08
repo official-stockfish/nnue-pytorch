@@ -6,6 +6,7 @@
 #include <future>
 #include <random>
 #include <cstring>
+#include <cmath>
 
 #include "lib/rng.h"
 
@@ -13,7 +14,7 @@ using namespace binpack;
 using namespace chess;
 
 // ---------------------------------------------------------
-// Internal extractors and threat arrays 
+// Internal extractors and threat arrays
 // ---------------------------------------------------------
 
 static Square orient_flip_2(Color color, Square sq, Square ksq) {
@@ -408,11 +409,14 @@ void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const Traini
           fs.fill_features_sparse(e, black + offset, black_values + offset, Color::Black).first;
 }
 
-int FeaturedBatchStream::calculate_initial_workers(int concurrency) {
-        if (num_feature_threads_per_reading_thread <= 0) return 1; 
-        
-        const int denominator = std::max(1, concurrency / num_feature_threads_per_reading_thread);
-        return std::max(1, concurrency - denominator);
+int FeaturedBatchStream::calculate_num_reader_threads(int concurrency) {
+        if (feature_thread_ratio >= 1) return 1;
+        return std::max(1, concurrency - calculate_num_feature_threads(concurrency));
+}
+
+int FeaturedBatchStream::calculate_num_feature_threads(int concurrency) {
+        if (feature_thread_ratio <= 0) return 1;
+        return std::max(1, static_cast<int>(std::floor(concurrency * feature_thread_ratio)));
 }
 
 FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
@@ -423,13 +427,13 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
                                          std::function<bool(const TrainingDataEntry&)> skipPredicate,
                                          int rank,
                                          int world_size) :
-    BaseType(std::max(1, concurrency / num_feature_threads_per_reading_thread),
+    BaseType(calculate_num_reader_threads(concurrency),
              filenames, cyclic, skipPredicate, rank, world_size),
     m_feature_set(std::move(feature_set)),
     m_concurrency(concurrency),
     m_batch_size(batch_size),
-    m_num_workers(calculate_initial_workers(concurrency)) {
-    
+    m_num_workers(calculate_num_feature_threads(concurrency)) {
+
     m_stop_flag.store(false);
 
     auto worker = [this]() {
@@ -460,7 +464,7 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
         m_batches_any.notify_one();
     };
 
-    const int num_feature_threads = std::max(1, concurrency - std::max(1, concurrency / num_feature_threads_per_reading_thread));
+    const int num_feature_threads = calculate_num_feature_threads(concurrency);
     for (int i = 0; i < num_feature_threads; ++i) {
         m_workers.emplace_back(worker);
     }
@@ -511,11 +515,14 @@ FenBatch::FenBatch(const std::vector<TrainingDataEntry>& entries) :
 
 FenBatch::~FenBatch() { delete[] m_fens; }
 
-int FenBatchStream::calculate_initial_workers(int concurrency) {
-        if (num_feature_threads_per_reading_thread <= 0) return 1; 
-        
-        const int denominator = std::max(1, concurrency / num_feature_threads_per_reading_thread);
-        return std::max(1, concurrency - denominator);
+int FenBatchStream::calculate_num_reader_threads(int concurrency) {
+        if (feature_thread_ratio >= 1) return 1;
+        return std::max(1, concurrency - calculate_num_feature_threads(concurrency));
+}
+
+int FenBatchStream::calculate_num_feature_threads(int concurrency) {
+        if (feature_thread_ratio <= 0) return 1;
+        return std::max(1, static_cast<int>(std::floor(concurrency * feature_thread_ratio)));
 }
 
 FenBatchStream::FenBatchStream(int concurrency,
@@ -525,12 +532,12 @@ FenBatchStream::FenBatchStream(int concurrency,
                                std::function<bool(const TrainingDataEntry&)> skipPredicate,
                                int rank,
                                int world_size) :
-    BaseType(std::max(1, concurrency / num_feature_threads_per_reading_thread),
+    BaseType(calculate_num_reader_threads(concurrency),
              filenames, cyclic, skipPredicate, rank, world_size),
     m_concurrency(concurrency),
     m_batch_size(batch_size),
-    m_num_workers(calculate_initial_workers(concurrency)) {
-    
+    m_num_workers(calculate_num_feature_threads(concurrency)) {
+
     m_stop_flag.store(false);
 
     auto worker = [this]() {
@@ -561,9 +568,7 @@ FenBatchStream::FenBatchStream(int concurrency,
         m_batches_any.notify_one();
     };
 
-    const int num_feature_threads = std::max(
-        1, concurrency - std::max(1, concurrency / num_feature_threads_per_reading_thread));
-
+    const int num_feature_threads = calculate_num_feature_threads(concurrency);
     for (int i = 0; i < num_feature_threads; ++i) {
         m_workers.emplace_back(worker);
     }

@@ -82,7 +82,7 @@ protected:
 
 struct FeaturedBatchStream: Stream<SparseBatch> {
     using BaseType = Stream<SparseBatch>;
-    static constexpr int num_feature_threads_per_reading_thread = 2;
+    static constexpr double feature_thread_ratio = 0.25;
 
     FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
                         int concurrency,
@@ -108,8 +108,9 @@ private:
     std::atomic_bool m_stop_flag;
     std::atomic_int m_num_workers;
     std::vector<std::thread> m_workers;
-    
-    static int calculate_initial_workers(int concurrency);
+
+    static int calculate_num_reader_threads(int concurrency);
+    static int calculate_num_feature_threads(int concurrency);
 };
 
 struct Fen final {
@@ -134,7 +135,7 @@ private:
 
 struct FenBatchStream: Stream<FenBatch> {
     using BaseType = Stream<FenBatch>;
-    static constexpr int num_feature_threads_per_reading_thread = 2;
+    static constexpr double feature_thread_ratio = 0.5;
 
     FenBatchStream(int concurrency,
                    const std::vector<std::string>& filenames,
@@ -159,5 +160,6 @@ private:
     std::atomic_int m_num_workers;
     std::vector<std::thread> m_workers;
 
-    static int calculate_initial_workers(int concurrency);
+    static int calculate_num_reader_threads(int concurrency);
+    static int calculate_num_feature_threads(int concurrency);
 };
