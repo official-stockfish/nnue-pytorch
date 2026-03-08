@@ -94,24 +94,37 @@ def make_data_loaders(
 def main():
     args = tyro.cli(TrainingConfig)
 
-    datasets = args.datasets
-    val_datasets = args.validation_datasets
-
-    for dataset in datasets:
+    for dataset in args.datasets:
         if not os.path.exists(dataset):
             raise Exception("{0} does not exist".format(dataset))
 
-    for val_dataset in val_datasets:
+    for val_dataset in args.validation_datasets:
         if not os.path.exists(val_dataset):
             raise Exception("{0} does not exist".format(val_dataset))
 
-    train_datasets = datasets
+    train_datasets = args.datasets
     val_datasets = train_datasets
 
-    if (args.start_lambda is not None) != (args.end_lambda is not None):
+    if len(args.validation_datasets) > 0:
+        val_datasets = args.validation_datasets
+
+    if (args.loss_config.start_lambda is not None) != (args.loss_config.end_lambda is not None):
         raise Exception(
             "Either both or none of start_lambda and end_lambda must be specified."
         )
+
+    loss_params = args.loss_config
+
+    loss_params.start_lambda = (
+        loss_params.start_lambda
+        if loss_params.start_lambda is not None
+        else loss_params.lambda_
+    )
+    loss_params.end_lambda = (
+        loss_params.end_lambda
+        if loss_params.end_lambda is not None
+        else loss_params.lambda_
+    )
 
     global_batch_size_requested = args.batch_size
     if global_batch_size_requested <= 0:
@@ -153,9 +166,12 @@ def main():
 
     feature_name = args.features
 
-    loss_params = M.LossParams.get_loss_params_from_args(args)
     print("Loss parameters:")
     print(loss_params)
+
+    num_batches_per_epoch=max(
+                1, args.epoch_size // global_batch_size_requested
+            )
 
     max_epoch = args.max_epochs or 800
     if args.resume_from_model is None:
@@ -163,13 +179,11 @@ def main():
             feature_name=feature_name,
             loss_params=loss_params,
             max_epoch=max_epoch,
-            num_batches_per_epoch=max(
-                1, args.epoch_size // global_batch_size_requested
-            ),
+            num_batches_per_epoch=num_batches_per_epoch,
             gamma=args.gamma,
             lr=args.lr,
-            param_index=args.param_index,
-            config=M.ModelConfig.get_model_config(args),
+            param_index=args.dataloader_config.param_index,
+            config=args.model_config,
             quantize_config=M.QuantizationConfig(),
         )
     else:
@@ -182,14 +196,12 @@ def main():
             )
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch = max(
-            1, args.epoch_size // global_batch_size_requested
-        )
+        nnue.num_batches_per_epoch = num_batches_per_epoch
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
         nnue.lr = args.lr
-        nnue.param_index = args.param_index
+        nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
     print("Feature set: {}".format(feature_name))
@@ -201,17 +213,7 @@ def main():
     L.seed_everything(args.seed)
     print("Seed {}".format(args.seed))
 
-    print("Smart fen skipping: {}".format(args.filtered))
-    print("WLD fen skipping: {}".format(args.wld_filtered))
-    print("Random fen skipping: {}".format(args.random_fen_skipping))
-    print("Skip early plies: {}".format(args.early_fen_skipping))
-    print("Skip simple eval : {}".format(args.simple_eval_skipping))
-    print("Param index: {}".format(args.param_index))
-    print("piececount param y1 : {}".format(args.pc_y1))
-    print("piececount param y2 : {}".format(args.pc_y2))
-    print("piececount param y3 : {}".format(args.pc_y3))
-    print("Weighting param w1 : {}".format(args.w1))
-    print("Weighting param w2 : {}".format(args.w2))
+    print(args.dataloader_config)
 
     if args.threads > 0:
         print("limiting torch to {} threads.".format(args.threads))
@@ -233,6 +235,7 @@ def main():
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
 
+    refresh_rate = max(1, (nnue.num_batches_per_epoch + 4) // 5)
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
@@ -242,7 +245,7 @@ def main():
         logger=tb_logger,
         callbacks=[
             checkpoint_callback,
-            TQDMProgressBar(refresh_rate=(nnue.num_batches_per_epoch + 4) // 5),
+            TQDMProgressBar(refresh_rate=refresh_rate),
             TimeLimitAfterCheckpoint(args.max_time),
             M.WeightClippingCallback(),
         ],
@@ -261,7 +264,7 @@ def main():
         input_feature_name,
         args.num_workers,
         per_gpu_batch_size,
-        data_loader.DataloaderSkipConfig.get_dataloader_skip_config_from_args(args),
+        args.dataloader_config,
         args.epoch_size,
         args.validation_size,
     )
