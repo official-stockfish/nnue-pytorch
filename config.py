@@ -1,7 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Literal
 import tyro
-from tyro.conf import UseAppendAction, FlagConversionOff, Positional
+from tyro.conf import (
+    OmitArgPrefixes,
+    UseAppendAction,
+    FlagConversionOff,
+    Positional,
+)
 
 from data_loader.config import DataloaderSkipConfig
 from model.config import LossParams, ModelConfig
@@ -9,7 +14,7 @@ from model.modules.features import FeatureConfig
 
 
 @dataclass
-class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfig):
+class TrainingConfig(FeatureConfig):
     datasets: Positional[list[str]] = field(default_factory=list)
     """Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if no validation data is specified."""
 
@@ -66,6 +71,14 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfi
 
     validation_size: int = 0
     """Number of positions per validation step."""
+
+    dataloader_config: OmitArgPrefixes[DataloaderSkipConfig] = field(
+        default_factory=DataloaderSkipConfig
+    )
+
+    model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
+
+    loss_config: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
 
 
 if __name__ == "__main__":
