@@ -675,7 +675,7 @@ def command_gather(args: FeaturePermutationConfig) -> None:
         nnue = NNUE.load_from_checkpoint(
             args.subcommand.checkpoint,
             feature_name=args.feature_config.features,
-            config=args,
+            config=args.model_config,
             quantize_config=QuantizationConfig(),
         )
         model = nnue.model
@@ -684,7 +684,7 @@ def command_gather(args: FeaturePermutationConfig) -> None:
         model = read_model(
             args.subcommand.net,
             args.feature_config.features,
-            args,
+            args.model_config,
             QuantizationConfig(),
         )
 
