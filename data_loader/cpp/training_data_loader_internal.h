@@ -11,6 +11,7 @@
 #include <atomic>
 #include <thread>
 #include <string_view>
+#include <utility>
 
 #include "lib/nnue_training_data_formats.h"
 #include "lib/nnue_training_data_stream.h"
@@ -107,6 +108,8 @@ private:
     std::atomic_bool m_stop_flag;
     std::atomic_int m_num_workers;
     std::vector<std::thread> m_workers;
+    
+    static int calculate_initial_workers(int concurrency);
 };
 
 struct Fen final {
@@ -155,4 +158,6 @@ private:
     std::atomic_bool m_stop_flag;
     std::atomic_int m_num_workers;
     std::vector<std::thread> m_workers;
+
+    static int calculate_initial_workers(int concurrency);
 };

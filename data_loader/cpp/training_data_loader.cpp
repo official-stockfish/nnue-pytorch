@@ -408,6 +408,13 @@ void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const Traini
           fs.fill_features_sparse(e, black + offset, black_values + offset, Color::Black).first;
 }
 
+int FeaturedBatchStream::calculate_initial_workers(int concurrency) {
+        if (num_feature_threads_per_reading_thread <= 0) return 1; 
+        
+        const int denominator = std::max(1, concurrency / num_feature_threads_per_reading_thread);
+        return std::max(1, concurrency - denominator);
+}
+
 FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
                                          int concurrency,
                                          const std::vector<std::string>& filenames,
@@ -420,7 +427,8 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
              filenames, cyclic, skipPredicate, rank, world_size),
     m_feature_set(std::move(feature_set)),
     m_concurrency(concurrency),
-    m_batch_size(batch_size) {
+    m_batch_size(batch_size),
+    m_num_workers(calculate_initial_workers(concurrency)) {
     
     m_stop_flag.store(false);
 
@@ -455,7 +463,6 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
     const int num_feature_threads = std::max(1, concurrency - std::max(1, concurrency / num_feature_threads_per_reading_thread));
     for (int i = 0; i < num_feature_threads; ++i) {
         m_workers.emplace_back(worker);
-        m_num_workers.fetch_add(1);
     }
 }
 
@@ -504,6 +511,13 @@ FenBatch::FenBatch(const std::vector<TrainingDataEntry>& entries) :
 
 FenBatch::~FenBatch() { delete[] m_fens; }
 
+int FenBatchStream::calculate_initial_workers(int concurrency) {
+        if (num_feature_threads_per_reading_thread <= 0) return 1; 
+        
+        const int denominator = std::max(1, concurrency / num_feature_threads_per_reading_thread);
+        return std::max(1, concurrency - denominator);
+}
+
 FenBatchStream::FenBatchStream(int concurrency,
                                const std::vector<std::string>& filenames,
                                int batch_size,
@@ -514,7 +528,8 @@ FenBatchStream::FenBatchStream(int concurrency,
     BaseType(std::max(1, concurrency / num_feature_threads_per_reading_thread),
              filenames, cyclic, skipPredicate, rank, world_size),
     m_concurrency(concurrency),
-    m_batch_size(batch_size) {
+    m_batch_size(batch_size),
+    m_num_workers(calculate_initial_workers(concurrency)) {
     
     m_stop_flag.store(false);
 
@@ -551,12 +566,6 @@ FenBatchStream::FenBatchStream(int concurrency,
 
     for (int i = 0; i < num_feature_threads; ++i) {
         m_workers.emplace_back(worker);
-
-            // This cannot be done in the thread worker. We need
-            // to have a guarantee that this is incremented, but if
-            // we did it in the worker there's no guarantee
-            // that it executed.
-        m_num_workers.fetch_add(1);
     }
 }
 
