@@ -532,62 +532,107 @@ struct FeaturedBatchStream: Stream<SparseBatch> {
         m_feature_set(std::move(feature_set)),
         m_concurrency(concurrency),
         m_batch_size(batch_size) {
+
         m_stop_flag.store(false);
 
-        auto worker = [this]() {
-            std::vector<TrainingDataEntry> entries;
-            entries.reserve(m_batch_size);
+        int num_producers = std::max(1, concurrency / num_feature_threads_per_reading_thread);
+        int num_consumers = std::max(1, concurrency - num_producers);
 
+        m_active_producers.store(num_producers);
+        m_active_consumers.store(num_consumers);
+
+        // ---------------------------------------------------------
+        // PRODUCERS: Multiple reading threads
+        // ---------------------------------------------------------
+        auto producer = [this]() {
             while (!m_stop_flag.load())
             {
-                entries.clear();
+                std::vector<TrainingDataEntry> entries;
+                entries.reserve(m_batch_size);
 
                 {
+                    // CRITICAL NOTE: If open_sfen_input_file_parallel's fill() method
+                    // is internally thread-safe, no mutex is required.
+                    // It is very possible that this mutex is the main bottleneck for throughput.
                     std::unique_lock lock(m_stream_mutex);
                     BaseType::m_stream->fill(entries, m_batch_size);
-                    if (entries.empty())
-                    {
+                }
+
+                if (entries.empty()) break; // EOF reached
+
+                {
+                    std::unique_lock lock(m_raw_mutex);
+                    m_raw_not_full.wait(lock, [this]() {
+                        return m_raw_batches.size() < static_cast<size_t>(m_concurrency) || m_stop_flag.load();
+                    });
+
+                    if (m_stop_flag.load()) break;
+
+                    m_raw_batches.push_back(std::move(entries));
+                }
+                m_raw_not_empty.notify_one();
+            }
+
+            if (m_active_producers.fetch_sub(1) == 1) {
+                m_raw_not_empty.notify_all(); // Last producer wakes all sleeping consumers
+            }
+        };
+
+        // ---------------------------------------------------------
+        // CONSUMERS: Lock-free workers
+        // ---------------------------------------------------------
+        auto consumer = [this]() {
+            while (!m_stop_flag.load())
+            {
+                std::vector<TrainingDataEntry> entries;
+
+                {
+                    std::unique_lock lock(m_raw_mutex);
+                    m_raw_not_empty.wait(lock, [this]() {
+                        return !m_raw_batches.empty() || m_stop_flag.load() || m_active_producers.load() == 0;
+                    });
+
+                    if (m_raw_batches.empty() && (m_stop_flag.load() || m_active_producers.load() == 0)) {
                         break;
                     }
+
+                    entries = std::move(m_raw_batches.front());
+                    m_raw_batches.pop_front();
                 }
+                m_raw_not_full.notify_one();
 
                 auto batch = new SparseBatch(*m_feature_set, entries);
 
                 {
                     std::unique_lock lock(m_batch_mutex);
                     m_batches_not_full.wait(lock, [this]() {
-                        return m_batches.size() < m_concurrency + 1 || m_stop_flag.load();
+                        return m_batches.size() < static_cast<size_t>(m_concurrency) || m_stop_flag.load();
                     });
 
-                    m_batches.emplace_back(batch);
+                    if (m_stop_flag.load()) {
+                        delete batch;
+                        break;
+                    }
 
-                    lock.unlock();
-                    m_batches_any.notify_one();
+                    m_batches.push_back(batch);
                 }
+                m_batches_any.notify_one();
             }
-            m_num_workers.fetch_sub(1);
-            m_batches_any.notify_one();
+
+            if (m_active_consumers.fetch_sub(1) == 1) {
+                m_batches_any.notify_all(); // Last consumer wakes Python thread
+            }
         };
 
-        const int num_feature_threads = std::max(
-          1, concurrency - std::max(1, concurrency / num_feature_threads_per_reading_thread));
-
-        for (int i = 0; i < num_feature_threads; ++i)
-        {
-            m_workers.emplace_back(worker);
-
-            // This cannot be done in the thread worker. We need
-            // to have a guarantee that this is incremented, but if
-            // we did it in the worker there's no guarantee
-            // that it executed.
-            m_num_workers.fetch_add(1);
-        }
+        for (int i = 0; i < num_producers; ++i) m_producers.emplace_back(producer);
+        for (int i = 0; i < num_consumers; ++i) m_consumers.emplace_back(consumer);
     }
 
     SparseBatch* next() override {
         std::unique_lock lock(m_batch_mutex);
-        m_batches_any.wait(lock,
-                           [this]() { return !m_batches.empty() || m_num_workers.load() == 0; });
+        m_batches_any.wait(lock, [this]() {
+            return !m_batches.empty() || m_active_consumers.load() == 0;
+        });
 
         if (!m_batches.empty())
         {
@@ -604,35 +649,44 @@ struct FeaturedBatchStream: Stream<SparseBatch> {
 
     ~FeaturedBatchStream() {
         m_stop_flag.store(true);
+
+        // Broadcast to all condition variables simultaneously to break any deadlocks
+        m_raw_not_full.notify_all();
+        m_raw_not_empty.notify_all();
         m_batches_not_full.notify_all();
+        m_batches_any.notify_all();
 
-        for (auto& worker : m_workers)
-        {
-            if (worker.joinable())
-            {
-                worker.join();
-            }
-        }
+        for (auto& p : m_producers) if (p.joinable()) p.join();
+        for (auto& c : m_consumers) if (c.joinable()) c.join();
 
-        for (auto& batch : m_batches)
-        {
-            delete batch;
-        }
+        for (auto& batch : m_batches) delete batch;
     }
 
    private:
     std::shared_ptr<IFeatureExtractor> m_feature_set;
     int                                m_batch_size;
     int                                m_concurrency;
+
+    // Output Queue
     std::deque<SparseBatch*>           m_batches;
     std::mutex                         m_batch_mutex;
-    std::mutex                         m_stream_mutex;
     std::condition_variable            m_batches_not_full;
     std::condition_variable            m_batches_any;
-    std::atomic_bool                   m_stop_flag;
-    std::atomic_int                    m_num_workers;
 
-    std::vector<std::thread> m_workers;
+    // Intermediate Raw Queue
+    std::deque<std::vector<TrainingDataEntry>> m_raw_batches;
+    std::mutex                                 m_raw_mutex;
+    std::condition_variable                    m_raw_not_full;
+    std::condition_variable                    m_raw_not_empty;
+
+    // Stream control
+    std::mutex                         m_stream_mutex;
+    std::atomic_bool                   m_stop_flag;
+    std::atomic_int                    m_active_producers;
+    std::atomic_int                    m_active_consumers;
+
+    std::vector<std::thread> m_producers;
+    std::vector<std::thread> m_consumers;
 };
 
 // Very simple fixed size string wrapper with a stable ABI to pass to python.

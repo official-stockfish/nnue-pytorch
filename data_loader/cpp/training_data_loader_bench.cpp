@@ -29,6 +29,7 @@ g++ -std=c++20 -g3 -O3 -DNDEBUG -DBENCH -march=native \
 #include <thread>
 #include <filesystem>
 #include <vector>
+#include <future>
 
 #include "training_data_loader_abi.h"
 
@@ -38,12 +39,11 @@ namespace fs = std::filesystem;
  * Validates existence, copies files to /dev/shm for low-latency access,
  * and returns the new RAM-based paths.
  */
+
 std::vector<std::string> stage_files_to_ram(int file_count, const char** files) {
     std::vector<std::string> ram_paths;
     ram_paths.reserve(file_count);
 
-    // Using /dev/shm for Linux RAM-disk.
-    // For cross-platform, you would need a custom memory buffer interface.
     const fs::path ram_base = "/dev/shm/app_cache";
 
     try {
@@ -51,26 +51,38 @@ std::vector<std::string> stage_files_to_ram(int file_count, const char** files) 
             fs::create_directories(ram_base);
         }
 
+        // Store futures to process copies concurrently
+        std::vector<std::future<std::string>> futures;
+
         for (int i = 0; i < file_count; ++i) {
             if (files[i] == nullptr) continue;
 
-            fs::path original_path(files[i]);
+            // Launch an asynchronous task for each file
+            futures.push_back(std::async(std::launch::async, [files, i, ram_base]() {
+                fs::path original_path(files[i]);
 
-            // 1. Logic/Existence Validation
-            if (!fs::exists(original_path) || !fs::is_regular_file(original_path)) {
-                throw std::runtime_error("Invalid or missing file: " + original_path.string());
-            }
+                if (!fs::exists(original_path) || !fs::is_regular_file(original_path)) {
+                    throw std::runtime_error("Invalid or missing file: " + original_path.string());
+                }
 
-            // 2. Performance: Copy to RAM
-            fs::path target_path = ram_base / original_path.filename();
+                fs::path target_path = ram_base / original_path.filename();
 
-            // Avoid redundant copies if multiple streams use the same files
-            if (!fs::exists(target_path)) {
-                fs::copy_file(original_path, target_path, fs::copy_options::overwrite_existing);
-            }
+                // The physical RAM allocation happens HERE.
+                // Because this runs concurrently across different cores,
+                // Linux will automatically distribute the memory pages across NUMA nodes.
+                if (!fs::exists(target_path)) {
+                    fs::copy_file(original_path, target_path, fs::copy_options::overwrite_existing);
+                }
 
-            ram_paths.push_back(target_path.string());
+                return target_path.string();
+            }));
         }
+
+        // Wait for all threads to finish and collect the paths
+        for (auto& f : futures) {
+            ram_paths.push_back(f.get());
+        }
+
     } catch (const fs::filesystem_error& e) {
         std::cerr << "Filesystem error: " << e.what() << std::endl;
         throw;
