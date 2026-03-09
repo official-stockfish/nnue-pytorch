@@ -49,6 +49,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <optional>
 #include <thread>
 #include <mutex>
+#include <shared_mutex>
 #include <random>
 #include <functional>
 
@@ -59,6 +60,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 
 #include "rng.h"
+#include "thread_id.h"
 
 #if (defined(_MSC_VER) || defined(__INTEL_COMPILER)) && !defined(__clang__)
 #include <intrin.h>
@@ -7660,7 +7662,6 @@ namespace binpack
         ) noexcept :
             m_concurrency(concurrency),
             m_numRunningWorkers(concurrency),
-            m_bufferOffset(0),
             m_cyclic(cyclic),
             m_skipPredicate(std::move(skipPredicate)),
             m_rank(rank),
@@ -7791,64 +7792,69 @@ namespace binpack
 
         [[nodiscard]] std::optional<TrainingDataEntry> next()
         {
-            std::unique_lock lock(m_ringMutex);
-
-            if (m_bufferOffset >= m_buffer.size())
+            LocalBuffer& local = getOrCreateLocalBuffer();
+            if (local.offset < local.entries.size()) [[likely]]
             {
-                m_buffer.clear();
+                return std::move(local.entries[local.offset++]);
+            }
+
+            if (local.offset >= local.entries.size())
+            {
+                std::unique_lock lock(m_ringMutex);
                 m_ringNotEmpty.wait(lock, [this]() {
                     return m_ringCount > 0 || m_numRunningWorkers.load() <= 0;
                 });
 
                 if (m_ringCount == 0) return std::nullopt;
 
-                m_buffer = std::move(m_ringBuffer[m_ringHead]);
+                local.entries.swap(m_ringBuffer[m_ringHead]);
                 m_ringHead = (m_ringHead + 1) % ringCapacity;
                 m_ringCount--;
-                m_bufferOffset = 0;
+                local.offset = 0;
 
+                lock.unlock();
                 m_ringNotFull.notify_one();
             }
 
-            return std::move(m_buffer[m_bufferOffset++]);
+            return std::move(local.entries[local.offset++]);
         }
 
         int fill(std::vector<TrainingDataEntry>& vec, std::size_t n)
         {
-            std::unique_lock lock(m_ringMutex);
+            LocalBuffer& local = getOrCreateLocalBuffer();
             std::size_t total_filled = 0;
 
-            while (total_filled < n)
-            {
-                if (m_bufferOffset >= m_buffer.size())
+            while (total_filled < n) {
+                if (local.offset >= local.entries.size()) [[unlikely]]
                 {
-                    m_buffer.clear();
+                    std::unique_lock lock(m_ringMutex);
                     m_ringNotEmpty.wait(lock, [this]() {
                         return m_ringCount > 0 || m_numRunningWorkers.load() <= 0;
                     });
 
-                    if (m_ringCount == 0) break;
+                    if (m_ringCount == 0) break; // Ring and workers exhausted
 
-                    m_buffer = std::move(m_ringBuffer[m_ringHead]);
+                    local.entries.swap(m_ringBuffer[m_ringHead]);
                     m_ringHead = (m_ringHead + 1) % ringCapacity;
                     m_ringCount--;
-                    m_bufferOffset = 0;
+                    local.offset = 0;
+
+                    lock.unlock();
                     m_ringNotFull.notify_one();
                 }
 
-                const std::size_t remaining_in_buffer = m_buffer.size() - m_bufferOffset;
-                const std::size_t to_take = std::min(n - total_filled, remaining_in_buffer);
+                const std::size_t available = local.entries.size() - local.offset;
+                const std::size_t to_copy = std::min(n - total_filled, available);
 
                 vec.insert(
                     vec.end(),
-                    std::make_move_iterator(m_buffer.begin() + m_bufferOffset),
-                    std::make_move_iterator(m_buffer.begin() + m_bufferOffset + to_take)
+                    std::make_move_iterator(local.entries.begin() + local.offset),
+                    std::make_move_iterator(local.entries.begin() + local.offset + to_copy)
                 );
 
-                m_bufferOffset += to_take;
-                total_filled += to_take;
+                local.offset += to_copy;
+                total_filled += to_copy;
             }
-
             return static_cast<int>(total_filled);
         }
 
@@ -7872,11 +7878,10 @@ namespace binpack
         bool m_cyclic;
 
         static constexpr int threadBufferSize = 256 * 256 * 16;
-        std::vector<TrainingDataEntry> m_buffer;
-        std::size_t m_bufferOffset;
 
         std::atomic_bool m_stopFlag;
         std::atomic_int m_numRunningWorkers;
+        std::vector<std::thread> m_workers;
 
         // Per File Lock
         std::vector<std::unique_ptr<std::mutex>> m_fileMutexes;
@@ -7894,13 +7899,37 @@ namespace binpack
 
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
 
-        std::vector<std::thread> m_workers;
-
         // DDP support
         int m_rank;
         int m_world_size;
         std::vector<std::uint8_t> m_files_seeked_for_ddp;  // Track which files have been seeked for DDP
         std::vector<std::size_t> m_ddp_chunks_to_skip_after_read;
+
+        // thread local data buffers
+        struct LocalBuffer {
+            std::vector<TrainingDataEntry> entries;
+            size_t offset = 0;
+        };
+        mutable std::vector<LocalBuffer> m_threadBuffers;
+        mutable std::shared_mutex m_registryMutex;
+
+
+        LocalBuffer& getOrCreateLocalBuffer() {
+            const uint32_t idx = thread_id::ThreadLocalIndex::get();
+            {
+                std::shared_lock lock(m_registryMutex);
+                if (idx < m_threadBuffers.size()) [[likely]] {
+                    return m_threadBuffers[idx];
+                }
+            }
+            {
+                std::unique_lock lock(m_registryMutex);
+                if (idx >= m_threadBuffers.size()) {
+                    m_threadBuffers.resize(idx + 1);
+                }
+                return m_threadBuffers[idx];
+            }
+        }
 
         bool fetchNextChunkIfNeeded(std::size_t& m_offset, std::vector<unsigned char>& m_chunk,
                                 std::discrete_distribution<std::size_t>& local_dist)
