@@ -35,10 +35,10 @@ cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DLIB_COPY_DIR="$ROOT_DIR"
 
 echo "Building instrumented targets..."
-cmake --build "$BUILD_DIR"
+cmake --build "$BUILD_DIR" -j
 
 echo "Running bench to generate profile data (pgo_run)..."
-cmake --build "$BUILD_DIR" --target pgo_run
+cmake --build "$BUILD_DIR" --target pgo_run -j
 
 echo "Re-configuring for PGO_Use (use collected profiles)..."
 cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
@@ -48,7 +48,7 @@ cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DLIB_COPY_DIR="$ROOT_DIR"
 
 echo "Building shared library with profile data (training_data_loader)..."
-cmake --build "$BUILD_DIR"
+cmake --build "$BUILD_DIR" -j
 
 echo "PGO build complete."
 

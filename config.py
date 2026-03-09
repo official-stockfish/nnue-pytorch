@@ -1,7 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Literal
 import tyro
-from tyro.conf import UseAppendAction, FlagConversionOff, Positional
+from tyro.conf import (
+    OmitArgPrefixes,
+    UseAppendAction,
+    FlagConversionOff,
+    Positional,
+)
 
 from data_loader.config import DataloaderSkipConfig
 from model.config import LossParams, ModelConfig
@@ -10,7 +15,7 @@ from model.modules.features import FeatureConfig
 
 
 @dataclass
-class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfig, OptimizerConfig):
+class TrainingConfig(FeatureConfig):
     datasets: Positional[list[str]] = field(default_factory=list)
     """Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if no validation data is specified."""
 
@@ -19,6 +24,12 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfi
 
     gpus: Optional[str] = None
     """List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (Use device 0 only)."""
+
+    pin_memory: bool = True
+    """Whether to use pin memory in the data pipeline. Should generally be left on unless you encounter issues with too much RAM usage."""
+
+    data_loader_queue_size: int = 16
+    """Size of the prefetching queue. Should be conservative if pin_memory is active."""
 
     max_epochs: int = 800
     """Maximum number of epochs to train for. Default 800."""
@@ -61,6 +72,16 @@ class TrainingConfig(LossParams, DataloaderSkipConfig, FeatureConfig, ModelConfi
 
     validation_size: int = 0
     """Number of positions per validation step."""
+
+    dataloader_config: OmitArgPrefixes[DataloaderSkipConfig] = field(
+        default_factory=DataloaderSkipConfig
+    )
+
+    model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
+
+    loss_config: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
+
+    optimizer_config: OmitArgPrefixes[OptimizerConfig] = field(default_factory=OptimizerConfig)
 
 
 if __name__ == "__main__":

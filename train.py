@@ -52,6 +52,8 @@ def make_data_loaders(
     config: data_loader.DataloaderSkipConfig,
     epoch_size,
     val_size,
+    pin_memory,
+    queue_size_limit,
 ):
     # Epoch and validation sizes are arbitrary
     features_name = feature_name
@@ -72,20 +74,26 @@ def make_data_loaders(
     # it currently cannot work in parallel mode but it shouldn't need to
     train = DataLoader(
         data_loader.FixedNumBatchesDataset(
-            train_infinite, (epoch_size + batch_size - 1) // batch_size
+            train_infinite, (epoch_size + batch_size - 1) // batch_size,
+            pin_memory=pin_memory,
+            queue_size_limit=queue_size_limit,
         ),
         batch_size=None,
         batch_sampler=None,
+        num_workers=0,
     )
     val = (
         None
         if val_size == 0
         else DataLoader(
             data_loader.FixedNumBatchesDataset(
-                val_infinite, (val_size + batch_size - 1) // batch_size
+                val_infinite, (val_size + batch_size - 1) // batch_size,
+                pin_memory=pin_memory,
+                queue_size_limit=queue_size_limit,
             ),
             batch_size=None,
             batch_sampler=None,
+            num_workers=0,
         )
     )
     return train, val
@@ -93,25 +101,39 @@ def make_data_loaders(
 
 def main():
     args = tyro.cli(TrainingConfig)
+    actual_threads, actual_workers = args.threads, args.num_workers
 
-    datasets = args.datasets
-    val_datasets = args.validation_datasets
-
-    for dataset in datasets:
+    for dataset in args.datasets:
         if not os.path.exists(dataset):
             raise Exception("{0} does not exist".format(dataset))
 
-    for val_dataset in val_datasets:
+    for val_dataset in args.validation_datasets:
         if not os.path.exists(val_dataset):
             raise Exception("{0} does not exist".format(val_dataset))
 
-    train_datasets = datasets
+    train_datasets = args.datasets
     val_datasets = train_datasets
 
-    if (args.start_lambda is not None) != (args.end_lambda is not None):
+    if len(args.validation_datasets) > 0:
+        val_datasets = args.validation_datasets
+
+    if (args.loss_config.start_lambda is not None) != (args.loss_config.end_lambda is not None):
         raise Exception(
             "Either both or none of start_lambda and end_lambda must be specified."
         )
+
+    loss_params = args.loss_config
+
+    loss_params.start_lambda = (
+        loss_params.start_lambda
+        if loss_params.start_lambda is not None
+        else loss_params.lambda_
+    )
+    loss_params.end_lambda = (
+        loss_params.end_lambda
+        if loss_params.end_lambda is not None
+        else loss_params.lambda_
+    )
 
     global_batch_size_requested = args.batch_size
     if global_batch_size_requested <= 0:
@@ -153,7 +175,6 @@ def main():
 
     feature_name = args.features
 
-    loss_params = M.LossParams.get_loss_params_from_args(args)
     print("Loss parameters:")
     print(loss_params)
 
@@ -174,14 +195,14 @@ def main():
             dense_weight_decay=args.dense_weight_decay,
             lr=args.lr,
             warmup_steps=args.warmup_steps,
-            param_index=args.param_index,
-            config=M.ModelConfig.get_model_config(args),
+            param_index=args.dataloader_config.param_index,
+            config=args.model_config,
             quantize_config=M.QuantizationConfig(),
         )
     else:
         assert os.path.exists(args.resume_from_model)
         try:
-            nnue = torch.load(args.resume_from_model, weights_only=False)
+            nnue = torch.load(args.resume_from_model, weights_only=False, map_location="cpu")
         except ModuleNotFoundError as e:
             raise RuntimeError(
                 f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
@@ -193,9 +214,10 @@ def main():
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
         nnue.lr = args.lr
-        nnue.param_index = args.param_index
         nnue.ft_weight_decay = args.ft_weight_decay
         nnue.dense_weight_decay = args.dense_weight_decay
+        nnue.compile_backend = args.compile_backend
+        nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
     print("Feature set: {}".format(feature_name))
@@ -207,21 +229,7 @@ def main():
     L.seed_everything(args.seed)
     print("Seed {}".format(args.seed))
 
-    print("Smart fen skipping: {}".format(args.filtered))
-    print("WLD fen skipping: {}".format(args.wld_filtered))
-    print("Random fen skipping: {}".format(args.random_fen_skipping))
-    print("Skip early plies: {}".format(args.early_fen_skipping))
-    print("Skip simple eval : {}".format(args.simple_eval_skipping))
-    print("Param index: {}".format(args.param_index))
-    print("piececount param y1 : {}".format(args.pc_y1))
-    print("piececount param y2 : {}".format(args.pc_y2))
-    print("piececount param y3 : {}".format(args.pc_y3))
-    print("Weighting param w1 : {}".format(args.w1))
-    print("Weighting param w2 : {}".format(args.w2))
-
-    if args.threads > 0:
-        print("limiting torch to {} threads.".format(args.threads))
-        t_set_num_threads(args.threads)
+    print(args.dataloader_config)
 
     logdir = args.default_root_dir if args.default_root_dir else "logs/"
 
@@ -235,6 +243,7 @@ def main():
         save_top_k=-1,
     )
 
+    nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
@@ -259,18 +268,23 @@ def main():
         num_sanity_val_steps=0,
     )
 
-    nnue = torch.compile(nnue, backend=args.compile_backend)
-
-    print("Using C++ data loader", flush=True)
+    if actual_threads > 0:
+        print("Set torch num_threads to {} threads.".format(actual_threads))
+        t_set_num_threads(actual_threads)
+    else:
+        print("Using default torch num_threads setting.", flush=True)
+    print(f"Using {actual_workers} workers for C++ data loader.", flush=True)
     train, val = make_data_loaders(
         train_datasets,
         val_datasets,
         input_feature_name,
-        args.num_workers,
+        actual_workers,
         per_gpu_batch_size,
-        data_loader.DataloaderSkipConfig.get_dataloader_skip_config_from_args(args),
+        args.dataloader_config,
         args.epoch_size,
         args.validation_size,
+        pin_memory=args.pin_memory,
+        queue_size_limit=args.data_loader_queue_size,
     )
 
     if args.resume_from_checkpoint:
@@ -278,11 +292,12 @@ def main():
     else:
         trainer.fit(nnue, train, val)
 
-    with open(os.path.join(logdir, "training_finished"), "w"):
-        pass
+    if trainer.is_global_zero:
+        with open(os.path.join(logdir, "training_finished"), "w"):
+            pass
 
 
 if __name__ == "__main__":
     main()
     if sys.platform == "win32":
-        os.system(f'wmic process where processid="{os.getpid()}" call terminate >nul')
+        os._exit(0)
