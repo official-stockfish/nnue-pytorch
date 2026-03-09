@@ -1,14 +1,14 @@
 from typing import Generator
+from dataclasses import dataclass
 
 import torch
 from torch import nn
 
-from ..config import ModelConfig
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
-
+from .config import LayerStackConfig
 
 class LayerStacks(nn.Module):
-    def __init__(self, count: int, config: ModelConfig):
+    def __init__(self, count: int, config: LayerStackConfig):
         super().__init__()
 
         self.count = count

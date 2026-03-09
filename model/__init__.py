@@ -1,5 +1,5 @@
 from .callbacks import WeightClippingCallback
-from .config import ModelConfig, LossParams
+from .config import ModelConfig, LossParams, NNUELightningConfig
 from .lightning_module import NNUE
 from .model import NNUEModel
 from .modules import (
@@ -28,6 +28,7 @@ __all__ = [
     "FeatureConfig",
     "NNUE",
     "NNUEModel",
+    "NNUELightningConfig",
     "QuantizationConfig",
     "load_model",
     "NNUEReader",

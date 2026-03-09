@@ -1,19 +1,17 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated
 
 import tyro
+from tyro.conf import OmitArgPrefixes
+
+from .optimizers.optimizer_config import OptimizerConfig
+from .modules.features import FeatureConfig
+from .modules.config import LayerStackConfig
 
 
 # 3 layer fully connected network
 @dataclass(kw_only=True)
-class ModelConfig:
-    L1: Annotated[int, tyro.conf.arg(name="l1")] = 1024
-    """Size of first hidden layer."""
-    L2: Annotated[int, tyro.conf.arg(name="l2")] = 31
-    """Size of second hidden layer."""
-    L3: Annotated[int, tyro.conf.arg(name="l3")] = 32
-    """Size of third hidden layer."""
-
+class ModelConfig(LayerStackConfig):
     @staticmethod
     def add_model_args(parser):
         parser.add_argument(
@@ -62,3 +60,9 @@ class LossParams:
     """weight boost parameter 2 (default=0.5)"""
     lambda_: Annotated[float, tyro.conf.arg(name="lambda")] = 1.0
     """1.0=train on evaluations, 0.0=train on game results, interpolates between (default=1.0)."""
+
+@dataclass
+class NNUELightningConfig(FeatureConfig):
+    model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
+    loss_params: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
+    optimizer_config: OmitArgPrefixes[OptimizerConfig] = field(default_factory=OptimizerConfig)

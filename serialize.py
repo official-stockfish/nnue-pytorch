@@ -1,11 +1,10 @@
 import argparse
 import hashlib
 import os
-
 import torch
+import tyro
 
 import model as M
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -70,11 +69,11 @@ def main():
         "--device", type=int, default="0", help="Device to use for cupy"
     )
 
-    M.ModelConfig.add_model_args(parser)
-    M.add_feature_args(parser)
-    args = parser.parse_args()
 
-    feature_name = args.features
+    args, unknown = parser.parse_known_args()
+    nnue_lightning_config = tyro.cli(M.NNUELightningConfig, args=unknown)
+
+    feature_name = nnue_lightning_config.features
 
     print("Converting %s to %s" % (args.source, args.target))
 
@@ -84,8 +83,7 @@ def main():
     if args.source.endswith(".ckpt"):
         nnue = M.NNUE.load_from_checkpoint(
             args.source,
-            feature_name=feature_name,
-            config=M.ModelConfig.get_model_config(args),
+            config=nnue_lightning_config,
             quantize_config=M.QuantizationConfig(),
             map_location=torch.device("cpu"),
         )
@@ -95,15 +93,14 @@ def main():
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
             nnue = M.NNUE(
-                feature_name,
-                M.ModelConfig.get_model_config(args),
-                M.QuantizationConfig(),
+                config=nnue_lightning_config,
+                quantize_config=M.QuantizationConfig(),
             )
             reader = M.NNUEReader(
                 f,
                 feature_name,
-                M.ModelConfig.get_model_config(args),
-                M.QuantizationConfig(),
+                config=nnue_lightning_config.model_config,
+                quantize_config=M.QuantizationConfig(),
             )
             nnue.model = reader.model
             if args.description is None:

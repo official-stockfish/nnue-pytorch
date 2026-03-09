@@ -9,13 +9,10 @@ from tyro.conf import (
 )
 
 from data_loader.config import DataloaderSkipConfig
-from model.config import LossParams, ModelConfig
-from model.optimizers.optimizer_config import OptimizerConfig
-from model.modules.features import FeatureConfig
-
+from model.config import NNUELightningConfig
 
 @dataclass
-class TrainingConfig(FeatureConfig):
+class TrainingConfig:
     datasets: Positional[list[str]] = field(default_factory=list)
     """Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if no validation data is specified."""
 
@@ -77,11 +74,10 @@ class TrainingConfig(FeatureConfig):
         default_factory=DataloaderSkipConfig
     )
 
-    model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
+    nnue_lightning_config: OmitArgPrefixes[NNUELightningConfig] = field(
+        default_factory=NNUELightningConfig
+    )
 
-    loss_config: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
-
-    optimizer_config: OmitArgPrefixes[OptimizerConfig] = field(default_factory=OptimizerConfig)
 
 
 if __name__ == "__main__":

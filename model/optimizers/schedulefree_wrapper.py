@@ -1,4 +1,3 @@
-import warnings
 import lightning as L
 
 from dataclasses import dataclass
@@ -17,28 +16,19 @@ class ScheduleFreeConfig:
 class ScheduleFreeWrapper:
     def __init__(
         self,
-        lr: float,
-        warmup_steps: int,
-        **kwargs,
+        config: ScheduleFreeConfig,
     ):
         if _schedulefree_import_error:
             raise ImportError(
                 "The required schedulefree library is not installed. "
             )
 
-        self.lr = lr
-        self.warmup_steps = warmup_steps
+        self.lr = config.lr
+        self.warmup_steps = config.warmup_steps
         self.needs_train_flip = False
 
-        warning_parts = ["The following keyword arguments are unused and will be ignored:"]
-        if kwargs:
-            warning_parts.append(
-                f"\n  - Unused Keyword Arguments: {', '.join(kwargs.keys())}"
-            )
-            warnings.warn("".join(warning_parts), UserWarning)
-
         print(
-            f"Using schedule-free Adam with warmup_steps={warmup_steps}, lr={lr}."
+            f"Using schedule-free Adam with warmup_steps={self.warmup_steps}, lr={self.lr}."
         )
 
     def configure_optimizers(self, train_params):

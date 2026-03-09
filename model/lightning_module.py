@@ -2,12 +2,10 @@ import lightning as L
 import torch
 from torch import Tensor, nn
 
-from .config import LossParams, ModelConfig
+from .config import NNUELightningConfig
 from .model import NNUEModel
 from .quantize import QuantizationConfig
 
-from .optimizers.ranger21_wrapper import Ranger21Wrapper
-from .optimizers.schedulefree_wrapper import ScheduleFreeWrapper
 
 def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
     return [
@@ -35,74 +33,46 @@ class NNUE(L.LightningModule):
 
     def __init__(
         self,
-        feature_name: str,
-        config: ModelConfig,
-        quantize_config: QuantizationConfig,
-        optimizer_name: str = "ranger21",
+        config: NNUELightningConfig,
+        quantize_config=QuantizationConfig(),
         max_epoch=800,
-        num_batches_per_epoch=int(100_000_000 / 16384),
-        gamma=0.992,
-        lr=8.75e-4,
-        warmup_steps=10000,
-        ft_weight_decay=0.0,
-        dense_weight_decay=0.0,
         param_index=0,
         num_psqt_buckets=8,
         num_ls_buckets=8,
-        loss_params=LossParams(),
-        **kwargs,
     ):
         super().__init__()
 
         self.model: NNUEModel = NNUEModel(
-            feature_name, config, quantize_config, num_psqt_buckets, num_ls_buckets
+            config.features, config.model_config, quantize_config, num_psqt_buckets, num_ls_buckets
         )
-        self.loss_params = loss_params
-        self.max_epoch = max_epoch
-        self.num_batches_per_epoch=num_batches_per_epoch
-        self.lr = lr
-        self.dense_weight_decay = dense_weight_decay
-        self.ft_weight_decay = ft_weight_decay
+        self.loss_params = config.loss_params
+        self.optimizer_config = config.optimizer_config
+        self.max_epoch = self.optimizer_config.max_epoch = max_epoch
         self.param_index = param_index
 
-        optimizer_name = optimizer_name.lower().strip()
-        if optimizer_name == "schedulefree":
-            self.optimizer_wrapper = ScheduleFreeWrapper(
-                lr=lr,
-                warmup_steps=warmup_steps,
-                **kwargs
-            )
-        elif optimizer_name == "ranger21":
-            self.optimizer_wrapper = Ranger21Wrapper(
-                max_epoch=max_epoch,
-                gamma=gamma,
-                num_batches_per_epoch=num_batches_per_epoch,
-                **kwargs
-            )
-        else:
-            raise ValueError(f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree' or 'ranger21'.")
+        self.optimizer_wrapper = self.optimizer_config.get_optimizer_wrapper()
 
-        if self.dense_weight_decay > 0.0 or self.ft_weight_decay > 0.0:
-            print(f"Using weight decay - ft_weight_decay: {self.ft_weight_decay}, dense_weight_decay: {self.dense_weight_decay}")
 
     # --- setup optimizers and training hooks ---
 
     def configure_optimizers(self):
-        LR = self.lr
+        LR = self.optimizer_config.lr
+        ft_wd = self.optimizer_config.ft_weight_decay
+        dense_wd = self.optimizer_config.dense_weight_decay
 
         train_params = [
             # Feature Transformer
-            {"params": _get_parameters([self.model.input], get_biases=False), "lr": LR, "weight_decay": self.ft_weight_decay},
+            {"params": _get_parameters([self.model.input], get_biases=False), "lr": LR, "weight_decay": ft_wd},
             {"params": _get_parameters([self.model.input], get_biases=True), "lr": LR, "weight_decay": 0.0},
 
             # Dense Layer Stacks
-            {"params": [self.model.layer_stacks.l1.factorized_linear.weight], "lr": LR, "weight_decay": self.dense_weight_decay},
+            {"params": [self.model.layer_stacks.l1.factorized_linear.weight], "lr": LR, "weight_decay": dense_wd},
             {"params": [self.model.layer_stacks.l1.factorized_linear.bias], "lr": LR, "weight_decay": 0.0},
-            {"params": [self.model.layer_stacks.l1.linear.weight], "lr": LR, "weight_decay": self.dense_weight_decay},
+            {"params": [self.model.layer_stacks.l1.linear.weight], "lr": LR, "weight_decay": dense_wd},
             {"params": [self.model.layer_stacks.l1.linear.bias], "lr": LR, "weight_decay": 0.0},
-            {"params": [self.model.layer_stacks.l2.linear.weight], "lr": LR, "weight_decay": self.dense_weight_decay},
+            {"params": [self.model.layer_stacks.l2.linear.weight], "lr": LR, "weight_decay": dense_wd},
             {"params": [self.model.layer_stacks.l2.linear.bias], "lr": LR, "weight_decay": 0.0},
-            {"params": [self.model.layer_stacks.output.linear.weight], "lr": LR, "weight_decay": self.dense_weight_decay},
+            {"params": [self.model.layer_stacks.output.linear.weight], "lr": LR, "weight_decay": dense_wd},
             {"params": [self.model.layer_stacks.output.linear.bias], "lr": LR, "weight_decay": 0.0},
         ]
 

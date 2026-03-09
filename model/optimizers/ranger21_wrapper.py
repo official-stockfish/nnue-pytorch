@@ -1,4 +1,3 @@
-import warnings
 import lightning as L
 import torch
 
@@ -16,31 +15,21 @@ class Ranger21Config:
     gamma: float = 0.992
     """Multiplicative factor applied to the learning rate after every epoch."""
 
-    num_batches_per_epoch: int = 6100
+    num_batches_per_epoch: int = 100_000_000 // 16384
     """Number of batches per epoch, used by Ranger21 for scheduling."""
 
 class Ranger21Wrapper:
     def __init__(
         self,
-        max_epoch: int,
-        gamma: float,
-        num_batches_per_epoch: int,
-        **kwargs,
+        config,
     ):
         if _ranger21_import_error:
             raise ImportError(
                 "The required ranger21 library is not installed. "
             )
-        self.max_epoch = max_epoch
-        self.gamma = gamma
-        self.num_batches_per_epoch = num_batches_per_epoch
-
-        warning_parts = ["The following keyword arguments are unused and will be ignored:"]
-        if kwargs:
-            warning_parts.append(
-                f"\n  - Unused Keyword Arguments: {', '.join(kwargs.keys())}"
-            )
-            warnings.warn("".join(warning_parts), UserWarning)
+        self.max_epoch = config.max_epoch
+        self.gamma = config.gamma
+        self.num_batches_per_epoch = config.num_batches_per_epoch
 
     def configure_optimizers(self, train_params):
         optimizer = ranger21.Ranger21(
