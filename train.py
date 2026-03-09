@@ -52,6 +52,8 @@ def make_data_loaders(
     config: data_loader.DataloaderSkipConfig,
     epoch_size,
     val_size,
+    pin_memory,
+    queue_size_limit,
 ):
     # Epoch and validation sizes are arbitrary
     features_name = feature_name
@@ -72,20 +74,26 @@ def make_data_loaders(
     # it currently cannot work in parallel mode but it shouldn't need to
     train = DataLoader(
         data_loader.FixedNumBatchesDataset(
-            train_infinite, (epoch_size + batch_size - 1) // batch_size
+            train_infinite, (epoch_size + batch_size - 1) // batch_size,
+            pin_memory=pin_memory,
+            queue_size_limit=queue_size_limit,
         ),
         batch_size=None,
         batch_sampler=None,
+        num_workers=0,
     )
     val = (
         None
         if val_size == 0
         else DataLoader(
             data_loader.FixedNumBatchesDataset(
-                val_infinite, (val_size + batch_size - 1) // batch_size
+                val_infinite, (val_size + batch_size - 1) // batch_size,
+                pin_memory=pin_memory,
+                queue_size_limit=queue_size_limit,
             ),
             batch_size=None,
             batch_sampler=None,
+            num_workers=0,
         )
     )
     return train, val
@@ -93,6 +101,7 @@ def make_data_loaders(
 
 def main():
     args = tyro.cli(TrainingConfig)
+    actual_threads, actual_workers = args.threads, args.num_workers
 
     for dataset in args.datasets:
         if not os.path.exists(dataset):
@@ -189,7 +198,7 @@ def main():
     else:
         assert os.path.exists(args.resume_from_model)
         try:
-            nnue = torch.load(args.resume_from_model, weights_only=False)
+            nnue = torch.load(args.resume_from_model, weights_only=False, map_location="cpu")
         except ModuleNotFoundError as e:
             raise RuntimeError(
                 f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
@@ -201,6 +210,7 @@ def main():
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
         nnue.lr = args.lr
+        nnue.compile_backend = args.compile_backend
         nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
@@ -215,10 +225,6 @@ def main():
 
     print(args.dataloader_config)
 
-    if args.threads > 0:
-        print("limiting torch to {} threads.".format(args.threads))
-        t_set_num_threads(args.threads)
-
     logdir = args.default_root_dir if args.default_root_dir else "logs/"
 
     tb_logger = pl_loggers.TensorBoardLogger(logdir)
@@ -231,6 +237,7 @@ def main():
         save_top_k=-1,
     )
 
+    nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
@@ -255,18 +262,23 @@ def main():
         num_sanity_val_steps=0,
     )
 
-    nnue = torch.compile(nnue, backend=args.compile_backend)
-
-    print("Using C++ data loader", flush=True)
+    if actual_threads > 0:
+        print("Set torch num_threads to {} threads.".format(actual_threads))
+        t_set_num_threads(actual_threads)
+    else:
+        print("Using default torch num_threads setting.", flush=True)
+    print(f"Using {actual_workers} workers for C++ data loader.", flush=True)
     train, val = make_data_loaders(
         train_datasets,
         val_datasets,
         input_feature_name,
-        args.num_workers,
+        actual_workers,
         per_gpu_batch_size,
         args.dataloader_config,
         args.epoch_size,
         args.validation_size,
+        pin_memory=args.pin_memory,
+        queue_size_limit=args.data_loader_queue_size,
     )
 
     if args.resume_from_checkpoint:
@@ -274,11 +286,12 @@ def main():
     else:
         trainer.fit(nnue, train, val)
 
-    with open(os.path.join(logdir, "training_finished"), "w"):
-        pass
+    if trainer.is_global_zero:
+        with open(os.path.join(logdir, "training_finished"), "w"):
+            pass
 
 
 if __name__ == "__main__":
     main()
     if sys.platform == "win32":
-        os.system(f'wmic process where processid="{os.getpid()}" call terminate >nul')
+        os._exit(0)
