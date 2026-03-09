@@ -82,7 +82,7 @@ protected:
 
 struct FeaturedBatchStream: Stream<SparseBatch> {
     using BaseType = Stream<SparseBatch>;
-    static constexpr double feature_thread_ratio = 0.25;
+    static constexpr double feature_thread_ratio = 0.20;
 
     FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
                         int concurrency,
