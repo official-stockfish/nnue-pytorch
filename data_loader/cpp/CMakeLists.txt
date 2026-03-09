@@ -11,7 +11,7 @@ string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_DEBUG "-g -march=native")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-g -O3 -march=native -DNDEBUG")
 
@@ -26,6 +26,13 @@ if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE" AND NOT PGO_INPUT)
   message(FATAL_ERROR
     "PGO_Generate build requires a non-empty PGO_INPUT.\n"
     "Re-run CMake with -DPGO_INPUT=<path-to-input-file>.")
+endif()
+
+option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+
+if(ENABLE_TSAN)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
 endif()
 
 set(CMAKE_CXX_FLAGS_PGO_GENERATE "${CMAKE_CXX_FLAGS_RELEASE}")
@@ -51,20 +58,21 @@ execute_process(
 )
 
 if(VENDOR_ID STREQUAL "AuthenticAMD")
-    if(CPU_FAMILY GREATER_EQUAL "23" AND CPU_BMI2 STREQUAL "bmi2")
-        set(CPU_SUPPORTS_BMI2 TRUE)
-    endif()
-elseif(CPU_BMI2 STREQUAL "bmi2")
+  if(CPU_FAMILY GREATER_EQUAL "23" AND CPU_BMI2 STREQUAL "bmi2")
     set(CPU_SUPPORTS_BMI2 TRUE)
+  endif()
+elseif(CPU_BMI2 STREQUAL "bmi2")
+  set(CPU_SUPPORTS_BMI2 TRUE)
 else()
-    set(CPU_SUPPORTS_BMI2 FALSE)
+  set(CPU_SUPPORTS_BMI2 FALSE)
 endif()
 
 if(CPU_SUPPORTS_BMI2)
-    message(STATUS "Adding BMI2 support")
-    add_definitions(-DHAS_BMI2)
+  message(STATUS "Adding BMI2 support")
+  add_definitions(-DHAS_BMI2)
+  add_compile_options(-mbmi2)
 else()
-    message(STATUS "No BMI2 support")
+  message(STATUS "No BMI2 support")
 endif()
 
 find_package(Threads REQUIRED)
@@ -82,9 +90,11 @@ set_target_properties(training_data_loader PROPERTIES
 )
 
 # Platform-independent copy of the shared library
-add_custom_command(TARGET training_data_loader POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:training_data_loader> "${LIB_COPY_DIR}/"
-)
+if(LIB_COPY_DIR)
+  add_custom_command(TARGET training_data_loader POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:training_data_loader> "${LIB_COPY_DIR}/"
+  )
+endif()
 
 # pgo generation target
 if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
