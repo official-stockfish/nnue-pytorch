@@ -194,7 +194,6 @@ def main():
             param_index=args.dataloader_config.param_index,
             config=args.model_config,
             quantize_config=M.QuantizationConfig(),
-            compile_backend = args.compile_backend,
         )
     else:
         assert os.path.exists(args.resume_from_model)
@@ -238,6 +237,7 @@ def main():
         save_top_k=-1,
     )
 
+    nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
