@@ -7,12 +7,12 @@ from tyro.conf import OmitArgPrefixes
 from .optimizers.config import OptimizerConfig
 
 from .modules.features import FeatureConfig
-from .modules.config import LayerStackConfig
+from .modules.config import LayerStacksConfig
 
 
 # 3 layer fully connected network
 @dataclass(kw_only=True)
-class ModelConfig(LayerStackConfig):
+class ModelConfig(LayerStacksConfig):
     @staticmethod
     def add_model_args(parser):
         parser.add_argument(

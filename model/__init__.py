@@ -4,8 +4,6 @@ from .config import ModelConfig, LossParams, NNUELightningConfig
 from .optimizers.config import OptimizerConfig
 from .optimizers.ranger21_wrapper import Ranger21Wrapper
 from .optimizers.schedulefree_wrapper import ScheduleFreeWrapper
-from .modules.features import FeatureConfig
-from .modules.config import LayerStackConfig
 
 from .lightning_module import NNUE
 from .model import NNUEModel
@@ -15,6 +13,7 @@ from .modules import (
     get_feature_cls,
     get_available_features,
     FeatureConfig,
+    LayerStacksConfig,
 )
 from .quantize import QuantizationConfig
 from .utils import (
@@ -42,6 +41,6 @@ __all__ = [
     "NNUELightningConfig",
     "OptimizerConfig",
     "FeatureConfig",
-    "LayerStackConfig",
+    "LayerStacksConfig",
     "QuantizationConfig",
 ]
