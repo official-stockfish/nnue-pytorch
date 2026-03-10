@@ -134,6 +134,7 @@ def main():
         else loss_params.lambda_
     )
 
+    # TODO sync batches per epoch for the optimizer using init hooks.
     global_batch_size_requested = args.batch_size
     if global_batch_size_requested <= 0:
         global_batch_size_requested = 16384
