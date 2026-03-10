@@ -23,15 +23,15 @@ class Ranger21Wrapper:
         self,
         config,
     ):
-        if _ranger21_import_error:
-            raise ImportError(
-                "The required ranger21 library is not installed. "
-            )
         self.max_epoch = config.max_epoch
         self.gamma = config.gamma
         self.num_batches_per_epoch = config.num_batches_per_epoch
 
     def configure_optimizers(self, train_params):
+        if _ranger21_import_error:
+            raise ImportError(
+                "The required ranger21 library is not installed. "
+            )
         optimizer = ranger21.Ranger21(
             train_params,
             lr=1.0,

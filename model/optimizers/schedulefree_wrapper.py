@@ -18,20 +18,18 @@ class ScheduleFreeWrapper:
         self,
         config: ScheduleFreeConfig,
     ):
-        if _schedulefree_import_error:
-            raise ImportError(
-                "The required schedulefree library is not installed. "
-            )
-
         self.lr = config.lr
         self.warmup_steps = config.warmup_steps
         self.needs_train_flip = False
 
+    def configure_optimizers(self, train_params):
+        if _schedulefree_import_error:
+            raise ImportError(
+                "The required schedulefree library is not installed. "
+            )
         print(
             f"Using schedule-free Adam with warmup_steps={self.warmup_steps}, lr={self.lr}."
         )
-
-    def configure_optimizers(self, train_params):
         optimizer = schedulefree.AdamWScheduleFree(
             train_params,
             lr=self.lr,
