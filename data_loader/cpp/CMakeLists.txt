@@ -21,6 +21,18 @@ set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data"
 set(PGO_INPUT ""
     CACHE STRING "Input file passed to training_data_loader_pgo_gen for profile generation")
 
+# STATISTICS REPORT
+add_executable(training_data_loader_report training_data_loader.cpp training_data_loader_abi.cpp training_data_loader_report.cpp)
+target_compile_definitions(training_data_loader_report PRIVATE LOADER_STATISTICS)
+
+target_link_libraries(training_data_loader_report
+  PRIVATE Threads::Threads)
+
+set_target_properties(training_data_loader_report PROPERTIES
+  BUILD_RPATH "$ORIGIN"
+  INSTALL_RPATH "$ORIGIN"
+)
+
 # Fail at configure time if PGO_Generate is requested without a valid input file.
 if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE" AND NOT PGO_INPUT)
   message(FATAL_ERROR
