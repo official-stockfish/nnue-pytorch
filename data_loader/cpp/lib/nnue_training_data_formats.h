@@ -60,7 +60,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 
 #include "rng.h"
-#include "thread_id.h"
+#include "thread_local_structs.h"
 
 #if (defined(_MSC_VER) || defined(__INTEL_COMPILER)) && !defined(__clang__)
 #include <intrin.h>
@@ -7659,7 +7659,7 @@ namespace binpack
             std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr,
             int rank = 0,
             int world_size = 1
-        ) noexcept :
+        ) :
             m_concurrency(concurrency),
             m_numRunningWorkers(concurrency),
             m_cyclic(cyclic),
@@ -7792,7 +7792,7 @@ namespace binpack
 
         [[nodiscard]] std::optional<TrainingDataEntry> next()
         {
-            LocalBuffer& local = getOrCreateLocalBuffer();
+            LocalBuffer& local = bufferRegistry.get();
             if (local.offset < local.entries.size()) [[likely]]
             {
                 return std::move(local.entries[local.offset++]);
@@ -7821,7 +7821,7 @@ namespace binpack
 
         int fill(std::vector<TrainingDataEntry>& vec, std::size_t n)
         {
-            LocalBuffer& local = getOrCreateLocalBuffer();
+            LocalBuffer& local = bufferRegistry.get();
             std::size_t total_filled = 0;
 
             while (total_filled < n) {
@@ -7874,13 +7874,13 @@ namespace binpack
 
     private:
         int m_concurrency;
+        std::atomic_int m_numRunningWorkers;
         std::vector<CompressedTrainingDataFile> m_inputFiles;
         bool m_cyclic;
 
         static constexpr int threadBufferSize = 256 * 256 * 16;
 
         std::atomic_bool m_stopFlag;
-        std::atomic_int m_numRunningWorkers;
         std::vector<std::thread> m_workers;
 
         // Per File Lock
@@ -7890,9 +7890,9 @@ namespace binpack
         // Size 4 Ring Buffer, using alignas to prevent false sharing
         static constexpr int ringCapacity = 4;
         std::vector<std::vector<TrainingDataEntry>> m_ringBuffer;
-        alignas(64) std::atomic<size_t> m_ringHead{0};
-        alignas(64) std::atomic<size_t> m_ringTail{0};
-        alignas(64) std::atomic<size_t> m_ringCount{0};
+        size_t m_ringHead = 0;
+        size_t m_ringTail = 0;
+        size_t m_ringCount = 0;
         std::mutex m_ringMutex;
         std::condition_variable m_ringNotEmpty;
         std::condition_variable m_ringNotFull;
@@ -7910,26 +7910,7 @@ namespace binpack
             std::vector<TrainingDataEntry> entries;
             size_t offset = 0;
         };
-        mutable std::vector<LocalBuffer> m_threadBuffers;
-        mutable std::shared_mutex m_registryMutex;
-
-
-        LocalBuffer& getOrCreateLocalBuffer() {
-            const uint32_t idx = thread_id::ThreadLocalIndex::get();
-            {
-                std::shared_lock lock(m_registryMutex);
-                if (idx < m_threadBuffers.size()) [[likely]] {
-                    return m_threadBuffers[idx];
-                }
-            }
-            {
-                std::unique_lock lock(m_registryMutex);
-                if (idx >= m_threadBuffers.size()) {
-                    m_threadBuffers.resize(idx + 1);
-                }
-                return m_threadBuffers[idx];
-            }
-        }
+        thread_local_structs::ThreadLocalRegistry<LocalBuffer> bufferRegistry;
 
         bool fetchNextChunkIfNeeded(std::size_t& m_offset, std::vector<unsigned char>& m_chunk,
                                 std::discrete_distribution<std::size_t>& local_dist)

@@ -410,13 +410,13 @@ void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const Traini
 }
 
 int FeaturedBatchStream::calculate_num_reader_threads(int concurrency) {
-        if (feature_thread_ratio >= 1) return 1;
-        return std::max(1, concurrency - calculate_num_feature_threads(concurrency));
+        if (worker_thread_ratio >= 1) return 1;
+        return std::max(1, concurrency - calculate_num_worker_threads(concurrency));
 }
 
-int FeaturedBatchStream::calculate_num_feature_threads(int concurrency) {
-        if (feature_thread_ratio <= 0) return 1;
-        return std::max(1, static_cast<int>(std::floor(concurrency * feature_thread_ratio)));
+int FeaturedBatchStream::calculate_num_worker_threads(int concurrency) {
+        if (worker_thread_ratio <= 0) return 1;
+        return std::max(1, static_cast<int>(std::floor(concurrency * worker_thread_ratio)));
 }
 
 FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
@@ -432,7 +432,7 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
     m_feature_set(std::move(feature_set)),
     m_concurrency(concurrency),
     m_batch_size(batch_size),
-    m_num_workers(calculate_num_feature_threads(concurrency)) {
+    m_num_workers(calculate_num_worker_threads(concurrency)) {
 
     m_stop_flag.store(false);
 
@@ -464,8 +464,8 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
         m_batches_any.notify_one();
     };
 
-    const int num_feature_threads = calculate_num_feature_threads(concurrency);
-    for (int i = 0; i < num_feature_threads; ++i) {
+    const int num_worker_threads = calculate_num_worker_threads(concurrency);
+    for (int i = 0; i < num_worker_threads; ++i) {
         m_workers.emplace_back(worker);
     }
 }
@@ -516,13 +516,13 @@ FenBatch::FenBatch(const std::vector<TrainingDataEntry>& entries) :
 FenBatch::~FenBatch() { delete[] m_fens; }
 
 int FenBatchStream::calculate_num_reader_threads(int concurrency) {
-        if (feature_thread_ratio >= 1) return 1;
-        return std::max(1, concurrency - calculate_num_feature_threads(concurrency));
+        if (worker_thread_ratio >= 1) return 1;
+        return std::max(1, concurrency - calculate_num_worker_threads(concurrency));
 }
 
-int FenBatchStream::calculate_num_feature_threads(int concurrency) {
-        if (feature_thread_ratio <= 0) return 1;
-        return std::max(1, static_cast<int>(std::floor(concurrency * feature_thread_ratio)));
+int FenBatchStream::calculate_num_worker_threads(int concurrency) {
+        if (worker_thread_ratio <= 0) return 1;
+        return std::max(1, static_cast<int>(std::floor(concurrency * worker_thread_ratio)));
 }
 
 FenBatchStream::FenBatchStream(int concurrency,
@@ -536,7 +536,7 @@ FenBatchStream::FenBatchStream(int concurrency,
              filenames, cyclic, skipPredicate, rank, world_size),
     m_concurrency(concurrency),
     m_batch_size(batch_size),
-    m_num_workers(calculate_num_feature_threads(concurrency)) {
+    m_num_workers(calculate_num_worker_threads(concurrency)) {
 
     m_stop_flag.store(false);
 
@@ -568,8 +568,8 @@ FenBatchStream::FenBatchStream(int concurrency,
         m_batches_any.notify_one();
     };
 
-    const int num_feature_threads = calculate_num_feature_threads(concurrency);
-    for (int i = 0; i < num_feature_threads; ++i) {
+    const int num_worker_threads = calculate_num_worker_threads(concurrency);
+    for (int i = 0; i < num_worker_threads; ++i) {
         m_workers.emplace_back(worker);
     }
 }
