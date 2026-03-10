@@ -21,9 +21,9 @@ class OptimizerConfig(Ranger21Config, ScheduleFreeConfig):
     def get_optimizer_wrapper(self):
         optimizer_name = self.optimizer_name.lower().strip()
         if optimizer_name == "schedulefree":
-            wrapper = optimizer_wrapper = ScheduleFreeWrapper(self)
+            wrapper = ScheduleFreeWrapper(self)
         elif optimizer_name == "ranger21":
-            wrapper = optimizer_wrapper = Ranger21Wrapper(self)
+            wrapper = Ranger21Wrapper(self)
         else:
             raise ValueError(f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree' or 'ranger21'.")
 

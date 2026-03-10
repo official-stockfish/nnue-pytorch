@@ -1,5 +1,4 @@
 from typing import Generator
-from dataclasses import dataclass
 
 import torch
 from torch import nn
