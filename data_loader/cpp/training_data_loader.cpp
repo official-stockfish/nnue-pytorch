@@ -13,7 +13,7 @@ using namespace binpack;
 using namespace chess;
 
 // ---------------------------------------------------------
-// Internal extractors and threat arrays 
+// Internal extractors and threat arrays
 // ---------------------------------------------------------
 
 static Square orient_flip_2(Color color, Square sq, Square ksq) {
@@ -409,8 +409,8 @@ void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const Traini
 }
 
 int FeaturedBatchStream::calculate_initial_workers(int concurrency) {
-        if (num_feature_threads_per_reading_thread <= 0) return 1; 
-        
+        if (num_feature_threads_per_reading_thread <= 0) return 1;
+
         const int denominator = std::max(1, concurrency / num_feature_threads_per_reading_thread);
         return std::max(1, concurrency - denominator);
 }
@@ -429,7 +429,7 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
     m_concurrency(concurrency),
     m_batch_size(batch_size),
     m_num_workers(calculate_initial_workers(concurrency)) {
-    
+
     m_stop_flag.store(false);
 
     auto worker = [this]() {
@@ -512,8 +512,8 @@ FenBatch::FenBatch(const std::vector<TrainingDataEntry>& entries) :
 FenBatch::~FenBatch() { delete[] m_fens; }
 
 int FenBatchStream::calculate_initial_workers(int concurrency) {
-        if (num_feature_threads_per_reading_thread <= 0) return 1; 
-        
+        if (num_feature_threads_per_reading_thread <= 0) return 1;
+
         const int denominator = std::max(1, concurrency / num_feature_threads_per_reading_thread);
         return std::max(1, concurrency - denominator);
 }
@@ -530,7 +530,7 @@ FenBatchStream::FenBatchStream(int concurrency,
     m_concurrency(concurrency),
     m_batch_size(batch_size),
     m_num_workers(calculate_initial_workers(concurrency)) {
-    
+
     m_stop_flag.store(false);
 
     auto worker = [this]() {
@@ -592,86 +592,113 @@ FenBatch* FenBatchStream::next() {
 }
 
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
-    if (config.filtered || config.random_fen_skipping || config.wld_filtered || config.early_fen_skipping) {
-        return [config, prob = double(config.random_fen_skipping) / (config.random_fen_skipping + 1)](const TrainingDataEntry& e) {
-            static constexpr int VALUE_NONE = 32002;
+    if (!config.filtered && !config.random_fen_skipping && !config.wld_filtered && !config.early_fen_skipping) {
+        return nullptr;
+    }
 
-            auto desired_piece_count_weights = [&config](int pc) -> double {
-                double x  = pc;
-                double x1 = 0, y1 = config.pc_y1;
-                double x2 = 16, y2 = config.pc_y2;
-                double x3 = 32, y3 = config.pc_y3;
-                double l1 = (x - x2) * (x - x3) / ((x1 - x2) * (x1 - x3));
-                double l2 = (x - x1) * (x - x3) / ((x2 - x1) * (x2 - x3));
-                double l3 = (x - x1) * (x - x2) / ((x3 - x1) * (x3 - x2));
-                return l1 * y1 + l2 * y2 + l3 * y3;
-            };
+    // Precompute the static random skipping threshold for the 64-bit PRNG
+    const double skip_prob = double(config.random_fen_skipping) / (config.random_fen_skipping + 1);
+    const uint64_t random_skip_threshold = config.random_fen_skipping ?
+                                           static_cast<uint64_t>(skip_prob * static_cast<double>(~0ULL)) : 0;
 
-            static thread_local double alpha                            = 1;
-            static thread_local double piece_count_history_all[33]      = {0};
-            static thread_local double piece_count_history_passed[33]   = {0};
-            static thread_local double piece_count_history_all_total    = 0;
-            static thread_local double piece_count_history_passed_total = 0;
+    std::array<double, 33> target_pc_weights_lut{};
+    double target_pc_weights_total = 0.0;
 
-            static constexpr double max_skipping_rate = 10.0;
+    for (int i = 0; i < 33; ++i) {
+        double x  = i;
+        double x1 = 0, y1 = config.pc_y1;
+        double x2 = 16, y2 = config.pc_y2;
+        double x3 = 32, y3 = config.pc_y3;
 
-            auto do_wld_skip = [&]() {
-                std::bernoulli_distribution distrib(1.0 - e.score_result_prob());
-                auto& prng = rng::get_thread_local_rng();
-                return distrib(prng);
-            };
+        double l1 = (x - x2) * (x - x3) / ((x1 - x2) * (x1 - x3));
+        double l2 = (x - x1) * (x - x3) / ((x2 - x1) * (x2 - x3));
+        double l3 = (x - x1) * (x - x2) / ((x3 - x1) * (x3 - x2));
 
-            auto do_skip = [&]() {
-                std::bernoulli_distribution distrib(prob);
-                auto& prng = rng::get_thread_local_rng();
-                return distrib(prng);
-            };
+        target_pc_weights_lut[i] = std::max(0.0, l1 * y1 + l2 * y2 + l3 * y3);
+        target_pc_weights_total += target_pc_weights_lut[i];
+    }
 
-            auto do_filter = [&]() { return (e.isCapturingMove() || e.isInCheck()); };
+    if (target_pc_weights_total <= 0.0) target_pc_weights_total = 1.0;
 
-            if (e.score == VALUE_NONE) return true;
-            if (e.ply <= config.early_fen_skipping) return true;
-            if (config.random_fen_skipping && do_skip()) return true;
-            if (config.filtered && do_filter()) return true;
-            if (config.wld_filtered && do_wld_skip()) return true;
-            if (config.simple_eval_skipping > 0 && std::abs(e.pos.simple_eval()) < config.simple_eval_skipping) return true;
+    return [config, random_skip_threshold, target_pc_weights_lut, target_pc_weights_total](const TrainingDataEntry& e) {
+        static constexpr int VALUE_NONE = 32002;
 
-            const int pc = e.pos.piecesBB().count();
-            piece_count_history_all[pc] += 1;
-            piece_count_history_all_total += 1;
+        static thread_local double alpha                            = 1.0;
+        static thread_local double pc_history_all[33]               = {0};
+        static thread_local double pc_history_passed[33]            = {0};
+        static thread_local double pc_history_all_total             = 0;
+        static thread_local double pc_history_passed_total          = 0;
 
-            double desired_piece_count_weights_total = [&desired_piece_count_weights]() {
-                double tot = 0;
-                for (int i = 0; i < 33; i++) tot += desired_piece_count_weights(i);
-                return tot;
-            }();
+        const double max_pc_skip_rate = 0.95;
 
-            // update alpha, which scales the filtering probability, to a maximum rate.
-            if (uint64_t(piece_count_history_all_total) % 10000 == 0) {
-                double pass = piece_count_history_all_total * desired_piece_count_weights_total;
-                for (int i = 0; i < 33; ++i) {
-                    if (desired_piece_count_weights(pc) > 0) {
-                        double tmp =
-                          piece_count_history_all_total * desired_piece_count_weights(pc)
-                          / (desired_piece_count_weights_total * piece_count_history_all[pc]);
-                        if (tmp < pass)
-                        pass = tmp;
+        if (e.score == VALUE_NONE) return true;
+        if (e.ply <= config.early_fen_skipping) return true;
+
+        auto& prng = rng::get_thread_local_rng();
+
+        if (config.random_fen_skipping && (prng() < random_skip_threshold)) {
+            return true;
+        }
+
+        if (config.filtered && (e.isCapturingMove() || e.isInCheck())) {
+            return true;
+        }
+
+        if (config.wld_filtered) {
+            uint64_t wld_skip_threshold = static_cast<uint64_t>((1.0 - e.score_result_prob()) * static_cast<double>(~0ULL));
+            if (prng() < wld_skip_threshold) return true;
+        }
+
+        if (config.simple_eval_skipping > 0 && std::abs(e.pos.simple_eval()) < config.simple_eval_skipping) {
+            return true;
+        }
+
+        const int pc = e.pos.piecesBB().count();
+        if (pc < 0 || pc > 32) return true;
+
+        pc_history_all[pc] += 1;
+        pc_history_all_total += 1;
+
+        // Recalculate alpha every 10,000 FENs to anchor the most overrepresented class to 10% acceptance
+        if (uint64_t(pc_history_all_total) % 10000 == 0) {
+            double min_ratio = std::numeric_limits<double>::infinity();
+            bool found_valid = false;
+
+            for (int i = 0; i < 33; ++i) {
+                // Only evaluate ratios for piece counts that actually exist in target and history
+                if (target_pc_weights_lut[i] > 0.0 && pc_history_all[i] > 0.0) {
+                    double current_ratio = (pc_history_all_total * target_pc_weights_lut[i]) /
+                                           (target_pc_weights_total * pc_history_all[i]);
+                    if (current_ratio < min_ratio) {
+                        min_ratio = current_ratio;
+                        found_valid = true;
                     }
                 }
-                alpha = 1.0 / (pass * max_skipping_rate);
             }
 
-            double tmp = alpha * piece_count_history_all_total * desired_piece_count_weights(pc) / (desired_piece_count_weights_total * piece_count_history_all[pc]);
-            tmp = std::min(1.0, tmp);
-            std::bernoulli_distribution distrib(1.0 - tmp);
-            auto& prng = rng::get_thread_local_rng();
-            if (distrib(prng)) return true;
+            // Anchor the lowest ratio (most overrepresented) to max_pc_skip_rate
+            if (found_valid && min_ratio > 0.0) {
+                alpha = (1.0 - max_pc_skip_rate) / min_ratio;
+            }
+        }
 
-            piece_count_history_passed[pc] += 1;
-            piece_count_history_passed_total += 1;
+        double accept_prob = 0.0;
+        if (target_pc_weights_lut[pc] > 0.0 && pc_history_all[pc] > 0.0) {
+            double current_ratio = (pc_history_all_total * target_pc_weights_lut[pc]) /
+                                   (target_pc_weights_total * pc_history_all[pc]);
+            accept_prob = alpha * current_ratio;
+        }
 
-            return false;
-        };
-    }
-    return nullptr;
+        accept_prob = std::min(1.0, std::max(0.0, accept_prob));
+
+        uint64_t reject_threshold = static_cast<uint64_t>((1.0 - accept_prob) * static_cast<double>(~0ULL));
+        if (prng() < reject_threshold) {
+            return true;
+        }
+
+        pc_history_passed[pc] += 1;
+        pc_history_passed_total += 1;
+
+        return false;
+    };
 }
