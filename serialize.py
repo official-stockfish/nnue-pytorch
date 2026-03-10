@@ -7,8 +7,13 @@ import tyro
 import model as M
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Converts files between ckpt and nnue format."
+    class NoExitParser(argparse.ArgumentParser):
+        def error(self, message):
+            # Instead of exiting, we just record that it failed or ignore it
+            print(f"Argparse ignored: {message}")
+    parser = NoExitParser(
+        description="Converts files between ckpt and nnue format.",
+        add_help=False,
     )
     parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
     parser.add_argument("target", help="Target file (can be .pt or .nnue)")
@@ -69,9 +74,16 @@ def main():
         "--device", type=int, default="0", help="Device to use for cupy"
     )
 
-
+    # Eventually it would be good to refactor the argparse arguments into a tyro class
+    parser.add_argument("-h", "--help", action="store_true", help="Show this help message")
     args, unknown = parser.parse_known_args()
+    if args.help:
+        print("=== Argparse Arguments ===")
+        parser.print_help()
+        print("\n=== Tyro Arguments ===")
+        tyro.cli(M.NNUELightningConfig, args=["--help"])
     nnue_lightning_config = tyro.cli(M.NNUELightningConfig, args=unknown)
+
 
     feature_name = nnue_lightning_config.features
 
