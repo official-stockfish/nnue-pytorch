@@ -4,7 +4,8 @@ from typing import Annotated
 import tyro
 from tyro.conf import OmitArgPrefixes
 
-from .optimizers.optimizer_config import OptimizerConfig
+from .optimizers.config import OptimizerConfig
+
 from .modules.features import FeatureConfig
 from .modules.config import LayerStackConfig
 

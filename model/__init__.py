@@ -1,5 +1,12 @@
 from .callbacks import WeightClippingCallback
 from .config import ModelConfig, LossParams, NNUELightningConfig
+
+from .optimizers.config import OptimizerConfig
+from .optimizers.ranger21_wrapper import Ranger21Wrapper
+from .optimizers.schedulefree_wrapper import ScheduleFreeWrapper
+from .modules.features import FeatureConfig
+from .modules.config import LayerStackConfig
+
 from .lightning_module import NNUE
 from .model import NNUEModel
 from .modules import (
@@ -25,12 +32,16 @@ __all__ = [
     "combine_input_features",
     "get_feature_cls",
     "get_available_features",
-    "FeatureConfig",
     "NNUE",
     "NNUEModel",
-    "NNUELightningConfig",
-    "QuantizationConfig",
+    "Ranger21Wrapper",
+    "ScheduleFreeWrapper",
     "load_model",
     "NNUEReader",
     "NNUEWriter",
+    "NNUELightningConfig",
+    "OptimizerConfig",
+    "FeatureConfig",
+    "LayerStackConfig",
+    "QuantizationConfig",
 ]
