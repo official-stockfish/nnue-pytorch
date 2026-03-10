@@ -1,9 +1,6 @@
 from .callbacks import WeightClippingCallback
 from .config import ModelConfig, LossParams, NNUELightningConfig
-
-from .optimizers.config import OptimizerConfig
-from .optimizers.ranger21_wrapper import Ranger21Wrapper
-from .optimizers.schedulefree_wrapper import ScheduleFreeWrapper
+from .optimizers import OptimizerConfig, Ranger21Wrapper, ScheduleFreeWrapper
 
 from .lightning_module import NNUE
 from .model import NNUEModel

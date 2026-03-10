@@ -4,10 +4,8 @@ from typing import Annotated
 import tyro
 from tyro.conf import OmitArgPrefixes
 
-from .optimizers.config import OptimizerConfig
-
-from .modules.features import FeatureConfig
-from .modules.config import LayerStacksConfig
+from .optimizers import OptimizerConfig
+from .modules import FeatureConfig, LayerStacksConfig
 
 
 # 3 layer fully connected network
