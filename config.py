@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Literal
+from typing import Optional, Tuple, Literal, Annotated
 import tyro
 from tyro.conf import (
     OmitArgPrefixes,
@@ -11,7 +11,7 @@ from tyro.conf import (
 from data_loader.config import DataloaderSkipConfig
 from model.config import NNUELightningConfig
 
-@dataclass
+@dataclass(kw_only=True)
 class TrainingConfig:
     datasets: Positional[list[str]] = field(default_factory=list)
     """Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if no validation data is specified."""
@@ -40,8 +40,8 @@ class TrainingConfig:
     num_workers: int = 1
     """Number of worker threads to use for data loading. Currently only works well for binpack."""
 
-    batch_size: int = -1
-    """Number of positions per batch / per iteration. Default on GPU = 8192 on CPU = 128."""
+    batch_size_raw: Annotated[int, tyro.conf.arg(name="batch-size")] = 16384
+    """Number of positions per batch / per iteration. Default to 16384."""
 
     threads: int = -1
     """Number of torch threads to use. Default automatic (cores)."""
@@ -78,7 +78,15 @@ class TrainingConfig:
         default_factory=NNUELightningConfig
     )
 
+    @property
+    def batch_size(self) -> int:
+        """Returns the validated batch size."""
+        return self.batch_size_raw if self.batch_size_raw > 0 else 16384
 
+    @property
+    def num_batches_per_epoch(self) -> int:
+        """Calculates batches per epoch based on validated batch size."""
+        return max(1, self.epoch_size // self.batch_size)
 
 if __name__ == "__main__":
     config = tyro.cli(TrainingConfig)

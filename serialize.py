@@ -1,97 +1,77 @@
-import argparse
 import hashlib
 import os
 import torch
 import tyro
 
+from dataclasses import dataclass, field
+from typing import Optional, Literal, Annotated
+from tyro.conf import OmitArgPrefixes, Positional
+
 import model as M
 
+@dataclass(frozen=True)
+class SerializeConfig:
+    # Flags and Options
+    out_sha: bool = False
+    """Ignore target file name and save as nn-<sha>.nnue. If target is a directory,
+    the file is placed there; otherwise it goes to dirname(target) or CWD."""
+
+    description: Optional[str] = None
+    """The description string to include in the network.
+    Only works when serializing into a .nnue file."""
+
+    ft_compression: Literal["none", "leb128"] = "leb128"
+    """Compression method to use for FT weights and biases.
+    Either 'none' or 'leb128'. Only allowed if saving to .nnue."""
+
+    ft_perm: Optional[str] = None
+    """Path to a file that defines the permutation to use on the feature transformer."""
+
+    ft_optimize: bool = False
+    """Whether to perform full feature transformer optimization (ftperm.py)
+    on the resulting network. This process is very time consuming."""
+
+    ft_optimize_data: Optional[str] = None
+    """Path to the dataset to use for FT optimization."""
+
+    ft_optimize_count: int = 10000
+    """Number of positions to use for FT optimization."""
+
+    use_cupy: Annotated[bool, tyro.conf.arg(name="cupy")] = True
+    """Disable CUPY usage if not enough GPU memory is available.
+    This will use numpy instead, which is slower."""
+
+    device: int = 0
+    """Device to use for cupy"""
+
+@dataclass(frozen=True)
+class CliConfig:
+    # Positional arguments
+    source: Positional[str]
+    """Source file (can be .ckpt, .pt or .nnue)"""
+
+    target: Positional[str]
+    """Target file (can be .pt or .nnue)"""
+    serialize_config: OmitArgPrefixes[SerializeConfig] = field(
+        default_factory=SerializeConfig
+    )
+    nnue_lightning_config: OmitArgPrefixes[M.NNUELightningConfig] = field(
+        default_factory=M.NNUELightningConfig
+    )
+
 def main():
-    class NoExitParser(argparse.ArgumentParser):
-        def error(self, message):
-            # Instead of exiting, we just record that it failed or ignore it
-            print(f"Argparse ignored: {message}")
-    parser = NoExitParser(
-        description="Converts files between ckpt and nnue format.",
-        add_help=False,
-    )
-    parser.add_argument("source", help="Source file (can be .ckpt, .pt or .nnue)")
-    parser.add_argument("target", help="Target file (can be .pt or .nnue)")
-    parser.add_argument(
-        "--out-sha",
-        action="store_true",
-        dest="out_sha",
-        help="Ignore target file name and save as nn-<sha>.nnue. If target is a directory, the file is placed there; otherwise it goes to dirname(target) or CWD.",
-    )
-    parser.add_argument(
-        "--description",
-        default=None,
-        type=str,
-        dest="description",
-        help="The description string to include in the network. Only works when serializing into a .nnue file.",
-    )
-    parser.add_argument(
-        "--ft_compression",
-        default="leb128",
-        type=str,
-        dest="ft_compression",
-        help="Compression method to use for FT weights and biases. Either 'none' or 'leb128'. Only allowed if saving to .nnue.",
-    )
-    parser.add_argument(
-        "--ft_perm",
-        default=None,
-        type=str,
-        dest="ft_perm",
-        help="Path to a file that defines the permutation to use on the feature transformer.",
-    )
-    parser.add_argument(
-        "--ft_optimize",
-        action="store_true",
-        dest="ft_optimize",
-        help="Whether to perform full feature transformer optimization (ftperm.py) on the resulting network. This process is very time consuming.",
-    )
-    parser.add_argument(
-        "--ft_optimize_data",
-        default=None,
-        type=str,
-        dest="ft_optimize_data",
-        help="Path to the dataset to use for FT optimization.",
-    )
-    parser.add_argument(
-        "--ft_optimize_count",
-        default=10000,
-        type=int,
-        dest="ft_optimize_count",
-        help="Number of positions to use for FT optimization.",
-    )
-    parser.add_argument(
-        "--no-cupy",
-        action="store_false",
-        dest="use_cupy",
-        help="Disable CUPY usage if not enough GPU memory is available. This will use numpy instead, which is slower.",
-    )
-    parser.add_argument(
-        "--device", type=int, default="0", help="Device to use for cupy"
-    )
-
-    # Eventually it would be good to refactor the argparse arguments into a tyro class
-    parser.add_argument("-h", "--help", action="store_true", help="Show this help message")
-    args, unknown = parser.parse_known_args()
-    if args.help:
-        print("=== Argparse Arguments ===")
-        parser.print_help()
-        print("\n=== Tyro Arguments ===")
-        tyro.cli(M.NNUELightningConfig, args=["--help"])
-    nnue_lightning_config = tyro.cli(M.NNUELightningConfig, args=unknown)
-
-
+    args = tyro.cli(CliConfig)
+    serialize_config = args.serialize_config
+    nnue_lightning_config = args.nnue_lightning_config
     feature_name = nnue_lightning_config.features
 
     print("Converting %s to %s" % (args.source, args.target))
 
     # Treat --out-sha as targeting .nnue even if target doesn't end with .nnue
-    target_is_nnue = args.out_sha or args.target.endswith(".nnue")
+    target_is_nnue = serialize_config.out_sha or args.target.endswith(".nnue")
 
+    model_description = serialize_config.description
+    ft_compression = serialize_config.ft_compression
     if args.source.endswith(".ckpt"):
         nnue = M.NNUE.load_from_checkpoint(
             args.source,
@@ -115,44 +95,45 @@ def main():
                 quantize_config=M.QuantizationConfig(),
             )
             nnue.model = reader.model
-            if args.description is None:
-                args.description = reader.description
+            if serialize_config.description is None:
+                model_description = reader.description
     else:
         raise Exception("Invalid network input format.")
 
-    if args.ft_compression != "none" and not target_is_nnue:
-        args.ft_compression = "none"
+    if ft_compression != "none" and not target_is_nnue:
+        print("Warning: Compression method for non `.nnue` target ignored.")
+        ft_compression = "none"
 
-    if args.ft_compression not in ["none", "leb128"]:
+    if ft_compression not in ["none", "leb128"]:
         raise Exception("Invalid compression method.")
 
-    if args.ft_optimize and args.ft_perm is not None:
+    if serialize_config.ft_optimize and serialize_config.ft_perm is not None:
         raise Exception("Options --ft_perm and --ft_optimize are mutually exclusive.")
 
-    if args.ft_perm is not None and target_is_nnue:
+    if serialize_config.ft_perm is not None and target_is_nnue:
         import ftperm
 
         if not args.source.endswith(".nnue"):
             nnue.model.input.coalesce()
             nnue.model.layer_stacks.coalesce_layer_stacks_inplace()
 
-        ftperm.ft_permute(nnue.model, args.ft_perm)
+        ftperm.ft_permute(nnue.model, serialize_config.ft_perm)
 
-    if args.ft_optimize and target_is_nnue:
+    if serialize_config.ft_optimize and target_is_nnue:
         import ftperm
 
-        if args.ft_optimize_data is None:
+        if serialize_config.ft_optimize_data is None:
             raise Exception(
                 "Invalid dataset path for FT optimization. (--ft_optimize_data)"
             )
-        if args.ft_optimize_count is None or args.ft_optimize_count < 1:
+        if serialize_config.ft_optimize_count is None or serialize_config.ft_optimize_count < 1:
             raise Exception(
                 "Invalid number of positions to optimize FT with. (--ft_optimize_count)"
             )
 
-        if args.use_cupy:
-            if args.device is not None:
-                ftperm.set_cupy_device(args.device)
+        if serialize_config.use_cupy:
+            if serialize_config.device is not None:
+                ftperm.set_cupy_device(serialize_config.device)
 
         if not args.source.endswith(".nnue"):
             nnue.model.input.coalesce()
@@ -160,9 +141,9 @@ def main():
 
         ftperm.ft_optimize(
             nnue.model,
-            args.ft_optimize_data,
-            args.ft_optimize_count,
-            use_cupy=args.use_cupy,
+            serialize_config.ft_optimize_data,
+            serialize_config.ft_optimize_count,
+            use_cupy=serialize_config.use_cupy,
         )
 
     if args.target.endswith(".ckpt"):
@@ -177,11 +158,11 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
 
         writer = M.NNUEWriter(
-            nnue.model, args.description, ft_compression=args.ft_compression
+            nnue.model, model_description, ft_compression=ft_compression
         )
         buf = writer.buf
 
-        if args.out_sha:
+        if serialize_config.out_sha:
             sha = hashlib.sha256(buf).hexdigest()
             final_path = os.path.join(out_dir, f"nn-{sha[:12]}.nnue")
             with open(final_path, "wb") as f:

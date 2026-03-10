@@ -34,8 +34,9 @@ class NNUE(L.LightningModule):
     def __init__(
         self,
         config: NNUELightningConfig,
+        max_epoch=None,
+        num_batches_per_epoch=None,
         quantize_config=QuantizationConfig(),
-        max_epoch=800,
         param_index=0,
         num_psqt_buckets=8,
         num_ls_buckets=8,
@@ -47,15 +48,18 @@ class NNUE(L.LightningModule):
         )
         self.loss_params = config.loss_params
         self.optimizer_config = config.optimizer_config
-        self.max_epoch = self.optimizer_config.max_epoch = max_epoch
+        self.max_epoch = max_epoch
         self.param_index = param_index
 
-        self.optimizer_wrapper = self.optimizer_config.get_optimizer_wrapper()
+        self.optimizer_wrapper = self.optimizer_config.get_optimizer_wrapper(max_epoch, num_batches_per_epoch)
 
 
     # --- setup optimizers and training hooks ---
 
     def configure_optimizers(self):
+        if self.max_epoch is None:
+            print("[NNUE] Required parameter for training not set: max_epoch")
+
         LR = self.optimizer_config.lr
         ft_wd = self.optimizer_config.ft_weight_decay
         dense_wd = self.optimizer_config.dense_weight_decay

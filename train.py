@@ -98,7 +98,6 @@ def make_data_loaders(
     )
     return train, val
 
-
 def main():
     args = tyro.cli(TrainingConfig)
     actual_threads, actual_workers = args.threads, args.num_workers
@@ -134,10 +133,7 @@ def main():
         else loss_params.lambda_
     )
 
-    # TODO sync batches per epoch for the optimizer using init hooks.
     global_batch_size_requested = args.batch_size
-    if global_batch_size_requested <= 0:
-        global_batch_size_requested = 16384
     # temporarily default to using only device 0 if user didn't specify --gpus
     # doing this so that batch size is consistent since if we rely on "auto" behavior
     # we don't know at this point in the code what the world size is.
@@ -178,15 +174,12 @@ def main():
     print("Loss parameters:")
     print(loss_params)
 
-    num_batches_per_epoch=max(
-                1, args.epoch_size // global_batch_size_requested
-            )
-
     max_epoch = args.max_epochs or 800
     if args.resume_from_model is None:
         nnue = M.NNUE(
             config=args.nnue_lightning_config,
             max_epoch=max_epoch,
+            num_batches_per_epoch=args.num_batches_per_epoch,
             param_index=args.dataloader_config.param_index,
             quantize_config=M.QuantizationConfig(),
         )
@@ -198,11 +191,12 @@ def main():
             raise RuntimeError(
                 f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
             )
-        nnue.loss_params = loss_params
-        nnue.max_epoch = max_epoch
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
-        nnue.optimizer_config = args.optimizer_config
+        nnue.loss_params = loss_params
+        nnue.max_epoch = max_epoch
+        nnue.num_batches_per_epoch=args.num_batches_per_epoch
+        args.nnue_lightning_config = args.nnue_lightning_config
         nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
@@ -234,7 +228,7 @@ def main():
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
 
-    refresh_rate = max(1, (num_batches_per_epoch + 4) // 5)
+    refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,

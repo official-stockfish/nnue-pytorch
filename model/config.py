@@ -35,7 +35,7 @@ class ModelConfig(LayerStacksConfig):
 
 
 # parameters needed for the definition of the loss
-@dataclass
+@dataclass(kw_only=True)
 class LossParams:
     in_offset: float = 270
     """offset for conversion to win on input (default=270.0)"""
@@ -60,7 +60,7 @@ class LossParams:
     lambda_: Annotated[float, tyro.conf.arg(name="lambda")] = 1.0
     """1.0=train on evaluations, 0.0=train on game results, interpolates between (default=1.0)."""
 
-@dataclass
+@dataclass(kw_only=True)
 class NNUELightningConfig(FeatureConfig):
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
     loss_params: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)

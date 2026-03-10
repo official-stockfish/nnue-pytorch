@@ -22,16 +22,20 @@ class Ranger21Wrapper:
     def __init__(
         self,
         config,
+        max_epoch,
+        num_batches_per_epoch,
     ):
-        self.max_epoch = config.max_epoch
-        self.gamma = config.gamma
+        self.max_epoch = max_epoch
         self.num_batches_per_epoch = config.num_batches_per_epoch
+        self.gamma = config.gamma
 
     def configure_optimizers(self, train_params):
         if _ranger21_import_error:
             raise ImportError(
                 "The required ranger21 library is not installed. "
             )
+        if self.num_batches_per_epoch is None:
+            print("[Ranger21Wrapper] Required parameter for training not set: num_batches_per_epoch")
         optimizer = ranger21.Ranger21(
             train_params,
             lr=1.0,

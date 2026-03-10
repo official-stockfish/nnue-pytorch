@@ -4,26 +4,26 @@ from typing import Literal
 from .ranger21_wrapper import Ranger21Config, Ranger21Wrapper
 from .schedulefree_wrapper import ScheduleFreeConfig, ScheduleFreeWrapper
 
-@dataclass
+@dataclass(kw_only=True)
 class OptimizerConfig(Ranger21Config, ScheduleFreeConfig):
     optimizer_name: Literal["schedulefree", "ranger21"] = "ranger21"
     """Which optimizer to use. """
 
     ft_weight_decay: float = 0.0
-    """Weight decay to apply to the feature transformer parameters.."""
+    """Weight decay to apply to the feature transformer parameters."""
 
     dense_weight_decay: float = 0.0
     """Weight decay to apply to the dense layer parameters."""
 
     lr: float = 8.75e-4
-    """Initial learning rate. Only used for schedulefree."""
+    """Initial learning rate."""
 
-    def get_optimizer_wrapper(self):
+    def get_optimizer_wrapper(self, max_epoch, num_batches_per_epoch):
         optimizer_name = self.optimizer_name.lower().strip()
         if optimizer_name == "schedulefree":
             wrapper = ScheduleFreeWrapper(self)
         elif optimizer_name == "ranger21":
-            wrapper = Ranger21Wrapper(self)
+            wrapper = Ranger21Wrapper(self, max_epoch, num_batches_per_epoch)
         else:
             raise ValueError(f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree' or 'ranger21'.")
 
