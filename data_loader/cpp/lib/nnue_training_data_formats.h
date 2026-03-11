@@ -49,7 +49,6 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <optional>
 #include <thread>
 #include <mutex>
-#include <shared_mutex>
 #include <random>
 #include <functional>
 
@@ -60,7 +59,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 
 #include "rng.h"
-#include "thread_local_structs.h"
+#include "thread_safe_types.h"
 
 #if (defined(_MSC_VER) || defined(__INTEL_COMPILER)) && !defined(__clang__)
 #include <intrin.h>
@@ -7685,11 +7684,7 @@ namespace binpack
                 m_fileMutexes.push_back(std::make_unique<std::mutex>());
             }
             m_distribution_weights = sizes;
-            m_ringBuffer.resize(ringCapacity);
-            for (size_t i = 0; i < ringCapacity; ++i)
-            {
-                m_ringBuffer[i].reserve(threadBufferSize);
-            }
+            m_ringBuffer.reserve_internal(threadBufferSize);
 
             // Initialize DDP seeking tracking
             m_files_seeked_for_ddp.resize(m_inputFiles.size(), false);
@@ -7765,26 +7760,17 @@ namespace binpack
                         auto& prng = rng::get_thread_local_rng();
                         std::shuffle(m_localBuffer.begin(), m_localBuffer.end(), prng);
 
-                        std::unique_lock lock(m_ringMutex);
-                        m_ringNotFull.wait(lock, [this]() {
-                            return m_ringCount < ringCapacity || m_stopFlag.load();
+                        bool success = m_ringBuffer.put(m_localBuffer, [this]() {
+                            return this->should_stop_producer();
                         });
-
-                        if (m_stopFlag.load()) break;
-
-                        m_ringBuffer[m_ringTail].swap(m_localBuffer);
-                        m_ringTail = (m_ringTail + 1) % ringCapacity;
-                        m_ringCount++;
-
-                        lock.unlock();
-                        m_ringNotEmpty.notify_one();
+                        if (!success) break; // Ring and workers exhausted
 
                         m_localBuffer.clear();
                         m_localBuffer.reserve(threadBufferSize);
                     }
                 }
                 m_numRunningWorkers.fetch_sub(1);
-                m_ringNotEmpty.notify_all();
+                m_ringBuffer.signal_stop(false);
             };
 
             for (int i = 0; i < concurrency; ++i)
@@ -7795,7 +7781,7 @@ namespace binpack
 
         [[nodiscard]] std::optional<TrainingDataEntry> next()
         {
-            LocalBuffer& local = bufferRegistry.get();
+            LocalBuffer& local = m_bufferRegistry.get();
             if (local.offset < local.entries.size()) [[likely]]
             {
                 return std::move(local.entries[local.offset++]);
@@ -7803,20 +7789,10 @@ namespace binpack
 
             if (local.offset >= local.entries.size())
             {
-                std::unique_lock lock(m_ringMutex);
-                m_ringNotEmpty.wait(lock, [this]() {
-                    return m_ringCount > 0 || m_numRunningWorkers.load() <= 0;
+                bool success = m_ringBuffer.take(local.entries, [this]() {
+                    return this->should_stop_consumer();
                 });
-
-                if (m_ringCount == 0) return std::nullopt;
-
-                local.entries.swap(m_ringBuffer[m_ringHead]);
-                m_ringHead = (m_ringHead + 1) % ringCapacity;
-                m_ringCount--;
-                local.offset = 0;
-
-                lock.unlock();
-                m_ringNotFull.notify_one();
+                if (!success) return std::nullopt;
             }
 
             return std::move(local.entries[local.offset++]);
@@ -7824,26 +7800,17 @@ namespace binpack
 
         int fill(std::vector<TrainingDataEntry>& vec, std::size_t n)
         {
-            LocalBuffer& local = bufferRegistry.get();
+            LocalBuffer& local = m_bufferRegistry.get();
             std::size_t total_filled = 0;
 
             while (total_filled < n) {
                 if (local.offset >= local.entries.size()) [[unlikely]]
                 {
-                    std::unique_lock lock(m_ringMutex);
-                    m_ringNotEmpty.wait(lock, [this]() {
-                        return m_ringCount > 0 || m_numRunningWorkers.load() <= 0;
+                    bool success = m_ringBuffer.take(local.entries, [this]() {
+                        return this->should_stop_consumer();
                     });
-
-                    if (m_ringCount == 0) break; // Ring and workers exhausted
-
-                    local.entries.swap(m_ringBuffer[m_ringHead]);
-                    m_ringHead = (m_ringHead + 1) % ringCapacity;
-                    m_ringCount--;
+                    if (!success) break; // Ring and workers exhausted
                     local.offset = 0;
-
-                    lock.unlock();
-                    m_ringNotFull.notify_one();
                 }
 
                 const std::size_t available = local.entries.size() - local.offset;
@@ -7864,8 +7831,7 @@ namespace binpack
         ~CompressedTrainingDataEntryParallelReader()
         {
             m_stopFlag.store(true);
-            m_ringNotEmpty.notify_all();
-            m_ringNotFull.notify_all();
+            m_ringBuffer.signal_stop();
             for (auto& worker : m_workers)
             {
                 if (worker.joinable())
@@ -7889,18 +7855,6 @@ namespace binpack
         // Per File Lock
         std::vector<std::unique_ptr<std::mutex>> m_fileMutexes;
         std::vector<double> m_distribution_weights;
-
-        // Constant Size Ring Buffer
-        static constexpr int ringCapacity = 4;
-        static_assert(ringCapacity > 0, "ringCapacity must be greater 0.");
-        std::vector<std::vector<TrainingDataEntry>> m_ringBuffer;
-        size_t m_ringHead = 0;
-        size_t m_ringTail = 0;
-        size_t m_ringCount = 0;
-        std::mutex m_ringMutex;
-        std::condition_variable m_ringNotEmpty;
-        std::condition_variable m_ringNotFull;
-
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
 
         // DDP support
@@ -7910,11 +7864,26 @@ namespace binpack
         std::vector<std::size_t> m_ddp_chunks_to_skip_after_read;
 
         // thread local data buffers
+        using TrainingDataEntries = std::vector<TrainingDataEntry>;
         struct alignas(128) LocalBuffer {
-            std::vector<TrainingDataEntry> entries;
+            TrainingDataEntries entries;
             size_t offset = 0;
         };
-        thread_local_structs::ThreadLocalRegistry<LocalBuffer> bufferRegistry;
+
+        // Constant Size Ring Buffer
+        static constexpr int ringCapacity = 4;
+        thread_safe_types::ThreadLocalRegistry<LocalBuffer> m_bufferRegistry;
+        thread_safe_types::ThreadSafeRingBuffer<TrainingDataEntries, ringCapacity> m_ringBuffer;
+
+        bool should_stop_producer()
+        {
+            return m_stopFlag.load();
+        }
+
+        bool should_stop_consumer()
+        {
+            return m_numRunningWorkers.load() <= 0;
+        }
 
         bool fetchNextChunkIfNeeded(std::size_t& m_offset, std::vector<unsigned char>& m_chunk,
                                 std::discrete_distribution<std::size_t>& local_dist)
