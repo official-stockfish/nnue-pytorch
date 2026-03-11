@@ -7674,8 +7674,7 @@ namespace binpack
 
                 if (!file.hasNextChunk()) [[unlikely]]
                 {
-                    std::cerr << "Fatal: Empty file?" << std::endl;
-                    std::abort();
+                    throw std::runtime_error("Empty or corrupted file.");
                 }
 
                 sizes.emplace_back(static_cast<double>(file.sizeBytes()));
