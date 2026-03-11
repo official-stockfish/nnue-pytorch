@@ -102,7 +102,6 @@ private:
     int m_concurrency;
     std::deque<SparseBatch*> m_batches;
     std::mutex m_batch_mutex;
-    std::mutex m_stream_mutex;
     std::condition_variable m_batches_not_full;
     std::condition_variable m_batches_any;
     std::atomic_bool m_stop_flag;
@@ -153,7 +152,6 @@ private:
     int m_concurrency;
     std::deque<FenBatch*> m_batches;
     std::mutex m_batch_mutex;
-    std::mutex m_stream_mutex;
     std::condition_variable m_batches_not_full;
     std::condition_variable m_batches_any;
     std::atomic_bool m_stop_flag;
