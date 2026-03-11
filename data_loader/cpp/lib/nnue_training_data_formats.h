@@ -7909,7 +7909,7 @@ namespace binpack
         std::vector<std::size_t> m_ddp_chunks_to_skip_after_read;
 
         // thread local data buffers
-        struct LocalBuffer {
+        struct alignas(128) LocalBuffer {
             std::vector<TrainingDataEntry> entries;
             size_t offset = 0;
         };
