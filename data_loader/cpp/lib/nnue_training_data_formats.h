@@ -7686,6 +7686,10 @@ namespace binpack
             }
             m_distribution_weights = sizes;
             m_ringBuffer.resize(ringCapacity);
+            for (size_t i = 0; i < ringCapacity; ++i)
+            {
+                m_ringBuffer[i].reserve(threadBufferSize);
+            }
 
             // Initialize DDP seeking tracking
             m_files_seeked_for_ddp.resize(m_inputFiles.size(), false);
@@ -7768,7 +7772,7 @@ namespace binpack
 
                         if (m_stopFlag.load()) break;
 
-                        m_ringBuffer[m_ringTail] = std::move(m_localBuffer);
+                        m_ringBuffer[m_ringTail].swap(m_localBuffer);
                         m_ringTail = (m_ringTail + 1) % ringCapacity;
                         m_ringCount++;
 
