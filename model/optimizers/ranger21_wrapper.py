@@ -32,7 +32,9 @@ class Ranger21Wrapper:
                 "The required ranger21 library is not installed. "
             )
         if self.num_batches_per_epoch is None:
-            print("[Ranger21Wrapper] Required parameter for training not set: num_batches_per_epoch")
+            raise RuntimeError(
+                "[Ranger21Wrapper] Required parameter for training not set: num_batches_per_epoch"
+                )
         optimizer = ranger21.Ranger21(
             train_params,
             lr=1.0,

@@ -51,7 +51,9 @@ class NNUE(L.LightningModule):
         self.max_epoch = max_epoch
         self.param_index = param_index
 
-        self.optimizer_wrapper = self.optimizer_config.get_optimizer_wrapper(max_epoch, num_batches_per_epoch)
+        self.optimizer_wrapper = self.optimizer_config.get_optimizer_wrapper(
+            self.max_epoch, self.num_batches_per_epoch
+        )
 
 
     # --- setup optimizers and training hooks ---
