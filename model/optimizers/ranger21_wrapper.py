@@ -15,9 +15,6 @@ class Ranger21Config:
     gamma: float = 0.992
     """Multiplicative factor applied to the learning rate after every epoch."""
 
-    num_batches_per_epoch: int = 100_000_000 // 16384
-    """Number of batches per epoch, used by Ranger21 for scheduling."""
-
 class Ranger21Wrapper:
     def __init__(
         self,
@@ -26,7 +23,7 @@ class Ranger21Wrapper:
         num_batches_per_epoch,
     ):
         self.max_epoch = max_epoch
-        self.num_batches_per_epoch = config.num_batches_per_epoch
+        self.num_batches_per_epoch = num_batches_per_epoch
         self.gamma = config.gamma
 
     def configure_optimizers(self, train_params):

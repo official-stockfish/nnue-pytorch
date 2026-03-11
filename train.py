@@ -196,7 +196,7 @@ def main():
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
         nnue.num_batches_per_epoch=args.num_batches_per_epoch
-        args.nnue_lightning_config = args.nnue_lightning_config
+        nnue.nnue_lightning_config = args.nnue_lightning_config
         nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
