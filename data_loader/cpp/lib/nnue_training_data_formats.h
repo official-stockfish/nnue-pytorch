@@ -7890,8 +7890,9 @@ namespace binpack
         std::vector<std::unique_ptr<std::mutex>> m_fileMutexes;
         std::vector<double> m_distribution_weights;
 
-        // Size 4 Ring Buffer, using alignas to prevent false sharing
+        // Constant Size Ring Buffer
         static constexpr int ringCapacity = 4;
+        static_assert(ringCapacity > 0, "ringCapacity must be greater 0.");
         std::vector<std::vector<TrainingDataEntry>> m_ringBuffer;
         size_t m_ringHead = 0;
         size_t m_ringTail = 0;
