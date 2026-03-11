@@ -7670,15 +7670,13 @@ namespace binpack
             for (const auto& path : paths)
             {
                 auto& file = m_inputFiles.emplace_back(path, om | std::ios_base::in);
-
                 if (!file.hasNextChunk())
                 {
-                    return;
+                    throw std::runtime_error("Missing or corrupted file.");
                 }
-
+                m_fileMutexes.push_back(std::make_unique<std::mutex>());
                 sizes.emplace_back(static_cast<double>(file.sizeBytes()));
             }
-
             m_inputFileDistribution = std::discrete_distribution<>(sizes.begin(), sizes.end());
 
             // Initialize DDP seeking tracking
@@ -7866,7 +7864,7 @@ namespace binpack
         std::vector<TrainingDataEntry> m_buffer;
         std::size_t m_bufferOffset;
         std::mutex m_waitingBufferMutex;
-        std::mutex m_fileMutex;
+        std::vector<std::unique_ptr<std::mutex>> m_fileMutexes;
         std::condition_variable m_waitingBufferEmpty;
         std::condition_variable m_waitingBufferFull;
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
@@ -7909,7 +7907,7 @@ namespace binpack
                     return ok;
                 };
 
-                std::unique_lock lock(m_fileMutex);
+                std::unique_lock lock(*m_fileMutexes[fileId]);
 
                 // DDP: chunk-based skipping
                 if (m_world_size > 1)
