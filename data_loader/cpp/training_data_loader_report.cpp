@@ -122,9 +122,9 @@ int main(int argc, char** argv) {
                                              .early_fen_skipping   = 10,
                                              .simple_eval_skipping = 0,
                                              .param_index          = 0,
-                                             .pc_y1                = 1.0,
-                                             .pc_y2                = 2.0,
-                                             .pc_y3                = 1.0};
+                                             .pc_y1                = 0.6893201149773951,
+                                             .pc_y2                = 2.9285769485515805,
+                                             .pc_y3                = 1.4386005301749225};
     const DataloaderDDPConfig  ddp_config = {.rank = 0, .world_size = 1};
 
     std::cout << "Initializing stream (Threads: " << concurrency << ", Iterations: " << iteration_count << ")..." << std::endl;
