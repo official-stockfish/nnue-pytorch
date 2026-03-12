@@ -64,12 +64,6 @@ def make_data_loaders(
         num_workers=num_workers,
         config=config,
     )
-    val_infinite = data_loader.SparseBatchDataset(
-        features_name,
-        val_filenames,
-        batch_size,
-        config=config,
-    )
     # num_workers has to be 0 for sparse, and 1 for dense
     # it currently cannot work in parallel mode but it shouldn't need to
     train = DataLoader(
@@ -82,20 +76,25 @@ def make_data_loaders(
         batch_sampler=None,
         num_workers=0,
     )
-    val = (
-        None
-        if val_size == 0
-        else DataLoader(
-            data_loader.FixedNumBatchesDataset(
-                val_infinite, (val_size + batch_size - 1) // batch_size,
-                pin_memory=pin_memory,
-                queue_size_limit=queue_size_limit,
-            ),
-            batch_size=None,
-            batch_sampler=None,
-            num_workers=0,
+    if val_size <= 0:
+        val = None
+    else:
+        val_infinite = data_loader.SparseBatchDataset(
+            features_name,
+            val_filenames,
+            batch_size,
+            config=config,
         )
-    )
+        val = DataLoader(
+                data_loader.FixedNumBatchesDataset(
+                    val_infinite, (val_size + batch_size - 1) // batch_size,
+                    pin_memory=pin_memory,
+                    queue_size_limit=queue_size_limit,
+                ),
+                batch_size=None,
+                batch_sampler=None,
+                num_workers=0,
+            )
     return train, val
 
 def main():
@@ -195,7 +194,7 @@ def main():
         # from .pt the optimizer is only created after the training is started
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch=args.num_batches_per_epoch
+        nnue.num_batches_per_epoch = args.num_batches_per_epoch
         nnue.nnue_lightning_config = args.nnue_lightning_config
         nnue.param_index = args.dataloader_config.param_index
 

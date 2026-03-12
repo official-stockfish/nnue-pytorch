@@ -18,17 +18,9 @@ def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
 
 class NNUE(L.LightningModule):
     """
-    feature_name - a string identifying the feature transformer (e.g. "HalfKAv2_hm")
-
-    optimizer_name - a string identifying the optimizer wrapper ("schedulefree" or "ranger21")
-
     lambda_ = 0.0 - purely based on game results
     0.0 < lambda_ < 1.0 - interpolated score and result
     lambda_ = 1.0 - purely based on search scores
-
-    gamma - the multiplicative factor applied to the learning rate after each epoch
-
-    lr - the initial learning rate
     """
 
     def __init__(
@@ -49,18 +41,20 @@ class NNUE(L.LightningModule):
         self.loss_params = config.loss_params
         self.optimizer_config = config.optimizer_config
         self.max_epoch = max_epoch
+        self.num_batches_per_epoch = num_batches_per_epoch
         self.param_index = param_index
 
-        self.optimizer_wrapper = self.optimizer_config.get_optimizer_wrapper(
-            self.max_epoch, self.num_batches_per_epoch
-        )
-
+        self.optimizer_wrapper = None # lazy init
 
     # --- setup optimizers and training hooks ---
 
     def configure_optimizers(self):
         if self.max_epoch is None:
             print("[NNUE] Required parameter for training not set: max_epoch")
+
+        self.optimizer_wrapper = self.optimizer_config.get_optimizer_wrapper(
+            self.max_epoch, self.num_batches_per_epoch
+        )
 
         LR = self.optimizer_config.lr
         ft_wd = self.optimizer_config.ft_weight_decay
