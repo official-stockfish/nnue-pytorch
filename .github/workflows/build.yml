@@ -20,5 +20,5 @@ jobs:
         run: ./build/training_data_loader_bench -i 100 ./.pgo/small.binpack
 
       - name: Run cmake compiled report (500 iterations)
-        run: ./build/training_data_loader_bench -i 500 ./.pgo/small.binpack
+        run: ./build/training_data_loader_report -i 500 ./.pgo/small.binpack
 
