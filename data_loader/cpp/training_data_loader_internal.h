@@ -33,7 +33,9 @@ std::function<bool(const struct binpack::TrainingDataEntry&)> make_skip_predicat
 struct SparseBatch final {
     static constexpr bool IS_BATCH = true;
 
-    SparseBatch(const IFeatureExtractor& feature_set, const std::vector<struct binpack::TrainingDataEntry>& entries);
+    SparseBatch(
+        const IFeatureExtractor& feature_set,
+        const std::vector<struct binpack::TrainingDataEntry>& entries);
     ~SparseBatch();
 
     int num_inputs;
@@ -51,6 +53,10 @@ struct SparseBatch final {
     float* black_values;
     int* psqt_indices;
     int* layer_stack_indices;
+
+#ifdef LOADER_STATISTICS
+    std::vector<struct binpack::TrainingDataEntry> entries_copy;
+#endif
 
 private:
     void fill_entry(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
@@ -108,7 +114,7 @@ private:
     std::atomic_bool m_stop_flag;
     std::atomic_int m_num_workers;
     std::vector<std::thread> m_workers;
-    
+
     static int calculate_initial_workers(int concurrency);
 };
 

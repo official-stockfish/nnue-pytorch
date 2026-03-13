@@ -13,7 +13,7 @@ using namespace binpack;
 using namespace chess;
 
 // ---------------------------------------------------------
-// Internal extractors and threat arrays 
+// Internal extractors and threat arrays
 // ---------------------------------------------------------
 
 static Square orient_flip_2(Color color, Square sq, Square ksq) {
@@ -377,6 +377,9 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
 
         for (int i = 0; i < size; ++i)
             fill_entry(feature_set, i, entries[i]);
+#ifdef LOADER_STATISTICS
+        entries_copy = entries;
+#endif
 }
 
 SparseBatch::~SparseBatch() {
@@ -409,8 +412,8 @@ void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const Traini
 }
 
 int FeaturedBatchStream::calculate_initial_workers(int concurrency) {
-        if (num_feature_threads_per_reading_thread <= 0) return 1; 
-        
+        if (num_feature_threads_per_reading_thread <= 0) return 1;
+
         const int denominator = std::max(1, concurrency / num_feature_threads_per_reading_thread);
         return std::max(1, concurrency - denominator);
 }
@@ -429,7 +432,7 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
     m_concurrency(concurrency),
     m_batch_size(batch_size),
     m_num_workers(calculate_initial_workers(concurrency)) {
-    
+
     m_stop_flag.store(false);
 
     auto worker = [this]() {
@@ -512,8 +515,8 @@ FenBatch::FenBatch(const std::vector<TrainingDataEntry>& entries) :
 FenBatch::~FenBatch() { delete[] m_fens; }
 
 int FenBatchStream::calculate_initial_workers(int concurrency) {
-        if (num_feature_threads_per_reading_thread <= 0) return 1; 
-        
+        if (num_feature_threads_per_reading_thread <= 0) return 1;
+
         const int denominator = std::max(1, concurrency / num_feature_threads_per_reading_thread);
         return std::max(1, concurrency - denominator);
 }
@@ -530,7 +533,7 @@ FenBatchStream::FenBatchStream(int concurrency,
     m_concurrency(concurrency),
     m_batch_size(batch_size),
     m_num_workers(calculate_initial_workers(concurrency)) {
-    
+
     m_stop_flag.store(false);
 
     auto worker = [this]() {
