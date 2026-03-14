@@ -74,9 +74,9 @@ namespace thread_safe_types
         }
 
         void signal_stop(bool signalProducers=true) {
+            m_ringNotEmpty.notify_all();
             if(signalProducers)
-                m_ringNotEmpty.notify_all();
-            m_ringNotFull.notify_all();
+                m_ringNotFull.notify_all();
         }
 
         void reserve_internal(size_t size) {
@@ -103,7 +103,8 @@ namespace thread_safe_types
             m_slot.resize(1);
         }
 
-        template <std::predicate<> Pred>
+        template <class Pred>
+        requires std::predicate<Pred>
         bool put(T& incomingItem, Pred stopCondition) {
             std::unique_lock lock(m_ringMutex);
 
@@ -121,7 +122,8 @@ namespace thread_safe_types
             return true;
         }
 
-        template <std::predicate<> Pred>
+        template <class Pred>
+        requires std::predicate<Pred>
         bool take(T& outgoingItem, Pred stopCondition) {
             std::unique_lock lock(m_ringMutex);
 

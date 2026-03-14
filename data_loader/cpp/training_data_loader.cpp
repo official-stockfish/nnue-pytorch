@@ -443,7 +443,7 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
         while (!m_stop_flag.load()) {
             entries.clear();
             {
-                BaseType::m_stream->fill(entries, m_batch_size);
+                BaseType::m_stream->fill_threadsafe(entries, m_batch_size);
                 if (entries.empty()) break;
             }
 
@@ -546,7 +546,7 @@ FenBatchStream::FenBatchStream(int concurrency,
         while (!m_stop_flag.load()) {
             entries.clear();
             {
-                BaseType::m_stream->fill(entries, m_batch_size);
+                BaseType::m_stream->fill_threadsafe(entries, m_batch_size);
                 if (entries.empty()) break;
             }
 

@@ -7791,6 +7791,7 @@ namespace binpack
                     return this->should_stop_consumer();
                 });
                 if (!success) return std::nullopt;
+                local.offset = 0;
             }
 
             return std::move(local.entries[local.offset++]);
