@@ -6882,7 +6882,6 @@ namespace binpack
             m_file.read(reinterpret_cast<char*>(header), 8);
             if (header[0] != 'B' || header[1] != 'I' || header[2] != 'N' || header[3] != 'P')
             {
-                assert(false);
                 throw std::runtime_error("Invalid binpack file or chunk.");
             }
 
@@ -6894,8 +6893,7 @@ namespace binpack
 
             if (size > maxChunkSize)
             {
-                assert(false);
-                throw std::runtime_error("Chunks size larger than supported. Malformed file?");
+                 throw std::runtime_error("Chunk size larger than supported. Malformed file?");
             }
 
             return { size };
@@ -7673,7 +7671,7 @@ namespace binpack
 
                 if (!file.hasNextChunk()) [[unlikely]]
                 {
-                    throw std::runtime_error("Empty or corrupted file.");
+                     throw std::runtime_error("Empty or corrupted file: " + path);
                 }
 
                 sizes.emplace_back(static_cast<double>(file.sizeBytes()));
