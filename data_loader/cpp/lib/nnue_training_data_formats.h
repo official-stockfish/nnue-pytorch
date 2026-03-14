@@ -7871,7 +7871,7 @@ namespace binpack
         };
 
         // Constant Size Ring Buffer
-        static constexpr int ringCapacity = 16;
+        static constexpr int ringCapacity = 1;
         thread_safe_types::ThreadLocalRegistry<LocalBuffer> m_bufferRegistry;
         thread_safe_types::ThreadSafeRingBuffer<TrainingDataEntries, ringCapacity> m_ringBuffer;
 
