@@ -38,27 +38,27 @@ class NNUE(L.LightningModule):
         self.model: NNUEModel = NNUEModel(
             config.features, config.model_config, quantize_config, num_psqt_buckets, num_ls_buckets
         )
-        self.loss_params = config.loss_params
-        self.optimizer_config = config.optimizer_config
+        self.config = config
         self.max_epoch = max_epoch
         self.num_batches_per_epoch = num_batches_per_epoch
         self.param_index = param_index
 
-        self.optimizer_wrapper = None # lazy init
+        # lazy init so `resume_from_model` with config changes works correctly
+        self.optimizer_wrapper = None
 
     # --- setup optimizers and training hooks ---
-
     def configure_optimizers(self):
         if self.max_epoch is None:
             print("[NNUE] Required parameter for training not set: max_epoch")
 
-        self.optimizer_wrapper = self.optimizer_config.get_optimizer_wrapper(
+        optimizer_config = self.config.optimizer_config
+        self.optimizer_wrapper = optimizer_config.get_optimizer_wrapper(
             self.max_epoch, self.num_batches_per_epoch
         )
 
-        LR = self.optimizer_config.lr
-        ft_wd = self.optimizer_config.ft_weight_decay
-        dense_wd = self.optimizer_config.dense_weight_decay
+        LR = optimizer_config.lr
+        ft_wd = optimizer_config.ft_weight_decay
+        dense_wd = optimizer_config.dense_weight_decay
 
         train_params = [
             # Feature Transformer
@@ -140,7 +140,7 @@ class NNUE(L.LightningModule):
             * self.model.quantization.nnue2score
         )
 
-        p = self.loss_params
+        p = self.config.loss_params
         # convert the network and search scores to an estimate match result
         # based on the win_rate_model, with scalings and offsets optimized
         q = (scorenet - p.in_offset) / p.in_scaling
