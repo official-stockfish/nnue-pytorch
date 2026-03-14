@@ -82,7 +82,7 @@ protected:
 
 struct FeaturedBatchStream: Stream<SparseBatch> {
     using BaseType = Stream<SparseBatch>;
-    static constexpr int num_feature_threads_per_reading_thread = 2;
+    static constexpr double worker_thread_ratio = 0.14;
 
     FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
                         int concurrency,
@@ -102,14 +102,14 @@ private:
     int m_concurrency;
     std::deque<SparseBatch*> m_batches;
     std::mutex m_batch_mutex;
-    std::mutex m_stream_mutex;
     std::condition_variable m_batches_not_full;
     std::condition_variable m_batches_any;
     std::atomic_bool m_stop_flag;
     std::atomic_int m_num_workers;
     std::vector<std::thread> m_workers;
-    
-    static int calculate_initial_workers(int concurrency);
+
+    static int calculate_num_reader_threads(int concurrency);
+    static int calculate_num_worker_threads(int concurrency);
 };
 
 struct Fen final {
@@ -134,7 +134,7 @@ private:
 
 struct FenBatchStream: Stream<FenBatch> {
     using BaseType = Stream<FenBatch>;
-    static constexpr int num_feature_threads_per_reading_thread = 2;
+    static constexpr double worker_thread_ratio = 0.5;
 
     FenBatchStream(int concurrency,
                    const std::vector<std::string>& filenames,
@@ -152,12 +152,12 @@ private:
     int m_concurrency;
     std::deque<FenBatch*> m_batches;
     std::mutex m_batch_mutex;
-    std::mutex m_stream_mutex;
     std::condition_variable m_batches_not_full;
     std::condition_variable m_batches_any;
     std::atomic_bool m_stop_flag;
     std::atomic_int m_num_workers;
     std::vector<std::thread> m_workers;
 
-    static int calculate_initial_workers(int concurrency);
+    static int calculate_num_reader_threads(int concurrency);
+    static int calculate_num_worker_threads(int concurrency);
 };
