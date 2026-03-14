@@ -192,10 +192,9 @@ def main():
             )
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
-        nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
         nnue.num_batches_per_epoch = args.num_batches_per_epoch
-        nnue.nnue_lightning_config = args.nnue_lightning_config
+        nnue.config = args.nnue_lightning_config
         nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
