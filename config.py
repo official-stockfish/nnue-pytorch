@@ -9,14 +9,18 @@ from tyro.conf import (
 )
 
 from data_loader.config import DataloaderSkipConfig
-from model.config import LossParams, ModelConfig
-from model.modules.features import FeatureConfig
+from model.config import NNUELightningConfig
 
-
-@dataclass
-class TrainingConfig(FeatureConfig):
-    datasets: Positional[list[str]] = field(default_factory=list)
+@dataclass(kw_only=True)
+class TrainingConfig:
+    datasets: Positional[Tuple[str, ...]] = ()
     """Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if no validation data is specified."""
+
+    validation_datasets: UseAppendAction[Tuple[str, ...]] = ()
+    """Validation data to use for validation instead of the training data."""
+
+    validation_size: int = 0
+    """Number of positions per validation step."""
 
     default_root_dir: Optional[str] = None
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
@@ -31,25 +35,16 @@ class TrainingConfig(FeatureConfig):
     """Size of the prefetching queue. Should be conservative if pin_memory is active."""
 
     max_epochs: int = 800
-    """Maximum number of epochs to train for. Default 800."""
+    """Maximum number of epochs to train for."""
 
     max_time: str = "30:00:00:00"
     """The maximum time to train for. A string in the format DD:HH:MM:SS (Default 30:00:00:00)."""
 
-    validation_datasets: UseAppendAction[Tuple[str, ...]] = ()
-    """Validation data to use for validation instead of the training data."""
-
-    gamma: float = 0.992
-    """Multiplicative factor applied to the learning rate after every epoch."""
-
-    lr: float = 8.75e-4
-    """Initial learning rate."""
-
     num_workers: int = 1
     """Number of worker threads to use for data loading. Currently only works well for binpack."""
 
-    batch_size: int = -1
-    """Number of positions per batch / per iteration. Default on GPU = 8192 on CPU = 128."""
+    batch_size: int = 16384
+    """Number of positions per batch / per iteration."""
 
     threads: int = -1
     """Number of torch threads to use. Default automatic (cores)."""
@@ -75,17 +70,24 @@ class TrainingConfig(FeatureConfig):
     epoch_size: int = 100_000_000
     """Number of positions per epoch."""
 
-    validation_size: int = 0
-    """Number of positions per validation step."""
-
     dataloader_config: OmitArgPrefixes[DataloaderSkipConfig] = field(
         default_factory=DataloaderSkipConfig
     )
 
-    model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
+    nnue_lightning_config: OmitArgPrefixes[NNUELightningConfig] = field(
+        default_factory=NNUELightningConfig
+    )
 
-    loss_config: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
+    @property
+    def num_batches_per_epoch(self) -> int:
+        """Calculates batches per epoch based on validated batch size."""
+        return max(1, self.epoch_size // self.batch_size)
 
+    def __post_init__(self):
+        if not self.datasets:
+            raise ValueError("Argument `datasets` is required.")
+        if self.max_epochs <= 0 or self.epoch_size <= 0 or self.batch_size <= 0:
+            raise ValueError("Arguments `max_epochs`, `epoch_size` and `batch_size` must be positive.")
 
 if __name__ == "__main__":
     config = tyro.cli(TrainingConfig)
