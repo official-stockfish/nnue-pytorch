@@ -226,7 +226,8 @@ class RangerLite(torch.optim.Optimizer):
 
     def swap_for_inference(self):
         """Safely loads slow weights for eval/saving. Idempotent."""
-        if not self.lookahead_active: return
+        if not self.lookahead_active:
+            return
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
@@ -238,7 +239,8 @@ class RangerLite(torch.optim.Optimizer):
 
     def restore_for_training(self):
         """Restores fast weights for training. Idempotent."""
-        if not self.lookahead_active: return
+        if not self.lookahead_active:
+            return
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
