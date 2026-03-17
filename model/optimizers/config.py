@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from .ranger21_wrapper import Ranger21Config, Ranger21Wrapper
+from .rangerlite_wrapper import RangerLiteConfig, RangerLiteWrapper
 from .schedulefree_wrapper import ScheduleFreeConfig, ScheduleFreeWrapper
 
 @dataclass(kw_only=True)
-class OptimizerConfig(Ranger21Config, ScheduleFreeConfig):
-    optimizer_name: Literal["schedulefree", "ranger21"] = "ranger21"
+class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
+    optimizer_name: Literal["schedulefree", "ranger21", "rangerlite"] = "ranger21"
     """Which optimizer to use. """
 
     ft_weight_decay: float = 0.0
@@ -23,9 +23,11 @@ class OptimizerConfig(Ranger21Config, ScheduleFreeConfig):
         if optimizer_name == "schedulefree":
             wrapper = ScheduleFreeWrapper(self)
         elif optimizer_name == "ranger21":
-            wrapper = Ranger21Wrapper(self, max_epoch, num_batches_per_epoch)
+            wrapper = RangerLiteWrapper(self, legacy_mode=True)
+        elif optimizer_name == "rangerlite":
+            wrapper = RangerLiteWrapper(self, legacy_mode=False)
         else:
-            raise ValueError(f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree' or 'ranger21'.")
+            raise ValueError(f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21' or 'rangerlite'.")
 
         if self.dense_weight_decay > 0.0 or self.ft_weight_decay > 0.0:
             print(f"Using weight decay - ft_weight_decay: {self.ft_weight_decay}, dense_weight_decay: {self.dense_weight_decay}")
