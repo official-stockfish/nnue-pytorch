@@ -25,10 +25,15 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
         elif optimizer_name == "ranger21":
             wrapper = RangerLiteWrapper(self, legacy_mode=True)
         elif optimizer_name == "rangerlite":
-            wrapper = RangerLiteWrapper(self, legacy_mode=False)
+            wrapper = RangerLiteWrapper(self, legacy_mode=False,
+                                            normloss_active=False,
+                                            pnm_momentum=0.5,
+                                        )
         else:
             raise ValueError(f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21' or 'rangerlite'.")
 
+        info_str = f"[OptimizerConfig] Using {optimizer_name} optimizer with lr: {self.lr}"
         if self.dense_weight_decay > 0.0 or self.ft_weight_decay > 0.0:
-            print(f"Using weight decay - ft_weight_decay: {self.ft_weight_decay}, dense_weight_decay: {self.dense_weight_decay}")
+            info_str += f" and ft_weight_decay: {self.ft_weight_decay}, dense_weight_decay: {self.dense_weight_decay}"
+        print(info_str + ".")
         return wrapper

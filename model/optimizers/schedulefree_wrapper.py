@@ -16,7 +16,7 @@ class ScheduleFreeConfig:
 class ScheduleFreeWrapper:
     def __init__(
         self,
-        config: ScheduleFreeConfig,
+        config,
     ):
         self.lr = config.lr
         self.warmup_steps = config.warmup_steps
@@ -28,7 +28,7 @@ class ScheduleFreeWrapper:
                 "The required schedulefree library is not installed. "
             )
         print(
-            f"Using schedule-free Adam with warmup_steps={self.warmup_steps}, lr={self.lr}."
+            f"[SchedulefreeSetup] warmup_steps={self.warmup_steps}."
         )
         optimizer = schedulefree.AdamWScheduleFree(
             train_params,

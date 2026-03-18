@@ -33,6 +33,10 @@ class RangerLiteWrapper:
             self.optimizer, step_size=1, gamma=self.gamma
         )
 
+        print(
+            f"[RangeerliteSetup] warmup_steps={self.gamma}."
+        )
+
         return [self.optimizer], [scheduler]
 
     def on_train_batch_start(self, pl_module: L.LightningModule, batch, batch_idx):
