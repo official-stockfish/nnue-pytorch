@@ -26,19 +26,24 @@ class ParamFreezer:
 
         elif self.mode == FreezeMode.PSQT_ONLY:
             print("Training only PSQT")
+            self._set_requires_grad(model.input.get_psqt_params(), True)
             self._set_requires_grad(model.input.get_ft_params(), False)
             self._set_requires_grad(model.layer_stacks, False)
-
             model.psqt_only = True
 
         elif self.mode == FreezeMode.FROZEN_PSQT:
             print("Training with Frozen PSQT")
             self._set_requires_grad(model.input.get_psqt_params(), False)
+            self._set_requires_grad(model.input.get_ft_params(), True)
+            self._set_requires_grad(model.layer_stacks, True)
+            model.psqt_only = False
 
         elif self.mode == FreezeMode.FROZEN_PSQT_FT:
             print("Training with Frozen PSQT and FT")
             self._set_requires_grad(model.input.get_psqt_params(), False)
             self._set_requires_grad(model.input.get_ft_params(), False)
+            self._set_requires_grad(model.layer_stacks, True)
+            model.psqt_only = False
 
         quantized_model = self._get_quantized_copy(model)
         self._replace_frozen_weights(model, quantized_model)
