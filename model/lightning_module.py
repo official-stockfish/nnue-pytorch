@@ -50,7 +50,7 @@ class NNUE(L.LightningModule):
 
     def setup(self, stage):
         _ = stage # unused, but required by pytorch-lightning
-        param_freezer = ParamFreezer(self.config).apply_freeze(self.model)
+        ParamFreezer(self.config).apply_freeze(self.model)
         pass
 
     # --- setup optimizers and training hooks ---

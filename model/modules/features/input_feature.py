@@ -40,8 +40,5 @@ class InputFeature(nn.Module, ABC):
     @abstractmethod
     def load_export_weights(self, export_weight: torch.Tensor) -> None: ...
 
-    @abstractmethod
-    def reset_parameters(self): ...
-
     def clip_weights(self, quantization) -> None:
         pass

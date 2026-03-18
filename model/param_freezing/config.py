@@ -1,6 +1,5 @@
 from enum import Enum
 from dataclasses import dataclass
-from typing import Tuple, Any
 from tyro.conf import EnumChoicesFromValues
 
 class FreezeMode(Enum):
