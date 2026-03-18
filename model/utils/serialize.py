@@ -133,10 +133,11 @@ class NNUEWriter:
         else:
             raise Exception("Invalid compression method.")
 
+    @torch.no_grad()
     def write_feature_transformer(self, model: NNUEModel, ft_compression: str) -> None:
         layer = model.input
 
-        bias = layer.bias.data[: model.L1]
+        bias = layer.bias_ft
 
         # Get export weights (coalesced + remapped 12→11 piece types)
         export_weight = layer.get_export_weights()
@@ -167,6 +168,7 @@ class NNUEWriter:
             offset += n
         self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
 
+    @torch.no_grad()
     def write_fc_layer(
         self, model: NNUEModel, layer: nn.Linear, is_output=False
     ) -> None:
@@ -301,6 +303,7 @@ class NNUEReader:
         else:
             raise Exception("Invalid compression method.")
 
+    @torch.no_grad()
     def read_feature_transformer(self, layer, num_psqt_buckets: int) -> None:
         num_export_features = layer.NUM_REAL_FEATURES
         num_outputs = layer.num_outputs
@@ -326,8 +329,9 @@ class NNUEReader:
         # Combine weight and psqt_weight into export format, then expand
         export_weight = torch.cat([weight, psqt_weight], dim=1)
         layer.load_export_weights(export_weight)
-        layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
+        layer.bias_ft.copy_(bias)
 
+    @torch.no_grad()
     def read_fc_layer(
         self,
         layer_weight_t: torch.Tensor,

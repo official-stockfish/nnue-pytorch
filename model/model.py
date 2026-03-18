@@ -25,7 +25,7 @@ class NNUEModel(nn.Module):
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
-        self.input = feature_cls(self.L1 + self.num_psqt_buckets)
+        self.input = feature_cls(self.L1, self.num_psqt_buckets)
         self.feature_name = self.input.FEATURE_NAME
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
@@ -34,7 +34,7 @@ class NNUEModel(nn.Module):
         self.quantization = QuantizationManager(quantize_config)
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
-        self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
+        self.input.init_weights(self.quantization.nnue2score)
 
     def clip_weights(self):
         """

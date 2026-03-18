@@ -46,6 +46,10 @@ class NNUE(L.LightningModule):
         # lazy init so `resume_from_model` with config changes works correctly
         self.optimizer_wrapper = None
 
+    def setup(self, stage):
+        _ = stage # unused, but required by pytorch-lightning
+        pass
+
     # --- setup optimizers and training hooks ---
     def configure_optimizers(self):
         if self.max_epoch is None:
@@ -61,9 +65,12 @@ class NNUE(L.LightningModule):
         dense_wd = optimizer_config.dense_weight_decay
 
         train_params = [
+            # PSQT
+            {"params": self.model.input.get_pqst_params(), "lr": LR, "weight_decay": 0.0},
+
             # Feature Transformer
-            {"params": _get_parameters([self.model.input], get_biases=False), "lr": LR, "weight_decay": ft_wd},
-            {"params": _get_parameters([self.model.input], get_biases=True), "lr": LR, "weight_decay": 0.0},
+            {"params": self.model.input.get_ft_params(include_bias=False), "lr": LR, "weight_decay": ft_wd},
+            {"params": self.model.input.get_ft_params(bias_only=True), "lr": LR, "weight_decay": 0.0},
 
             # Dense Layer Stacks
             {"params": [self.model.layer_stacks.l1.factorized_linear.weight], "lr": LR, "weight_decay": dense_wd},
