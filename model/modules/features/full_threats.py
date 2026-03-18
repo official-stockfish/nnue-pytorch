@@ -34,7 +34,7 @@ class FullThreats(InputFeature):
     def get_ft_params(self) -> list[nn.Parameter]:
         return [self.weight_ft]
 
-    def get_pqst_params(self) -> list[nn.Parameter]:
+    def get_psqt_params(self) -> list[nn.Parameter]:
         return [self.weight_psqt]
 
     @torch.no_grad()

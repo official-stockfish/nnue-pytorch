@@ -17,7 +17,7 @@ class InputFeature(nn.Module, ABC):
         """Return parameters belonging to the Feature Transformer group."""
 
     @abstractmethod
-    def get_pqst_params(self) -> list[nn.Parameter]:
+    def get_psqt_params(self) -> list[nn.Parameter]:
         """Return parameters belonging to the PSQT group."""
 
     @abstractmethod

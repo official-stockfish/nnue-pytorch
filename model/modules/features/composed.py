@@ -45,12 +45,12 @@ class ComposedFeatureTransformer(nn.Module):
                 params.extend(f.get_ft_params())
         return params
 
-    def get_pqst_params(self, include_bias=True, bias_only=False) -> list[nn.Parameter]:
+    def get_psqt_params(self, include_bias=True, bias_only=False) -> list[nn.Parameter]:
         """Aggregate PSQT parameters from all features and the shared PSQT bias."""
         params = [self.bias_psqt] if include_bias else []
         if not bias_only:
             for f in self.features:
-                params.extend(f.get_pqst_params())
+                params.extend(f.get_psqt_params())
         return params
 
     def _compute_hash(self) -> int:
