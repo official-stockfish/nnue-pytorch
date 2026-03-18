@@ -18,6 +18,7 @@ from .utils import (
     NNUEReader,
     NNUEWriter,
 )
+from .param_freezing.config import ParamFreezerConfig
 
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "FeatureConfig",
     "LayerStacksConfig",
     "QuantizationConfig",
+    "ParamFreezerConfig",
 ]

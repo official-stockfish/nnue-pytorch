@@ -6,6 +6,8 @@ from .config import NNUELightningConfig
 from .model import NNUEModel
 from .quantize import QuantizationConfig
 
+from .param_freezing.freezer import ParamFreezer
+
 
 def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
     return [
@@ -48,6 +50,7 @@ class NNUE(L.LightningModule):
 
     def setup(self, stage):
         _ = stage # unused, but required by pytorch-lightning
+        param_freezer = ParamFreezer(self.config).apply_freeze(self.model)
         pass
 
     # --- setup optimizers and training hooks ---

@@ -6,6 +6,7 @@ from tyro.conf import OmitArgPrefixes
 
 from .optimizers import OptimizerConfig
 from .modules import FeatureConfig, LayerStacksConfig
+from .param_freezing.config import ParamFreezerConfig
 
 
 # 3 layer fully connected network
@@ -65,3 +66,4 @@ class NNUELightningConfig(FeatureConfig):
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
     loss_params: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
     optimizer_config: OmitArgPrefixes[OptimizerConfig] = field(default_factory=OptimizerConfig)
+    freeze_config: OmitArgPrefixes[ParamFreezerConfig] = field(default_factory=ParamFreezerConfig)

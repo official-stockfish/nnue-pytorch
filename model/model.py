@@ -36,6 +36,8 @@ class NNUEModel(nn.Module):
 
         self.input.init_weights(self.quantization.nnue2score)
 
+        self.psqt_only = False
+
     def clip_weights(self):
         """
         Clips the weights of the model based on the min/max values allowed
@@ -81,6 +83,15 @@ class NNUEModel(nn.Module):
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
         w, wpsqt = torch.split(wp, self.L1, dim=1)
         b, bpsqt = torch.split(bp, self.L1, dim=1)
+
+        # The PSQT values are averaged over perspectives. "Their" perspective
+        # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
+        # which does both the averaging and sign flip for black to move)
+        psqt_out = (wpsqt - bpsqt) * (us - 0.5)
+
+        if self.psqt_only:
+            return psqt_out
+
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
         l0_ = torch.clamp(l0_, 0.0, 1.0)
 
@@ -93,9 +104,7 @@ class NNUEModel(nn.Module):
         psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
         wpsqt = wpsqt.gather(1, psqt_indices_unsq)
         bpsqt = bpsqt.gather(1, psqt_indices_unsq)
-        # The PSQT values are averaged over perspectives. "Their" perspective
-        # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
-        # which does both the averaging and sign flip for black to move)
-        x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
-        return x
+        layer_stack_out = self.layer_stacks(l0_, layer_stack_indices)
+
+        return layer_stack_out + psqt_out

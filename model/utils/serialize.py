@@ -2,6 +2,7 @@ from functools import reduce
 import operator
 import struct
 from typing import BinaryIO, Sequence
+import io
 
 import numpy as np
 import numpy.typing as npt
@@ -73,7 +74,10 @@ class NNUEWriter:
         model: NNUEModel,
         description: str | None = None,
         ft_compression: str = "none",
+        verbose = True,
     ):
+        self.verbose = verbose
+
         if description is None:
             description = DEFAULT_DESCRIPTION
 
@@ -151,8 +155,9 @@ class NNUEWriter:
             ascii_hist("ft weight:", weight.numpy())
             ascii_hist("ft psqt weight:", psqt_weight.numpy())
 
+        callback = histogram_callback if self.verbose else lambda *args, **kwargs: None
         bias, weight, psqt_weight = model.quantization.quantize_feature_transformer(
-            bias, weight, psqt_weight, histogram_callback
+            bias, weight, psqt_weight, callback
         )
 
         # Weights stored as [num_features][outputs]
@@ -192,8 +197,9 @@ class NNUEWriter:
             )
             ascii_hist("fc weight:", weight.numpy())
 
+        callback = histogram_callback if self.verbose else lambda *args, **kwargs: None
         bias, weight = model.quantization.quantize_fc_layer(
-            bias, weight, is_output, histogram_callback
+            bias, weight, is_output, callback
         )
 
         # FC inputs are padded to 32 elements by spec.
@@ -294,7 +300,13 @@ class NNUEReader:
         compression = self.determine_compression()
 
         if compression == "none":
-            d = np.fromfile(self.f, dtype, reduce(operator.mul, shape, 1))
+            count = reduce(operator.mul, shape, 1)
+            try:
+                d = np.fromfile(self.f, dtype, count)
+            except (io.UnsupportedOperation, AttributeError):
+                # Fallback for BytesIO/streams
+                item_size = np.dtype(dtype).itemsize
+                d = np.frombuffer(self.f.read(count * item_size), dtype=dtype)
             d = torch.from_numpy(d.astype(np.float32))
             d = d.reshape(shape)
             return d
