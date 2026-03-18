@@ -9,6 +9,9 @@ class RangerLiteConfig:
     gamma: float = 0.992
     """Multiplicative factor applied to the learning rate after every epoch."""
 
+    pnm_momentum: float = 1.0
+    """Positive Negative Momentum parameter."""
+
 class RangerLiteWrapper:
     def __init__(
         self,
@@ -16,6 +19,7 @@ class RangerLiteWrapper:
         legacy_mode,
     ):
         self.gamma = config.gamma
+        self.pnm_momentum = config.pnm_momentum
         self.legacy_mode = legacy_mode
         self.needs_train_flip = True
 
@@ -27,6 +31,8 @@ class RangerLiteWrapper:
             lr=1.0,
             weight_decay=0.0,
             use_legacy_scoping_bug=self.legacy_mode,
+            normloss_active=self.legacy_mode,
+            pnm_momentum=self.pnm_momentum,
         )
 
         scheduler = torch.optim.lr_scheduler.StepLR(
@@ -34,7 +40,7 @@ class RangerLiteWrapper:
         )
 
         print(
-            f"[RangeerliteSetup] warmup_steps={self.gamma}."
+            f"[RangeerliteSetup] gamma={self.gamma} pnm_momentum={self.pnm_momentum}."
         )
 
         return [self.optimizer], [scheduler]

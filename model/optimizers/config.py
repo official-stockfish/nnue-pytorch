@@ -25,10 +25,7 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
         elif optimizer_name == "ranger21":
             wrapper = RangerLiteWrapper(self, legacy_mode=True)
         elif optimizer_name == "rangerlite":
-            wrapper = RangerLiteWrapper(self, legacy_mode=False,
-                                            normloss_active=False,
-                                            pnm_momentum=0.5,
-                                        )
+            wrapper = RangerLiteWrapper(self, legacy_mode=False)
         else:
             raise ValueError(f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21' or 'rangerlite'.")
 
