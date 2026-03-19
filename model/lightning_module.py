@@ -68,8 +68,8 @@ class NNUE(L.LightningModule):
         dense_wd = optimizer_config.dense_weight_decay
 
         train_params = [
-            # PSQT
-            {"params": self.model.input.get_psqt_params(), "lr": LR, "weight_decay": 0.0},
+            # PSQT -- do not train biases
+            {"params": self.model.input.get_psqt_params(include_bias=False), "lr": LR, "weight_decay": 0.0},
 
             # Feature Transformer
             {"params": self.model.input.get_ft_params(include_bias=False), "lr": LR, "weight_decay": ft_wd},

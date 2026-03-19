@@ -18,31 +18,30 @@ class ParamFreezer:
 
     def apply_freeze(self, model: nn.Module):
         """Applies freezing logic to the model based on the selected mode."""
+        # unfreeze all parameters
         for param in model.parameters():
             param.requires_grad = True
 
+        # never train psqt biases
+        self._set_requires_grad(model.input.get_psqt_params(bias_only=True), False)
         if self.mode == FreezeMode.FULL_TRAINING:
             return
 
         elif self.mode == FreezeMode.PSQT_ONLY:
             print("Training only PSQT")
-            self._set_requires_grad(model.input.get_psqt_params(), True)
             self._set_requires_grad(model.input.get_ft_params(), False)
             self._set_requires_grad(model.layer_stacks, False)
             model.psqt_only = True
 
         elif self.mode == FreezeMode.FROZEN_PSQT:
             print("Training with Frozen PSQT")
-            self._set_requires_grad(model.input.get_psqt_params(), False)
-            self._set_requires_grad(model.input.get_ft_params(), True)
-            self._set_requires_grad(model.layer_stacks, True)
+            self._set_requires_grad(model.input.get_psqt_params(include_bias=False), False)
             model.psqt_only = False
 
         elif self.mode == FreezeMode.FROZEN_PSQT_FT:
             print("Training with Frozen PSQT and FT")
-            self._set_requires_grad(model.input.get_psqt_params(), False)
+            self._set_requires_grad(model.input.get_psqt_params(include_bias=False), False)
             self._set_requires_grad(model.input.get_ft_params(), False)
-            self._set_requires_grad(model.layer_stacks, True)
             model.psqt_only = False
 
         quantized_model = self._get_quantized_copy(model)

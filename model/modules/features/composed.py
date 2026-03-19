@@ -23,7 +23,7 @@ class ComposedFeatureTransformer(nn.Module):
 
         # Split the shared bias into FT and PSQT parameter groups
         self.bias_ft = nn.Parameter(torch.empty(self.l1, dtype=torch.float32))
-        self.bias_psqt = nn.Parameter(torch.empty(self.num_psqt_buckets, dtype=torch.float32))
+        self.bias_psqt = nn.Parameter(torch.zeros(self.num_psqt_buckets, dtype=torch.float32))
 
         # Aggregate attributes from components
         self.NUM_INPUTS = sum(f.NUM_INPUTS for f in features)
@@ -66,7 +66,7 @@ class ComposedFeatureTransformer(nn.Module):
         sigma = math.sqrt(1 / self.NUM_INPUTS)
         with torch.no_grad():
             self.bias_ft.uniform_(-sigma, sigma)
-            self.bias_psqt.uniform_(-sigma, sigma)
+            self.bias_psqt.zero_()
 
     def forward(
         self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
