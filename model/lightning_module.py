@@ -30,7 +30,6 @@ class NNUE(L.LightningModule):
         config: NNUELightningConfig,
         max_epoch=None,
         num_batches_per_epoch=None,
-        quantize_config=QuantizationConfig(),
         param_index=0,
         num_psqt_buckets=8,
         num_ls_buckets=8,
@@ -38,7 +37,7 @@ class NNUE(L.LightningModule):
         super().__init__()
 
         self.model: NNUEModel = NNUEModel(
-            config.features, config.model_config, quantize_config, num_psqt_buckets, num_ls_buckets
+            config.features, config.model_config, num_psqt_buckets, num_ls_buckets
         )
         self.config = config
         self.max_epoch = max_epoch

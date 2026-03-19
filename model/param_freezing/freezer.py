@@ -5,7 +5,6 @@ from torch import nn
 from typing import Union, Iterable
 
 from ..utils.serialize import NNUEWriter, NNUEReader
-from ..quantize import QuantizationConfig
 
 from .config import FreezeMode
 
@@ -77,7 +76,6 @@ class ParamFreezer:
             buffer_stream,
             feature_name=model.feature_name,
             config=self.nnue_lightning_config.model_config,
-            quantize_config=QuantizationConfig(),
         )
 
         return reader.model

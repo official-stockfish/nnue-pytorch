@@ -12,8 +12,6 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
-from ..quantize import QuantizationConfig
-
 
 def ascii_hist(name, x, bins=6):
     N, X = np.histogram(x, bins=bins)
@@ -224,11 +222,10 @@ class NNUEReader:
         f: BinaryIO,
         feature_name: str,
         config: ModelConfig,
-        quantize_config: QuantizationConfig,
     ):
         self.f = f
         self.feature_name = feature_name
-        self.model = NNUEModel(feature_name, config, quantize_config)
+        self.model = NNUEModel(feature_name, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
@@ -342,6 +339,7 @@ class NNUEReader:
         export_weight = torch.cat([weight, psqt_weight], dim=1)
         layer.load_export_weights(export_weight)
         layer.bias_ft.copy_(bias)
+        layer.bias_psqt.zero_()
 
     @torch.no_grad()
     def read_fc_layer(

@@ -11,12 +11,10 @@ class NNUEModel(nn.Module):
         self,
         feature_name: str,
         config: ModelConfig,
-        quantize_config: QuantizationConfig,
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
     ):
         super().__init__()
-
         feature_cls = get_feature_cls(feature_name)
         self.L1 = config.L1
         self.L2 = config.L2
@@ -31,7 +29,7 @@ class NNUEModel(nn.Module):
         self.feature_hash = self.input.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
 
-        self.quantization = QuantizationManager(quantize_config)
+        self.quantization = QuantizationManager(config.quantize_config)
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
         self.input.init_weights(self.quantization.nnue2score)
@@ -84,6 +82,11 @@ class NNUEModel(nn.Module):
         w, wpsqt = torch.split(wp, self.L1, dim=1)
         b, bpsqt = torch.split(bp, self.L1, dim=1)
 
+        # PSQT Bucket logic
+        psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
+        wpsqt = wpsqt.gather(1, psqt_indices_unsq)
+        bpsqt = bpsqt.gather(1, psqt_indices_unsq)
+
         # The PSQT values are averaged over perspectives. "Their" perspective
         # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
         # which does both the averaging and sign flip for black to move)
@@ -100,10 +103,6 @@ class NNUEModel(nn.Module):
         # We multiply by 127/128 because in the quantized network 1.0 is represented by 127
         # and it's more efficient to divide by 128 instead.
         l0_ = torch.cat(l0_s1, dim=1) * (127 / 128)
-
-        psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
-        wpsqt = wpsqt.gather(1, psqt_indices_unsq)
-        bpsqt = bpsqt.gather(1, psqt_indices_unsq)
 
         layer_stack_out = self.layer_stacks(l0_, layer_stack_indices)
 

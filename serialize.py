@@ -76,7 +76,6 @@ def main():
         nnue = M.NNUE.load_from_checkpoint(
             args.source,
             config=nnue_lightning_config,
-            quantize_config=M.QuantizationConfig(),
             map_location=torch.device("cpu"),
         )
         nnue.eval()
@@ -86,13 +85,11 @@ def main():
         with open(args.source, "rb") as f:
             nnue = M.NNUE(
                 config=nnue_lightning_config,
-                quantize_config=M.QuantizationConfig(),
             )
             reader = M.NNUEReader(
                 f,
                 feature_name,
                 config=nnue_lightning_config.model_config,
-                quantize_config=M.QuantizationConfig(),
             )
             nnue.model = reader.model
             if serialize_config.description is None:
