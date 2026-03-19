@@ -43,6 +43,7 @@ class TimeLimitAfterCheckpoint(Callback):
                 f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
             )
 
+
 class SimpleLineLogger(L.Callback):
     def __init__(self, refresh_rate=1, metric_name="train_loss"):
         super().__init__()
@@ -77,12 +78,12 @@ class SimpleLineLogger(L.Callback):
 
             print(
                 f"Epoch {trainer.current_epoch:>2}: "
-                f"{current_step/total_batches:>4.0%}| "
+                f"{current_step / total_batches:>4.0%}| "
                 f"{current_step:>5}/{total_batches:<5} "
                 f"[{elapsed_str}<{remaining_str}, {rate:>6.2f}it/s, "
                 f"{self.metric_name}={loss_val:.5f}, "
                 f"v_num={trainer.logger.version}]",
-                flush=True
+                flush=True,
             )
 
 
@@ -141,6 +142,11 @@ def make_data_loaders(
             num_workers=0,
         )
     return train, val
+
+
+def is_master_process():
+    # torchrun sets 'RANK'. If not set, we assume it's a single-process run (Rank 0).
+    return int(os.environ.get("RANK", 0)) == 0
 
 
 def main():
@@ -209,15 +215,7 @@ def main():
             f"Got --gpus={args.gpus or '0'}"
         )
     per_gpu_batch_size = global_batch_size_requested // n_devices
-    print(
-        f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}",
-        flush=True,
-    )
-
     feature_name = args.nnue_lightning_config.features
-
-    print("Loss parameters:")
-    print(loss_params)
 
     max_epoch = args.max_epochs or 800
     if args.resume_from_model is None:
@@ -246,22 +244,32 @@ def main():
         nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
-    print("Feature set: {}".format(feature_name))
-    print("Num inputs: {}".format(nnue.model.input.NUM_INPUTS))
-
-    print("Training with: {}".format(train_datasets))
-    print("Validating with: {}".format(val_datasets))
 
     L.seed_everything(args.seed)
-    print("Seed {}".format(args.seed))
-
-    print(args.dataloader_config)
 
     logdir = args.default_root_dir if args.default_root_dir else "logs/"
-
     tb_logger = pl_loggers.TensorBoardLogger(logdir)
 
-    print("Using log dir {}".format(tb_logger.log_dir), flush=True)
+    if is_master_process():
+        print(
+            f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}"
+        )
+        print("Loss parameters:")
+        print(loss_params)
+        print("Feature set: {}".format(feature_name))
+        print("Num inputs: {}".format(nnue.model.input.NUM_INPUTS))
+
+        print("Training with: {}".format(train_datasets))
+        print("Validating with: {}".format(val_datasets))
+        print("Seed {}".format(args.seed))
+        print(args.dataloader_config)
+        print("Using log dir {}".format(tb_logger.log_dir))
+        print(f"Using {actual_workers} workers for C++ data loader.")
+        if actual_threads > 0:
+            print("Set torch num_threads to {} threads.".format(actual_threads))
+        else:
+            print("Using default torch num_threads setting.")
+        print("", flush=True)
 
     checkpoint_callback = ModelCheckpoint(
         save_last=args.save_last_network,
@@ -296,11 +304,8 @@ def main():
     )
 
     if actual_threads > 0:
-        print("Set torch num_threads to {} threads.".format(actual_threads))
         t_set_num_threads(actual_threads)
-    else:
-        print("Using default torch num_threads setting.", flush=True)
-    print(f"Using {actual_workers} workers for C++ data loader.", flush=True)
+
     train, val = make_data_loaders(
         train_datasets,
         val_datasets,

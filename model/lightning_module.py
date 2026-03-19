@@ -210,7 +210,12 @@ class NNUE(L.LightningModule):
         loss = (loss * weights).sum() / weights.sum()
 
         self.log(
-            loss_type, loss, prog_bar=False, sync_dist=True, on_epoch=False, on_step=True
+            loss_type,
+            loss,
+            prog_bar=False,
+            sync_dist=True,
+            on_epoch=False,
+            on_step=True,
         )
 
         return loss
