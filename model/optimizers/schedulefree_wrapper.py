@@ -4,14 +4,17 @@ from dataclasses import dataclass
 
 try:
     import schedulefree
+
     _schedulefree_import_error = False
 except ImportError:
     _schedulefree_import_error = True
+
 
 @dataclass
 class ScheduleFreeConfig:
     warmup_steps: int = 10000
     """Number of steps to warmup schedulefree optimizer."""
+
 
 class ScheduleFreeWrapper:
     def __init__(
@@ -24,9 +27,7 @@ class ScheduleFreeWrapper:
 
     def configure_optimizers(self, train_params):
         if _schedulefree_import_error:
-            raise ImportError(
-                "The required schedulefree library is not installed. "
-            )
+            raise ImportError("The required schedulefree library is not installed. ")
         print(
             f"Using schedule-free Adam with warmup_steps={self.warmup_steps}, lr={self.lr}."
         )

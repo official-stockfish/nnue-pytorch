@@ -36,7 +36,11 @@ class NNUE(L.LightningModule):
         super().__init__()
 
         self.model: NNUEModel = NNUEModel(
-            config.features, config.model_config, quantize_config, num_psqt_buckets, num_ls_buckets
+            config.features,
+            config.model_config,
+            quantize_config,
+            num_psqt_buckets,
+            num_ls_buckets,
         )
         self.config = config
         self.max_epoch = max_epoch
@@ -62,18 +66,57 @@ class NNUE(L.LightningModule):
 
         train_params = [
             # Feature Transformer
-            {"params": _get_parameters([self.model.input], get_biases=False), "lr": LR, "weight_decay": ft_wd},
-            {"params": _get_parameters([self.model.input], get_biases=True), "lr": LR, "weight_decay": 0.0},
-
+            {
+                "params": _get_parameters([self.model.input], get_biases=False),
+                "lr": LR,
+                "weight_decay": ft_wd,
+            },
+            {
+                "params": _get_parameters([self.model.input], get_biases=True),
+                "lr": LR,
+                "weight_decay": 0.0,
+            },
             # Dense Layer Stacks
-            {"params": [self.model.layer_stacks.l1.factorized_linear.weight], "lr": LR, "weight_decay": dense_wd},
-            {"params": [self.model.layer_stacks.l1.factorized_linear.bias], "lr": LR, "weight_decay": 0.0},
-            {"params": [self.model.layer_stacks.l1.linear.weight], "lr": LR, "weight_decay": dense_wd},
-            {"params": [self.model.layer_stacks.l1.linear.bias], "lr": LR, "weight_decay": 0.0},
-            {"params": [self.model.layer_stacks.l2.linear.weight], "lr": LR, "weight_decay": dense_wd},
-            {"params": [self.model.layer_stacks.l2.linear.bias], "lr": LR, "weight_decay": 0.0},
-            {"params": [self.model.layer_stacks.output.linear.weight], "lr": LR, "weight_decay": dense_wd},
-            {"params": [self.model.layer_stacks.output.linear.bias], "lr": LR, "weight_decay": 0.0},
+            {
+                "params": [self.model.layer_stacks.l1.factorized_linear.weight],
+                "lr": LR,
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [self.model.layer_stacks.l1.factorized_linear.bias],
+                "lr": LR,
+                "weight_decay": 0.0,
+            },
+            {
+                "params": [self.model.layer_stacks.l1.linear.weight],
+                "lr": LR,
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [self.model.layer_stacks.l1.linear.bias],
+                "lr": LR,
+                "weight_decay": 0.0,
+            },
+            {
+                "params": [self.model.layer_stacks.l2.linear.weight],
+                "lr": LR,
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [self.model.layer_stacks.l2.linear.bias],
+                "lr": LR,
+                "weight_decay": 0.0,
+            },
+            {
+                "params": [self.model.layer_stacks.output.linear.weight],
+                "lr": LR,
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [self.model.layer_stacks.output.linear.bias],
+                "lr": LR,
+                "weight_decay": 0.0,
+            },
         ]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
@@ -166,6 +209,13 @@ class NNUE(L.LightningModule):
         weights = 1 + (2.0**p.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), p.w2)
         loss = (loss * weights).sum() / weights.sum()
 
-        self.log(loss_type, loss, prog_bar=True, sync_dist=True)
+        self.log(
+            loss_type,
+            loss,
+            prog_bar=False,
+            sync_dist=True,
+            on_epoch=False,
+            on_step=True,
+        )
 
         return loss
