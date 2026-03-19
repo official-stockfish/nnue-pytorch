@@ -6,6 +6,7 @@ from torch import nn
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 from .config import LayerStacksConfig
 
+
 class LayerStacks(nn.Module):
     def __init__(self, count: int, config: LayerStacksConfig):
         super().__init__()

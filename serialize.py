@@ -9,6 +9,7 @@ from tyro.conf import OmitArgPrefixes, Positional
 
 import model as M
 
+
 @dataclass(frozen=True)
 class SerializeConfig:
     # Flags and Options
@@ -44,6 +45,7 @@ class SerializeConfig:
     device: int = 0
     """Device to use for cupy"""
 
+
 @dataclass(frozen=True)
 class CliConfig:
     # Positional arguments
@@ -58,6 +60,7 @@ class CliConfig:
     nnue_lightning_config: OmitArgPrefixes[M.NNUELightningConfig] = field(
         default_factory=M.NNUELightningConfig
     )
+
 
 def main():
     args = tyro.cli(CliConfig)
@@ -126,7 +129,10 @@ def main():
             raise Exception(
                 "Invalid dataset path for FT optimization. (--ft_optimize_data)"
             )
-        if serialize_config.ft_optimize_count is None or serialize_config.ft_optimize_count < 1:
+        if (
+            serialize_config.ft_optimize_count is None
+            or serialize_config.ft_optimize_count < 1
+        ):
             raise Exception(
                 "Invalid number of positions to optimize FT with. (--ft_optimize_count)"
             )

@@ -4,6 +4,7 @@ import subprocess
 import math
 import pathlib
 
+
 def _get_numa_node_robust(pci_raw: str) -> int:
     if not pci_raw:
         return -1
@@ -13,7 +14,7 @@ def _get_numa_node_robust(pci_raw: str) -> int:
 
     # 2. Extract components from the back (The "Anchor" method)
     # Standard PCI BDF is [Domain:]Bus:Device.Function
-    parts = clean.split(':')
+    parts = clean.split(":")
 
     candidates = []
 
@@ -43,7 +44,7 @@ def _get_numa_node_robust(pci_raw: str) -> int:
     # 3. Execution Pass
     base_sys_path = pathlib.Path("/sys/bus/pci/devices")
 
-    for cid in dict.fromkeys(candidates): # Deduplicate while preserving order
+    for cid in dict.fromkeys(candidates):  # Deduplicate while preserving order
         if not cid:
             continue
         node_file = base_sys_path / cid / "numa_node"
@@ -70,24 +71,30 @@ def _get_numa_node_robust(pci_raw: str) -> int:
 
     return -1
 
+
 def _parse_cpu_list(cpu_str: str) -> set:
     """Parses a sysfs cpu list string (e.g., '0,2,4-7') into a set of integers."""
     cpus = set()
     if not cpu_str:
         return cpus
-    for part in cpu_str.split(','):
-        if '-' in part:
-            start, end = map(int, part.split('-'))
+    for part in cpu_str.split(","):
+        if "-" in part:
+            start, end = map(int, part.split("-"))
             cpus.update(range(start, end + 1))
         else:
             cpus.add(int(part))
     return cpus
 
+
 def _get_fallback_core_count(reason: str = "unknown") -> int:
-    print("[ddp_init] Warning: Unable to determine GPU NUMA affinity, falling back to all available CPU cores. Reason:", reason)
-    if hasattr(os, 'sched_getaffinity'):
+    print(
+        "[ddp_init] Warning: Unable to determine GPU NUMA affinity, falling back to all available CPU cores. Reason:",
+        reason,
+    )
+    if hasattr(os, "sched_getaffinity"):
         return len(os.sched_getaffinity(0))
     return os.cpu_count() or 1
+
 
 def enforce_gpu_numa_affinity():
     """
@@ -116,11 +123,14 @@ def enforce_gpu_numa_affinity():
         try:
             gpu_indices_str = subprocess.check_output(
                 ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
-                text=True, stderr=subprocess.DEVNULL
+                text=True,
+                stderr=subprocess.DEVNULL,
             ).strip()
             visible_list = gpu_indices_str.split("\n") if gpu_indices_str else []
         except Exception as e:
-            return _get_fallback_core_count("Failed to query nvidia-smi for GPU indices: " + str(e))
+            return _get_fallback_core_count(
+                "Failed to query nvidia-smi for GPU indices: " + str(e)
+            )
 
     if local_rank < 0 or local_rank >= len(visible_list):
         return _get_fallback_core_count("LOCAL_RANK out of bounds for visible GPUs")
@@ -128,10 +138,16 @@ def enforce_gpu_numa_affinity():
     # 2. Map all visible GPUs to their NUMA nodes via PCI bus
     gpu_numa_map = []
     try:
-        pci_bus_ids_raw = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=index,pci.bus_id", "--format=csv,noheader"],
-            text=True, stderr=subprocess.DEVNULL
-        ).strip().lower().split("\n")
+        pci_bus_ids_raw = (
+            subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=index,pci.bus_id", "--format=csv,noheader"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            .strip()
+            .lower()
+            .split("\n")
+        )
 
         pci_map = {}
         for line in pci_bus_ids_raw:
@@ -151,7 +167,9 @@ def enforce_gpu_numa_affinity():
     # 3. Identify peers sharing the same NUMA node
     my_numa_node = next((node for lr, node in gpu_numa_map if lr == local_rank), -1)
     if my_numa_node < 0:
-        return _get_fallback_core_count(f"Could not determine NUMA node for local GPU ({local_rank}, {pci_bus_id_raw}).")
+        return _get_fallback_core_count(
+            f"Could not determine NUMA node for local GPU ({local_rank}, {pci_bus_id_raw})."
+        )
 
     peers_on_node = sorted([lr for lr, node in gpu_numa_map if node == my_numa_node])
     my_node_index = peers_on_node.index(local_rank)
@@ -177,7 +195,7 @@ def enforce_gpu_numa_affinity():
         # Check modern and legacy sysfs paths for sibling lists
         sibling_paths = [
             f"/sys/devices/system/cpu/cpu{cpu}/topology/core_cpus_list",
-            f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list"
+            f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list",
         ]
 
         siblings = {cpu}
@@ -217,10 +235,13 @@ def enforce_gpu_numa_affinity():
 
     try:
         os.sched_setaffinity(0, my_final_cpus)
-        print(f"[ddp_init] Successfully set CPU affinity to cores {my_final_cpus} for LOCAL_RANK {local_rank} (NUMA node {my_numa_node})")
+        print(
+            f"[ddp_init] Successfully set CPU affinity to cores {my_final_cpus} for LOCAL_RANK {local_rank} (NUMA node {my_numa_node})"
+        )
         return len(my_final_cpus)
     except Exception as e:
         return _get_fallback_core_count("Failed to set CPU affinity: " + str(e))
+
 
 def setup_environment(requested_threads: int = -1, requested_workers: int = 0):
     """

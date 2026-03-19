@@ -9,7 +9,8 @@ import torch
 from torch import set_num_threads as t_set_num_threads
 from torch.utils.data import DataLoader
 from lightning.pytorch import loggers as pl_loggers
-from lightning.pytorch.callbacks import TQDMProgressBar, Callback, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, ModelCheckpoint
+from tqdm import tqdm
 
 import data_loader
 import model as M
@@ -42,6 +43,48 @@ class TimeLimitAfterCheckpoint(Callback):
                 f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
             )
 
+class SimpleLineLogger(L.Callback):
+    def __init__(self, refresh_rate=1, metric_name="train_loss"):
+        super().__init__()
+        self.refresh_rate = refresh_rate
+        self.metric_name = metric_name
+        self.start_time = None
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        self.start_time = time.time()
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if trainer.global_rank != 0:
+            return
+
+        # Ensure we use the current step (1-indexed for display)
+        current_step = batch_idx + 1
+        total_batches = trainer.num_training_batches
+
+        if current_step % self.refresh_rate == 0 or current_step == total_batches:
+            elapsed = time.time() - self.start_time
+
+            # Use tqdm.format_interval for consistent 00:00 formatting
+            elapsed_str = tqdm.format_interval(elapsed)
+
+            # Calculate Rate and ETA manually for total control over the string
+            rate = current_step / elapsed if elapsed > 0 else 0
+            remaining = (total_batches - current_step) / rate if rate > 0 else 0
+            remaining_str = tqdm.format_interval(remaining)
+
+            metrics = trainer.callback_metrics
+            loss_val = metrics.get(self.metric_name, 0.0)
+
+            print(
+                f"Epoch {trainer.current_epoch:>2}: "
+                f"{current_step/total_batches:>4.0%}| "
+                f"{current_step:>5}/{total_batches:<5} "
+                f"[{elapsed_str}<{remaining_str}, {rate:>6.2f}it/s, "
+                f"{self.metric_name}={loss_val:.5f}, "
+                f"v_num={trainer.logger.version}]",
+                flush=True
+            )
+
 
 def make_data_loaders(
     train_filenames,
@@ -68,7 +111,8 @@ def make_data_loaders(
     # it currently cannot work in parallel mode but it shouldn't need to
     train = DataLoader(
         data_loader.FixedNumBatchesDataset(
-            train_infinite, (epoch_size + batch_size - 1) // batch_size,
+            train_infinite,
+            (epoch_size + batch_size - 1) // batch_size,
             pin_memory=pin_memory,
             queue_size_limit=queue_size_limit,
         ),
@@ -86,16 +130,18 @@ def make_data_loaders(
             config=config,
         )
         val = DataLoader(
-                data_loader.FixedNumBatchesDataset(
-                    val_infinite, (val_size + batch_size - 1) // batch_size,
-                    pin_memory=pin_memory,
-                    queue_size_limit=queue_size_limit,
-                ),
-                batch_size=None,
-                batch_sampler=None,
-                num_workers=0,
-            )
+            data_loader.FixedNumBatchesDataset(
+                val_infinite,
+                (val_size + batch_size - 1) // batch_size,
+                pin_memory=pin_memory,
+                queue_size_limit=queue_size_limit,
+            ),
+            batch_size=None,
+            batch_sampler=None,
+            num_workers=0,
+        )
     return train, val
+
 
 def main():
     args = tyro.cli(TrainingConfig)
@@ -185,7 +231,9 @@ def main():
     else:
         assert os.path.exists(args.resume_from_model)
         try:
-            nnue = torch.load(args.resume_from_model, weights_only=False, map_location="cpu")
+            nnue = torch.load(
+                args.resume_from_model, weights_only=False, map_location="cpu"
+            )
         except ModuleNotFoundError as e:
             raise RuntimeError(
                 f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
@@ -236,11 +284,12 @@ def main():
         logger=tb_logger,
         callbacks=[
             checkpoint_callback,
-            TQDMProgressBar(refresh_rate=refresh_rate),
+            SimpleLineLogger(refresh_rate=refresh_rate),
             TimeLimitAfterCheckpoint(args.max_time),
             M.WeightClippingCallback(),
         ],
-        enable_progress_bar=True,
+        log_every_n_steps=refresh_rate,
+        enable_progress_bar=False,
         enable_checkpointing=True,
         benchmark=True,
         num_sanity_val_steps=0,
