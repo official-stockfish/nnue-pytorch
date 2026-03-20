@@ -4,6 +4,7 @@ from typing import Literal
 from .rangerlite_wrapper import RangerLiteConfig, RangerLiteWrapper
 from .schedulefree_wrapper import ScheduleFreeConfig, ScheduleFreeWrapper
 
+
 @dataclass(kw_only=True)
 class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
     optimizer_name: Literal["schedulefree", "ranger21", "rangerlite"] = "ranger21"
@@ -27,7 +28,9 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
         elif optimizer_name == "rangerlite":
             wrapper = RangerLiteWrapper(self, legacy_mode=False)
         else:
-            raise ValueError(f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21' or 'rangerlite'.")
+            raise ValueError(
+                f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21' or 'rangerlite'.
+            )
 
         info_str = f"[OptimizerConfig] Using {optimizer_name} optimizer with lr: {self.lr}"
         if self.dense_weight_decay > 0.0 or self.ft_weight_decay > 0.0:

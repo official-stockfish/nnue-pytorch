@@ -3,6 +3,7 @@ from typing import Annotated
 
 import tyro
 
+
 # 3 layer fully connected network
 @dataclass(kw_only=True)
 class LayerStacksConfig:

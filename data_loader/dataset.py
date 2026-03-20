@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from . import stream
 from .config import DataloaderSkipConfig, DataloaderDDPConfig
 
+
 def _recursive_pin(obj):
     if isinstance(obj, torch.Tensor):
         return obj.pin_memory()
@@ -15,6 +16,7 @@ def _recursive_pin(obj):
     elif isinstance(obj, (list, tuple)):
         return type(obj)(_recursive_pin(v) for v in obj)
     return obj
+
 
 class FenBatchProvider:
     def __init__(
