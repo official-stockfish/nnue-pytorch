@@ -3,7 +3,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .modules import LayerStacks, get_feature_cls
-from .quantize import QuantizationConfig, QuantizationManager
+from .quantize import QuantizationManager
 
 
 class NNUEModel(nn.Module):

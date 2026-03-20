@@ -4,7 +4,6 @@ from torch import Tensor, nn
 
 from .config import NNUELightningConfig
 from .model import NNUEModel
-from .quantize import QuantizationConfig
 
 from .param_freezing.freezer import ParamFreezer
 
