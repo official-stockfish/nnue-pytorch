@@ -70,7 +70,7 @@ class RangerLite(torch.optim.Optimizer):
                 loss = closure()
 
         param_size = 0
-        variance_ma_sum = 0.0
+        variance_ma_sum = torch.zeros(1)
         leaked_p = None
 
         # Phase 1: Accumulate variance_ma_sum for stable weight decay
@@ -100,7 +100,6 @@ class RangerLite(torch.optim.Optimizer):
 
                     # PNM components
                     state["neg_grad_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state["max_variance_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 state["step"] += 1
                 beta1, beta2 = group["betas"]
@@ -114,9 +113,12 @@ class RangerLite(torch.optim.Optimizer):
                 variance_ma_sum += variance_ma_debiased.sum()
 
         if not self.param_size:
+            if not param_size:
+                # No trainable params
+                return loss
             self.param_size = param_size
 
-        variance_normalized = math.sqrt(variance_ma_sum / self.param_size)
+        variance_normalized = torch.sqrt(variance_ma_sum / self.param_size)
 
         # Phase 2: Apply weight decay and update weights
         for group in self.param_groups:
@@ -167,7 +169,6 @@ class RangerLite(torch.optim.Optimizer):
                 # PNM Adam Core Setup
                 grad_ma = state["grad_ma"]
                 variance_ma = state["variance_ma"]
-                max_variance_ma = state["max_variance_ma"]
 
                 if step % 2 == 1:
                     grad_ma, neg_grad_ma = state["grad_ma"], state["neg_grad_ma"]
@@ -177,7 +178,7 @@ class RangerLite(torch.optim.Optimizer):
                 bias_correction1 = 1 - beta1 ** step
                 bias_correction2 = 1 - beta2 ** step
 
-                torch.max(max_variance_ma, variance_ma, out=variance_ma)
+                # Despite the comment. Ranger21 doesnt actually use variance_ma_max for denominator
                 denom = (variance_ma.sqrt() / math.sqrt(bias_correction2)).add_(group["eps"])
 
                 # Update grad_ma
