@@ -4,10 +4,14 @@ import os
 import argparse
 from ddp_utils import setup_environment
 
+
 def main():
     # 1. Validate basic usage
     if len(sys.argv) < 2:
-        print(f"Usage: torchrun {sys.argv[0]} <train_script.py> [args...]", file=sys.stderr)
+        print(
+            f"Usage: torchrun {sys.argv[0]} <train_script.py> [args...]",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     target_script = sys.argv[1]
@@ -24,8 +28,7 @@ def main():
 
     # 3. Apply constraints and get the optimal bounds
     actual_threads, actual_workers = setup_environment(
-        requested_threads=args.threads,
-        requested_workers=args.num_workers
+        requested_threads=args.threads, requested_workers=args.num_workers
     )
 
     # 4. Reconstruct the command line for the target script
@@ -37,12 +40,21 @@ def main():
 
     # 5. Optional diagnostic output from the lead rank
     if os.environ.get("LOCAL_RANK") == "0":
-        print(f"[Launcher] Intercepted requests: threads={args.threads}, workers={args.num_workers}", flush=True)
-        print(f"[Launcher] Applied constraints : threads={actual_threads}, workers={actual_workers}", flush=True)
-        print(f"[Launcher] Executing target    : {' '.join(final_args[1:])}", flush=True)
+        print(
+            f"[Launcher] Intercepted requests: threads={args.threads}, workers={args.num_workers}",
+            flush=True,
+        )
+        print(
+            f"[Launcher] Applied constraints : threads={actual_threads}, workers={actual_workers}",
+            flush=True,
+        )
+        print(
+            f"[Launcher] Executing target    : {' '.join(final_args[1:])}", flush=True
+        )
 
     # 6. Replace current process with the target python script
     os.execv(sys.executable, final_args)
+
 
 if __name__ == "__main__":
     main()

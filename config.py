@@ -11,6 +11,7 @@ from tyro.conf import (
 from data_loader.config import DataloaderSkipConfig
 from model.config import NNUELightningConfig
 
+
 @dataclass(kw_only=True)
 class TrainingConfig:
     datasets: Positional[Tuple[str, ...]] = ()
@@ -87,7 +88,10 @@ class TrainingConfig:
         if not self.datasets:
             raise ValueError("Argument `datasets` is required.")
         if self.max_epochs <= 0 or self.epoch_size <= 0 or self.batch_size <= 0:
-            raise ValueError("Arguments `max_epochs`, `epoch_size` and `batch_size` must be positive.")
+            raise ValueError(
+                "Arguments `max_epochs`, `epoch_size` and `batch_size` must be positive."
+            )
+
 
 if __name__ == "__main__":
     config = tyro.cli(TrainingConfig)

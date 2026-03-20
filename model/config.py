@@ -64,9 +64,15 @@ class LossParams:
     lambda_: Annotated[float, tyro.conf.arg(name="lambda")] = 1.0
     """1.0=train on evaluations, 0.0=train on game results, interpolates between (default=1.0)."""
 
+
 @dataclass(kw_only=True)
 class NNUELightningConfig(FeatureConfig):
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
     loss_params: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
-    optimizer_config: OmitArgPrefixes[OptimizerConfig] = field(default_factory=OptimizerConfig)
-    freeze_config: OmitArgPrefixes[ParamFreezerConfig] = field(default_factory=ParamFreezerConfig)
+    optimizer_config: OmitArgPrefixes[OptimizerConfig] = field(
+        default_factory=OptimizerConfig
+    )
+    freeze_config: OmitArgPrefixes[ParamFreezerConfig] = field(
+        default_factory=ParamFreezerConfig
+    )
+
