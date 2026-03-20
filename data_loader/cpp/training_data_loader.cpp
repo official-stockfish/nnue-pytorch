@@ -378,6 +378,9 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
 
         for (int i = 0; i < size; ++i)
             fill_entry(feature_set, i, entries[i]);
+#ifdef LOADER_STATISTICS
+        entries_copy = entries;
+#endif
 }
 
 SparseBatch::~SparseBatch() {
