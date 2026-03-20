@@ -10,7 +10,7 @@ class RangerLiteConfig:
     """Multiplicative factor applied to the learning rate after every epoch."""
 
     pnm_momentum: float = 1.0
-    """Positive Negative Momentum parameter."""
+    """Positive Negative Momentum parameter. Value of 1.0 corresponds to ranger21 behaviour."""
 
 class RangerLiteWrapper:
     def __init__(
@@ -32,6 +32,7 @@ class RangerLiteWrapper:
             weight_decay=0.0,
             use_legacy_scoping_bug=self.legacy_mode,
             normloss_active=self.legacy_mode,
+            # pnm_momentum was hardcoded to 1.0 in ranger21. The argument was unused.
             pnm_momentum=self.pnm_momentum,
         )
 
@@ -40,7 +41,7 @@ class RangerLiteWrapper:
         )
 
         print(
-            f"[RangeerliteSetup] gamma={self.gamma} pnm_momentum={self.pnm_momentum}."
+            f"[RangerLiteSetup] gamma={self.gamma} pnm_momentum={self.pnm_momentum}."
         )
 
         return [self.optimizer], [scheduler]
