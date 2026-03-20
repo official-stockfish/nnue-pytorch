@@ -29,7 +29,7 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
             wrapper = RangerLiteWrapper(self, legacy_mode=False)
         else:
             raise ValueError(
-                f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21' or 'rangerlite'.
+                f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21' or 'rangerlite'."
             )
 
         info_str = f"[OptimizerConfig] Using {optimizer_name} optimizer with lr: {self.lr}"
