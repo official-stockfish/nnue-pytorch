@@ -543,8 +543,8 @@ def filter_fens(fens: list[str]) -> list[str]:
 
 def quantize_ft(model: NNUEModel) -> None:
     for f in model.input.features:
-        f.weight.data = f.weight.data.mul(model.quantization.ft_quantized_one).round()
-    model.input.bias.data = model.input.bias.data.mul(
+        f.weight_ft.data = f.weight_ft.data.mul(model.quantization.ft_quantized_one).round()
+    model.input.bias_ft.data = model.input.bias_ft.data.mul(
         model.quantization.ft_quantized_one
     ).round()
 
@@ -614,14 +614,12 @@ def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
 
     # Both sides of the FT must use the same permutation.
     permutation.extend([x + l1_size // 2 for x in permutation])
-
-    # Add identity permutation for PSQT weights
-    ft_permutation = permutation + list(range(l1_size, model.input.num_outputs))
+    ft_permutation = permutation
 
     # Apply the permutation in place.
     for f in model.input.features:
-        f.weight.data = f.weight.data[:, ft_permutation]
-    model.input.bias.data = model.input.bias.data[ft_permutation]
+        f.weight_ft.data = f.weight_ft.data[:, ft_permutation]
+    model.input.bias_ft.data = model.input.bias_ft.data[ft_permutation]
     model.layer_stacks.l1.linear.weight.data = model.layer_stacks.l1.linear.weight.data[
         :, permutation
     ]

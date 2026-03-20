@@ -224,7 +224,6 @@ def main():
             max_epoch=max_epoch,
             num_batches_per_epoch=args.num_batches_per_epoch,
             param_index=args.dataloader_config.param_index,
-            quantize_config=M.QuantizationConfig(),
         )
     else:
         assert os.path.exists(args.resume_from_model)

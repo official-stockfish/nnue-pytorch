@@ -4,7 +4,8 @@ from torch import Tensor, nn
 
 from .config import NNUELightningConfig
 from .model import NNUEModel
-from .quantize import QuantizationConfig
+
+from .param_freezing.freezer import ParamFreezer
 
 
 def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
@@ -28,7 +29,6 @@ class NNUE(L.LightningModule):
         config: NNUELightningConfig,
         max_epoch=None,
         num_batches_per_epoch=None,
-        quantize_config=QuantizationConfig(),
         param_index=0,
         num_psqt_buckets=8,
         num_ls_buckets=8,
@@ -38,7 +38,6 @@ class NNUE(L.LightningModule):
         self.model: NNUEModel = NNUEModel(
             config.features,
             config.model_config,
-            quantize_config,
             num_psqt_buckets,
             num_ls_buckets,
         )
@@ -49,6 +48,11 @@ class NNUE(L.LightningModule):
 
         # lazy init so `resume_from_model` with config changes works correctly
         self.optimizer_wrapper = None
+
+    def setup(self, stage):
+        _ = stage # unused, but required by pytorch-lightning
+        ParamFreezer(self.config).apply_freeze(self.model)
+        pass
 
     # --- setup optimizers and training hooks ---
     def configure_optimizers(self):
@@ -65,14 +69,17 @@ class NNUE(L.LightningModule):
         dense_wd = optimizer_config.dense_weight_decay
 
         train_params = [
+            # PSQT -- do not train biases
+            {"params": self.model.input.get_psqt_params(include_bias=False), "lr": LR, "weight_decay": 0.0},
+
             # Feature Transformer
             {
-                "params": _get_parameters([self.model.input], get_biases=False),
+                "params": self.model.input.get_ft_params(include_bias=False),
                 "lr": LR,
                 "weight_decay": ft_wd,
             },
             {
-                "params": _get_parameters([self.model.input], get_biases=True),
+                "params": self.model.input.get_ft_params(bias_only=True),
                 "lr": LR,
                 "weight_decay": 0.0,
             },

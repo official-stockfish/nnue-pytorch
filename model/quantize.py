@@ -14,7 +14,7 @@ class WeightClippingConfig(TypedDict):
     virtual_params: NotRequired[torch.Tensor]
 
 
-@dataclass
+@dataclass(kw_only=True)
 class QuantizationConfig:
     nnue2score: float = 600.0
     weight_scale_hidden: float = 64.0

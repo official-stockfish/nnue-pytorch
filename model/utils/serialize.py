@@ -2,6 +2,7 @@ from functools import reduce
 import operator
 import struct
 from typing import BinaryIO, Sequence
+import io
 
 import numpy as np
 import numpy.typing as npt
@@ -11,8 +12,6 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
-from ..quantize import QuantizationConfig
-
 
 def ascii_hist(name, x, bins=6):
     N, X = np.histogram(x, bins=bins)
@@ -73,7 +72,10 @@ class NNUEWriter:
         model: NNUEModel,
         description: str | None = None,
         ft_compression: str = "none",
+        verbose = True,
     ):
+        self.verbose = verbose
+
         if description is None:
             description = DEFAULT_DESCRIPTION
 
@@ -133,10 +135,11 @@ class NNUEWriter:
         else:
             raise Exception("Invalid compression method.")
 
+    @torch.no_grad()
     def write_feature_transformer(self, model: NNUEModel, ft_compression: str) -> None:
         layer = model.input
 
-        bias = layer.bias.data[: model.L1]
+        bias = layer.bias_ft
 
         # Get export weights (coalesced + remapped 12→11 piece types)
         export_weight = layer.get_export_weights()
@@ -150,8 +153,9 @@ class NNUEWriter:
             ascii_hist("ft weight:", weight.numpy())
             ascii_hist("ft psqt weight:", psqt_weight.numpy())
 
+        callback = histogram_callback if self.verbose else lambda *args, **kwargs: None
         bias, weight, psqt_weight = model.quantization.quantize_feature_transformer(
-            bias, weight, psqt_weight, histogram_callback
+            bias, weight, psqt_weight, callback
         )
 
         # Weights stored as [num_features][outputs]
@@ -167,6 +171,7 @@ class NNUEWriter:
             offset += n
         self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
 
+    @torch.no_grad()
     def write_fc_layer(
         self, model: NNUEModel, layer: nn.Linear, is_output=False
     ) -> None:
@@ -190,8 +195,9 @@ class NNUEWriter:
             )
             ascii_hist("fc weight:", weight.numpy())
 
+        callback = histogram_callback if self.verbose else lambda *args, **kwargs: None
         bias, weight = model.quantization.quantize_fc_layer(
-            bias, weight, is_output, histogram_callback
+            bias, weight, is_output, callback
         )
 
         # FC inputs are padded to 32 elements by spec.
@@ -216,11 +222,10 @@ class NNUEReader:
         f: BinaryIO,
         feature_name: str,
         config: ModelConfig,
-        quantize_config: QuantizationConfig,
     ):
         self.f = f
         self.feature_name = feature_name
-        self.model = NNUEModel(feature_name, config, quantize_config)
+        self.model = NNUEModel(feature_name, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
@@ -292,7 +297,13 @@ class NNUEReader:
         compression = self.determine_compression()
 
         if compression == "none":
-            d = np.fromfile(self.f, dtype, reduce(operator.mul, shape, 1))
+            count = reduce(operator.mul, shape, 1)
+            try:
+                d = np.fromfile(self.f, dtype, count)
+            except (io.UnsupportedOperation, AttributeError):
+                # Fallback for BytesIO/streams
+                item_size = np.dtype(dtype).itemsize
+                d = np.frombuffer(self.f.read(count * item_size), dtype=dtype)
             d = torch.from_numpy(d.astype(np.float32))
             d = d.reshape(shape)
             return d
@@ -301,6 +312,7 @@ class NNUEReader:
         else:
             raise Exception("Invalid compression method.")
 
+    @torch.no_grad()
     def read_feature_transformer(self, layer, num_psqt_buckets: int) -> None:
         num_export_features = layer.NUM_REAL_FEATURES
         num_outputs = layer.num_outputs
@@ -326,8 +338,10 @@ class NNUEReader:
         # Combine weight and psqt_weight into export format, then expand
         export_weight = torch.cat([weight, psqt_weight], dim=1)
         layer.load_export_weights(export_weight)
-        layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
+        layer.bias_ft.copy_(bias)
+        layer.bias_psqt.zero_()
 
+    @torch.no_grad()
     def read_fc_layer(
         self,
         layer_weight_t: torch.Tensor,
