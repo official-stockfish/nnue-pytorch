@@ -70,7 +70,8 @@ class RangerLite(torch.optim.Optimizer):
                 loss = closure()
 
         param_size = 0
-        variance_ma_sum = torch.zeros(1)
+        # Needs lazy init to init on device
+        variance_ma_sum = None
         leaked_p = None
 
         # Phase 1: Accumulate variance_ma_sum for stable weight decay
@@ -78,6 +79,9 @@ class RangerLite(torch.optim.Optimizer):
             for p in group["params"]:
                 if p.grad is None:
                     continue
+
+                if variance_ma_sum is None:
+                    variance_ma_sum = torch.zeros(1, device=p.device, dtype=p.dtype)
 
                 leaked_p = p
 
