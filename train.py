@@ -282,6 +282,19 @@ def main():
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
 
+    train, val = make_data_loaders(
+        train_datasets,
+        val_datasets,
+        input_feature_name,
+        actual_workers,
+        per_gpu_batch_size,
+        args.dataloader_config,
+        args.epoch_size,
+        args.validation_size,
+        pin_memory=args.pin_memory,
+        queue_size_limit=args.data_loader_queue_size,
+    )
+
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
     trainer = L.Trainer(
         default_root_dir=logdir,
@@ -300,24 +313,11 @@ def main():
         enable_progress_bar=False,
         enable_checkpointing=True,
         benchmark=True,
-        num_sanity_val_steps=0,
+        num_sanity_val_steps=0 if val is None else 4,
     )
 
     if actual_threads > 0:
         t_set_num_threads(actual_threads)
-
-    train, val = make_data_loaders(
-        train_datasets,
-        val_datasets,
-        input_feature_name,
-        actual_workers,
-        per_gpu_batch_size,
-        args.dataloader_config,
-        args.epoch_size,
-        args.validation_size,
-        pin_memory=args.pin_memory,
-        queue_size_limit=args.data_loader_queue_size,
-    )
 
     if args.resume_from_checkpoint:
         trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)

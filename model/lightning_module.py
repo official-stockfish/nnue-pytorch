@@ -214,8 +214,8 @@ class NNUE(L.LightningModule):
             loss,
             prog_bar=False,
             sync_dist=True,
-            on_epoch=False,
-            on_step=True,
+            on_epoch=True,
+            on_step=False,
         )
 
         return loss
