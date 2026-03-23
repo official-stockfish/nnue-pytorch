@@ -332,7 +332,7 @@ def main():
 
     logdir = args.default_root_dir if args.default_root_dir else "logs/"
     tb_logger = pl_loggers.TensorBoardLogger(logdir)
-    csv_logger = pl_loggers.CSVLogger(logdir)
+    csv_logger = pl_loggers.CSVLogger(logdir, version=tb_logger.version)
     loggers = [tb_logger, csv_logger]
 
     if is_master_process():
