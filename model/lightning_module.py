@@ -1,6 +1,7 @@
 import lightning as L
 import torch
 from torch import Tensor, nn
+from torchmetrics import MeanMetric, MetricCollection
 
 from .config import NNUELightningConfig
 from .model import NNUEModel
@@ -49,6 +50,12 @@ class NNUE(L.LightningModule):
 
         # lazy init so `resume_from_model` with config changes works correctly
         self.optimizer_wrapper = None
+
+        self.loss_metrics = MetricCollection ({
+            "train_loss_epoch": MeanMetric(),
+            "val_loss_epoch": MeanMetric(),
+            "test_loss_epoch": MeanMetric(),
+        })
 
     # --- setup optimizers and training hooks ---
     def configure_optimizers(self):
@@ -155,6 +162,8 @@ class NNUE(L.LightningModule):
 
     @torch.compiler.disable
     def _log(self, loss_type, loss):
+        self.loss_metrics[f"{loss_type}_epoch"](loss)
+
         self.log(
             loss_type,
             loss,
@@ -166,7 +175,7 @@ class NNUE(L.LightningModule):
 
         self.log(
             f"{loss_type}_epoch",
-            loss,
+            self.loss_metrics[f"{loss_type}_epoch"],
             prog_bar=False,
             sync_dist=True,
             on_epoch=True,
