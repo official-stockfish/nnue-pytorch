@@ -10,7 +10,6 @@ from torch import set_num_threads as t_set_num_threads
 from torch.utils.data import DataLoader
 from lightning.pytorch import loggers as pl_loggers
 from lightning.pytorch.callbacks import Callback, ModelCheckpoint
-from tqdm import tqdm
 
 import data_loader
 import model as M
