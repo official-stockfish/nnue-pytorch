@@ -163,8 +163,8 @@ class SimpleLineLogger(L.Callback):
 
         print(
             f"Epoch {trainer.current_epoch:>2} (Summary): "
-            f"{self.train_metric_epoch}={train_loss:.5f}\n"
-            f"{self.val_metric}={val_loss:.5f}\n" + "-"*60,
+            f"[{self.train_metric_epoch}={train_loss:.5f}, "
+            f"{self.val_metric}={val_loss:.5f}]\n" + "-"*60,
             flush=True
         )
 
