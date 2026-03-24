@@ -350,7 +350,11 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
 // ---------------------------------------------------------
 
 SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
-                         const std::vector<TrainingDataEntry>& entries) {
+                         const std::vector<TrainingDataEntry>& entries)
+#ifdef NNUE_LOADER_STATISTICS
+        : entries_copy(entries)
+#endif
+{
     num_inputs          = feature_set.inputs();
     size                = entries.size();
     max_active_features = feature_set.max_active_features();
@@ -378,9 +382,6 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
 
         for (int i = 0; i < size; ++i)
             fill_entry(feature_set, i, entries[i]);
-#ifdef LOADER_STATISTICS
-        entries_copy = entries;
-#endif
 }
 
 SparseBatch::~SparseBatch() {

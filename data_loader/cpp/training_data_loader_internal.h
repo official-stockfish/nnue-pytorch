@@ -54,7 +54,7 @@ struct SparseBatch final {
     int* psqt_indices;
     int* layer_stack_indices;
 
-#ifdef LOADER_STATISTICS
+#ifdef NNUE_LOADER_STATISTICS
     std::vector<struct binpack::TrainingDataEntry> entries_copy;
 #endif
 
