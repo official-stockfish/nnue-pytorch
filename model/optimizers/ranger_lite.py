@@ -31,7 +31,8 @@ class RangerLite(torch.optim.Optimizer):
             weight_decay=weight_decay,
             betas=betas,
             eps=eps,
-            pnm_momentum=pnm_momentum
+            pnm_momentum=pnm_momentum,
+            normloss_factor=normloss_factor,
         )
         super().__init__(params, defaults)
 
@@ -41,26 +42,25 @@ class RangerLite(torch.optim.Optimizer):
         self.lookahead_step = 0
 
         self.normloss_active = normloss_active
-        self.normloss_factor = normloss_factor
         self.eps = eps
         self.param_size = 0
 
         self.use_legacy_scoping_bug = use_legacy_scoping_bug
 
     def unit_norm(self, x):
-        """Axis-based Euclidean norm for normloss."""
-        keepdim = True
-        xlen = len(x.shape)
+        """
+        Normalizes parameters such that each 'unit' (row/filter) has a unit norm.
+        Works for:
+        - Linear: (out, in) -> Norm per neuron
+        - Conv2d: (out, in, h, w) -> Norm per filter
+        - Embedding: (vocab, dim) -> Norm per vector
+        """
+        xlen = x.ndim
+
         if xlen <= 1:
-            keepdim = False
-            dim = None
-        elif xlen in (2, 3):
-            dim = 1
-        elif xlen == 4:
-            dim = (1, 2, 3)
-        else:
-            dim = tuple([i for i in range(1, xlen)])
-        return x.norm(dim=dim, keepdim=keepdim, p=2.0)
+            return x.norm(p=2.0, keepdim=False)
+        dim = tuple(range(1, xlen))
+        return x.norm(dim=dim, keepdim=True, p=2.0)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -133,6 +133,7 @@ class RangerLite(torch.optim.Optimizer):
             lr = group["lr"]
             beta1, beta2 = group["betas"]
             pnm_factor = group["pnm_momentum"]
+            normloss_factor = group["normloss_factor"]
 
             # --- LEGACY BUG BEHAVIOR ---
             # This correctly targets the last parameter of the PREVIOUS group
@@ -142,7 +143,7 @@ class RangerLite(torch.optim.Optimizer):
                     leaked_p.data.mul_(1 - decay * lr / variance_normalized)
                 if self.normloss_active:
                     unorm = self.unit_norm(leaked_p.data)
-                    corr = 2 * self.normloss_factor * (1 - torch.div(1, unorm + self.eps))
+                    corr = 2 * normloss_factor * (1 - torch.div(1, unorm + self.eps))
                     leaked_p.data.mul_(1 - lr * corr)
             # ---------------------------
 
@@ -166,7 +167,7 @@ class RangerLite(torch.optim.Optimizer):
                     # Norm Loss
                     if self.normloss_active:
                         unorm = self.unit_norm(p.data)
-                        corr = 2 * self.normloss_factor * (1 - torch.div(1, unorm + self.eps))
+                        corr = 2 * normloss_factor * (1 - torch.div(1, unorm + self.eps))
                         p.data.mul_(1 - lr * corr)
                 # ------------------------
 
