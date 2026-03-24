@@ -48,14 +48,14 @@ class RangerLite(torch.optim.Optimizer):
         self.use_legacy_scoping_bug = use_legacy_scoping_bug
 
     def unit_norm(self, x):
-    """
-    Calculates the L2 norm of each sub-unit (row/filter) in a parameter tensor.
-    Returns a tensor of norms with the same number of dimensions as x (via keepdim).
-    Examples:
-        - Linear: (out, in) -> Norm per neuron
-        - Conv2d: (out, in, h, w) -> Norm per filter
-        - Embedding: (vocab, dim) -> Norm per vector
-    """
+        """
+        Calculates the L2 norm of each sub-unit (row/filter) in a parameter tensor.
+        Returns a tensor of norms with the same number of dimensions as x (via keepdim).
+        Examples:
+            - Linear: (out, in) -> Norm per neuron
+            - Conv2d: (out, in, h, w) -> Norm per filter
+            - Embedding: (vocab, dim) -> Norm per vector
+        """
         xlen = x.ndim
 
         if xlen <= 1:
