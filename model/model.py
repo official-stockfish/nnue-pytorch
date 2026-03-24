@@ -3,7 +3,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .modules import LayerStacks, get_feature_cls
-from .quantize import QuantizationConfig, QuantizationManager
+from .quantize import QuantizationManager
 
 
 class NNUEModel(nn.Module):
@@ -11,12 +11,10 @@ class NNUEModel(nn.Module):
         self,
         feature_name: str,
         config: ModelConfig,
-        quantize_config: QuantizationConfig,
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
     ):
         super().__init__()
-
         feature_cls = get_feature_cls(feature_name)
         self.L1 = config.L1
         self.L2 = config.L2
@@ -25,16 +23,18 @@ class NNUEModel(nn.Module):
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
-        self.input = feature_cls(self.L1 + self.num_psqt_buckets)
+        self.input = feature_cls(self.L1, self.num_psqt_buckets)
         self.feature_name = self.input.FEATURE_NAME
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
 
-        self.quantization = QuantizationManager(quantize_config)
+        self.quantization = QuantizationManager(config.quantize_config)
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
-        self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
+        self.input.init_weights(self.quantization.nnue2score)
+
+        self.psqt_only = False
 
     def clip_weights(self):
         """
@@ -81,6 +81,20 @@ class NNUEModel(nn.Module):
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
         w, wpsqt = torch.split(wp, self.L1, dim=1)
         b, bpsqt = torch.split(bp, self.L1, dim=1)
+
+        # PSQT Bucket logic
+        psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
+        wpsqt = wpsqt.gather(1, psqt_indices_unsq)
+        bpsqt = bpsqt.gather(1, psqt_indices_unsq)
+
+        # The PSQT values are averaged over perspectives. "Their" perspective
+        # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
+        # which does both the averaging and sign flip for black to move)
+        psqt_out = (wpsqt - bpsqt) * (us - 0.5)
+
+        if self.psqt_only:
+            return psqt_out
+
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
         l0_ = torch.clamp(l0_, 0.0, 1.0)
 
@@ -90,12 +104,6 @@ class NNUEModel(nn.Module):
         # and it's more efficient to divide by 128 instead.
         l0_ = torch.cat(l0_s1, dim=1) * (127 / 128)
 
-        psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
-        wpsqt = wpsqt.gather(1, psqt_indices_unsq)
-        bpsqt = bpsqt.gather(1, psqt_indices_unsq)
-        # The PSQT values are averaged over perspectives. "Their" perspective
-        # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
-        # which does both the averaging and sign flip for black to move)
-        x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
+        layer_stack_out = self.layer_stacks(l0_, layer_stack_indices)
 
-        return x
+        return layer_stack_out + psqt_out

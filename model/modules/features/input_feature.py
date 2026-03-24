@@ -1,4 +1,3 @@
-import math
 from abc import ABC, abstractmethod
 
 import torch
@@ -14,6 +13,18 @@ class InputFeature(nn.Module, ABC):
     EXPORT_WEIGHT_DTYPE: torch.dtype = torch.int16
 
     @abstractmethod
+    def get_ft_params(self) -> list[nn.Parameter]:
+        """Return parameters belonging to the Feature Transformer group."""
+
+    @abstractmethod
+    def get_psqt_params(self) -> list[nn.Parameter]:
+        """Return parameters belonging to the PSQT group."""
+
+    @abstractmethod
+    def reset_parameters(self) -> None:
+        """Initialize parameters."""
+
+    @abstractmethod
     def merged_weight(self) -> torch.Tensor:
         """Return effective weight matrix (with virtual weights merged if applicable)."""
 
@@ -21,7 +32,7 @@ class InputFeature(nn.Module, ABC):
     def coalesce(self) -> None: ...
 
     @abstractmethod
-    def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None: ...
+    def init_weights(self, nnue2score: float) -> None: ...
 
     @abstractmethod
     def get_export_weights(self) -> torch.Tensor: ...
@@ -31,8 +42,3 @@ class InputFeature(nn.Module, ABC):
 
     def clip_weights(self, quantization) -> None:
         pass
-
-    def reset_parameters(self):
-        sigma = math.sqrt(1 / self.NUM_INPUTS)
-        with torch.no_grad():
-            self.weight.uniform_(-sigma, sigma)

@@ -5,12 +5,16 @@ import tyro
 from tyro.conf import OmitArgPrefixes
 
 from .optimizers import OptimizerConfig
+from .quantize import QuantizationConfig
 from .modules import FeatureConfig, LayerStacksConfig
+from .param_freezing.config import ParamFreezerConfig
 
 
 # 3 layer fully connected network
 @dataclass(kw_only=True)
 class ModelConfig(LayerStacksConfig):
+    quantize_config: QuantizationConfig = field(default_factory=QuantizationConfig)
+
     @staticmethod
     def add_model_args(parser):
         parser.add_argument(
@@ -68,3 +72,7 @@ class NNUELightningConfig(FeatureConfig):
     optimizer_config: OmitArgPrefixes[OptimizerConfig] = field(
         default_factory=OptimizerConfig
     )
+    freeze_config: OmitArgPrefixes[ParamFreezerConfig] = field(
+        default_factory=ParamFreezerConfig
+    )
+

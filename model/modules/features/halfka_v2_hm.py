@@ -1,3 +1,4 @@
+import math
 import chess
 import torch
 from torch import nn
@@ -53,49 +54,76 @@ class HalfKav2Hm(InputFeature):
     # Export size uses 11 piece types (704 * 32 = 22,528)
     NUM_REAL_FEATURES = 704 * 32  # 22,528
 
-    def __init__(self, num_outputs: int):
+    def __init__(self, l1: int, num_psqt_buckets: int):
         super().__init__()
 
-        self.num_outputs = num_outputs
-        self.weight = nn.Parameter(
-            torch.empty(self.NUM_INPUTS, num_outputs, dtype=torch.float32)
+        self.l1 = l1
+        self.num_psqt_buckets = num_psqt_buckets
+        self.num_outputs = l1 + num_psqt_buckets
+
+        self.weight_ft = nn.Parameter(
+            torch.empty(self.NUM_INPUTS, l1, dtype=torch.float32)
         )
-        self.virtual_weight = nn.Parameter(
-            torch.zeros(self.NUM_INPUTS_VIRTUAL, num_outputs, dtype=torch.float32)
+        self.virtual_weight_ft = nn.Parameter(
+            torch.zeros(self.NUM_INPUTS_VIRTUAL, l1, dtype=torch.float32)
+        )
+
+        self.weight_psqt = nn.Parameter(
+            torch.empty(self.NUM_INPUTS, num_psqt_buckets, dtype=torch.float32)
+        )
+        self.virtual_weight_psqt = nn.Parameter(
+            torch.zeros(self.NUM_INPUTS_VIRTUAL, num_psqt_buckets, dtype=torch.float32)
         )
 
         self.reset_parameters()
 
+    def get_ft_params(self) -> list[nn.Parameter]:
+        return [self.weight_ft, self.virtual_weight_ft]
+
+    def get_psqt_params(self) -> list[nn.Parameter]:
+        return [self.weight_psqt, self.virtual_weight_psqt]
+
+    @torch.no_grad()
+    def reset_parameters(self) -> None:
+        sigma = math.sqrt(1 / self.NUM_INPUTS)
+        self.weight_ft.uniform_(-sigma, sigma)
+        self.weight_psqt.uniform_(-sigma, sigma)
+        self.virtual_weight_ft.zero_()
+        self.virtual_weight_psqt.zero_()
+
     def merged_weight(self) -> torch.Tensor:
-        return self.weight + self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
+        merged_ft = self.weight_ft + self.virtual_weight_ft.repeat(self.NUM_BUCKETS, 1)
+        merged_psqt = self.weight_psqt + self.virtual_weight_psqt.repeat(self.NUM_BUCKETS, 1)
+        return torch.cat([merged_ft, merged_psqt], dim=1)
 
     @torch.no_grad()
     def coalesce(self) -> None:
-        self.weight.add_(self.virtual_weight.repeat(self.NUM_BUCKETS, 1))
-        self.virtual_weight.zero_()
+        self.weight_ft.add_(self.virtual_weight_ft.repeat(self.NUM_BUCKETS, 1))
+        self.virtual_weight_ft.zero_()
+        self.weight_psqt.add_(self.virtual_weight_psqt.repeat(self.NUM_BUCKETS, 1))
+        self.virtual_weight_psqt.zero_()
 
     @torch.no_grad()
-    def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None:
+    def init_weights(self, nnue2score: float) -> None:
         """Initialize virtual weights to zero and set PSQT columns."""
-        self.virtual_weight.zero_()
+        self.virtual_weight_ft.zero_()
+        self.virtual_weight_psqt.zero_()
 
         scale = 1.0 / nnue2score
-        L1 = self.num_outputs - num_psqt_buckets
-
         initial_values = self.halfka_psqts()
         assert len(initial_values) == self.NUM_INPUTS
 
         new_weights = (
             torch.tensor(
                 initial_values,
-                device=self.weight.device,
-                dtype=self.weight.dtype,
+                device=self.weight_psqt.device,
+                dtype=self.weight_psqt.dtype,
             )
             * scale
         )
 
-        for i in range(num_psqt_buckets):
-            self.weight[:, L1 + i] = new_weights
+        for i in range(self.num_psqt_buckets):
+            self.weight_psqt[:, i] = new_weights
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:
@@ -103,32 +131,24 @@ class HalfKav2Hm(InputFeature):
 
         Returns a float tensor with NUM_REAL_FEATURES rows.
         """
-        # Coalesce virtual weights
-        coalesced = self.weight.data + self.virtual_weight.data.repeat(
-            self.NUM_BUCKETS, 1
-        )
+        coalesced_ft = self.weight_ft.data + self.virtual_weight_ft.data.repeat(self.NUM_BUCKETS, 1)
+        coalesced_psqt = self.weight_psqt.data + self.virtual_weight_psqt.data.repeat(self.NUM_BUCKETS, 1)
+        coalesced = torch.cat([coalesced_ft, coalesced_psqt], dim=1)
 
-        # Remap 12 piece types -> 11 piece types
         export = coalesced.new_zeros(self.NUM_REAL_FEATURES, coalesced.shape[1])
 
         for b in range(self.NUM_BUCKETS):
-            src_offset = b * self.NUM_PLANES  # 768 features per bucket
-            dst_offset = b * 704  # 704 features per bucket in export
+            src_offset = b * self.NUM_PLANES
+            dst_offset = b * 704
 
-            # Copy first 10 piece types (p_idx 0..9) -- 640 features
-            export[dst_offset : dst_offset + 640] = coalesced[
-                src_offset : src_offset + 640
-            ]
+            export[dst_offset : dst_offset + 640] = coalesced[src_offset : src_offset + 640]
 
-            # Merge own king (p_idx=10) and opponent king (p_idx=11) into single block
             own_king_src = src_offset + 10 * 64
             opp_king_src = src_offset + 11 * 64
             dst_king = dst_offset + 10 * 64
             ksq = InverseKingBuckets[b]
 
-            export[dst_king : dst_king + 64] = coalesced[
-                opp_king_src : opp_king_src + 64
-            ]
+            export[dst_king : dst_king + 64] = coalesced[opp_king_src : opp_king_src + 64]
             export[dst_king + ksq] = coalesced[own_king_src + ksq]
 
         return export
@@ -148,9 +168,7 @@ class HalfKav2Hm(InputFeature):
             dst_offset = b * self.NUM_PLANES
 
             # Copy first 10 piece types
-            expanded[dst_offset : dst_offset + 640] = export_weight[
-                src_offset : src_offset + 640
-            ]
+            expanded[dst_offset : dst_offset + 640] = export_weight[src_offset : src_offset + 640]
 
             # Split merged king block back into p_idx 10 and 11
             src_king = src_offset + 10 * 64
@@ -165,12 +183,13 @@ class HalfKav2Hm(InputFeature):
             ]
             expanded[dst_offset + 11 * 64 + ksq] = 0
 
-        self.weight.data.copy_(expanded)
-        self.virtual_weight.zero_()
+        self.weight_ft.data.copy_(expanded[:, :self.l1])
+        self.weight_psqt.data.copy_(expanded[:, self.l1:])
+        self.virtual_weight_ft.zero_()
+        self.virtual_weight_psqt.zero_()
 
     @staticmethod
     def halfka_psqts() -> list[int]:
-        """PSQT initial values using 12 piece types (24,576 values)."""
         piece_values = {
             chess.PAWN: 126,
             chess.KNIGHT: 781,
