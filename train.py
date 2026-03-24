@@ -42,7 +42,7 @@ class TimeLimitAfterCheckpoint(Callback):
                 f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
             )
 
-class SimpleLineLogger(L.Callback):
+class SimpleLineLogger(Callback):
     def __init__(
         self,
         refresh_rate=None,
@@ -80,11 +80,15 @@ class SimpleLineLogger(L.Callback):
     # ==========================================
     # TRAINING LOOP
     # ==========================================
+    @torch.compiler.disable
     def on_train_epoch_start(self, trainer, pl_module):
         self.train_start_time = time.time()
         self.train_last_time = time.time()
         self.train_last_step = 0
 
+        print("-"*60)
+
+    @torch.compiler.disable
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if trainer.global_rank != 0:
             return
@@ -116,6 +120,7 @@ class SimpleLineLogger(L.Callback):
             self.train_last_time = now
             self.train_last_step = current_step
 
+    @torch.compiler.disable
     def on_train_epoch_end(self, trainer, pl_module):
         if trainer.global_rank != 0 or trainer.sanity_checking:
             return
@@ -123,18 +128,20 @@ class SimpleLineLogger(L.Callback):
         train_loss = trainer.callback_metrics.get(self.train_metric_epoch, float('nan'))
         print(
             f"Epoch {trainer.current_epoch:>2} (Train): "
-            f"[{self.train_metric_epoch}={train_loss:.5f}]\n" + "-"*60,
+            f"[{self.train_metric_epoch}={train_loss:.5f}]",
             flush=True
         )
 
     # ==========================================
     # VALIDATION LOOP
     # ==========================================
+    @torch.compiler.disable
     def on_validation_epoch_start(self, trainer, pl_module):
         self.val_start_time = time.time()
         self.val_last_time = time.time()
         self.val_last_step = 0
 
+    @torch.compiler.disable
     def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
         # Ignore non-zero ranks and the pre-training sanity check
         if trainer.global_rank != 0 or trainer.sanity_checking:
@@ -165,6 +172,7 @@ class SimpleLineLogger(L.Callback):
             self.val_last_time = now
             self.val_last_step = current_step
 
+    @torch.compiler.disable
     def on_validation_epoch_end(self, trainer, pl_module):
         if trainer.global_rank != 0 or trainer.sanity_checking:
             return
@@ -172,7 +180,7 @@ class SimpleLineLogger(L.Callback):
         val_loss = trainer.callback_metrics.get(self.val_metric, float('nan'))
         print(
             f"Epoch {trainer.current_epoch:>2} (Val): "
-            f"[{self.val_metric}={val_loss:.5f}]\n" + "-"*60,
+            f"[{self.val_metric}={val_loss:.5f}]",
             flush=True
         )
 
@@ -371,6 +379,8 @@ def main():
         save_top_k=-1,
     )
 
+    # Since we compile the entire lighning module we have quite a few graph breaks
+    torch._dynamo.config.cache_size_limit = 32
     nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
