@@ -154,9 +154,11 @@ class NNUE(L.LightningModule):
     def training_step(self, batch, batch_idx):
         return self.step_(batch, batch_idx, "train_loss")
 
+    @torch.no_grad()
     def validation_step(self, batch, batch_idx):
         self.step_(batch, batch_idx, "val_loss")
 
+    @torch.no_grad()
     def test_step(self, batch, batch_idx):
         self.step_(batch, batch_idx, "test_loss")
 
