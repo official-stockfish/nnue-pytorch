@@ -289,14 +289,31 @@ def main():
     )
 
     global_batch_size_requested = args.batch_size
-    # temporarily default to using only device 0 if user didn't specify --gpus
-    # doing this so that batch size is consistent since if we rely on "auto" behavior
-    # we don't know at this point in the code what the world size is.
-    # TODO: refactor initialization so that we can support default behavior of "auto" with proper batch sizing
-    if args.gpus:
-        try:
-            devices = [int(x) for x in args.gpus.rstrip(",").split(",") if x]
-        except ValueError:
+
+    accelerator = args.accelerator
+    if accelerator == "auto":
+        if torch.cuda.is_available():
+            accelerator = "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            accelerator = "mps"
+        else:
+            accelerator = "cpu"
+
+    if accelerator == "cuda":
+        if args.gpus:
+            try:
+                devices = [int(x) for x in args.gpus.rstrip(",").split(",") if x]
+            except ValueError:
+                print(
+                    f"Invalid --gpus argument: '{args.gpus}'. "
+                    "Expected a comma separated list of ints, e.g. 0,1",
+                    file=sys.stderr,
+                )
+                return
+        else:
+            devices = [0]
+        n_devices = len(devices)
+        if n_devices == 0:
             print(
                 f"Invalid --gpus argument: '{args.gpus}'. "
                 "Expected a comma separated list of ints, e.g. 0,1",
@@ -304,21 +321,20 @@ def main():
             )
             return
     else:
-        devices = [0]
-    n_devices = len(devices)
-    if n_devices == 0:
-        print(
-            f"Invalid --gpus argument: '{args.gpus}'. "
-            "Expected a comma separated list of ints, e.g. 0,1",
-            file=sys.stderr,
-        )
-        return
+        if args.gpus:
+            print(
+                f"Warning: --gpus is ignored for accelerator='{accelerator}'",
+                file=sys.stderr,
+            )
+        devices = 1
+        n_devices = 1
+
     if global_batch_size_requested % n_devices != 0:
         raise ValueError(
-            f"--batch-size {global_batch_size_requested} must be divisible by number of gpus ({n_devices}). "
+            f"--batch-size {global_batch_size_requested} must be divisible by number of devices ({n_devices}). "
             f"Got --gpus={args.gpus or '0'}"
         )
-    per_gpu_batch_size = global_batch_size_requested // n_devices
+    per_device_batch_size = global_batch_size_requested // n_devices
     feature_name = args.nnue_lightning_config.features
 
     max_epoch = args.max_epochs or 800
@@ -358,7 +374,7 @@ def main():
 
     if is_master_process():
         print(
-            f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}"
+            f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_device)={per_device_batch_size} | accelerator={accelerator}"
         )
         print("Loss parameters:")
         print(loss_params)
@@ -383,34 +399,20 @@ def main():
         save_top_k=-1,
     )
 
-    # Since we compile the entire lightning module we have quite a few graph breaks
-    torch._dynamo.config.cache_size_limit = 32
-    nnue = torch.compile(nnue, backend=args.compile_backend)
+    if args.compile_backend != "none":
+        nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
-
-    train, val = make_data_loaders(
-        train_datasets,
-        val_datasets,
-        input_feature_name,
-        actual_workers,
-        per_gpu_batch_size,
-        args.dataloader_config,
-        args.epoch_size,
-        args.validation_size,
-        pin_memory=args.pin_memory,
-        queue_size_limit=args.data_loader_queue_size,
-    )
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
-        accelerator="cuda",
-        strategy="ddp" if len(devices) > 1 else "auto",
+        accelerator=accelerator,
+        strategy="ddp" if isinstance(devices, list) and len(devices) > 1 else "auto",
         devices=devices,
-        logger=loggers,
+        logger=tb_logger,
         callbacks=[
             checkpoint_callback,
             SimpleLineLogger(refresh_rate=refresh_rate),
@@ -421,11 +423,24 @@ def main():
         enable_progress_bar=False,
         enable_checkpointing=True,
         benchmark=True,
-        num_sanity_val_steps=0 if val is None else 4,
+        num_sanity_val_steps=0,
     )
 
     if actual_threads > 0:
         t_set_num_threads(actual_threads)
+
+    train, val = make_data_loaders(
+        train_datasets,
+        val_datasets,
+        input_feature_name,
+        actual_workers,
+        per_device_batch_size,
+        args.dataloader_config,
+        args.epoch_size,
+        args.validation_size,
+        pin_memory=args.pin_memory,
+        queue_size_limit=args.data_loader_queue_size,
+    )
 
     if args.resume_from_checkpoint:
         trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)

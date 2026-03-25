@@ -1,13 +1,63 @@
 import torch
+import torch.nn.functional as F
 from torch import autograd
 
-from .kernel import (
-    make_sparse_input_linear_forward_kernel,
-    make_sparse_input_linear_backward_kernel,
-)
+_HAS_CUPY_KERNELS = False
+try:
+    from .kernel import (
+        make_sparse_input_linear_forward_kernel,
+        make_sparse_input_linear_backward_kernel,
+    )
+
+    _HAS_CUPY_KERNELS = True
+except (ImportError, ModuleNotFoundError):
+    pass
 
 
-class SparseLinearFunction(autograd.Function):
+def sparse_linear(feature_indices, feature_values, weight, bias):
+    """Sparse linear: output[b] = sum_k(weight[indices[b,k]] * values[b,k]) + bias.
+
+    Dispatches to a hand-tuned CuPy CUDA kernel when available, otherwise falls
+    back to a pure-PyTorch implementation that works on any device.
+    """
+    if _HAS_CUPY_KERNELS and feature_indices.is_cuda:
+        return _CudaSparseLinearFunction.apply(
+            feature_indices, feature_values, weight, bias
+        )
+    return _torch_sparse_linear(feature_indices, feature_values, weight, bias)
+
+
+def _torch_sparse_linear(feature_indices, feature_values, weight, bias):
+    """Pure PyTorch implementation using F.embedding_bag for memory efficiency.
+
+    Instead of materialising the full (batch, max_active, output_size) gathered
+    tensor, embedding_bag fuses the lookup, per-sample weighting, and reduction
+    into a single call with O(batch * output_size) memory.
+    """
+    batch_size, max_active = feature_indices.shape
+
+    mask = feature_indices >= 0
+    safe_indices = feature_indices.clamp(min=0).long().reshape(-1)
+    per_sample_weights = (feature_values * mask).reshape(-1)
+
+    offsets = torch.arange(
+        0,
+        batch_size * max_active,
+        max_active,
+        device=feature_indices.device,
+    )
+
+    output = F.embedding_bag(
+        safe_indices,
+        weight,
+        offsets,
+        mode="sum",
+        per_sample_weights=per_sample_weights,
+    )
+    return output + bias
+
+
+class _CudaSparseLinearFunction(autograd.Function):
     @staticmethod
     def forward(ctx, feature_indices, feature_values, weight, bias):
         ctx.save_for_backward(feature_indices, feature_values, weight, bias)
@@ -102,3 +152,7 @@ class SparseLinearFunction(autograd.Function):
         )
 
         return None, None, weight_grad, bias_grad
+
+
+# Legacy alias
+SparseLinearFunction = _CudaSparseLinearFunction
