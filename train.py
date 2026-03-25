@@ -86,7 +86,8 @@ class SimpleLineLogger(Callback):
         self.train_last_time = time.time()
         self.train_last_step = 0
 
-        print("-"*60)
+        if trainer.global_rank == 0:
+            print("-"*60)
 
     @torch.compiler.disable
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
