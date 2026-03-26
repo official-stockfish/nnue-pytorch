@@ -115,6 +115,7 @@ class SimpleLineLogger(Callback):
                 f"[{self._format_time(elapsed_total)}<{self._format_time(remaining)}, "
                 f"{rate:>6.2f}it/s, "
                 f"{self.train_metric_step}={loss_val:.5f}]",
+                f"v_num={trainer.logger.version}]",
                 flush=True,
             )
 
