@@ -162,7 +162,6 @@ class NNUE(L.LightningModule):
     def test_step(self, batch, batch_idx):
         self.step_(batch, batch_idx, "test_loss")
 
-    @torch.compiler.disable
     def _log(self, loss_type, loss):
         self.loss_metrics[f"{loss_type}_epoch"](loss)
 
