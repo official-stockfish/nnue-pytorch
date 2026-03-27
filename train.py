@@ -82,11 +82,8 @@ class SimpleLineLogger(Callback):
     # ==========================================
     @torch.compiler.disable
     def on_train_epoch_start(self, trainer, pl_module):
-        self.train_start_time = time.time()
-        self.train_last_time = time.time()
-        self.train_last_step = 0
-
         if trainer.global_rank == 0:
+            self.train_start_time = time.time()
             print("-"*60)
 
     @torch.compiler.disable
@@ -100,10 +97,7 @@ class SimpleLineLogger(Callback):
         if current_step % self._get_refresh_rate(trainer) == 0 or current_step == total_batches:
             now = time.time()
             elapsed_total = now - self.train_start_time
-
-            elapsed_interval = now - self.train_last_time
-            steps_interval = current_step - self.train_last_step
-            rate = steps_interval / elapsed_interval if elapsed_interval > 0 else 0
+            rate = current_step / elapsed_total if elapsed_total > 0 else 0
 
             remaining = (total_batches - current_step) / rate if rate > 0 else 0
             loss_val = trainer.callback_metrics.get(self.train_metric_step, float('nan'))
@@ -139,27 +133,22 @@ class SimpleLineLogger(Callback):
     # ==========================================
     @torch.compiler.disable
     def on_validation_epoch_start(self, trainer, pl_module):
-        self.val_start_time = time.time()
-        self.val_last_time = time.time()
-        self.val_last_step = 0
+        if trainer.global_rank == 0 and not trainer.sanity_checking:
+            self.val_start_time = time.time()
 
     @torch.compiler.disable
     def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
-        # Ignore non-zero ranks and the pre-training sanity check
         if trainer.global_rank != 0 or trainer.sanity_checking:
             return
 
         current_step = batch_idx + 1
-        # Sum is used in case you have multiple validation dataloaders
         total_batches = sum(trainer.num_val_batches)
 
         if current_step % self._get_refresh_rate(trainer) == 0 or current_step == total_batches:
             now = time.time()
             elapsed_total = now - self.val_start_time
 
-            elapsed_interval = now - self.val_last_time
-            steps_interval = current_step - self.val_last_step
-            rate = steps_interval / elapsed_interval if elapsed_interval > 0 else 0
+            rate = current_step / elapsed_total if elapsed_total > 0 else 0
             remaining = (total_batches - current_step) / rate if rate > 0 else 0
 
             print(
@@ -170,9 +159,6 @@ class SimpleLineLogger(Callback):
                 f"{rate:>6.2f}it/s]",
                 flush=True,
             )
-
-            self.val_last_time = now
-            self.val_last_step = current_step
 
     @torch.compiler.disable
     def on_validation_epoch_end(self, trainer, pl_module):
