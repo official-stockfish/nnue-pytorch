@@ -121,6 +121,7 @@ class SimpleLineLogger(Callback):
         if trainer.global_rank != 0 or trainer.sanity_checking:
             return
 
+        pl_module._log_epoch_end(self.train_metric_epoch)
         train_loss = trainer.callback_metrics.get(self.train_metric_epoch, float('nan'))
         print(
             f"Epoch {trainer.current_epoch:>2} (Train): "
@@ -165,6 +166,7 @@ class SimpleLineLogger(Callback):
         if trainer.global_rank != 0 or trainer.sanity_checking:
             return
 
+        pl_module._log_epoch_end(self.val_metric)
         val_loss = trainer.callback_metrics.get(self.val_metric, float('nan'))
         print(
             f"Epoch {trainer.current_epoch:>2} (Val): "

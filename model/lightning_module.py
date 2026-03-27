@@ -133,19 +133,19 @@ class NNUE(L.LightningModule):
 
     def on_train_epoch_end(self):
         self.optimizer_wrapper.on_train_epoch_end(self)
-        self._log_epoch_end("train_loss")
+        self._log_epoch_end("train_loss_epoch")
 
     def on_validation_epoch_start(self):
         self.optimizer_wrapper.on_validation_epoch_start(self)
 
     def on_validation_epoch_end(self):
-        self._log_epoch_end("val_loss")
+        self._log_epoch_end("val_loss_epoch")
 
     def on_test_epoch_start(self):
         self.optimizer_wrapper.on_test_epoch_start(self)
 
     def on_test_epoch_end(self):
-        self._log_epoch_end("test_loss")
+        self._log_epoch_end("test_loss_epoch")
 
     def on_save_checkpoint(self, checkpoint):
         self.optimizer_wrapper.on_save_checkpoint(self, checkpoint)
@@ -155,8 +155,8 @@ class NNUE(L.LightningModule):
 
     def _log_epoch_end(self, loss_type):
         self.log(
-            f"{loss_type}_epoch",
-            self.loss_metrics[f"{loss_type}_epoch"],
+            f"{loss_type}",
+            self.loss_metrics[f"{loss_type}"],
             prog_bar=False,
             sync_dist=True,
             on_epoch=True,
@@ -235,7 +235,7 @@ class NNUE(L.LightningModule):
         weights = 1 + (2.0**p.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), p.w2)
         loss = (loss * weights).sum() / weights.sum()
 
-        self.loss_metrics[f"{loss_type}_epoch"](loss)
+        self.loss_metrics[f"{loss_type}_epoch"].update(loss)
         self.log(
             loss_type,
             loss,
