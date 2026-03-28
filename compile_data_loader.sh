@@ -40,6 +40,20 @@ cmake --build "$BUILD_DIR" -j
 echo "Running bench to generate profile data (pgo_run)..."
 cmake --build "$BUILD_DIR" --target pgo_run -j
 
+# Clang/AppleClang generates .profraw files that must be merged into
+# default.profdata before -fprofile-use can consume them.
+if ls "$PGO_DIR"/*.profraw 1>/dev/null 2>&1; then
+  echo "Merging Clang raw profiles..."
+  if command -v xcrun >/dev/null 2>&1; then
+    xcrun llvm-profdata merge -output="$PGO_DIR/default.profdata" "$PGO_DIR"/*.profraw
+  elif command -v llvm-profdata >/dev/null 2>&1; then
+    llvm-profdata merge -output="$PGO_DIR/default.profdata" "$PGO_DIR"/*.profraw
+  else
+    echo "Error: llvm-profdata not found. Cannot merge Clang profiles." >&2
+    exit 1
+  fi
+fi
+
 echo "Re-configuring for PGO_Use (use collected profiles)..."
 cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=PGO_Use \
