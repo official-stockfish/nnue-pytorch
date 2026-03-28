@@ -21,6 +21,18 @@ set(PGO_PROFILE_DATA_DIR "${CMAKE_BINARY_DIR}/pgo_data"
 set(PGO_INPUT ""
     CACHE STRING "Input file passed to training_data_loader_pgo_gen for profile generation")
 
+# STATISTICS REPORT
+add_executable(training_data_loader_report training_data_loader.cpp training_data_loader_abi.cpp training_data_loader_bench.cpp)
+target_compile_definitions(training_data_loader_report PRIVATE NNUE_LOADER_STATISTICS)
+
+target_link_libraries(training_data_loader_report
+  PRIVATE Threads::Threads)
+
+set_target_properties(training_data_loader_report PROPERTIES
+  BUILD_RPATH "$ORIGIN"
+  INSTALL_RPATH "$ORIGIN"
+)
+
 # Fail at configure time if PGO_Generate is requested without a valid input file.
 if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE" AND NOT PGO_INPUT)
   message(FATAL_ERROR
@@ -129,6 +141,29 @@ if(NOT UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
     BUILD_RPATH "$ORIGIN"
     INSTALL_RPATH "$ORIGIN"
   )
+endif()
+
+# ---- copy dataloader config ----
+set(CONFIG_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/data_loader_config.ini")
+
+function(add_config_copy_step TARGET_NAME)
+    add_custom_command(
+        TARGET ${TARGET_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CONFIG_SOURCE}"
+                "$<TARGET_FILE_DIR:${TARGET_NAME}>/data_loader_config.ini"
+        COMMENT "Copying data_loader_config.ini to output directory for ${TARGET_NAME}"
+        VERBATIM
+    )
+endfunction()
+
+# Apply to your targets
+if(TARGET training_data_loader_report)
+    add_config_copy_step(training_data_loader_report)
+endif()
+
+if(TARGET training_data_loader_bench)
+    add_config_copy_step(training_data_loader_bench)
 endif()
 
 # ---- compile and link option for pgo ----
