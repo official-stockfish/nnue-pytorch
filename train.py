@@ -10,7 +10,6 @@ from torch import set_num_threads as t_set_num_threads
 from torch.utils.data import DataLoader
 from lightning.pytorch import loggers as pl_loggers
 from lightning.pytorch.callbacks import Callback, ModelCheckpoint
-from tqdm import tqdm
 
 import data_loader
 import model as M
@@ -43,48 +42,141 @@ class TimeLimitAfterCheckpoint(Callback):
                 f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
             )
 
-
-class SimpleLineLogger(L.Callback):
-    def __init__(self, refresh_rate=1, metric_name="train_loss"):
+class SimpleLineLogger(Callback):
+    def __init__(
+        self,
+        refresh_rate=None,
+        train_metric_step="train_loss",
+        train_metric_epoch="train_loss_epoch",
+        val_metric="val_loss_epoch",
+    ):
         super().__init__()
+        self.train_metric_step = train_metric_step
+        self.train_metric_epoch = train_metric_epoch
+        self.val_metric = val_metric
+
         self.refresh_rate = refresh_rate
-        self.metric_name = metric_name
-        self.start_time = None
 
+        # Train tracking
+        self.train_start_time = None
+        self.train_last_time = None
+        self.train_last_step = 0
+
+        # Val tracking
+        self.val_start_time = None
+        self.val_last_time = None
+        self.val_last_step = 0
+
+    def _format_time(self, seconds):
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+    def _get_refresh_rate(self, trainer):
+        if self.refresh_rate is not None:
+            return self.refresh_rate
+        return trainer.log_every_n_steps
+
+    # ==========================================
+    # TRAINING LOOP
+    # ==========================================
+    @torch.compiler.disable
     def on_train_epoch_start(self, trainer, pl_module):
-        self.start_time = time.time()
+        if trainer.global_rank == 0:
+            self.train_start_time = time.time()
+            print("-"*60)
 
+    @torch.compiler.disable
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if trainer.global_rank != 0:
             return
 
-        # Ensure we use the current step (1-indexed for display)
         current_step = batch_idx + 1
         total_batches = trainer.num_training_batches
 
-        if current_step % self.refresh_rate == 0 or current_step == total_batches:
-            elapsed = time.time() - self.start_time
+        if current_step % self._get_refresh_rate(trainer) == 0 or current_step == total_batches:
+            now = time.time()
+            elapsed_total = now - self.train_start_time
+            rate = current_step / elapsed_total if elapsed_total > 0 else 0
 
-            # Use tqdm.format_interval for consistent 00:00 formatting
-            elapsed_str = tqdm.format_interval(elapsed)
-
-            # Calculate Rate and ETA manually for total control over the string
-            rate = current_step / elapsed if elapsed > 0 else 0
             remaining = (total_batches - current_step) / rate if rate > 0 else 0
-            remaining_str = tqdm.format_interval(remaining)
-
-            metrics = trainer.callback_metrics
-            loss_val = metrics.get(self.metric_name, 0.0)
+            loss_val = trainer.callback_metrics.get(self.train_metric_step, float('nan'))
 
             print(
-                f"Epoch {trainer.current_epoch:>2}: "
+                f"Epoch {trainer.current_epoch:>2} (Train): "
                 f"{current_step / total_batches:>4.0%}| "
                 f"{current_step:>5}/{total_batches:<5} "
-                f"[{elapsed_str}<{remaining_str}, {rate:>6.2f}it/s, "
-                f"{self.metric_name}={loss_val:.5f}, "
+                f"[{self._format_time(elapsed_total)}<{self._format_time(remaining)}, "
+                f"{rate:>6.2f}it/s, "
+                f"{self.train_metric_step}={loss_val:.5f}, ",
                 f"v_num={trainer.logger.version}]",
                 flush=True,
             )
+
+            self.train_last_time = now
+            self.train_last_step = current_step
+
+    @torch.compiler.disable
+    def on_train_epoch_end(self, trainer, pl_module):
+        if trainer.global_rank != 0 or trainer.sanity_checking:
+            return
+
+        pl_module._log_epoch_end(self.train_metric_epoch)
+        train_loss = trainer.callback_metrics.get(self.train_metric_epoch, float('nan'))
+        print(
+            f"Epoch {trainer.current_epoch:>2} (Train): "
+            f"[{self.train_metric_epoch}={train_loss:.5f}]",
+            flush=True
+        )
+
+    # ==========================================
+    # VALIDATION LOOP
+    # ==========================================
+    @torch.compiler.disable
+    def on_validation_epoch_start(self, trainer, pl_module):
+        if trainer.global_rank == 0 and not trainer.sanity_checking:
+            self.val_start_time = time.time()
+
+    @torch.compiler.disable
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+        if trainer.global_rank != 0 or trainer.sanity_checking:
+            return
+
+        current_step = batch_idx + 1
+        val_batches = trainer.num_val_batches
+        if isinstance(val_batches, int):
+            total_batches = val_batches
+        else:
+            total_batches = sum(val_batches)
+
+        if current_step % self._get_refresh_rate(trainer) == 0 or current_step == total_batches:
+            now = time.time()
+            elapsed_total = now - self.val_start_time
+
+            rate = current_step / elapsed_total if elapsed_total > 0 else 0
+            remaining = (total_batches - current_step) / rate if rate > 0 else 0
+
+            print(
+                f"Epoch {trainer.current_epoch:>2} (Val)  : "
+                f"{current_step / total_batches:>4.0%}| "
+                f"{current_step:>5}/{total_batches:<5} "
+                f"[{self._format_time(elapsed_total)}<{self._format_time(remaining)}, "
+                f"{rate:>6.2f}it/s]",
+                flush=True,
+            )
+
+    @torch.compiler.disable
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if trainer.global_rank != 0 or trainer.sanity_checking:
+            return
+
+        pl_module._log_epoch_end(self.val_metric)
+        val_loss = trainer.callback_metrics.get(self.val_metric, float('nan'))
+        print(
+            f"Epoch {trainer.current_epoch:>2} (Val): "
+            f"[{self.val_metric}={val_loss:.5f}]",
+            flush=True
+        )
 
 
 def make_data_loaders(
@@ -123,6 +215,18 @@ def make_data_loaders(
     )
     if val_size <= 0:
         val = None
+    elif val_filenames is None:
+        val = DataLoader(
+            data_loader.FixedNumBatchesDataset(
+                train_infinite,
+                (val_size + batch_size - 1) // batch_size,
+                pin_memory=pin_memory,
+                queue_size_limit=queue_size_limit,
+            ),
+            batch_size=None,
+            batch_sampler=None,
+            num_workers=0,
+        )
     else:
         val_infinite = data_loader.SparseBatchDataset(
             features_name,
@@ -162,7 +266,7 @@ def main():
             raise Exception("{0} does not exist".format(val_dataset))
 
     train_datasets = args.datasets
-    val_datasets = train_datasets
+    val_datasets = None
 
     if len(args.validation_datasets) > 0:
         val_datasets = args.validation_datasets
@@ -249,6 +353,8 @@ def main():
 
     logdir = args.default_root_dir if args.default_root_dir else "logs/"
     tb_logger = pl_loggers.TensorBoardLogger(logdir)
+    csv_logger = pl_loggers.CSVLogger(logdir, version=tb_logger.version)
+    loggers = [tb_logger, csv_logger]
 
     if is_master_process():
         print(
@@ -277,34 +383,12 @@ def main():
         save_top_k=-1,
     )
 
+    # Since we compile the entire lightning module we have quite a few graph breaks
+    torch._dynamo.config.cache_size_limit = 32
     nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
-
-    refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
-    trainer = L.Trainer(
-        default_root_dir=logdir,
-        max_epochs=args.max_epochs,
-        accelerator="cuda",
-        strategy="ddp" if len(devices) > 1 else "auto",
-        devices=devices,
-        logger=tb_logger,
-        callbacks=[
-            checkpoint_callback,
-            SimpleLineLogger(refresh_rate=refresh_rate),
-            TimeLimitAfterCheckpoint(args.max_time),
-            M.WeightClippingCallback(),
-        ],
-        log_every_n_steps=refresh_rate,
-        enable_progress_bar=False,
-        enable_checkpointing=True,
-        benchmark=True,
-        num_sanity_val_steps=0,
-    )
-
-    if actual_threads > 0:
-        t_set_num_threads(actual_threads)
 
     train, val = make_data_loaders(
         train_datasets,
@@ -318,6 +402,30 @@ def main():
         pin_memory=args.pin_memory,
         queue_size_limit=args.data_loader_queue_size,
     )
+
+    refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
+    trainer = L.Trainer(
+        default_root_dir=logdir,
+        max_epochs=args.max_epochs,
+        accelerator="cuda",
+        strategy="ddp" if len(devices) > 1 else "auto",
+        devices=devices,
+        logger=loggers,
+        callbacks=[
+            checkpoint_callback,
+            SimpleLineLogger(refresh_rate=refresh_rate),
+            TimeLimitAfterCheckpoint(args.max_time),
+            M.WeightClippingCallback(),
+        ],
+        log_every_n_steps=refresh_rate,
+        enable_progress_bar=False,
+        enable_checkpointing=True,
+        benchmark=True,
+        num_sanity_val_steps=0 if val is None else 4,
+    )
+
+    if actual_threads > 0:
+        t_set_num_threads(actual_threads)
 
     if args.resume_from_checkpoint:
         trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)
