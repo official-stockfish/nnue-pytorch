@@ -108,7 +108,7 @@ class SimpleLineLogger(Callback):
                 f"{current_step:>5}/{total_batches:<5} "
                 f"[{self._format_time(elapsed_total)}<{self._format_time(remaining)}, "
                 f"{rate:>6.2f}it/s, "
-                f"{self.train_metric_step}={loss_val:.5f}]",
+                f"{self.train_metric_step}={loss_val:.5f}, ",
                 f"v_num={trainer.logger.version}]",
                 flush=True,
             )
@@ -143,7 +143,11 @@ class SimpleLineLogger(Callback):
             return
 
         current_step = batch_idx + 1
-        total_batches = sum(trainer.num_val_batches)
+        val_batches = trainer.num_val_batches
+        if isinstance(val_batches, int):
+            total_batches = val_batches
+        else:
+            total_batches = sum(val_batches)
 
         if current_step % self._get_refresh_rate(trainer) == 0 or current_step == total_batches:
             now = time.time()
@@ -212,7 +216,17 @@ def make_data_loaders(
     if val_size <= 0:
         val = None
     elif val_filenames is None:
-        val = train
+        val = DataLoader(
+            data_loader.FixedNumBatchesDataset(
+                train_infinite,
+                (val_size + batch_size - 1) // batch_size,
+                pin_memory=pin_memory,
+                queue_size_limit=queue_size_limit,
+            ),
+            batch_size=None,
+            batch_sampler=None,
+            num_workers=0,
+        )
     else:
         val_infinite = data_loader.SparseBatchDataset(
             features_name,
@@ -369,7 +383,7 @@ def main():
         save_top_k=-1,
     )
 
-    # Since we compile the entire lighning module we have quite a few graph breaks
+    # Since we compile the entire lightning module we have quite a few graph breaks
     torch._dynamo.config.cache_size_limit = 32
     nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
