@@ -16,15 +16,14 @@ from torch import autograd
 
 _dir = os.path.dirname(__file__)
 _cpp = None
-_shader_source = None
+_shader_sources: dict[str, str] = {}
 
 
-def _get_shader_source() -> str:
-    global _shader_source
-    if _shader_source is None:
-        with open(os.path.join(_dir, "sparse_linear.metal")) as f:
-            _shader_source = f.read()
-    return _shader_source
+def _get_shader(name: str) -> str:
+    if name not in _shader_sources:
+        with open(os.path.join(_dir, name)) as f:
+            _shader_sources[name] = f.read()
+    return _shader_sources[name]
 
 
 def _load_extension():
@@ -97,19 +96,25 @@ class MetalSparseLinearFunction(autograd.Function):
             feature_values,
             weight,
             bias,
-            _get_shader_source(),
+            _get_shader("sparse_linear.metal"),
+            _get_shader("sparse_linear_backward_cas.metal"),
+            _get_shader("sparse_linear_backward_native.metal"),
         )
 
     @staticmethod
     def backward(ctx, grad_output):
         feature_indices, feature_values, weight, bias = ctx.saved_tensors
-        weight_grad, bias_grad = _cpp.sparse_linear_backward(
+        grad_output = grad_output.contiguous()
+        weight_grad = _cpp.sparse_linear_backward(
             feature_indices,
             feature_values,
-            grad_output.contiguous(),
+            grad_output,
             weight.size(0),
-            _get_shader_source(),
+            _get_shader("sparse_linear.metal"),
+            _get_shader("sparse_linear_backward_cas.metal"),
+            _get_shader("sparse_linear_backward_native.metal"),
         )
+        bias_grad = grad_output.sum(dim=0)
         return None, None, weight_grad, bias_grad
 
 
