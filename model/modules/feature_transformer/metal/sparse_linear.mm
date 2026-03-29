@@ -864,6 +864,126 @@ void fused_adam_step_multi_metal(
 }
 
 // ---------------------------------------------------------------------------
+// Indexed stacked linear — avoids computing unused output channels.
+// ---------------------------------------------------------------------------
+namespace {
+    id<MTLLibrary> g_stacked_library = nil;
+}
+
+void ensure_stacked_init(const std::string& src) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_stacked_library) return;
+    ensure_device();
+    g_stacked_library = compile_shader(src, MTLLanguageVersion2_4);
+}
+
+id<MTLComputePipelineState> get_stacked_pipeline(
+        const std::string& func_name,
+        uint32_t in_size, uint32_t out_size) {
+    PipelineKey key{func_name, in_size, out_size};
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_pipelines.find(key);
+    if (it != g_pipelines.end()) return it->second;
+
+    MTLFunctionConstantValues* constants =
+        [[MTLFunctionConstantValues alloc] init];
+    [constants setConstantValue:&in_size  type:MTLDataTypeUInt atIndex:0];
+    [constants setConstantValue:&out_size type:MTLDataTypeUInt atIndex:1];
+
+    NSString* name = [NSString stringWithUTF8String:func_name.c_str()];
+    NSError* error = nil;
+    id<MTLFunction> func =
+        [g_stacked_library newFunctionWithName:name constantValues:constants error:&error];
+    TORCH_CHECK(func, "Stacked linear Metal function not found: ", func_name,
+        error ? (std::string(" — ") + [[error localizedDescription] UTF8String]) : "");
+
+    id<MTLComputePipelineState> pso =
+        [g_device newComputePipelineStateWithFunction:func error:&error];
+    TORCH_CHECK(pso, "Stacked linear pipeline creation failed: ", func_name);
+
+    g_pipelines[key] = pso;
+    return pso;
+}
+
+torch::Tensor indexed_stacked_linear_forward_metal(
+        torch::Tensor x,           // (B, in_size)
+        torch::Tensor weight,      // (count*out_size, in_size)
+        torch::Tensor bias,        // (count*out_size,)
+        torch::Tensor indices,     // (B,) int32
+        int64_t out_size,
+        const std::string& src) {
+
+    ensure_stacked_init(src);
+
+    x       = x.contiguous();
+    weight  = weight.contiguous();
+    bias    = bias.contiguous();
+    indices = indices.contiguous();
+
+    const int64_t batch    = x.size(0);
+    const uint32_t in_u    = static_cast<uint32_t>(x.size(1));
+    const uint32_t out_u   = static_cast<uint32_t>(out_size);
+
+    auto output = torch::empty({batch, out_size}, x.options());
+    if (batch == 0) return output;
+
+    auto pipeline = get_stacked_pipeline(
+        "indexed_stacked_linear_forward", in_u, out_u);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, x,       0);
+        set_buffer(enc, weight,  1);
+        set_buffer(enc, bias,    2);
+        set_buffer(enc, indices, 3);
+        set_buffer(enc, output,  4);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(out_u, 1, 1)];
+    }
+    return output;
+}
+
+torch::Tensor indexed_stacked_linear_backward_x_metal(
+        torch::Tensor grad_output,  // (B, out_size)
+        torch::Tensor weight,       // (count*out_size, in_size)
+        torch::Tensor indices,      // (B,) int32
+        const std::string& src) {
+
+    ensure_stacked_init(src);
+
+    grad_output = grad_output.contiguous();
+    weight      = weight.contiguous();
+    indices     = indices.contiguous();
+
+    const int64_t batch  = grad_output.size(0);
+    const uint32_t out_u = static_cast<uint32_t>(grad_output.size(1));
+    const uint32_t in_u  = static_cast<uint32_t>(weight.size(1));
+    const uint32_t num_threads = in_u / 4;
+
+    auto grad_x = torch::empty({batch, static_cast<int64_t>(in_u)},
+                                grad_output.options());
+    if (batch == 0) return grad_x;
+
+    auto pipeline = get_stacked_pipeline(
+        "indexed_stacked_linear_backward_x", in_u, out_u);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, grad_output, 0);
+        set_buffer(enc, weight,      1);
+        set_buffer(enc, indices,     2);
+        set_buffer(enc, grad_x,     3);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+    }
+    return grad_x;
+}
+
+// ---------------------------------------------------------------------------
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("sparse_linear_forward",  &sparse_linear_forward_metal,
           "Sparse linear forward pass (Metal)");
@@ -885,4 +1005,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Fused loss backward (Metal)");
     m.def("fused_adam_step_multi", &fused_adam_step_multi_metal,
           "Multi-tensor fused Adam step — one C++ call for all params (Metal)");
+    m.def("indexed_stacked_linear_forward", &indexed_stacked_linear_forward_metal,
+          "Indexed stacked linear forward (Metal)");
+    m.def("indexed_stacked_linear_backward_x", &indexed_stacked_linear_backward_x_metal,
+          "Indexed stacked linear backward for grad_x (Metal)");
 }

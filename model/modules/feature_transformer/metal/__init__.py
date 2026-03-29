@@ -293,6 +293,58 @@ def metal_fused_loss(scorenet, score, outcome,
     )
 
 
+class IndexedStackedLinearFunction(autograd.Function):
+    """Forward uses a Metal kernel that computes only the selected output
+    block per batch element (count-x less work). Backward grad_x also uses
+    Metal. Backward grad_weight/bias falls back to standard matmul via the
+    full (sparse) grad_output reconstruction."""
+
+    @staticmethod
+    def forward(ctx, x, weight, bias, indices, out_size, count):
+        output = _cpp.indexed_stacked_linear_forward(
+            x, weight, bias, indices, out_size,
+            _get_shader("stacked_linear.metal"),
+        )
+        ctx.save_for_backward(x, weight, indices)
+        ctx.out_size = out_size
+        ctx.count = count
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, weight, indices = ctx.saved_tensors
+        out_size = ctx.out_size
+        count = ctx.count
+        grad_output = grad_output.contiguous()
+
+        grad_x = _cpp.indexed_stacked_linear_backward_x(
+            grad_output, weight, indices,
+            _get_shader("stacked_linear.metal"),
+        )
+
+        # Reconstruct full grad for weight/bias gradients:
+        # scatter (B, out_size) into (B, count*out_size)
+        batch = grad_output.size(0)
+        total_out = count * out_size
+        grad_full = grad_output.new_zeros(batch, total_out)
+        idx_expanded = (indices.view(-1, 1) * out_size
+                        + torch.arange(out_size, device=grad_output.device))
+        grad_full.scatter_(1, idx_expanded, grad_output)
+
+        grad_weight = grad_full.t() @ x
+        grad_bias = grad_full.sum(0)
+
+        return grad_x, grad_weight, grad_bias, None, None, None
+
+
+def metal_indexed_stacked_linear(x, weight, bias, indices, out_size, count):
+    """Indexed stacked linear — Metal kernel computes only the selected
+    output block, avoiding count-x wasted compute."""
+    return IndexedStackedLinearFunction.apply(
+        x, weight, bias, indices, out_size, count
+    )
+
+
 def metal_fused_adam_step_multi(params, grads, grad_mas, variance_mas,
                                 beta1_sq, one_minus_beta1_sq,
                                 beta2, one_minus_beta2,
