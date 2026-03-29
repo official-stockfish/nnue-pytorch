@@ -11,7 +11,7 @@ import math
 
 import torch
 
-from ..modules.feature_transformer.metal import metal_fused_adam_step
+from ..modules.feature_transformer.metal import metal_fused_adam_step_multi
 
 
 class FusedRanger21(torch.optim.Optimizer):
@@ -55,33 +55,43 @@ class FusedRanger21(torch.optim.Optimizer):
             eps = group["eps"]
             beta1, beta2 = group["betas"]
 
+            params_list = []
+            grads_list = []
+            grad_ma_list = []
+            variance_ma_list = []
+
             for p in group["params"]:
                 if p.grad is None:
                     continue
 
-                grad = p.grad
                 state = self.state[p]
-
                 if len(state) == 0:
                     state["step"] = 0
                     state["grad_ma"] = torch.zeros_like(p.data)
                     state["variance_ma"] = torch.zeros_like(p.data)
 
                 state["step"] += 1
-                step = state["step"]
 
-                bias_correction1 = 1.0 - beta1 ** step
-                bias_correction2 = 1.0 - beta2 ** step
-                inv_sqrt_bc2 = 1.0 / math.sqrt(bias_correction2)
-                step_size = lr / bias_correction1 / self._noise_norm
+                params_list.append(p.data)
+                grads_list.append(p.grad.data)
+                grad_ma_list.append(state["grad_ma"])
+                variance_ma_list.append(state["variance_ma"])
 
-                metal_fused_adam_step(
-                    p, grad,
-                    state["grad_ma"], state["variance_ma"],
-                    self._beta1_sq, self._one_minus_beta1_sq,
-                    self._beta2, self._one_minus_beta2,
-                    inv_sqrt_bc2, step_size, eps,
-                )
+            if not params_list:
+                continue
+
+            step = self.state[group["params"][0]]["step"]
+            bias_correction1 = 1.0 - beta1 ** step
+            bias_correction2 = 1.0 - beta2 ** step
+            inv_sqrt_bc2 = 1.0 / math.sqrt(bias_correction2)
+            step_size = lr / bias_correction1 / self._noise_norm
+
+            metal_fused_adam_step_multi(
+                params_list, grads_list, grad_ma_list, variance_ma_list,
+                self._beta1_sq, self._one_minus_beta1_sq,
+                self._beta2, self._one_minus_beta2,
+                inv_sqrt_bc2, step_size, eps,
+            )
 
         self._track_epochs()
         return loss

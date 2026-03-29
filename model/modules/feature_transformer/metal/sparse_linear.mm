@@ -810,26 +810,22 @@ id<MTLComputePipelineState> get_opt_pipeline(const std::string& func_name) {
     return pso;
 }
 
-void fused_adam_step_metal(
-        torch::Tensor param, torch::Tensor grad,
-        torch::Tensor grad_ma, torch::Tensor variance_ma,
+void fused_adam_step_multi_metal(
+        std::vector<torch::Tensor> params,
+        std::vector<torch::Tensor> grads,
+        std::vector<torch::Tensor> grad_mas,
+        std::vector<torch::Tensor> variance_mas,
         double beta1_sq, double one_minus_beta1_sq,
         double beta2, double one_minus_beta2,
         double inv_sqrt_bc2, double step_size, double eps,
         const std::string& opt_src) {
 
+    const size_t n = params.size();
+    TORCH_CHECK(n == grads.size() && n == grad_mas.size() && n == variance_mas.size(),
+                "All tensor lists must have the same length");
+    if (n == 0) return;
+
     ensure_opt_init(opt_src);
-
-    TORCH_CHECK(param.is_contiguous(), "param must be contiguous");
-    TORCH_CHECK(grad.is_contiguous(), "grad must be contiguous");
-    TORCH_CHECK(grad_ma.is_contiguous(), "grad_ma must be contiguous");
-    TORCH_CHECK(variance_ma.is_contiguous(), "variance_ma must be contiguous");
-
-    uint32_t num_elements = static_cast<uint32_t>(param.numel());
-    if (num_elements == 0) return;
-
-    constexpr uint32_t kTgThreads = 256;
-    uint32_t num_tg = (num_elements + kTgThreads - 1) / kTgThreads;
 
     StepParamsGPU sp;
     sp.beta1_sq            = static_cast<float>(beta1_sq);
@@ -840,6 +836,7 @@ void fused_adam_step_metal(
     sp.step_size           = static_cast<float>(step_size);
     sp.eps                 = static_cast<float>(eps);
 
+    constexpr uint32_t kTgThreads = 256;
     auto pipeline = get_opt_pipeline("fused_adam_step");
 
     @autoreleasepool {
@@ -847,14 +844,22 @@ void fused_adam_step_metal(
         auto enc    = stream->commandEncoder();
 
         [enc setComputePipelineState:pipeline];
-        set_buffer(enc, param,       0);
-        set_buffer(enc, grad,        1);
-        set_buffer(enc, grad_ma,     2);
-        set_buffer(enc, variance_ma, 3);
-        [enc setBytes:&sp           length:sizeof(StepParamsGPU) atIndex:4];
-        [enc setBytes:&num_elements length:sizeof(uint32_t)      atIndex:5];
-        [enc dispatchThreadgroups:MTLSizeMake(num_tg, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
+        [enc setBytes:&sp length:sizeof(StepParamsGPU) atIndex:4];
+
+        for (size_t i = 0; i < n; ++i) {
+            uint32_t num_elements = static_cast<uint32_t>(params[i].numel());
+            if (num_elements == 0) continue;
+
+            uint32_t num_tg = (num_elements + kTgThreads - 1) / kTgThreads;
+
+            set_buffer(enc, params[i],       0);
+            set_buffer(enc, grads[i],        1);
+            set_buffer(enc, grad_mas[i],     2);
+            set_buffer(enc, variance_mas[i], 3);
+            [enc setBytes:&num_elements length:sizeof(uint32_t) atIndex:5];
+            [enc dispatchThreadgroups:MTLSizeMake(num_tg, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
+        }
     }
 }
 
@@ -878,6 +883,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Fused loss forward (Metal)");
     m.def("loss_backward", &loss_backward_metal,
           "Fused loss backward (Metal)");
-    m.def("fused_adam_step", &fused_adam_step_metal,
-          "Fused Adam-like optimizer step (Metal)");
+    m.def("fused_adam_step_multi", &fused_adam_step_multi_metal,
+          "Multi-tensor fused Adam step — one C++ call for all params (Metal)");
 }
