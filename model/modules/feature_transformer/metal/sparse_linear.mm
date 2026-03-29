@@ -57,6 +57,8 @@ uint32_t find_nearest_divisor(uint32_t value, uint32_t target) {
     return best;
 }
 
+constexpr uint32_t kSparseThreadTarget = 128;
+
 id<MTLLibrary> compile_shader(const std::string& source, MTLLanguageVersion ver) {
     NSString*          src  = [NSString stringWithUTF8String:source.c_str()];
     MTLCompileOptions* opts = [[MTLCompileOptions alloc] init];
@@ -160,7 +162,7 @@ torch::Tensor sparse_linear_forward_metal(
         return torch::empty({batch_size, static_cast<int64_t>(output_size)},
                             input_indices.options().dtype(torch::kFloat32));
 
-    uint32_t num_threads = find_nearest_divisor(output_size, 512);
+    uint32_t num_threads = find_nearest_divisor(output_size, kSparseThreadTarget);
     uint32_t slice_size  = output_size / num_threads;
 
     auto pipeline = get_pipeline(
@@ -176,6 +178,7 @@ torch::Tensor sparse_linear_forward_metal(
         auto enc    = stream->commandEncoder();
 
         [enc setComputePipelineState:pipeline];
+        [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
         set_buffer(enc, input_indices, 0);
         set_buffer(enc, input_values,  1);
         set_buffer(enc, weight,        2);
@@ -217,7 +220,7 @@ torch::Tensor sparse_linear_backward_metal(
             {num_inputs, static_cast<int64_t>(output_size)}, opts);
     }
 
-    uint32_t num_threads = find_nearest_divisor(output_size, 512);
+    uint32_t num_threads = find_nearest_divisor(output_size, kSparseThreadTarget);
     uint32_t slice_size  = output_size / num_threads;
 
     auto pipeline = get_pipeline(
@@ -232,6 +235,7 @@ torch::Tensor sparse_linear_backward_metal(
         auto enc    = stream->commandEncoder();
 
         [enc setComputePipelineState:pipeline];
+        [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
         set_buffer(enc, input_indices, 0);
         set_buffer(enc, input_values,  1);
         set_buffer(enc, weight_grad,   2);
@@ -413,7 +417,7 @@ sparse_linear_double_forward_metal(
         return std::make_tuple(z, z.clone());
     }
 
-    uint32_t num_threads = find_nearest_divisor(output_size, 512);
+    uint32_t num_threads = find_nearest_divisor(output_size, kSparseThreadTarget);
     uint32_t slice_size  = output_size / num_threads;
 
     auto pipeline = get_pipeline(
@@ -428,6 +432,7 @@ sparse_linear_double_forward_metal(
         auto enc    = stream->commandEncoder();
 
         [enc setComputePipelineState:pipeline];
+        [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
         set_buffer(enc, weight, 2);
         set_buffer(enc, bias,   3);
 
@@ -481,7 +486,7 @@ torch::Tensor sparse_linear_double_backward_metal(
             {num_inputs, static_cast<int64_t>(output_size)}, opts);
     }
 
-    uint32_t num_threads = find_nearest_divisor(output_size, 512);
+    uint32_t num_threads = find_nearest_divisor(output_size, kSparseThreadTarget);
     uint32_t slice_size  = output_size / num_threads;
 
     auto pipeline = get_pipeline(
@@ -496,6 +501,7 @@ torch::Tensor sparse_linear_double_backward_metal(
         auto enc    = stream->commandEncoder();
 
         [enc setComputePipelineState:pipeline];
+        [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
         set_buffer(enc, weight_grad, 2);
 
         set_buffer(enc, w_indices, 0);
@@ -560,7 +566,7 @@ fused_backward_metal(
 
     const uint32_t max_active  = static_cast<uint32_t>(w_indices.size(1));
     const uint32_t output_size = static_cast<uint32_t>(out);
-    uint32_t num_threads_bwd = find_nearest_divisor(output_size, 512);
+    uint32_t num_threads_bwd = find_nearest_divisor(output_size, kSparseThreadTarget);
     uint32_t slice_size_bwd  = output_size / num_threads_bwd;
 
     auto weight_grad = torch::zeros(
@@ -592,6 +598,7 @@ fused_backward_metal(
         // Sparse backward — single shared weight_grad buffer, two
         // dispatches (white + black perspectives).
         [enc setComputePipelineState:bwd_pipeline];
+        [enc setThreadgroupMemoryLength:num_threads_bwd * slice_size_bwd * sizeof(float) atIndex:0];
         set_buffer(enc, weight_grad, 2);
         set_buffer(enc, w_indices,   0);
         set_buffer(enc, w_values,    1);

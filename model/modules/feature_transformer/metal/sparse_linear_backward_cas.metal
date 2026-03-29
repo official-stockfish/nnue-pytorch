@@ -27,6 +27,7 @@ kernel void sparse_input_linear_backward(
     device const float* input_values  [[buffer(1)]],
     device float*       weight_grad   [[buffer(2)]],
     device const float* output_grad   [[buffer(3)]],
+    threadgroup float*  tg_mem        [[threadgroup(0)]],
     uint tg_pos [[threadgroup_position_in_grid]],
     uint t_pos  [[thread_position_in_threadgroup]]
 ) {
@@ -36,8 +37,8 @@ kernel void sparse_input_linear_backward(
     device const float* og_slice = output_grad + block_idx * FC_OUTPUT_SIZE + slice_offset;
     device const int*   idx_row  = input_indices + block_idx * FC_MAX_ACTIVE;
     device const float* val_row  = input_values  + block_idx * FC_MAX_ACTIVE;
+    threadgroup float*  cached_grad = tg_mem + t_pos * FC_SLICE_SIZE;
 
-    float cached_grad[8];
     for (uint s = 0; s < FC_SLICE_SIZE; ++s)
         cached_grad[s] = og_slice[s];
 

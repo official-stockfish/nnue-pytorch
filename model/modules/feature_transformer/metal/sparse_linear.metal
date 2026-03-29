@@ -10,8 +10,9 @@ constant uint FC_SLICE_SIZE  [[function_constant(2)]];
 // Forward: output[b] = sum_k(weight[indices[b,k]] * values[b,k]) + bias
 //
 // One threadgroup per batch element.  Each thread accumulates FC_SLICE_SIZE
-// consecutive output elements entirely in registers — no threadgroup memory
-// needed since there is no inter-thread communication.
+// consecutive output elements in threadgroup memory, preserving the
+// cache-friendly weight access pattern (contiguous reads per feature).
+// Threadgroup memory is sized at dispatch time via setThreadgroupMemoryLength.
 // ---------------------------------------------------------------------------
 kernel void sparse_input_linear_forward(
     device const int*   input_indices [[buffer(0)]],
@@ -19,6 +20,7 @@ kernel void sparse_input_linear_forward(
     device const float* weight        [[buffer(2)]],
     device const float* bias          [[buffer(3)]],
     device float*       output        [[buffer(4)]],
+    threadgroup float*  tg_mem        [[threadgroup(0)]],
     uint tg_pos [[threadgroup_position_in_grid]],
     uint t_pos  [[thread_position_in_threadgroup]]
 ) {
@@ -27,11 +29,11 @@ kernel void sparse_input_linear_forward(
 
     device float*       out_slice  = output + block_idx * FC_OUTPUT_SIZE + slice_offset;
     device const float* bias_slice = bias + slice_offset;
+    threadgroup float*  acc        = tg_mem + t_pos * FC_SLICE_SIZE;
 
     device const int*   idx_row = input_indices + block_idx * FC_MAX_ACTIVE;
     device const float* val_row = input_values  + block_idx * FC_MAX_ACTIVE;
 
-    float acc[8];
     for (uint s = 0; s < FC_SLICE_SIZE; ++s)
         acc[s] = bias_slice[s];
 
