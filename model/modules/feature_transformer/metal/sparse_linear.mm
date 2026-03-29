@@ -563,26 +563,13 @@ fused_backward_metal(
     uint32_t num_threads_bwd = find_nearest_divisor(output_size, 512);
     uint32_t slice_size_bwd  = output_size / num_threads_bwd;
 
-    // Split the batch into K slices, each writing to its own zero-initialized
-    // weight_grad buffer.  This reduces atomic contention by ~K×: each buffer
-    // only receives 1/K of the batch's atomic adds.  The K buffers are merged
-    // via element-wise add_ after the dispatches complete.
-    constexpr int kNumSplits = 4;
-    int64_t out_i64 = static_cast<int64_t>(output_size);
-    int64_t batch_per_split = (batch + kNumSplits - 1) / kNumSplits;
-    torch::Tensor partials[kNumSplits];
-    for (int k = 0; k < kNumSplits; ++k)
-        partials[k] = torch::zeros({num_inputs, out_i64}, opts);
+    auto weight_grad = torch::zeros(
+        {num_inputs, static_cast<int64_t>(output_size)}, opts);
 
     auto l0_pipeline = get_l0_pipeline("l0_mixing_backward", uL1, uH, uPSQT, uOUT);
     auto bwd_pipeline = get_pipeline(
         g_bwd_library, "sparse_input_linear_backward",
         max_active, output_size, slice_size_bwd);
-
-    auto bias_grad = torch::empty({out_i64}, opts);
-    auto bias_pipeline = get_l0_pipeline("bias_grad_sum", uL1, uH, uPSQT, uOUT);
-    constexpr uint32_t kBiasTgThreads = 256;
-    uint32_t batch_u32 = static_cast<uint32_t>(batch);
 
     @autoreleasepool {
         auto stream = at::mps::getCurrentMPSStream();
@@ -602,51 +589,24 @@ fused_backward_metal(
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(uH, 1, 1)];
 
-        // Bias grad reduction
-        [enc setComputePipelineState:bias_pipeline];
-        set_buffer(enc, grad_wp,    0);
-        set_buffer(enc, grad_bp,    1);
-        set_buffer(enc, bias_grad,  2);
-        [enc setBytes:&batch_u32 length:sizeof(uint32_t) atIndex:3];
-        [enc setThreadgroupMemoryLength:kBiasTgThreads * sizeof(float) atIndex:0];
-        [enc dispatchThreadgroups:MTLSizeMake(uOUT, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(kBiasTgThreads, 1, 1)];
-
-        // Sparse backward — K-split: each split writes to its own buffer,
-        // reducing per-feature atomic contention by ~K×.
+        // Sparse backward — single shared weight_grad buffer, two
+        // dispatches (white + black perspectives).
         [enc setComputePipelineState:bwd_pipeline];
-        for (int k = 0; k < kNumSplits; ++k) {
-            int64_t start = k * batch_per_split;
-            int64_t end   = std::min(start + batch_per_split, batch);
-            if (start >= batch) break;
-            int64_t this_batch = end - start;
+        set_buffer(enc, weight_grad, 2);
+        set_buffer(enc, w_indices,   0);
+        set_buffer(enc, w_values,    1);
+        set_buffer(enc, grad_wp,     3);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
 
-            auto w_idx_k = w_indices.slice(0, start, end);
-            auto w_val_k = w_values.slice(0, start, end);
-            auto gwp_k   = grad_wp.slice(0, start, end);
-            auto b_idx_k = b_indices.slice(0, start, end);
-            auto b_val_k = b_values.slice(0, start, end);
-            auto gbp_k   = grad_bp.slice(0, start, end);
-
-            set_buffer(enc, partials[k], 2);
-
-            set_buffer(enc, w_idx_k, 0);
-            set_buffer(enc, w_val_k, 1);
-            set_buffer(enc, gwp_k,   3);
-            [enc dispatchThreadgroups:MTLSizeMake(this_batch, 1, 1)
-                threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
-
-            set_buffer(enc, b_idx_k, 0);
-            set_buffer(enc, b_val_k, 1);
-            set_buffer(enc, gbp_k,   3);
-            [enc dispatchThreadgroups:MTLSizeMake(this_batch, 1, 1)
-                threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
-        }
+        set_buffer(enc, b_indices, 0);
+        set_buffer(enc, b_values,  1);
+        set_buffer(enc, grad_bp,   3);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
     }
 
-    auto weight_grad = partials[0];
-    for (int k = 1; k < kNumSplits; ++k)
-        weight_grad.add_(partials[k]);
+    auto bias_grad = grad_wp.sum(0).add_(grad_bp.sum(0));
 
     return std::make_tuple(weight_grad, bias_grad);
 }
