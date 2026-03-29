@@ -6,6 +6,19 @@ slicing.
 
 Build the extension with:
     python setup_metal.py build_ext --inplace
+
+Hot-path classes (used during MPS fused training):
+    FusedComposedDoubleForwardL0Function  -- composed FT forward + L0 mixing
+    FusedDoubleForwardL0Function          -- single-weight FT forward + L0 mixing
+    FusedLossFunction                     -- fused loss forward + backward
+    IndexedStackedLinearFunction          -- layer stack indexed GEMM
+    FusedSqrCReluFunction                 -- fused l1 activation
+    metal_fused_adam_step_multi           -- fused optimizer step
+
+Test / fallback classes (not on the default fused training path):
+    MetalSparseLinearFunction             -- single-perspective sparse linear
+    DoubleMetalSparseLinearFunction       -- double-perspective sparse linear
+    FusedL0MixingFunction                 -- standalone L0 mixing
 """
 
 import os
@@ -82,6 +95,9 @@ def is_available() -> bool:
 
 
 class MetalSparseLinearFunction(autograd.Function):
+    """Single-perspective sparse linear. Not on the fused training path --
+    used by tests and ComposedFeatureTransformer.forward (CPU/CUDA fallback)."""
+
     @staticmethod
     def forward(ctx, feature_indices, feature_values, weight, bias):
         ctx.save_for_backward(feature_indices, feature_values, weight, bias)
@@ -126,9 +142,9 @@ def metal_sparse_linear(feature_indices, feature_values, weight, bias):
 
 
 class DoubleMetalSparseLinearFunction(autograd.Function):
-    """Both perspectives in one autograd node — shares a single weight_grad
-    tensor in the backward, eliminating the ~0.84 ms autograd accumulation
-    overhead from adding two separate 96 MB gradient tensors."""
+    """Both perspectives in one autograd node. Not on the fused training path
+    -- superseded by FusedDoubleForwardL0Function which also fuses L0 mixing.
+    Kept for DoubleFeatureTransformer compatibility and tests."""
 
     @staticmethod
     def forward(ctx, w_indices, w_values, b_indices, b_values, weight, bias):
@@ -285,6 +301,10 @@ def metal_fused_composed_double_forward_l0(
 
 
 class FusedL0MixingFunction(autograd.Function):
+    """Standalone L0 mixing. Not on the fused training path -- L0 is fused
+    inside FusedDoubleForwardL0Function / FusedComposedDoubleForwardL0Function.
+    Kept for modular use and tests."""
+
     @staticmethod
     def forward(ctx, wp, bp, us, them, L1, psqt):
         ctx.save_for_backward(wp, bp, us, them)

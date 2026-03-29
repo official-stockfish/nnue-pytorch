@@ -22,6 +22,8 @@ from model.modules.feature_transformer.metal import (
     is_available,
     metal_l0_mixing,
     metal_fused_double_forward_l0,
+    metal_fused_composed_double_forward_l0,
+    metal_sqr_crelu,
 )
 
 DEVICE = "mps"
@@ -265,6 +267,144 @@ def test_fused_double_forward_l0():
 
 
 # ---------------------------------------------------------------------------
+# Level 2d: composed fused double sparse_linear + L0 mixing (virtual_weight)
+# ---------------------------------------------------------------------------
+def test_fused_composed_double_forward_l0():
+    assert is_available()
+
+    for B, N_A, N_B, VW_P, MAX_ACT, L1, PSQT, label in [
+        (16, 32, 16, 8, 8, 24, 4, "small"),
+        (64, 128, 64, 16, 32, 96, 8, "medium"),
+        (256, 2048, 1024, 64, 32, 512, 8, "training-like"),
+    ]:
+        N_IN = N_A + N_B
+        OUT = L1 + PSQT
+        NUM_BUCKETS = N_B // VW_P
+        torch.manual_seed(77)
+
+        w_idx, w_val = _make_inputs(B, N_IN, MAX_ACT, seed=10)
+        b_idx, b_val = _make_inputs(B, N_IN, MAX_ACT, seed=20)
+        us = torch.randint(0, 2, (B, 1), dtype=torch.float32)
+        them = 1 - us
+
+        weight_a = torch.rand(N_A, OUT, requires_grad=True)
+        weight_b = torch.rand(N_B, OUT, requires_grad=True)
+        virtual_w = torch.rand(VW_P, OUT, requires_grad=True)
+        bias_ref = torch.rand(OUT, requires_grad=True)
+
+        # Reference: merge weights, then use the non-composed fused path
+        merged_b = (
+            weight_b.detach().view(NUM_BUCKETS, VW_P, OUT)
+            + virtual_w.detach().unsqueeze(0)
+        ).view(N_B, OUT)
+        merged = torch.cat([weight_a.detach(), merged_b], dim=0).requires_grad_(True)
+        bias_pt = bias_ref.detach().clone().requires_grad_(True)
+
+        wp_r = _torch_sparse_linear(w_idx, w_val, merged, bias_pt)
+        bp_r = _torch_sparse_linear(b_idx, b_val, merged, bias_pt)
+        wo, wpsqt_r = wp_r.split(L1, dim=1)
+        bo, bpsqt_r = bp_r.split(L1, dim=1)
+        l0 = (us * torch.cat([wo, bo], dim=1)) + (them * torch.cat([bo, wo], dim=1))
+        l0 = torch.clamp(l0, 0.0, 1.0)
+        s = l0.split(L1 // 2, dim=1)
+        l0_ref = torch.cat([s[0] * s[1], s[2] * s[3]], dim=1) * (127 / 128)
+        (l0_ref.sum() + wpsqt_r.sum() + bpsqt_r.sum()).backward()
+
+        # Metal composed path
+        wa_m = weight_a.detach().clone().to(DEVICE).requires_grad_(True)
+        wb_m = weight_b.detach().clone().to(DEVICE).requires_grad_(True)
+        vw_m = virtual_w.detach().clone().to(DEVICE).requires_grad_(True)
+        bi_m = bias_ref.detach().clone().to(DEVICE).requires_grad_(True)
+        l0_m, wp_m, bp_m = metal_fused_composed_double_forward_l0(
+            w_idx.to(DEVICE), w_val.to(DEVICE),
+            b_idx.to(DEVICE), b_val.to(DEVICE),
+            wa_m, wb_m, vw_m, bi_m,
+            us.to(DEVICE), them.to(DEVICE), L1, PSQT, N_A, VW_P,
+        )
+        (l0_m.sum() + wp_m.sum() + bp_m.sum()).backward()
+
+        fwd_err = (l0_ref - l0_m.cpu()).abs().max().item()
+
+        # Reconstruct component grads from the merged weight grad
+        ref_wa_g = merged.grad[:N_A]
+        ref_wb_g = merged.grad[N_A:]
+        ref_vw_g = ref_wb_g.view(NUM_BUCKETS, VW_P, OUT).sum(0)
+
+        wa_err = (ref_wa_g - wa_m.grad.cpu()).abs().max().item()
+        wb_err = (ref_wb_g - wb_m.grad.cpu()).abs().max().item()
+        vw_err = (ref_vw_g - vw_m.grad.cpu()).abs().max().item()
+        bg_err = (bias_pt.grad - bi_m.grad.cpu()).abs().max().item()
+
+        assert fwd_err < FWD_TOL, f"[{label}] fwd err {fwd_err:.2e}"
+        assert wa_err < GRAD_TOL, f"[{label}] wa_grad err {wa_err:.2e}"
+        assert wb_err < GRAD_TOL, f"[{label}] wb_grad err {wb_err:.2e}"
+        assert vw_err < GRAD_TOL, f"[{label}] vw_grad err {vw_err:.2e}"
+        assert bg_err < GRAD_TOL, f"[{label}] bias_grad err {bg_err:.2e}"
+        print(
+            f"  composed fused [{label:14s}]  fwd={fwd_err:.2e}  "
+            f"wa={wa_err:.2e}  wb={wb_err:.2e}  vw={vw_err:.2e}  "
+            f"bg={bg_err:.2e}  PASS"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Level 2e: fused squared-clamp-relu activation
+# ---------------------------------------------------------------------------
+def test_fused_sqr_crelu():
+    assert is_available()
+
+    for B, L2, label in [
+        (16, 7, "small"),
+        (64, 15, "medium"),
+        (512, 31, "training-shape"),
+    ]:
+        torch.manual_seed(99)
+        l1c = torch.randn(B, L2 + 1, device=DEVICE)
+
+        # Reference: PyTorch ops
+        l1x_v, l1x_out_v = l1c.split(L2, dim=1)
+        l1x_ref = torch.clamp(
+            torch.cat([torch.pow(l1x_v, 2.0) * (255 / 256), l1x_v], dim=1),
+            0.0, 1.0,
+        )
+        l1x_out_ref = l1x_out_v.squeeze(1)
+
+        # Metal kernel
+        l1x_met, l1x_out_met = metal_sqr_crelu(l1c, L2)
+
+        fwd_err = (l1x_ref - l1x_met).abs().max().item()
+        out_err = (l1x_out_ref - l1x_out_met).abs().max().item()
+        assert fwd_err < FWD_TOL, f"[{label}] l1x fwd err {fwd_err:.2e}"
+        assert out_err < FWD_TOL, f"[{label}] l1x_out err {out_err:.2e}"
+
+        # Backward
+        l1c_pt = l1c.clone().detach().requires_grad_(True)
+        l1x_v2, l1x_out_v2 = l1c_pt.split(L2, dim=1)
+        l1x_pt = torch.clamp(
+            torch.cat([torch.pow(l1x_v2, 2.0) * (255 / 256), l1x_v2], dim=1),
+            0.0, 1.0,
+        )
+        l1x_out_pt = l1x_out_v2.squeeze(1)
+
+        grad_l1x = torch.randn_like(l1x_pt)
+        grad_out = torch.randn(B, device=DEVICE)
+        (l1x_pt * grad_l1x + l1x_out_pt.unsqueeze(1) * grad_out.unsqueeze(1)).sum().backward()
+        ref_grad = l1c_pt.grad.clone()
+
+        l1c_met = l1c.clone().detach().requires_grad_(True)
+        l1x_m, l1x_out_m = metal_sqr_crelu(l1c_met, L2)
+        (l1x_m * grad_l1x + l1x_out_m.unsqueeze(1) * grad_out.unsqueeze(1)).sum().backward()
+        met_grad = l1c_met.grad.clone()
+
+        grad_err = (ref_grad - met_grad).abs().max().item()
+        assert grad_err < GRAD_TOL, f"[{label}] grad err {grad_err:.2e}"
+        print(
+            f"  sqr_crelu [{label:14s}]  fwd={fwd_err:.2e}  "
+            f"out={out_err:.2e}  grad={grad_err:.2e}  PASS"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Level 3: full NNUEModel forward+backward
 # ---------------------------------------------------------------------------
 def test_full_model():
@@ -418,6 +558,16 @@ if __name__ == "__main__":
     print("Level 2c: fused double sparse_linear + L0 mixing")
     print("-" * 40)
     test_fused_double_forward_l0()
+
+    print()
+    print("Level 2d: composed fused double forward + L0 mixing")
+    print("-" * 40)
+    test_fused_composed_double_forward_l0()
+
+    print()
+    print("Level 2e: fused squared-clamp-relu activation")
+    print("-" * 40)
+    test_fused_sqr_crelu()
 
     print()
     print("Level 3: full NNUEModel forward + backward")
