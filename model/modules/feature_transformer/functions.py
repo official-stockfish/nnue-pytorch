@@ -13,17 +13,27 @@ try:
 except (ImportError, ModuleNotFoundError):
     pass
 
+_HAS_METAL_KERNELS = False
+try:
+    from .metal import is_available as _metal_is_available, metal_sparse_linear
+
+    _HAS_METAL_KERNELS = _metal_is_available()
+except (ImportError, ModuleNotFoundError):
+    pass
+
 
 def sparse_linear(feature_indices, feature_values, weight, bias):
     """Sparse linear: output[b] = sum_k(weight[indices[b,k]] * values[b,k]) + bias.
 
-    Dispatches to a hand-tuned CuPy CUDA kernel when available, otherwise falls
-    back to a pure-PyTorch implementation that works on any device.
+    Dispatches to a hand-tuned CuPy CUDA kernel when available, a custom Metal
+    kernel on MPS, or falls back to a pure-PyTorch implementation.
     """
     if _HAS_CUPY_KERNELS and feature_indices.is_cuda:
         return _CudaSparseLinearFunction.apply(
             feature_indices, feature_values, weight, bias
         )
+    if _HAS_METAL_KERNELS and feature_indices.device.type == "mps":
+        return metal_sparse_linear(feature_indices, feature_values, weight, bias)
     return _torch_sparse_linear(feature_indices, feature_values, weight, bias)
 
 
