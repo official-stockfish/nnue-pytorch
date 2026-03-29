@@ -123,3 +123,31 @@ def metal_sparse_linear(feature_indices, feature_values, weight, bias):
     return MetalSparseLinearFunction.apply(
         feature_indices, feature_values, weight, bias
     )
+
+
+class FusedL0MixingFunction(autograd.Function):
+    @staticmethod
+    def forward(ctx, wp, bp, us, them, L1, psqt):
+        ctx.save_for_backward(wp, bp, us, them)
+        l0, wpsqt, bpsqt = _cpp.l0_mixing_forward(
+            wp, bp, us, them, L1, psqt,
+            _get_shader("l0_mixing.metal"),
+        )
+        return l0, wpsqt, bpsqt
+
+    @staticmethod
+    def backward(ctx, grad_l0, grad_wpsqt, grad_bpsqt):
+        wp, bp, us, them = ctx.saved_tensors
+        grad_wp, grad_bp = _cpp.l0_mixing_backward(
+            grad_l0.contiguous(),
+            grad_wpsqt.contiguous(),
+            grad_bpsqt.contiguous(),
+            wp, bp, us, them,
+            _get_shader("l0_mixing.metal"),
+        )
+        return grad_wp, grad_bp, None, None, None, None
+
+
+def metal_l0_mixing(wp, bp, us, them, L1, psqt):
+    """Fused L0 mixing: replaces ~7 separate MPS ops with one Metal kernel."""
+    return FusedL0MixingFunction.apply(wp, bp, us, them, L1, psqt)

@@ -240,9 +240,154 @@ torch::Tensor sparse_linear_backward_metal(
 }
 
 // ---------------------------------------------------------------------------
+// L0 mixing — fused element-wise ops for the feature transformer output.
+// Replaces ~7 separate MPS dispatches with a single Metal kernel.
+// ---------------------------------------------------------------------------
+namespace {
+    id<MTLLibrary> g_l0_library = nil;
+}
+
+void ensure_l0_init(const std::string& l0_src) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_l0_library) return;
+    if (!g_device) {
+        g_device = at::mps::MPSDevice::getInstance()->device();
+        TORCH_CHECK(g_device, "No Metal device found");
+    }
+    g_l0_library = compile_shader(l0_src, MTLLanguageVersion2_4);
+}
+
+id<MTLComputePipelineState> get_l0_pipeline(
+        const std::string& func_name,
+        uint32_t L1, uint32_t H, uint32_t psqt, uint32_t out) {
+    PipelineKey key{func_name, L1, out};
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_pipelines.find(key);
+    if (it != g_pipelines.end()) return it->second;
+
+    MTLFunctionConstantValues* constants =
+        [[MTLFunctionConstantValues alloc] init];
+    [constants setConstantValue:&L1   type:MTLDataTypeUInt atIndex:0];
+    [constants setConstantValue:&H    type:MTLDataTypeUInt atIndex:1];
+    [constants setConstantValue:&psqt type:MTLDataTypeUInt atIndex:2];
+    [constants setConstantValue:&out  type:MTLDataTypeUInt atIndex:3];
+
+    NSString* name = [NSString stringWithUTF8String:func_name.c_str()];
+    NSError*  error = nil;
+    id<MTLFunction> func =
+        [g_l0_library newFunctionWithName:name constantValues:constants error:&error];
+    TORCH_CHECK(func, "L0 Metal function not found: ", func_name,
+        error ? (std::string(" — ") + [[error localizedDescription] UTF8String]) : "");
+
+    id<MTLComputePipelineState> pso =
+        [g_device newComputePipelineStateWithFunction:func error:&error];
+    TORCH_CHECK(pso, "L0 pipeline creation failed for: ", func_name);
+
+    g_pipelines[key] = pso;
+    return pso;
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+l0_mixing_forward_metal(
+        torch::Tensor wp, torch::Tensor bp,
+        torch::Tensor us, torch::Tensor them,
+        int64_t L1, int64_t psqt,
+        const std::string& l0_src) {
+
+    ensure_l0_init(l0_src);
+
+    wp = wp.contiguous();
+    bp = bp.contiguous();
+    us = us.contiguous();
+    them = them.contiguous();
+
+    const int64_t batch = wp.size(0);
+    const uint32_t uL1 = static_cast<uint32_t>(L1);
+    const uint32_t uH  = uL1 / 2;
+    const uint32_t uPSQT = static_cast<uint32_t>(psqt);
+    const uint32_t uOUT = uL1 + uPSQT;
+
+    auto opts = wp.options();
+    auto l0 = torch::empty({batch, L1}, opts);
+    auto wpsqt = torch::empty({batch, psqt}, opts);
+    auto bpsqt = torch::empty({batch, psqt}, opts);
+
+    auto pipeline = get_l0_pipeline("l0_mixing_forward", uL1, uH, uPSQT, uOUT);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc = stream->commandEncoder();
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, wp, 0);
+        set_buffer(enc, bp, 1);
+        set_buffer(enc, us, 2);
+        set_buffer(enc, them, 3);
+        set_buffer(enc, l0, 4);
+        set_buffer(enc, wpsqt, 5);
+        set_buffer(enc, bpsqt, 6);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(uH, 1, 1)];
+    }
+
+    return std::make_tuple(l0, wpsqt, bpsqt);
+}
+
+std::tuple<torch::Tensor, torch::Tensor>
+l0_mixing_backward_metal(
+        torch::Tensor grad_l0, torch::Tensor grad_wpsqt, torch::Tensor grad_bpsqt,
+        torch::Tensor wp, torch::Tensor bp,
+        torch::Tensor us, torch::Tensor them,
+        const std::string& l0_src) {
+
+    ensure_l0_init(l0_src);
+
+    grad_l0    = grad_l0.contiguous();
+    grad_wpsqt = grad_wpsqt.contiguous();
+    grad_bpsqt = grad_bpsqt.contiguous();
+
+    const int64_t batch = wp.size(0);
+    const int64_t out   = wp.size(1);
+    const int64_t psqt  = grad_wpsqt.size(1);
+    const int64_t L1    = out - psqt;
+    const uint32_t uL1 = static_cast<uint32_t>(L1);
+    const uint32_t uH  = uL1 / 2;
+    const uint32_t uPSQT = static_cast<uint32_t>(psqt);
+    const uint32_t uOUT = static_cast<uint32_t>(out);
+
+    auto opts = wp.options();
+    auto grad_wp = torch::empty({batch, out}, opts);
+    auto grad_bp = torch::empty({batch, out}, opts);
+
+    auto pipeline = get_l0_pipeline("l0_mixing_backward", uL1, uH, uPSQT, uOUT);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc = stream->commandEncoder();
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, grad_l0, 0);
+        set_buffer(enc, grad_wpsqt, 1);
+        set_buffer(enc, grad_bpsqt, 2);
+        set_buffer(enc, wp, 3);
+        set_buffer(enc, bp, 4);
+        set_buffer(enc, us, 5);
+        set_buffer(enc, them, 6);
+        set_buffer(enc, grad_wp, 7);
+        set_buffer(enc, grad_bp, 8);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(uH, 1, 1)];
+    }
+
+    return std::make_tuple(grad_wp, grad_bp);
+}
+
+// ---------------------------------------------------------------------------
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("sparse_linear_forward",  &sparse_linear_forward_metal,
           "Sparse linear forward pass (Metal)");
     m.def("sparse_linear_backward", &sparse_linear_backward_metal,
           "Sparse linear backward pass (Metal)");
+    m.def("l0_mixing_forward",  &l0_mixing_forward_metal,
+          "Fused L0 mixing forward (Metal)");
+    m.def("l0_mixing_backward", &l0_mixing_backward_metal,
+          "Fused L0 mixing backward (Metal)");
 }
