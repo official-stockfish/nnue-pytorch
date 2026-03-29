@@ -86,6 +86,7 @@ class TrainingDataProvider:
         batch_size=None,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
         ddp_config: DataloaderDDPConfig = None,
+        device: str = "cpu",
     ):
         self.feature_set = feature_set.encode("utf-8")
         self.create_stream = create_stream
@@ -97,6 +98,7 @@ class TrainingDataProvider:
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.config = config
+        self.device = device
 
         if batch_size:
             self.stream = self.create_stream(
@@ -125,7 +127,7 @@ class TrainingDataProvider:
         v = self.fetch_next(self.stream)
 
         if v:
-            tensors = v.contents.get_tensors("cpu")
+            tensors = v.contents.get_tensors(self.device)
             self.destroy_part(v)
             return tensors
         else:
@@ -145,6 +147,7 @@ class SparseBatchProvider(TrainingDataProvider):
         num_workers=1,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
         ddp_config: DataloaderDDPConfig = None,
+        device: str = "cpu",
     ):
         super().__init__(
             feature_set,
@@ -158,6 +161,7 @@ class SparseBatchProvider(TrainingDataProvider):
             batch_size,
             config,
             ddp_config,
+            device=device,
         )
 
 
@@ -171,6 +175,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         num_workers=1,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
         ddp_config: DataloaderDDPConfig = None,
+        device: str = "cpu",
     ):
         super().__init__()
         self.feature_set = feature_set
@@ -180,6 +185,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         self.num_workers = num_workers
         self.config = config
         self.ddp_config = ddp_config
+        self.device = device
 
     def __iter__(self):
         return SparseBatchProvider(
@@ -190,6 +196,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             num_workers=self.num_workers,
             config=self.config,
             ddp_config=self.ddp_config,
+            device=self.device,
         )
 
 

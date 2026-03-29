@@ -514,11 +514,10 @@ torch::Tensor sparse_linear_double_backward_metal(
 }
 
 // ---------------------------------------------------------------------------
-// Fused backward: L0 mixing backward → double sparse backward, chained in
-// one C++ call to avoid Python roundtrip between kernels.  Returns
-// (weight_grad, grad_wp, grad_bp) — grad_wp/bp still needed for bias_grad.
+// Fused backward: L0 mixing backward → double sparse backward → bias_grad,
+// all chained in one C++ call.  Returns (weight_grad, bias_grad).
 // ---------------------------------------------------------------------------
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor>
 fused_backward_metal(
         torch::Tensor grad_l0,    torch::Tensor grad_wpsqt,
         torch::Tensor grad_bpsqt, torch::Tensor wp,
@@ -610,7 +609,10 @@ fused_backward_metal(
             threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
     }
 
-    return std::make_tuple(weight_grad, grad_wp, grad_bp);
+    // bias_grad = grad_wp.sum(0) + grad_bp.sum(0)
+    auto bias_grad = grad_wp.sum(0).add_(grad_bp.sum(0));
+
+    return std::make_tuple(weight_grad, bias_grad);
 }
 
 // ---------------------------------------------------------------------------

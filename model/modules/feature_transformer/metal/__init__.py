@@ -192,7 +192,7 @@ class FusedDoubleForwardL0Function(autograd.Function):
         w_idx, w_val, b_idx, b_val, us, wp, bp = ctx.saved_tensors
         them = 1.0 - us
 
-        weight_grad, grad_wp, grad_bp = _cpp.fused_backward(
+        weight_grad, bias_grad = _cpp.fused_backward(
             grad_l0.contiguous(), grad_wpsqt.contiguous(), grad_bpsqt.contiguous(),
             wp, bp, us, them,
             w_idx, w_val, b_idx, b_val,
@@ -202,7 +202,6 @@ class FusedDoubleForwardL0Function(autograd.Function):
             _get_shader("sparse_linear_backward_native.metal"),
             _get_shader("l0_mixing.metal"),
         )
-        bias_grad = grad_wp.sum(dim=0) + grad_bp.sum(dim=0)
         return None, None, None, None, weight_grad, bias_grad, None, None, None, None
 
 

@@ -67,7 +67,11 @@ class HalfKav2Hm(InputFeature):
         self.reset_parameters()
 
     def merged_weight(self) -> torch.Tensor:
-        return self.weight + self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
+        out = self.weight.size(1)
+        return (
+            self.weight.view(self.NUM_BUCKETS, -1, out)
+            + self.virtual_weight.unsqueeze(0)
+        ).view(-1, out)
 
     @torch.no_grad()
     def coalesce(self) -> None:

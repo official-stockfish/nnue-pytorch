@@ -104,6 +104,7 @@ def make_data_loaders(
     val_size,
     pin_memory,
     queue_size_limit,
+    device: str = "cpu",
 ):
     # Epoch and validation sizes are arbitrary
     features_name = feature_name
@@ -113,6 +114,7 @@ def make_data_loaders(
         batch_size,
         num_workers=num_workers,
         config=config,
+        device=device,
     )
     # num_workers has to be 0 for sparse, and 1 for dense
     # it currently cannot work in parallel mode but it shouldn't need to
@@ -147,6 +149,7 @@ def make_data_loaders(
             val_filenames,
             batch_size,
             config=config,
+            device=device,
         )
         val = DataLoader(
             data_loader.FixedNumBatchesDataset(
@@ -354,6 +357,7 @@ def main():
         args.validation_size,
         pin_memory=args.pin_memory,
         queue_size_limit=args.data_loader_queue_size,
+        device=accelerator if accelerator in ("mps", "cpu") else "cpu",
     )
 
     if args.resume_from_checkpoint:

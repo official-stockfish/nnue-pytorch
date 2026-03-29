@@ -9,7 +9,7 @@ python3 train.py \
   test79-2022-05-may-12tb7p.min-v2.binpack \
   --accelerator=mps \
   --compile-backend=none \
-  --batch-size=16384 \
+  --batch-size=65536 \
   --max_epochs=800 \
   --features=Full_Threats+HalfKAv2_hm^ \
   --l1=1024 \
