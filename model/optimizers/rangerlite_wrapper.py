@@ -24,9 +24,10 @@ class RangerLiteConfig:
     lookahead_steps: int = 5
     """Lookahead steps parameter. Value of 5 corresponds to ranger21 behaviour."""
 
-def _safe_step(self):
-    if self.last_epoch < self.total_steps - 1:
-        type(self).step(self)
+class SafeOneCycleLR(torch.optim.lr_scheduler.OneCycleLR):
+    def step(self, epoch=None):
+        if self.last_epoch < self.total_steps - 1:
+            super().step(epoch)
 
 class RangerLiteWrapper:
     def __init__(
@@ -65,10 +66,9 @@ class RangerLiteWrapper:
             )
 
         else:
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            scheduler = SafeOneCycleLR(
                 self.optimizer, max_lr=self.lr, total_steps=self.cycle_steps, final_div_factor=1e3
             )
-            scheduler.step = _safe_step.__get__(scheduler, type(scheduler))
 
         print(
             f"[RangerLiteSetup] gamma={self.gamma} pnm_momentum={self.pnm_momentum}."
