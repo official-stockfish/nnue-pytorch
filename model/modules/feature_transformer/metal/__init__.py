@@ -153,7 +153,9 @@ class DoubleMetalSparseLinearFunction(autograd.Function):
             _get_shader("sparse_linear_backward_cas.metal"),
             _get_shader("sparse_linear_backward_native.metal"),
         )
-        bias_grad = grad_wp.sum(dim=0) + grad_bp.sum(dim=0)
+        bias_grad = _cpp.bias_grad_sum(
+            grad_wp, grad_bp, _get_shader("l0_mixing.metal"),
+        )
         return None, None, None, None, weight_grad, bias_grad
 
 

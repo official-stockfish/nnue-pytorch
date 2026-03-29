@@ -572,10 +572,13 @@ fused_backward_metal(
     auto weight_grad = torch::zeros(
         {num_inputs, static_cast<int64_t>(output_size)}, opts);
 
+    auto bias_grad = torch::empty({static_cast<int64_t>(uOUT)}, opts);
+
     auto l0_pipeline = get_l0_pipeline("l0_mixing_backward", uL1, uH, uPSQT, uOUT);
     auto bwd_pipeline = get_pipeline(
         g_bwd_library, "sparse_input_linear_backward",
         max_active, output_size, slice_size_bwd);
+    auto bg_pipeline = get_l0_pipeline("bias_grad_sum", uL1, uH, uPSQT, uOUT);
 
     @autoreleasepool {
         auto stream = at::mps::getCurrentMPSStream();
@@ -611,9 +614,19 @@ fused_backward_metal(
         set_buffer(enc, grad_bp,   3);
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
-    }
 
-    auto bias_grad = grad_wp.sum(0).add_(grad_bp.sum(0));
+        // bias_grad = grad_wp.sum(0) + grad_bp.sum(0), fused into one pass
+        constexpr uint32_t kBiasGradThreads = 256;
+        uint32_t batch_u32 = static_cast<uint32_t>(batch);
+        [enc setComputePipelineState:bg_pipeline];
+        set_buffer(enc, grad_wp,    0);
+        set_buffer(enc, grad_bp,    1);
+        set_buffer(enc, bias_grad,  2);
+        [enc setBytes:&batch_u32 length:sizeof(uint32_t) atIndex:3];
+        [enc setThreadgroupMemoryLength:kBiasGradThreads * sizeof(float) atIndex:0];
+        [enc dispatchThreadgroups:MTLSizeMake(uOUT, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(kBiasGradThreads, 1, 1)];
+    }
 
     return std::make_tuple(weight_grad, bias_grad);
 }
@@ -991,6 +1004,53 @@ torch::Tensor indexed_stacked_linear_backward_x_metal(
 }
 
 // ---------------------------------------------------------------------------
+// Fused bias_grad = grad_a.sum(0) + grad_b.sum(0), single Metal dispatch.
+// ---------------------------------------------------------------------------
+torch::Tensor bias_grad_sum_metal(
+        torch::Tensor grad_a, torch::Tensor grad_b,
+        const std::string& l0_src) {
+
+    ensure_l0_init(l0_src);
+
+    grad_a = grad_a.contiguous();
+    grad_b = grad_b.contiguous();
+
+    const int64_t batch = grad_a.size(0);
+    const int64_t out   = grad_a.size(1);
+
+    // bias_grad_sum kernel uses FC_OUT from L0 function constants.
+    // We need valid L1/H/PSQT/OUT values; only FC_OUT matters for this kernel.
+    // Use L1=out, H=out/2, PSQT=0, OUT=out so FC_OUT == out.
+    const uint32_t uOUT  = static_cast<uint32_t>(out);
+    const uint32_t uL1   = uOUT;
+    const uint32_t uH    = uOUT / 2;
+    const uint32_t uPSQT = 0;
+
+    auto bias_grad = torch::empty({out}, grad_a.options());
+
+    auto pipeline = get_l0_pipeline("bias_grad_sum", uL1, uH, uPSQT, uOUT);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+
+        constexpr uint32_t kTgThreads = 256;
+        uint32_t batch_u32 = static_cast<uint32_t>(batch);
+
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, grad_a,     0);
+        set_buffer(enc, grad_b,     1);
+        set_buffer(enc, bias_grad,  2);
+        [enc setBytes:&batch_u32 length:sizeof(uint32_t) atIndex:3];
+        [enc setThreadgroupMemoryLength:kTgThreads * sizeof(float) atIndex:0];
+        [enc dispatchThreadgroups:MTLSizeMake(uOUT, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
+    }
+
+    return bias_grad;
+}
+
+// ---------------------------------------------------------------------------
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("sparse_linear_forward",  &sparse_linear_forward_metal,
           "Sparse linear forward pass (Metal)");
@@ -1016,4 +1076,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Indexed stacked linear forward (Metal)");
     m.def("indexed_stacked_linear_backward_x", &indexed_stacked_linear_backward_x_metal,
           "Indexed stacked linear backward for grad_x (Metal)");
+    m.def("bias_grad_sum", &bias_grad_sum_metal,
+          "Fused bias_grad = grad_a.sum(0) + grad_b.sum(0) (Metal)");
 }
