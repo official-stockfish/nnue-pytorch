@@ -11,6 +11,13 @@ try:
 except ImportError:
     _ranger21_import_error = True
 
+_HAS_FUSED_OPT = False
+try:
+    from ..modules.feature_transformer.metal import is_available as _metal_is_available
+    _HAS_FUSED_OPT = _metal_is_available()
+except (ImportError, ModuleNotFoundError):
+    pass
+
 
 @dataclass
 class Ranger21Config:
@@ -30,32 +37,50 @@ class Ranger21Wrapper:
         self.gamma = config.gamma
 
     def configure_optimizers(self, train_params):
-        if _ranger21_import_error:
-            raise ImportError("The required ranger21 library is not installed. ")
         if self.num_batches_per_epoch is None:
             raise RuntimeError(
                 "[Ranger21Wrapper] Required parameter for training not set: num_batches_per_epoch"
             )
-        optimizer = ranger21.Ranger21(
-            train_params,
-            lr=1.0,
-            betas=(0.9, 0.999),
-            eps=1.0e-7,
-            using_gc=False,
-            using_normgc=False,
-            weight_decay=0.0,
-            num_batches_per_epoch=self.num_batches_per_epoch,
-            num_epochs=self.max_epoch,
-            warmdown_active=False,
-            use_warmup=False,
-            use_adaptive_gradient_clipping=False,
-            softplus=False,
-            pnm_momentum_factor=0.0,
-            lookahead_active=False,
-            normloss_active=False,
-            momentum_type="standard",
-            logging_active=False,
+
+        use_fused = _HAS_FUSED_OPT and any(
+            p.device.type == "mps"
+            for group in train_params
+            for p in group["params"]
         )
+
+        if use_fused:
+            from .fused_ranger21 import FusedRanger21
+
+            optimizer = FusedRanger21(
+                train_params,
+                lr=1.0,
+                betas=(0.9, 0.999),
+                eps=1.0e-7,
+                num_batches_per_epoch=self.num_batches_per_epoch,
+                num_epochs=self.max_epoch,
+            )
+        else:
+            if _ranger21_import_error:
+                raise ImportError("The required ranger21 library is not installed. ")
+            optimizer = ranger21.Ranger21(
+                train_params,
+                lr=1.0,
+                betas=(0.9, 0.999),
+                eps=1.0e-7,
+                using_gc=False,
+                using_normgc=False,
+                weight_decay=0.0,
+                num_batches_per_epoch=self.num_batches_per_epoch,
+                num_epochs=self.max_epoch,
+                warmdown_active=False,
+                use_warmup=False,
+                use_adaptive_gradient_clipping=False,
+                softplus=False,
+                pnm_momentum_factor=0.0,
+                lookahead_active=False,
+                normloss_active=False,
+                logging_active=False,
+            )
 
         scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer, step_size=1, gamma=self.gamma

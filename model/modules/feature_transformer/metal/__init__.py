@@ -291,3 +291,17 @@ def metal_fused_loss(scorenet, score, outcome,
         in_offset, in_scaling, out_offset, out_scaling,
         actual_lambda, pow_exp, qp_asymmetry, w1_factor, w2,
     )
+
+
+def metal_fused_adam_step(param, grad, grad_ma, variance_ma,
+                          beta1_sq, one_minus_beta1_sq,
+                          beta2, one_minus_beta2,
+                          inv_sqrt_bc2, step_size, eps):
+    """Fused Adam-like optimizer step for one parameter tensor."""
+    _cpp.fused_adam_step(
+        param.data, grad.data, grad_ma, variance_ma,
+        beta1_sq, one_minus_beta1_sq,
+        beta2, one_minus_beta2,
+        inv_sqrt_bc2, step_size, eps,
+        _get_shader("optimizer.metal"),
+    )

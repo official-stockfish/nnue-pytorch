@@ -810,6 +810,100 @@ torch::Tensor loss_backward_metal(
 }
 
 // ---------------------------------------------------------------------------
+// Fused optimizer step — one Metal dispatch per parameter tensor.
+// ---------------------------------------------------------------------------
+namespace {
+    id<MTLLibrary> g_opt_library = nil;
+
+    struct StepParamsGPU {
+        float beta1_sq;
+        float one_minus_beta1_sq;
+        float beta2;
+        float one_minus_beta2;
+        float inv_sqrt_bc2;
+        float step_size;
+        float eps;
+    };
+}
+
+void ensure_opt_init(const std::string& opt_src) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_opt_library) return;
+    if (!g_device) {
+        g_device = at::mps::MPSDevice::getInstance()->device();
+        TORCH_CHECK(g_device, "No Metal device found");
+    }
+    g_opt_library = compile_shader(opt_src, MTLLanguageVersion2_4);
+}
+
+id<MTLComputePipelineState> get_opt_pipeline(const std::string& func_name) {
+    PipelineKey key{func_name, 1, 1};
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_pipelines.find(key);
+    if (it != g_pipelines.end()) return it->second;
+
+    NSString* name = [NSString stringWithUTF8String:func_name.c_str()];
+    id<MTLFunction> func = [g_opt_library newFunctionWithName:name];
+    TORCH_CHECK(func, "Optimizer Metal function not found: ", func_name);
+
+    NSError* error = nil;
+    id<MTLComputePipelineState> pso =
+        [g_device newComputePipelineStateWithFunction:func error:&error];
+    TORCH_CHECK(pso, "Optimizer pipeline creation failed for: ", func_name);
+
+    g_pipelines[key] = pso;
+    return pso;
+}
+
+void fused_adam_step_metal(
+        torch::Tensor param, torch::Tensor grad,
+        torch::Tensor grad_ma, torch::Tensor variance_ma,
+        double beta1_sq, double one_minus_beta1_sq,
+        double beta2, double one_minus_beta2,
+        double inv_sqrt_bc2, double step_size, double eps,
+        const std::string& opt_src) {
+
+    ensure_opt_init(opt_src);
+
+    TORCH_CHECK(param.is_contiguous(), "param must be contiguous");
+    TORCH_CHECK(grad.is_contiguous(), "grad must be contiguous");
+    TORCH_CHECK(grad_ma.is_contiguous(), "grad_ma must be contiguous");
+    TORCH_CHECK(variance_ma.is_contiguous(), "variance_ma must be contiguous");
+
+    uint32_t num_elements = static_cast<uint32_t>(param.numel());
+    if (num_elements == 0) return;
+
+    constexpr uint32_t kTgThreads = 256;
+    uint32_t num_tg = (num_elements + kTgThreads - 1) / kTgThreads;
+
+    StepParamsGPU sp;
+    sp.beta1_sq            = static_cast<float>(beta1_sq);
+    sp.one_minus_beta1_sq  = static_cast<float>(one_minus_beta1_sq);
+    sp.beta2               = static_cast<float>(beta2);
+    sp.one_minus_beta2     = static_cast<float>(one_minus_beta2);
+    sp.inv_sqrt_bc2        = static_cast<float>(inv_sqrt_bc2);
+    sp.step_size           = static_cast<float>(step_size);
+    sp.eps                 = static_cast<float>(eps);
+
+    auto pipeline = get_opt_pipeline("fused_adam_step");
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, param,       0);
+        set_buffer(enc, grad,        1);
+        set_buffer(enc, grad_ma,     2);
+        set_buffer(enc, variance_ma, 3);
+        [enc setBytes:&sp           length:sizeof(StepParamsGPU) atIndex:4];
+        [enc setBytes:&num_elements length:sizeof(uint32_t)      atIndex:5];
+        [enc dispatchThreadgroups:MTLSizeMake(num_tg, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
+    }
+}
+
+// ---------------------------------------------------------------------------
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("sparse_linear_forward",  &sparse_linear_forward_metal,
           "Sparse linear forward pass (Metal)");
@@ -829,4 +923,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Fused loss forward (Metal)");
     m.def("loss_backward", &loss_backward_metal,
           "Fused loss backward (Metal)");
+    m.def("fused_adam_step", &fused_adam_step_metal,
+          "Fused Adam-like optimizer step (Metal)");
 }
