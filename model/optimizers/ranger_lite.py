@@ -18,6 +18,7 @@ class RangerLite(torch.optim.Optimizer):
         weight_decay=0.0,
         betas=(0.9, 0.999),
         eps=1e-7,
+        pnm_activate=True,
         pnm_momentum=1.0,
         lookahead_active=True,
         lookahead_mergetime=5,
@@ -41,6 +42,7 @@ class RangerLite(torch.optim.Optimizer):
         self.lookahead_alpha = lookahead_blending_alpha
         self.lookahead_step = 0
 
+        self.pnm_active = pnm_activate
         self.normloss_active = normloss_active
         self.eps = eps
         self.param_size = 0
@@ -106,8 +108,9 @@ class RangerLite(torch.optim.Optimizer):
                     if self.lookahead_active:
                         state["lookahead_params"] = torch.clone(p.data)
 
-                    # PNM components
-                    state["neg_grad_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    if self.pnm_active:
+                        # PNM components
+                        state["neg_grad_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 state["step"] += 1
                 beta1, beta2 = group["betas"]
@@ -175,14 +178,8 @@ class RangerLite(torch.optim.Optimizer):
                 grad = p.grad
                 step = state["step"]
 
-                # PNM Adam Core Setup
                 grad_ma = state["grad_ma"]
                 variance_ma = state["variance_ma"]
-
-                if step % 2 == 1:
-                    grad_ma, neg_grad_ma = state["grad_ma"], state["neg_grad_ma"]
-                else:
-                    grad_ma, neg_grad_ma = state["neg_grad_ma"], state["grad_ma"]
 
                 bias_correction1 = 1 - beta1 ** step
                 bias_correction2 = 1 - beta2 ** step
@@ -190,18 +187,46 @@ class RangerLite(torch.optim.Optimizer):
                 # Despite the comment. Ranger21 doesnt actually use variance_ma_max for denominator
                 denom = (variance_ma.sqrt() / math.sqrt(bias_correction2)).add_(group["eps"])
 
-                # Update grad_ma
-                grad_ma.mul_(beta1 ** 2).add_(grad, alpha=1 - beta1 ** 2)
+                if self.pnm_active:
+                    # PNM Adam Core Setup
+                    if step % 2 == 1:
+                        pnm_grad_ma, pnm_neg_grad_ma = state["grad_ma"], state["neg_grad_ma"]
+                    else:
+                        pnm_grad_ma, pnm_neg_grad_ma = state["neg_grad_ma"], state["grad_ma"]
 
-                # Refactored PNM calculation
-                noise_norm = math.sqrt((1 + beta2) ** 2 + beta2 ** 2)
-                pnm_val = (
-                    grad_ma.mul(1 + pnm_factor)
-                    .add(neg_grad_ma, alpha=-pnm_factor)
-                    .mul(1 / noise_norm)
-                )
-                step_size = lr / bias_correction1
-                p.addcdiv_(pnm_val, denom, value=-step_size)
+                    # Update neg_grad_ma
+                    pnm_grad_ma.mul_(beta1 ** 2).add_(grad, alpha=(1 - beta1 ** 2))
+
+                    if self.use_legacy_scoping_bug:
+                        # Legacy noise calculation
+                        noise_norm = math.sqrt((1 + beta2) ** 2 + beta2 ** 2)
+
+                    else:
+                        pnm_grad_ma.mul_(beta1 ** 2).add_(grad, alpha=(1 - beta1 ** 2))
+
+                        # Refactored PNM calculation
+                        # Corrected: Normalization must be based on the coefficients of the linear combination
+                        noise_norm = math.sqrt((1 + pnm_factor) ** 2 + pnm_factor ** 2)
+
+                    pnm_val = (
+                        pnm_grad_ma.mul(1 + pnm_factor)
+                        .add(pnm_neg_grad_ma, alpha=-pnm_factor)
+                        .mul(1 / noise_norm)
+                    )
+
+                    step_size = lr / bias_correction1
+                    p.addcdiv_(pnm_val, denom, value=-step_size)
+
+                else:
+                    # Standard Adam update
+                    bias_correction1 = 1 - beta1 ** step
+
+                    # Standard EMA for the first moment
+                    grad_ma.mul_(beta1).add_(grad, alpha=1 - beta1)
+
+                    step_size = lr / bias_correction1
+                    p.addcdiv_(grad_ma, denom, value=-step_size)
+
 
         if self.lookahead_active:
             self.lookahead_process_step()
