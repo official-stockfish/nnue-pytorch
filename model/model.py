@@ -55,25 +55,21 @@ class NNUEModel(nn.Module):
         for group in self.weight_clipping:
             for p in group["params"]:
                 if "min_weight" in group or "max_weight" in group:
-                    p_data_fp32 = p.data
+                    p_data = p.data
                     min_weight = group["min_weight"]
                     max_weight = group["max_weight"]
                     if "virtual_params" in group:
                         virtual_params = group["virtual_params"]
-                        xs = p_data_fp32.shape[0] // virtual_params.shape[0]
-                        ys = p_data_fp32.shape[1] // virtual_params.shape[1]
-                        expanded_virtual_layer = virtual_params.repeat(xs, ys)
-                        if min_weight is not None:
-                            min_weight = (
-                                p_data_fp32.new_full(p_data_fp32.shape, min_weight)
-                                - expanded_virtual_layer
-                            )
-                        if max_weight is not None:
-                            max_weight = (
-                                p_data_fp32.new_full(p_data_fp32.shape, max_weight)
-                                - expanded_virtual_layer
-                            )
-                    p_data_fp32.clamp_(min_weight, max_weight)
+                        vp_r, vp_c = virtual_params.shape
+                        xs = p_data.shape[0] // vp_r
+                        ys = p_data.shape[1] // vp_c
+                        p_view = p_data.view(xs, vp_r, ys, vp_c)
+                        vp_bcast = virtual_params.view(1, vp_r, 1, vp_c)
+                        min_bound = (min_weight - vp_bcast) if min_weight is not None else None
+                        max_bound = (max_weight - vp_bcast) if max_weight is not None else None
+                        p_view.clamp_(min_bound, max_bound)
+                    else:
+                        p_data.clamp_(min_weight, max_weight)
 
     def clip_input_weights(self):
         self.input.clip_weights(self.quantization)

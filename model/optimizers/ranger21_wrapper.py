@@ -51,6 +51,7 @@ class Ranger21Wrapper:
             use_adaptive_gradient_clipping=False,
             softplus=False,
             pnm_momentum_factor=0.0,
+            logging_active=False,
         )
 
         scheduler = torch.optim.lr_scheduler.StepLR(

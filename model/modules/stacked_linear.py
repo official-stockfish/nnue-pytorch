@@ -11,6 +11,8 @@ class StackedLinear(nn.Module):
         self.out_features = out_features
         self.count = count
         self.linear = nn.Linear(in_features, out_features * count)
+        self._cached_idx_offset: torch.Tensor | None = None
+        self._cached_idx_batch_size: int = 0
 
         self._init_uniformly()
 
@@ -32,17 +34,19 @@ class StackedLinear(nn.Module):
     ) -> torch.Tensor:
         reshaped_output = stacked_output.reshape(-1, self.out_features)
 
-        idx_offset = torch.arange(
-            0,
-            ls_indices.shape[0] * self.count,
-            self.count,
-            device=stacked_output.device,
-        )
-        indices = ls_indices.flatten() + idx_offset
+        n = ls_indices.shape[0]
+        if (
+            self._cached_idx_offset is None
+            or self._cached_idx_batch_size != n
+            or self._cached_idx_offset.device != stacked_output.device
+        ):
+            self._cached_idx_offset = torch.arange(
+                0, n * self.count, self.count, device=stacked_output.device,
+            )
+            self._cached_idx_batch_size = n
+        indices = ls_indices.flatten() + self._cached_idx_offset
 
-        selected_output = reshaped_output[indices]
-
-        return selected_output
+        return reshaped_output[indices]
 
     @torch.no_grad()
     def at_index(self, index: int) -> nn.Linear:
