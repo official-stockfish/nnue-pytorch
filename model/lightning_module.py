@@ -1,6 +1,7 @@
 import lightning as L
 import torch
 from torch import Tensor, nn
+from torchmetrics import MeanMetric, MetricCollection
 
 from .config import NNUELightningConfig
 from .model import NNUEModel
@@ -49,6 +50,12 @@ class NNUE(L.LightningModule):
 
         # lazy init so `resume_from_model` with config changes works correctly
         self.optimizer_wrapper = None
+
+        self.loss_metrics = MetricCollection ({
+            "train_loss_epoch": MeanMetric(),
+            "val_loss_epoch": MeanMetric(),
+            "test_loss_epoch": MeanMetric(),
+        })
 
     # --- setup optimizers and training hooks ---
     def configure_optimizers(self):
@@ -126,18 +133,35 @@ class NNUE(L.LightningModule):
 
     def on_train_epoch_end(self):
         self.optimizer_wrapper.on_train_epoch_end(self)
+        self._log_epoch_end("train_loss_epoch")
 
     def on_validation_epoch_start(self):
         self.optimizer_wrapper.on_validation_epoch_start(self)
 
+    def on_validation_epoch_end(self):
+        self._log_epoch_end("val_loss_epoch")
+
     def on_test_epoch_start(self):
         self.optimizer_wrapper.on_test_epoch_start(self)
+
+    def on_test_epoch_end(self):
+        self._log_epoch_end("test_loss_epoch")
 
     def on_save_checkpoint(self, checkpoint):
         self.optimizer_wrapper.on_save_checkpoint(self, checkpoint)
 
     def on_train_batch_start(self, batch, batch_idx):
         self.optimizer_wrapper.on_train_batch_start(self, batch, batch_idx)
+
+    def _log_epoch_end(self, loss_type):
+        self.log(
+            f"{loss_type}",
+            self.loss_metrics[f"{loss_type}"],
+            prog_bar=False,
+            sync_dist=True,
+            on_epoch=True,
+            on_step=False,
+        )
 
     # --- Training step implementation ---
 
@@ -147,9 +171,11 @@ class NNUE(L.LightningModule):
     def training_step(self, batch, batch_idx):
         return self.step_(batch, batch_idx, "train_loss")
 
+    @torch.no_grad()
     def validation_step(self, batch, batch_idx):
         self.step_(batch, batch_idx, "val_loss")
 
+    @torch.no_grad()
     def test_step(self, batch, batch_idx):
         self.step_(batch, batch_idx, "test_loss")
 
@@ -209,13 +235,13 @@ class NNUE(L.LightningModule):
         weights = 1 + (2.0**p.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), p.w2)
         loss = (loss * weights).sum() / weights.sum()
 
+        self.loss_metrics[f"{loss_type}_epoch"].update(loss)
         self.log(
             loss_type,
             loss,
             prog_bar=False,
-            sync_dist=True,
+            sync_dist=False,
             on_epoch=False,
             on_step=True,
         )
-
         return loss
