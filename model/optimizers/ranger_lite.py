@@ -202,9 +202,6 @@ class RangerLite(torch.optim.Optimizer):
                         noise_norm = math.sqrt((1 + beta2) ** 2 + beta2 ** 2)
 
                     else:
-                        pnm_grad_ma.mul_(beta1 ** 2).add_(grad, alpha=(1 - beta1 ** 2))
-
-                        # Refactored PNM calculation
                         # Corrected: Normalization must be based on the coefficients of the linear combination
                         noise_norm = math.sqrt((1 + pnm_factor) ** 2 + pnm_factor ** 2)
 
