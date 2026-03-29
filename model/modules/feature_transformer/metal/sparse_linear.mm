@@ -68,16 +68,20 @@ id<MTLLibrary> compile_shader(const std::string& source, MTLLanguageVersion ver)
     return lib;
 }
 
+void ensure_device() {
+    if (g_device) return;
+    g_device = at::mps::MPSDevice::getInstance()->device();
+    TORCH_CHECK(g_device, "No Metal device found");
+    g_has_native_float_atomics = [g_device supportsFamily:MTLGPUFamilyMetal3];
+}
+
 void ensure_init(const std::string& fwd_src,
                  const std::string& bwd_cas_src,
                  const std::string& bwd_native_src) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_device) return;
+    if (g_fwd_library) return;
 
-    g_device = at::mps::MPSDevice::getInstance()->device();
-    TORCH_CHECK(g_device, "No Metal device found");
-
-    g_has_native_float_atomics = [g_device supportsFamily:MTLGPUFamilyMetal3];
+    ensure_device();
 
     g_fwd_library = compile_shader(fwd_src, MTLLanguageVersion2_4);
 
@@ -250,10 +254,7 @@ namespace {
 void ensure_l0_init(const std::string& l0_src) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_l0_library) return;
-    if (!g_device) {
-        g_device = at::mps::MPSDevice::getInstance()->device();
-        TORCH_CHECK(g_device, "No Metal device found");
-    }
+    ensure_device();
     g_l0_library = compile_shader(l0_src, MTLLanguageVersion2_4);
 }
 
@@ -673,10 +674,7 @@ namespace {
 void ensure_loss_init(const std::string& loss_src) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_loss_library) return;
-    if (!g_device) {
-        g_device = at::mps::MPSDevice::getInstance()->device();
-        TORCH_CHECK(g_device, "No Metal device found");
-    }
+    ensure_device();
     g_loss_library = compile_shader(loss_src, MTLLanguageVersion2_4);
 }
 
@@ -829,10 +827,7 @@ namespace {
 void ensure_opt_init(const std::string& opt_src) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_opt_library) return;
-    if (!g_device) {
-        g_device = at::mps::MPSDevice::getInstance()->device();
-        TORCH_CHECK(g_device, "No Metal device found");
-    }
+    ensure_device();
     g_opt_library = compile_shader(opt_src, MTLLanguageVersion2_4);
 }
 
