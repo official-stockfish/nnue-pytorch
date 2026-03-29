@@ -967,7 +967,7 @@ torch::Tensor indexed_stacked_linear_backward_x_metal(
     const int64_t batch  = grad_output.size(0);
     const uint32_t out_u = static_cast<uint32_t>(grad_output.size(1));
     const uint32_t in_u  = static_cast<uint32_t>(weight.size(1));
-    const uint32_t num_threads = in_u / 4;
+    const uint32_t num_threads = in_u;
 
     auto grad_x = torch::empty({batch, static_cast<int64_t>(in_u)},
                                 grad_output.options());

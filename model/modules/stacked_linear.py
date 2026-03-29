@@ -35,8 +35,7 @@ class StackedLinear(nn.Module):
         self.linear.bias.copy_(init_bias.repeat(self.count))
 
     def forward(self, x: torch.Tensor, ls_indices: torch.Tensor) -> torch.Tensor:
-        if (_HAS_METAL_STACKED and x.device.type == "mps"
-                and self.in_features % 4 == 0):
+        if _HAS_METAL_STACKED and x.device.type == "mps":
             return metal_indexed_stacked_linear(
                 x, self.linear.weight, self.linear.bias,
                 ls_indices.flatten().int(), self.out_features, self.count,
@@ -98,8 +97,7 @@ class FactorizedStackedLinear(StackedLinear):
             + self.factorized_linear.bias.unsqueeze(0)
         ).view(-1)
 
-        if (_HAS_METAL_STACKED and x.device.type == "mps"
-                and self.in_features % 4 == 0):
+        if _HAS_METAL_STACKED and x.device.type == "mps":
             return metal_indexed_stacked_linear(
                 x, merged_weight, merged_bias,
                 ls_indices.flatten().int(), o, self.count,
