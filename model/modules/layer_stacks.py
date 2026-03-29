@@ -3,18 +3,9 @@ from typing import Generator
 import torch
 from torch import nn
 
+from ..metal_support import MPS_AVAILABLE, metal_sqr_crelu
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 from .config import LayerStacksConfig
-
-_HAS_METAL_SQR_CRELU = False
-try:
-    from .feature_transformer.metal import (
-        is_available as _metal_is_available,
-        metal_sqr_crelu,
-    )
-    _HAS_METAL_SQR_CRELU = _metal_is_available()
-except (ImportError, ModuleNotFoundError):
-    pass
 
 
 class LayerStacks(nn.Module):
@@ -39,7 +30,7 @@ class LayerStacks(nn.Module):
 
     def forward(self, x: torch.Tensor, ls_indices: torch.Tensor):
         l1c_ = self.l1(x, ls_indices)
-        if _HAS_METAL_SQR_CRELU and l1c_.device.type == "mps":
+        if MPS_AVAILABLE and l1c_.device.type == "mps":
             l1x_, l1x_out = metal_sqr_crelu(l1c_, self.L2)
             l1x_out = l1x_out.unsqueeze(1)
         else:

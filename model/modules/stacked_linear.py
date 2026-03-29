@@ -2,15 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-_HAS_METAL_STACKED = False
-try:
-    from .feature_transformer.metal import (
-        is_available as _metal_is_available,
-        metal_indexed_stacked_linear,
-    )
-    _HAS_METAL_STACKED = _metal_is_available()
-except (ImportError, ModuleNotFoundError):
-    pass
+from ..metal_support import MPS_AVAILABLE, metal_indexed_stacked_linear
 
 
 class StackedLinear(nn.Module):
@@ -35,7 +27,7 @@ class StackedLinear(nn.Module):
         self.linear.bias.copy_(init_bias.repeat(self.count))
 
     def forward(self, x: torch.Tensor, ls_indices: torch.Tensor) -> torch.Tensor:
-        if _HAS_METAL_STACKED and x.device.type == "mps":
+        if MPS_AVAILABLE and x.device.type == "mps":
             return metal_indexed_stacked_linear(
                 x, self.linear.weight, self.linear.bias,
                 ls_indices.flatten().int(), self.out_features, self.count,
@@ -97,7 +89,7 @@ class FactorizedStackedLinear(StackedLinear):
             + self.factorized_linear.bias.unsqueeze(0)
         ).view(-1)
 
-        if _HAS_METAL_STACKED and x.device.type == "mps":
+        if MPS_AVAILABLE and x.device.type == "mps":
             return metal_indexed_stacked_linear(
                 x, merged_weight, merged_bias,
                 ls_indices.flatten().int(), o, self.count,

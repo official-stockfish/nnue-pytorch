@@ -3,6 +3,7 @@ import torch
 
 from dataclasses import dataclass
 
+from ..metal_support import MPS_AVAILABLE
 
 try:
     import ranger21
@@ -10,13 +11,6 @@ try:
     _ranger21_import_error = False
 except ImportError:
     _ranger21_import_error = True
-
-_HAS_FUSED_OPT = False
-try:
-    from ..modules.feature_transformer.metal import is_available as _metal_is_available
-    _HAS_FUSED_OPT = _metal_is_available()
-except (ImportError, ModuleNotFoundError):
-    pass
 
 
 @dataclass
@@ -42,7 +36,7 @@ class Ranger21Wrapper:
                 "[Ranger21Wrapper] Required parameter for training not set: num_batches_per_epoch"
             )
 
-        use_fused = _HAS_FUSED_OPT and any(
+        use_fused = MPS_AVAILABLE and any(
             p.device.type == "mps"
             for group in train_params
             for p in group["params"]

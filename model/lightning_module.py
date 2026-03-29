@@ -4,18 +4,9 @@ from torch import Tensor, nn
 from torchmetrics import MeanMetric, MetricCollection
 
 from .config import NNUELightningConfig
+from .metal_support import MPS_AVAILABLE, metal_fused_loss
 from .model import NNUEModel
 from .quantize import QuantizationConfig
-
-_HAS_METAL_LOSS = False
-try:
-    from .modules.feature_transformer.metal import (
-        is_available as _metal_is_available,
-        metal_fused_loss,
-    )
-    _HAS_METAL_LOSS = _metal_is_available()
-except (ImportError, ModuleNotFoundError):
-    pass
 
 
 def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
@@ -224,7 +215,7 @@ class NNUE(L.LightningModule):
             self.current_epoch / self.max_epoch
         )
 
-        if _HAS_METAL_LOSS and scorenet.device.type == "mps":
+        if MPS_AVAILABLE and scorenet.device.type == "mps":
             loss = metal_fused_loss(
                 scorenet, score, outcome,
                 p.in_offset, p.in_scaling, p.out_offset, p.out_scaling,

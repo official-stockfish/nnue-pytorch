@@ -2,19 +2,13 @@ import torch
 from torch import nn
 
 from .config import ModelConfig
+from .metal_support import (
+    MPS_AVAILABLE,
+    metal_fused_double_forward_l0,
+    metal_fused_composed_double_forward_l0,
+)
 from .modules import LayerStacks, get_feature_cls
 from .quantize import QuantizationConfig, QuantizationManager
-
-_HAS_METAL_FUSED = False
-try:
-    from .modules.feature_transformer.metal import (
-        is_available as _metal_is_available,
-        metal_fused_double_forward_l0,
-        metal_fused_composed_double_forward_l0,
-    )
-    _HAS_METAL_FUSED = _metal_is_available()
-except (ImportError, ModuleNotFoundError):
-    pass
 
 
 class NNUEModel(nn.Module):
@@ -86,7 +80,7 @@ class NNUEModel(nn.Module):
         psqt_indices: torch.Tensor,
         layer_stack_indices: torch.Tensor,
     ):
-        if _HAS_METAL_FUSED and white_indices.device.type == "mps":
+        if MPS_AVAILABLE and white_indices.device.type == "mps":
             ft = self.input
             if (hasattr(ft, "features") and len(ft.features) == 2
                     and hasattr(ft.features[1], "virtual_weight")):

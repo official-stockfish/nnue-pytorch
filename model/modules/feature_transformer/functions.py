@@ -2,6 +2,12 @@ import torch
 import torch.nn.functional as F
 from torch import autograd
 
+from ...metal_support import (
+    MPS_AVAILABLE,
+    metal_sparse_linear,
+    metal_double_sparse_linear,
+)
+
 _HAS_CUPY_KERNELS = False
 try:
     from .kernel import (
@@ -10,18 +16,6 @@ try:
     )
 
     _HAS_CUPY_KERNELS = True
-except (ImportError, ModuleNotFoundError):
-    pass
-
-_HAS_METAL_KERNELS = False
-try:
-    from .metal import (
-        is_available as _metal_is_available,
-        metal_sparse_linear,
-        metal_double_sparse_linear,
-    )
-
-    _HAS_METAL_KERNELS = _metal_is_available()
 except (ImportError, ModuleNotFoundError):
     pass
 
@@ -36,7 +30,7 @@ def sparse_linear(feature_indices, feature_values, weight, bias):
         return _CudaSparseLinearFunction.apply(
             feature_indices, feature_values, weight, bias
         )
-    if _HAS_METAL_KERNELS and feature_indices.device.type == "mps":
+    if MPS_AVAILABLE and feature_indices.device.type == "mps":
         return metal_sparse_linear(feature_indices, feature_values, weight, bias)
     return _torch_sparse_linear(feature_indices, feature_values, weight, bias)
 
@@ -46,7 +40,7 @@ def double_sparse_linear(
 ):
     """Both perspectives in one call — saves ~0.84 ms on MPS by sharing
     the weight_grad allocation in the backward pass."""
-    if _HAS_METAL_KERNELS and w_indices.device.type == "mps":
+    if MPS_AVAILABLE and w_indices.device.type == "mps":
         return metal_double_sparse_linear(
             w_indices, w_values, b_indices, b_values, weight, bias
         )
