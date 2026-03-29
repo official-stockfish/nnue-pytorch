@@ -1,3 +1,4 @@
+import gc
 import time
 import warnings
 import os
@@ -105,6 +106,7 @@ def make_data_loaders(
     pin_memory,
     queue_size_limit,
     device: str = "cpu",
+    start_immediately: bool = False,
 ):
     # Epoch and validation sizes are arbitrary
     features_name = feature_name
@@ -124,6 +126,7 @@ def make_data_loaders(
             (epoch_size + batch_size - 1) // batch_size,
             pin_memory=pin_memory,
             queue_size_limit=queue_size_limit,
+            start_immediately=start_immediately,
         ),
         batch_size=None,
         batch_sampler=None,
@@ -316,7 +319,7 @@ def main():
         save_top_k=-1,
     )
 
-    if args.compile_backend != "none":
+    if args.compile_backend != "none" and accelerator != "mps":
         nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
@@ -335,6 +338,7 @@ def main():
             SimpleLineLogger(refresh_rate=refresh_rate, min_print_interval=10.0),
             TimeLimitAfterCheckpoint(args.max_time),
             M.WeightClippingCallback(),
+            M.ManagedGCCallback(),
         ],
         log_every_n_steps=refresh_rate,
         enable_progress_bar=False,
@@ -358,6 +362,7 @@ def main():
         pin_memory=args.pin_memory,
         queue_size_limit=args.data_loader_queue_size,
         device=accelerator if accelerator in ("mps", "cpu") else "cpu",
+        start_immediately=(accelerator == "mps"),
     )
 
     if args.resume_from_checkpoint:

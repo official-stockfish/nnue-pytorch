@@ -1,6 +1,25 @@
+import gc
+
 import lightning as L
 
 from .lightning_module import NNUE
+
+
+class ManagedGCCallback(L.Callback):
+    """Disable automatic GC during training to prevent multi-second stalls
+    from bulk MPS tensor deallocation.  Collect between epochs instead."""
+
+    def on_train_start(self, trainer, pl_module):
+        gc.collect()
+        gc.disable()
+        gc.set_threshold(0, 0, 0)
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        gc.collect()
+
+    def on_train_end(self, trainer, pl_module):
+        gc.set_threshold(700, 10, 10)
+        gc.enable()
 
 
 class WeightClippingCallback(L.Callback):

@@ -201,7 +201,8 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
 
 
 class FixedNumBatchesDataset(Dataset):
-    def __init__(self, dataset, num_batches, pin_memory=False, queue_size_limit=None):
+    def __init__(self, dataset, num_batches, pin_memory=False, queue_size_limit=None,
+                 start_immediately=False):
         super().__init__()
         self.dataset = dataset
         self.iter = None  # Deferred to _start_prefetching
@@ -215,6 +216,9 @@ class FixedNumBatchesDataset(Dataset):
         self._stop_prefetching = threading.Event()
         self._prefetch_started = False
         self._lock = threading.Lock()
+
+        if start_immediately:
+            self._start_prefetching()
 
     def _safe_put(self, item):
         """Helper to ensure we don't hang on shutdown if queue is full."""

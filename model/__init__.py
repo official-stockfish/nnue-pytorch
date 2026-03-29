@@ -1,4 +1,4 @@
-from .callbacks import WeightClippingCallback
+from .callbacks import ManagedGCCallback, WeightClippingCallback
 from .config import ModelConfig, LossParams, NNUELightningConfig
 from .optimizers import OptimizerConfig, Ranger21Wrapper, ScheduleFreeWrapper
 
@@ -21,6 +21,7 @@ from .utils import (
 
 
 __all__ = [
+    "ManagedGCCallback",
     "WeightClippingCallback",
     "ModelConfig",
     "LossParams",
