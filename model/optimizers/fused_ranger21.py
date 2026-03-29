@@ -11,7 +11,7 @@ import math
 
 import torch
 
-from ..modules.feature_transformer.metal import metal_fused_adam_step_multi
+from ..metal_support import metal_fused_adam_step_multi
 
 
 class FusedRanger21(torch.optim.Optimizer):
@@ -21,20 +21,9 @@ class FusedRanger21(torch.optim.Optimizer):
         lr=1.0,
         betas=(0.9, 0.999),
         eps=1e-7,
-        num_batches_per_epoch=None,
-        num_epochs=None,
     ):
         defaults = dict(lr=lr, betas=betas, eps=eps)
         super().__init__(params, defaults)
-
-        self.num_batches_per_epoch = num_batches_per_epoch
-        self.num_epochs = num_epochs
-        self.total_iterations = num_epochs * num_batches_per_epoch
-        self.starting_lr = lr
-        self.current_lr = lr
-        self.epoch_count = 0
-        self.current_iter = 0
-        self.tracking_lr = []
 
         beta1, beta2 = betas
         self._beta1_sq = beta1 ** 2
@@ -93,12 +82,4 @@ class FusedRanger21(torch.optim.Optimizer):
                 inv_sqrt_bc2, step_size, eps,
             )
 
-        self._track_epochs()
         return loss
-
-    def _track_epochs(self):
-        self.current_iter += 1
-        if self.current_iter % self.num_batches_per_epoch == 0:
-            self.current_iter = 0
-            self.epoch_count += 1
-            self.tracking_lr.append(self.current_lr)

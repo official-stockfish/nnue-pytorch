@@ -50,8 +50,6 @@ class Ranger21Wrapper:
                 lr=1.0,
                 betas=(0.9, 0.999),
                 eps=1.0e-7,
-                num_batches_per_epoch=self.num_batches_per_epoch,
-                num_epochs=self.max_epoch,
             )
         else:
             if _ranger21_import_error:
