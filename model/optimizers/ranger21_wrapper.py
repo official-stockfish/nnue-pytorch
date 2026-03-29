@@ -51,6 +51,9 @@ class Ranger21Wrapper:
             use_adaptive_gradient_clipping=False,
             softplus=False,
             pnm_momentum_factor=0.0,
+            lookahead_active=False,
+            normloss_active=False,
+            momentum_type="standard",
             logging_active=False,
         )
 
