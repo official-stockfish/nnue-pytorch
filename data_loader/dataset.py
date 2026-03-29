@@ -9,6 +9,8 @@ from .config import DataloaderSkipConfig, DataloaderDDPConfig
 
 
 def _recursive_pin(obj):
+    if not torch.cuda.is_available():
+        return obj
     if isinstance(obj, torch.Tensor):
         return obj.pin_memory()
     elif isinstance(obj, dict):

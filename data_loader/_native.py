@@ -27,73 +27,58 @@ class SparseBatch(ctypes.Structure):
     ]
 
     def get_tensors(self, device):
-        white_values = (
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.white_values, shape=(self.size, self.max_active_features)
-                )
+        # pin_memory is a CUDA-only optimisation for async transfers;
+        # on MPS (unified memory) it is both unnecessary and broken.
+        use_pin = torch.cuda.is_available()
+
+        def _prepare(arr, dtype_cast=None):
+            # .clone() copies out of the C-owned buffer before it is freed
+            # by destroy_part(); the original code relied on .pin_memory()
+            # for this copy, which is CUDA-only.
+            t = torch.from_numpy(arr).clone()
+            if dtype_cast is not None:
+                t = dtype_cast(t)
+            if use_pin:
+                t = t.pin_memory()
+            return t.to(device=device, non_blocking=use_pin)
+
+        white_values = _prepare(
+            np.ctypeslib.as_array(
+                self.white_values, shape=(self.size, self.max_active_features)
             )
-            .pin_memory()
-            .to(device=device, non_blocking=True)
         )
-        black_values = (
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.black_values, shape=(self.size, self.max_active_features)
-                )
+        black_values = _prepare(
+            np.ctypeslib.as_array(
+                self.black_values, shape=(self.size, self.max_active_features)
             )
-            .pin_memory()
-            .to(device=device, non_blocking=True)
         )
-        white_indices = (
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.white, shape=(self.size, self.max_active_features)
-                )
+        white_indices = _prepare(
+            np.ctypeslib.as_array(
+                self.white, shape=(self.size, self.max_active_features)
             )
-            .pin_memory()
-            .to(device=device, non_blocking=True)
         )
-        black_indices = (
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.black, shape=(self.size, self.max_active_features)
-                )
+        black_indices = _prepare(
+            np.ctypeslib.as_array(
+                self.black, shape=(self.size, self.max_active_features)
             )
-            .pin_memory()
-            .to(device=device, non_blocking=True)
         )
-        us = (
-            torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1)))
-            .pin_memory()
-            .to(device=device, non_blocking=True)
+        us = _prepare(
+            np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))
         )
         them = 1.0 - us
-        outcome = (
-            torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1)))
-            .pin_memory()
-            .to(device=device, non_blocking=True)
+        outcome = _prepare(
+            np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))
         )
-        score = (
-            torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1)))
-            .pin_memory()
-            .to(device=device, non_blocking=True)
+        score = _prepare(
+            np.ctypeslib.as_array(self.score, shape=(self.size, 1))
         )
-        psqt_indices = (
-            torch.from_numpy(
-                np.ctypeslib.as_array(self.psqt_indices, shape=(self.size,))
-            )
-            .long()
-            .pin_memory()
-            .to(device=device, non_blocking=True)
+        psqt_indices = _prepare(
+            np.ctypeslib.as_array(self.psqt_indices, shape=(self.size,)),
+            dtype_cast=lambda t: t.long(),
         )
-        layer_stack_indices = (
-            torch.from_numpy(
-                np.ctypeslib.as_array(self.layer_stack_indices, shape=(self.size,))
-            )
-            .long()
-            .pin_memory()
-            .to(device=device, non_blocking=True)
+        layer_stack_indices = _prepare(
+            np.ctypeslib.as_array(self.layer_stack_indices, shape=(self.size,)),
+            dtype_cast=lambda t: t.long(),
         )
         return (
             us,
