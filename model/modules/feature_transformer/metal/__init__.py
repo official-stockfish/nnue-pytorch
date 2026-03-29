@@ -239,3 +239,55 @@ class FusedL0MixingFunction(autograd.Function):
 def metal_l0_mixing(wp, bp, us, them, L1, psqt):
     """Fused L0 mixing: replaces ~7 separate MPS ops with one Metal kernel."""
     return FusedL0MixingFunction.apply(wp, bp, us, them, L1, psqt)
+
+
+class FusedLossFunction(autograd.Function):
+    """Fuses ~20 element-wise loss ops into two Metal kernels (fwd + bwd)."""
+
+    @staticmethod
+    def forward(ctx, scorenet, score, outcome,
+                in_offset, in_scaling, out_offset, out_scaling,
+                actual_lambda, pow_exp, qp_asymmetry, w1_factor, w2):
+        partial_wloss, partial_weights = _cpp.loss_forward(
+            scorenet, score, outcome,
+            in_offset, in_scaling, out_offset, out_scaling,
+            actual_lambda, pow_exp, qp_asymmetry, w1_factor, w2,
+            _get_shader("loss.metal"),
+        )
+        weights_sum = partial_weights.sum()
+        loss = partial_wloss.sum() / weights_sum
+
+        ctx.save_for_backward(scorenet, score, outcome, weights_sum)
+        ctx.loss_scalars = (
+            in_offset, in_scaling, out_offset, out_scaling,
+            actual_lambda, pow_exp, qp_asymmetry, w1_factor, w2,
+        )
+        return loss
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        scorenet, score, outcome, weights_sum = ctx.saved_tensors
+        (in_offset, in_scaling, out_offset, out_scaling,
+         actual_lambda, pow_exp, qp_asymmetry, w1_factor, w2) = ctx.loss_scalars
+
+        grad_scale = (grad_output / weights_sum).view(1)
+
+        grad_scorenet = _cpp.loss_backward(
+            scorenet, score, outcome, grad_scale,
+            in_offset, in_scaling, out_offset, out_scaling,
+            actual_lambda, pow_exp, qp_asymmetry, w1_factor, w2,
+            _get_shader("loss.metal"),
+        )
+        return grad_scorenet.view_as(scorenet), *([None] * 11)
+
+
+def metal_fused_loss(scorenet, score, outcome,
+                     in_offset, in_scaling, out_offset, out_scaling,
+                     actual_lambda, pow_exp, qp_asymmetry, w1, w2):
+    """Fused loss: replaces ~20 separate MPS dispatches."""
+    w1_factor = 2.0 ** w1 - 1.0
+    return FusedLossFunction.apply(
+        scorenet, score, outcome,
+        in_offset, in_scaling, out_offset, out_scaling,
+        actual_lambda, pow_exp, qp_asymmetry, w1_factor, w2,
+    )

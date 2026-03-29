@@ -7,6 +7,16 @@ from .config import NNUELightningConfig
 from .model import NNUEModel
 from .quantize import QuantizationConfig
 
+_HAS_METAL_LOSS = False
+try:
+    from .modules.feature_transformer.metal import (
+        is_available as _metal_is_available,
+        metal_fused_loss,
+    )
+    _HAS_METAL_LOSS = _metal_is_available()
+except (ImportError, ModuleNotFoundError):
+    pass
+
 
 def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
     return [
@@ -210,30 +220,36 @@ class NNUE(L.LightningModule):
         )
 
         p = self.config.loss_params
-        # convert the network and search scores to an estimate match result
-        # based on the win_rate_model, with scalings and offsets optimized
-        q = (scorenet - p.in_offset) / p.in_scaling
-        qm = (-scorenet - p.in_offset) / p.in_scaling
-        qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
-
-        s = (score - p.out_offset) / p.out_scaling
-        sm = (-score - p.out_offset) / p.out_scaling
-        pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
-
-        # blend that eval based score with the actual game outcome
-        t = outcome
         actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
             self.current_epoch / self.max_epoch
         )
-        pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
-        # use a MSE-like loss function
-        loss = torch.pow(torch.abs(pt - qf), p.pow_exp)
-        if p.qp_asymmetry != 0.0:
-            loss = loss * ((qf > pt) * p.qp_asymmetry + 1)
+        if _HAS_METAL_LOSS and scorenet.device.type == "mps":
+            loss = metal_fused_loss(
+                scorenet, score, outcome,
+                p.in_offset, p.in_scaling, p.out_offset, p.out_scaling,
+                actual_lambda, p.pow_exp, p.qp_asymmetry, p.w1, p.w2,
+            )
+        else:
+            q = (scorenet - p.in_offset) / p.in_scaling
+            qm = (-scorenet - p.in_offset) / p.in_scaling
+            qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
 
-        weights = 1 + (2.0**p.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), p.w2)
-        loss = (loss * weights).sum() / weights.sum()
+            s = (score - p.out_offset) / p.out_scaling
+            sm = (-score - p.out_offset) / p.out_scaling
+            pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
+
+            t = outcome
+            pt = pf * actual_lambda + t * (1.0 - actual_lambda)
+
+            loss = torch.pow(torch.abs(pt - qf), p.pow_exp)
+            if p.qp_asymmetry != 0.0:
+                loss = loss * ((qf > pt) * p.qp_asymmetry + 1)
+
+            weights = 1 + (2.0**p.w1 - 1) * torch.pow(
+                (pf - 0.5) ** 2 * pf * (1 - pf), p.w2
+            )
+            loss = (loss * weights).sum() / weights.sum()
 
         self.loss_metrics[f"{loss_type}_epoch"].update(loss)
         self.log(

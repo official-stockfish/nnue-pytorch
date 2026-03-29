@@ -630,6 +630,165 @@ fused_backward_metal(
 }
 
 // ---------------------------------------------------------------------------
+// Fused loss computation — replaces ~20 element-wise MPS dispatches with
+// two Metal kernel invocations (forward + backward).
+// ---------------------------------------------------------------------------
+namespace {
+    id<MTLLibrary> g_loss_library = nil;
+
+    struct LossParamsGPU {
+        float in_offset;
+        float in_scaling;
+        float out_offset;
+        float out_scaling;
+        float actual_lambda;
+        float pow_exp;
+        float qp_asymmetry;
+        float w1_factor;
+        float w2;
+    };
+}
+
+void ensure_loss_init(const std::string& loss_src) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_loss_library) return;
+    if (!g_device) {
+        g_device = at::mps::MPSDevice::getInstance()->device();
+        TORCH_CHECK(g_device, "No Metal device found");
+    }
+    g_loss_library = compile_shader(loss_src, MTLLanguageVersion2_4);
+}
+
+id<MTLComputePipelineState> get_loss_pipeline(const std::string& func_name) {
+    PipelineKey key{func_name, 0, 0};
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_pipelines.find(key);
+    if (it != g_pipelines.end()) return it->second;
+
+    NSString* name = [NSString stringWithUTF8String:func_name.c_str()];
+    id<MTLFunction> func = [g_loss_library newFunctionWithName:name];
+    TORCH_CHECK(func, "Loss Metal function not found: ", func_name);
+
+    NSError* error = nil;
+    id<MTLComputePipelineState> pso =
+        [g_device newComputePipelineStateWithFunction:func error:&error];
+    TORCH_CHECK(pso, "Loss pipeline creation failed for: ", func_name);
+
+    g_pipelines[key] = pso;
+    return pso;
+}
+
+std::tuple<torch::Tensor, torch::Tensor>
+loss_forward_metal(
+        torch::Tensor scorenet, torch::Tensor score, torch::Tensor outcome,
+        double in_offset, double in_scaling, double out_offset, double out_scaling,
+        double actual_lambda, double pow_exp, double qp_asymmetry,
+        double w1_factor, double w2,
+        const std::string& loss_src) {
+
+    ensure_loss_init(loss_src);
+
+    scorenet = scorenet.contiguous().view(-1);
+    score    = score.contiguous().view(-1);
+    outcome  = outcome.contiguous().view(-1);
+
+    const int64_t B = scorenet.size(0);
+    constexpr uint32_t kTgThreads = 256;
+    uint32_t num_tg = (static_cast<uint32_t>(B) + kTgThreads - 1) / kTgThreads;
+    uint32_t batch_u32 = static_cast<uint32_t>(B);
+
+    auto opts = scorenet.options();
+    auto partial_wloss   = torch::empty({static_cast<int64_t>(num_tg)}, opts);
+    auto partial_weights = torch::empty({static_cast<int64_t>(num_tg)}, opts);
+
+    LossParamsGPU params;
+    params.in_offset     = static_cast<float>(in_offset);
+    params.in_scaling    = static_cast<float>(in_scaling);
+    params.out_offset    = static_cast<float>(out_offset);
+    params.out_scaling   = static_cast<float>(out_scaling);
+    params.actual_lambda = static_cast<float>(actual_lambda);
+    params.pow_exp       = static_cast<float>(pow_exp);
+    params.qp_asymmetry  = static_cast<float>(qp_asymmetry);
+    params.w1_factor     = static_cast<float>(w1_factor);
+    params.w2            = static_cast<float>(w2);
+
+    auto pipeline = get_loss_pipeline("loss_forward");
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, scorenet,        0);
+        set_buffer(enc, score,           1);
+        set_buffer(enc, outcome,         2);
+        set_buffer(enc, partial_wloss,   3);
+        set_buffer(enc, partial_weights, 4);
+        [enc setBytes:&params     length:sizeof(LossParamsGPU) atIndex:5];
+        [enc setBytes:&batch_u32  length:sizeof(uint32_t)      atIndex:6];
+        [enc setThreadgroupMemoryLength:2 * kTgThreads * sizeof(float) atIndex:0];
+        [enc dispatchThreadgroups:MTLSizeMake(num_tg, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
+    }
+
+    return std::make_tuple(partial_wloss, partial_weights);
+}
+
+torch::Tensor loss_backward_metal(
+        torch::Tensor scorenet, torch::Tensor score, torch::Tensor outcome,
+        torch::Tensor grad_scale,
+        double in_offset, double in_scaling, double out_offset, double out_scaling,
+        double actual_lambda, double pow_exp, double qp_asymmetry,
+        double w1_factor, double w2,
+        const std::string& loss_src) {
+
+    ensure_loss_init(loss_src);
+
+    scorenet   = scorenet.contiguous().view(-1);
+    score      = score.contiguous().view(-1);
+    outcome    = outcome.contiguous().view(-1);
+    grad_scale = grad_scale.contiguous().view(-1);
+
+    const int64_t B = scorenet.size(0);
+    constexpr uint32_t kTgThreads = 256;
+    uint32_t num_tg = (static_cast<uint32_t>(B) + kTgThreads - 1) / kTgThreads;
+    uint32_t batch_u32 = static_cast<uint32_t>(B);
+
+    auto grad_scorenet = torch::empty_like(scorenet);
+
+    LossParamsGPU params;
+    params.in_offset     = static_cast<float>(in_offset);
+    params.in_scaling    = static_cast<float>(in_scaling);
+    params.out_offset    = static_cast<float>(out_offset);
+    params.out_scaling   = static_cast<float>(out_scaling);
+    params.actual_lambda = static_cast<float>(actual_lambda);
+    params.pow_exp       = static_cast<float>(pow_exp);
+    params.qp_asymmetry  = static_cast<float>(qp_asymmetry);
+    params.w1_factor     = static_cast<float>(w1_factor);
+    params.w2            = static_cast<float>(w2);
+
+    auto pipeline = get_loss_pipeline("loss_backward");
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, scorenet,       0);
+        set_buffer(enc, score,          1);
+        set_buffer(enc, outcome,        2);
+        set_buffer(enc, grad_scorenet,  3);
+        [enc setBytes:&params     length:sizeof(LossParamsGPU) atIndex:4];
+        set_buffer(enc, grad_scale,     5);
+        [enc setBytes:&batch_u32  length:sizeof(uint32_t)      atIndex:6];
+        [enc dispatchThreadgroups:MTLSizeMake(num_tg, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
+    }
+
+    return grad_scorenet;
+}
+
+// ---------------------------------------------------------------------------
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("sparse_linear_forward",  &sparse_linear_forward_metal,
           "Sparse linear forward pass (Metal)");
@@ -645,4 +804,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Fused L0 mixing backward (Metal)");
     m.def("fused_backward", &fused_backward_metal,
           "Fused L0 backward + double sparse backward (Metal)");
+    m.def("loss_forward",  &loss_forward_metal,
+          "Fused loss forward (Metal)");
+    m.def("loss_backward", &loss_backward_metal,
+          "Fused loss backward (Metal)");
 }
