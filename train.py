@@ -1,4 +1,3 @@
-import gc
 import time
 import warnings
 import os

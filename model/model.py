@@ -98,12 +98,11 @@ class NNUEModel(nn.Module):
                     weight, ft.bias, us, them, self.L1, self.num_psqt_buckets,
                 )
             else:
-                weight = torch.cat(
-                    [f.merged_weight() for f in ft.features], dim=0
-                )
-                l0_, wpsqt, bpsqt = metal_fused_double_forward_l0(
-                    white_indices, white_values, black_indices, black_values,
-                    weight, ft.bias, us, them, self.L1, self.num_psqt_buckets,
+                raise RuntimeError(
+                    f"Unsupported feature transformer layout for MPS fused "
+                    f"path: {type(ft).__name__}. Expected a single-weight "
+                    f"feature (hasattr 'weight') or a 2-component composed "
+                    f"feature with virtual_weight on the second component."
                 )
         else:
             wp, bp = self.input(
