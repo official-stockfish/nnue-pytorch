@@ -74,3 +74,64 @@ kernel void indexed_stacked_linear_backward_x(
 
     grad_x[b * FC_IN_SIZE + tid] = acc;
 }
+
+// ---------------------------------------------------------------------------
+// Fused squared-clamp-relu activation for layer stack l1 output.
+//
+// Given l1c of shape (B, L2+1):
+//   l1x[b, t]      = clamp(l1c[b, t]^2 * (255/256), 0, 1)   for t < L2
+//   l1x[b, L2 + t] = clamp(l1c[b, t], 0, 1)                 for t < L2
+//   l1x_out[b]     = l1c[b, L2]
+//
+// FC_IN_SIZE = L2, FC_OUT_SIZE = 2*L2.
+// One threadgroup per batch element, L2 threads.
+// ---------------------------------------------------------------------------
+kernel void sqr_crelu_forward(
+    device const float* l1c     [[buffer(0)]],   // (B, L2+1)
+    device float*       l1x     [[buffer(1)]],   // (B, 2*L2)
+    device float*       l1x_out [[buffer(2)]],   // (B,)
+    uint tg  [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]]
+) {
+    const uint b = tg;
+    const uint in_stride = FC_IN_SIZE + 1;
+    float x = l1c[b * in_stride + tid];
+
+    l1x[b * FC_OUT_SIZE + tid]             = clamp(x * x * (255.0f / 256.0f), 0.0f, 1.0f);
+    l1x[b * FC_OUT_SIZE + FC_IN_SIZE + tid] = clamp(x, 0.0f, 1.0f);
+
+    if (tid == 0)
+        l1x_out[b] = l1c[b * in_stride + FC_IN_SIZE];
+}
+
+// ---------------------------------------------------------------------------
+// Backward for fused squared-clamp-relu.
+//
+// grad_l1c[b, t] = grad_l1x[b, t] * 2*x*(255/256) * (0 < x^2*255/256 < 1)
+//                 + grad_l1x[b, L2+t] * (0 < x < 1)
+// grad_l1c[b, L2] = grad_l1x_out[b]
+// ---------------------------------------------------------------------------
+kernel void sqr_crelu_backward(
+    device const float* grad_l1x     [[buffer(0)]],   // (B, 2*L2)
+    device const float* grad_l1x_out [[buffer(1)]],   // (B,)
+    device const float* l1c          [[buffer(2)]],   // (B, L2+1)
+    device float*       grad_l1c     [[buffer(3)]],   // (B, L2+1)
+    uint tg  [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]]
+) {
+    const uint b = tg;
+    const uint in_stride = FC_IN_SIZE + 1;
+    float x = l1c[b * in_stride + tid];
+    float sq = x * x * (255.0f / 256.0f);
+
+    float g_sq  = grad_l1x[b * FC_OUT_SIZE + tid];
+    float g_lin = grad_l1x[b * FC_OUT_SIZE + FC_IN_SIZE + tid];
+
+    float grad = g_sq * 2.0f * x * (255.0f / 256.0f) * float(sq > 0.0f && sq < 1.0f)
+               + g_lin * float(x > 0.0f && x < 1.0f);
+
+    grad_l1c[b * in_stride + tid] = grad;
+
+    if (tid == 0)
+        grad_l1c[b * in_stride + FC_IN_SIZE] = grad_l1x_out[b];
+}

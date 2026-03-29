@@ -416,6 +416,34 @@ def metal_indexed_stacked_linear(x, weight, bias, indices, out_size, count):
     )
 
 
+class FusedSqrCReluFunction(autograd.Function):
+    """Fuses split → pow(2) * (255/256) → cat → clamp(0,1) into one Metal
+    kernel for the l1 activation in layer stacks."""
+
+    @staticmethod
+    def forward(ctx, l1c, L2):
+        l1x, l1x_out = _cpp.sqr_crelu_forward(
+            l1c, L2, _get_shader("stacked_linear.metal"),
+        )
+        ctx.save_for_backward(l1c)
+        ctx.L2 = L2
+        return l1x, l1x_out
+
+    @staticmethod
+    def backward(ctx, grad_l1x, grad_l1x_out):
+        l1c, = ctx.saved_tensors
+        grad_l1c = _cpp.sqr_crelu_backward(
+            grad_l1x.contiguous(), grad_l1x_out.contiguous(),
+            l1c, ctx.L2, _get_shader("stacked_linear.metal"),
+        )
+        return grad_l1c, None
+
+
+def metal_sqr_crelu(l1c, L2):
+    """Fused squared-clamp-relu activation for layer stack l1."""
+    return FusedSqrCReluFunction.apply(l1c, L2)
+
+
 def metal_fused_adam_step_multi(params, grads, grad_mas, variance_mas,
                                 beta1_sq, one_minus_beta1_sq,
                                 beta2, one_minus_beta2,

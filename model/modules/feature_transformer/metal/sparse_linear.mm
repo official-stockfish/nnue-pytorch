@@ -1101,6 +1101,75 @@ torch::Tensor indexed_stacked_linear_backward_x_metal(
 }
 
 // ---------------------------------------------------------------------------
+// Fused squared-clamp-relu activation for layer stack l1.
+// ---------------------------------------------------------------------------
+std::tuple<torch::Tensor, torch::Tensor>
+sqr_crelu_forward_metal(
+        torch::Tensor l1c,
+        int64_t L2,
+        const std::string& src) {
+
+    ensure_stacked_init(src);
+
+    l1c = l1c.contiguous();
+    const int64_t batch = l1c.size(0);
+    const uint32_t L2_u = static_cast<uint32_t>(L2);
+
+    auto l1x     = torch::empty({batch, 2 * L2}, l1c.options());
+    auto l1x_out = torch::empty({batch}, l1c.options());
+    if (batch == 0) return std::make_tuple(l1x, l1x_out);
+
+    auto pipeline = get_stacked_pipeline("sqr_crelu_forward", L2_u, 2 * L2_u);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, l1c,     0);
+        set_buffer(enc, l1x,     1);
+        set_buffer(enc, l1x_out, 2);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(L2_u, 1, 1)];
+    }
+    return std::make_tuple(l1x, l1x_out);
+}
+
+torch::Tensor sqr_crelu_backward_metal(
+        torch::Tensor grad_l1x,
+        torch::Tensor grad_l1x_out,
+        torch::Tensor l1c,
+        int64_t L2,
+        const std::string& src) {
+
+    ensure_stacked_init(src);
+
+    grad_l1x     = grad_l1x.contiguous();
+    grad_l1x_out = grad_l1x_out.contiguous();
+    l1c          = l1c.contiguous();
+
+    const int64_t batch = l1c.size(0);
+    const uint32_t L2_u = static_cast<uint32_t>(L2);
+
+    auto grad_l1c = torch::empty_like(l1c);
+    if (batch == 0) return grad_l1c;
+
+    auto pipeline = get_stacked_pipeline("sqr_crelu_backward", L2_u, 2 * L2_u);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, grad_l1x,     0);
+        set_buffer(enc, grad_l1x_out, 1);
+        set_buffer(enc, l1c,          2);
+        set_buffer(enc, grad_l1c,     3);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(L2_u, 1, 1)];
+    }
+    return grad_l1c;
+}
+
+// ---------------------------------------------------------------------------
 // Fused bias_grad = grad_a.sum(0) + grad_b.sum(0), single Metal dispatch.
 // ---------------------------------------------------------------------------
 torch::Tensor bias_grad_sum_metal(
@@ -1178,4 +1247,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Indexed stacked linear backward for grad_x (Metal)");
     m.def("bias_grad_sum", &bias_grad_sum_metal,
           "Fused bias_grad = grad_a.sum(0) + grad_b.sum(0) (Metal)");
+    m.def("sqr_crelu_forward", &sqr_crelu_forward_metal,
+          "Fused squared-clamp-relu forward (Metal)");
+    m.def("sqr_crelu_backward", &sqr_crelu_backward_metal,
+          "Fused squared-clamp-relu backward (Metal)");
 }

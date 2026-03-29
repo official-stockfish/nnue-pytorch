@@ -6,6 +6,16 @@ from torch import nn
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 from .config import LayerStacksConfig
 
+_HAS_METAL_SQR_CRELU = False
+try:
+    from .feature_transformer.metal import (
+        is_available as _metal_is_available,
+        metal_sqr_crelu,
+    )
+    _HAS_METAL_SQR_CRELU = _metal_is_available()
+except (ImportError, ModuleNotFoundError):
+    pass
+
 
 class LayerStacks(nn.Module):
     def __init__(self, count: int, config: LayerStacksConfig):
@@ -29,11 +39,14 @@ class LayerStacks(nn.Module):
 
     def forward(self, x: torch.Tensor, ls_indices: torch.Tensor):
         l1c_ = self.l1(x, ls_indices)
-        l1x_, l1x_out = l1c_.split(self.L2, dim=1)
-        # multiply sqr crelu result by (255/256) to match quantized version
-        l1x_ = torch.clamp(
-            torch.cat([torch.pow(l1x_, 2.0) * (255 / 256), l1x_], dim=1), 0.0, 1.0
-        )
+        if _HAS_METAL_SQR_CRELU and l1c_.device.type == "mps":
+            l1x_, l1x_out = metal_sqr_crelu(l1c_, self.L2)
+            l1x_out = l1x_out.unsqueeze(1)
+        else:
+            l1x_, l1x_out = l1c_.split(self.L2, dim=1)
+            l1x_ = torch.clamp(
+                torch.cat([torch.pow(l1x_, 2.0) * (255 / 256), l1x_], dim=1), 0.0, 1.0
+            )
 
         l2c_ = self.l2(l1x_, ls_indices)
         l2x_ = torch.clamp(l2c_, 0.0, 1.0)
