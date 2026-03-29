@@ -386,6 +386,103 @@ l0_mixing_backward_metal(
 }
 
 // ---------------------------------------------------------------------------
+// Composed double-perspective forward — fuses the weight merge (cat +
+// virtual_weight add) into the same command encoder as the sparse forward,
+// eliminating the intermediate merged tensor and MPS dispatch overhead.
+// ---------------------------------------------------------------------------
+std::tuple<torch::Tensor, torch::Tensor>
+sparse_linear_composed_double_forward_metal(
+        torch::Tensor w_indices, torch::Tensor w_values,
+        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor weight_a,  torch::Tensor weight_b,
+        torch::Tensor virtual_w, torch::Tensor bias,
+        int64_t       boundary,  int64_t       vw_period,
+        const std::string& fwd_src,
+        const std::string& bwd_cas_src,
+        const std::string& bwd_native_src) {
+
+    ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
+
+    w_indices = w_indices.contiguous();
+    w_values  = w_values.contiguous();
+    b_indices = b_indices.contiguous();
+    b_values  = b_values.contiguous();
+    weight_a  = weight_a.contiguous();
+    weight_b  = weight_b.contiguous();
+    virtual_w = virtual_w.contiguous();
+    bias      = bias.contiguous();
+
+    const int64_t  batch_size  = w_indices.size(0);
+    const uint32_t max_active  = static_cast<uint32_t>(w_indices.size(1));
+    const int64_t  num_a       = weight_a.size(0);
+    const int64_t  num_b       = weight_b.size(0);
+    const int64_t  total_rows  = num_a + num_b;
+    const uint32_t output_size = static_cast<uint32_t>(weight_a.size(1));
+
+    auto opts = w_indices.options().dtype(torch::kFloat32);
+    if (batch_size == 0 || output_size == 0) {
+        auto z = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+        return std::make_tuple(z, z.clone());
+    }
+
+    uint32_t num_threads = find_nearest_divisor(output_size, kSparseThreadTarget);
+    uint32_t slice_size  = output_size / num_threads;
+
+    // Merged weight buffer (avoids Python-side torch.cat + broadcast add)
+    auto merged = torch::empty({total_rows, static_cast<int64_t>(output_size)}, opts);
+
+    uint32_t merge_threads = output_size / 4;
+    uint32_t num_a_u32     = static_cast<uint32_t>(num_a);
+    uint32_t vw_period_u32 = static_cast<uint32_t>(vw_period);
+
+    auto merge_pipeline = get_pipeline(
+        g_fwd_library, "fused_weight_merge",
+        0, output_size, 0);
+    auto fwd_pipeline = get_pipeline(
+        g_fwd_library, "sparse_input_linear_forward",
+        max_active, output_size, slice_size);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+
+        // 1) Fused weight merge: cat(weight_a, weight_b + virtual_w) → merged
+        [enc setComputePipelineState:merge_pipeline];
+        set_buffer(enc, weight_a,  0);
+        set_buffer(enc, weight_b,  1);
+        set_buffer(enc, virtual_w, 2);
+        set_buffer(enc, merged,    3);
+        [enc setBytes:&num_a_u32     length:sizeof(uint32_t) atIndex:4];
+        [enc setBytes:&vw_period_u32 length:sizeof(uint32_t) atIndex:5];
+        [enc dispatchThreadgroups:MTLSizeMake(total_rows, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(merge_threads, 1, 1)];
+
+        // 2) Standard sparse forward (both perspectives)
+        [enc setComputePipelineState:fwd_pipeline];
+        [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
+        set_buffer(enc, merged, 2);
+        set_buffer(enc, bias,   3);
+
+        auto wp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+        auto bp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+
+        set_buffer(enc, w_indices, 0);
+        set_buffer(enc, w_values,  1);
+        set_buffer(enc, wp,        4);
+        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+
+        set_buffer(enc, b_indices, 0);
+        set_buffer(enc, b_values,  1);
+        set_buffer(enc, bp,        4);
+        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+
+        return std::make_tuple(wp, bp);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Double-perspective forward — dispatches both perspectives in one C++→Metal
 // call, sharing the same command encoder session.
 // ---------------------------------------------------------------------------
@@ -1058,6 +1155,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Sparse linear backward pass (Metal)");
     m.def("sparse_linear_double_forward",  &sparse_linear_double_forward_metal,
           "Double-perspective sparse linear forward (Metal)");
+    m.def("sparse_linear_composed_double_forward",
+          &sparse_linear_composed_double_forward_metal,
+          "Composed double-perspective sparse linear forward (Metal)");
     m.def("sparse_linear_double_backward", &sparse_linear_double_backward_metal,
           "Double-perspective sparse linear backward (Metal)");
     m.def("l0_mixing_forward",  &l0_mixing_forward_metal,

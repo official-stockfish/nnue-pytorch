@@ -10,6 +10,7 @@ try:
     from .modules.feature_transformer.metal import (
         is_available as _metal_is_available,
         metal_fused_double_forward_l0,
+        metal_fused_composed_double_forward_l0,
     )
     _HAS_METAL_FUSED = _metal_is_available()
 except (ImportError, ModuleNotFoundError):
@@ -87,16 +88,29 @@ class NNUEModel(nn.Module):
     ):
         if _HAS_METAL_FUSED and white_indices.device.type == "mps":
             ft = self.input
-            if hasattr(ft, "weight"):
+            if (hasattr(ft, "features") and len(ft.features) == 2
+                    and hasattr(ft.features[1], "virtual_weight")):
+                fa, fb = ft.features
+                l0_, wpsqt, bpsqt = metal_fused_composed_double_forward_l0(
+                    white_indices, white_values, black_indices, black_values,
+                    fa.weight, fb.weight, fb.virtual_weight, ft.bias,
+                    us, them, self.L1, self.num_psqt_buckets,
+                    fa.NUM_INPUTS, fb.NUM_INPUTS_VIRTUAL,
+                )
+            elif hasattr(ft, "weight"):
                 weight = ft.weight
+                l0_, wpsqt, bpsqt = metal_fused_double_forward_l0(
+                    white_indices, white_values, black_indices, black_values,
+                    weight, ft.bias, us, them, self.L1, self.num_psqt_buckets,
+                )
             else:
                 weight = torch.cat(
                     [f.merged_weight() for f in ft.features], dim=0
                 )
-            l0_, wpsqt, bpsqt = metal_fused_double_forward_l0(
-                white_indices, white_values, black_indices, black_values,
-                weight, ft.bias, us, them, self.L1, self.num_psqt_buckets,
-            )
+                l0_, wpsqt, bpsqt = metal_fused_double_forward_l0(
+                    white_indices, white_values, black_indices, black_values,
+                    weight, ft.bias, us, them, self.L1, self.num_psqt_buckets,
+                )
         else:
             wp, bp = self.input(
                 white_indices, white_values, black_indices, black_values

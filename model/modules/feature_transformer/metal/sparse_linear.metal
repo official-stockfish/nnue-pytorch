@@ -49,3 +49,42 @@ kernel void sparse_input_linear_forward(
     for (uint s = 0; s < FC_SLICE_SIZE; ++s)
         out_slice[s] = acc[s];
 }
+
+// ---------------------------------------------------------------------------
+// Fused weight merge: cat(weight_a, weight_b + virtual_w) → merged
+//
+// Writes weight_a rows directly, then weight_b rows with virtual_w added
+// on the fly. Eliminates the intermediate merged tensor from
+// HalfKav2Hm.merged_weight() + torch.cat().
+//
+// Grid: (num_a + num_b) threadgroups, FC_OUTPUT_SIZE / 4 threads each.
+// Thread t writes 4 consecutive elements of one output row.
+// ---------------------------------------------------------------------------
+kernel void fused_weight_merge(
+    device const float* weight_a   [[buffer(0)]],
+    device const float* weight_b   [[buffer(1)]],
+    device const float* virtual_w  [[buffer(2)]],
+    device float*       merged     [[buffer(3)]],
+    constant uint&      num_a      [[buffer(4)]],
+    constant uint&      vw_period  [[buffer(5)]],
+    uint tg  [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]]
+) {
+    const uint col = tid * 4;
+    if (col >= FC_OUTPUT_SIZE) return;
+    const uint n = min(FC_OUTPUT_SIZE - col, 4u);
+
+    device float* out_row = merged + tg * FC_OUTPUT_SIZE + col;
+
+    if (tg < num_a) {
+        device const float* src = weight_a + tg * FC_OUTPUT_SIZE + col;
+        for (uint i = 0; i < n; ++i)
+            out_row[i] = src[i];
+    } else {
+        uint local = tg - num_a;
+        device const float* wb = weight_b  + local * FC_OUTPUT_SIZE + col;
+        device const float* vw = virtual_w + (local % vw_period) * FC_OUTPUT_SIZE + col;
+        for (uint i = 0; i < n; ++i)
+            out_row[i] = wb[i] + vw[i];
+    }
+}
