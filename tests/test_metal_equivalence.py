@@ -21,6 +21,7 @@ from model.modules.feature_transformer.metal import (
     MetalSparseLinearFunction,
     is_available,
     metal_l0_mixing,
+    metal_fused_double_forward_l0,
 )
 
 DEVICE = "mps"
@@ -210,6 +211,60 @@ def test_fused_l0_mixing():
 
 
 # ---------------------------------------------------------------------------
+# Level 2c: Fused double sparse_linear + L0 mixing (single autograd node)
+# ---------------------------------------------------------------------------
+def test_fused_double_forward_l0():
+    assert is_available()
+
+    for B, N_IN, MAX_ACT, L1, PSQT, label in [
+        (16, 64, 8, 32, 4, "small"),
+        (64, 256, 32, 128, 8, "medium"),
+        (512, 4096, 32, 1024, 8, "training-shape"),
+    ]:
+        OUT = L1 + PSQT
+        torch.manual_seed(55)
+        w_idx, w_val = _make_inputs(B, N_IN, MAX_ACT, seed=10)
+        b_idx, b_val = _make_inputs(B, N_IN, MAX_ACT, seed=20)
+        us = torch.randint(0, 2, (B, 1), dtype=torch.float32)
+        them = 1 - us
+
+        # Reference: embedding_bag + PyTorch L0 ops
+        w_ref = torch.rand(N_IN, OUT, requires_grad=True)
+        b_ref = torch.rand(OUT, requires_grad=True)
+        wp_ref = _torch_sparse_linear(w_idx, w_val, w_ref, b_ref)
+        bp_ref = _torch_sparse_linear(b_idx, b_val, w_ref, b_ref)
+        wo, wpsqt_r = wp_ref.split(L1, dim=1)
+        bo, bpsqt_r = bp_ref.split(L1, dim=1)
+        l0 = (us * torch.cat([wo, bo], dim=1)) + (them * torch.cat([bo, wo], dim=1))
+        l0 = torch.clamp(l0, 0.0, 1.0)
+        s = l0.split(L1 // 2, dim=1)
+        l0_ref = torch.cat([s[0] * s[1], s[2] * s[3]], dim=1) * (127 / 128)
+        (l0_ref.sum() + wpsqt_r.sum() + bpsqt_r.sum()).backward()
+
+        # Metal fused path
+        w_met = w_ref.detach().clone().to(DEVICE).requires_grad_(True)
+        b_met = b_ref.detach().clone().to(DEVICE).requires_grad_(True)
+        l0_m, wp_m, bp_m = metal_fused_double_forward_l0(
+            w_idx.to(DEVICE), w_val.to(DEVICE),
+            b_idx.to(DEVICE), b_val.to(DEVICE),
+            w_met, b_met,
+            us.to(DEVICE), them.to(DEVICE), L1, PSQT,
+        )
+        (l0_m.sum() + wp_m.sum() + bp_m.sum()).backward()
+
+        fwd_err = (l0_ref - l0_m.cpu()).abs().max().item()
+        wg_err = (w_ref.grad - w_met.grad.cpu()).abs().max().item()
+        bg_err = (b_ref.grad - b_met.grad.cpu()).abs().max().item()
+        assert fwd_err < FWD_TOL, f"[{label}] fwd err {fwd_err:.2e}"
+        assert wg_err < GRAD_TOL, f"[{label}] w_grad err {wg_err:.2e}"
+        assert bg_err < GRAD_TOL, f"[{label}] b_grad err {bg_err:.2e}"
+        print(
+            f"  fused double+L0 [{label:14s}]  fwd={fwd_err:.2e}  "
+            f"wg={wg_err:.2e}  bg={bg_err:.2e}  PASS"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Level 3: full NNUEModel forward+backward
 # ---------------------------------------------------------------------------
 def test_full_model():
@@ -247,9 +302,6 @@ def test_full_model():
 
         if use_metal:
             dev = DEVICE
-            sparse_fn = lambda i, v, w, b: MetalSparseLinearFunction.apply(
-                i.to(dev), v.to(dev), w, b
-            )
             weight = weight.to(dev).requires_grad_(True)
             bias = bias.to(dev).requires_grad_(True)
             stacks = stacks.to(dev)
@@ -262,7 +314,6 @@ def test_full_model():
             _idx_b = idx_b.to(dev)
             _val_b = val_b.to(dev)
         else:
-            sparse_fn = _torch_sparse_linear
             weight = weight.requires_grad_(True)
             bias = bias.requires_grad_(True)
             _us, _them = us, them
@@ -270,12 +321,14 @@ def test_full_model():
             _idx_w, _val_w = idx_w, val_w
             _idx_b, _val_b = idx_b, val_b
 
-        wp = sparse_fn(_idx_w, _val_w, weight, bias)
-        bp = sparse_fn(_idx_b, _val_b, weight, bias)
-
         if use_metal:
-            l0, wpsqt, bpsqt = metal_l0_mixing(wp, bp, _us, _them, L1, PSQT)
+            l0, wpsqt, bpsqt = metal_fused_double_forward_l0(
+                _idx_w, _val_w, _idx_b, _val_b,
+                weight, bias, _us, _them, L1, PSQT,
+            )
         else:
+            wp = _torch_sparse_linear(_idx_w, _val_w, weight, bias)
+            bp = _torch_sparse_linear(_idx_b, _val_b, weight, bias)
             w_out, wpsqt = wp.split(L1, dim=1)
             b_out, bpsqt = bp.split(L1, dim=1)
             l0 = (_us * torch.cat([w_out, b_out], dim=1)) + (
@@ -360,6 +413,11 @@ if __name__ == "__main__":
     print("Level 2b: fused L0 mixing kernel")
     print("-" * 40)
     test_fused_l0_mixing()
+
+    print()
+    print("Level 2c: fused double sparse_linear + L0 mixing")
+    print("-" * 40)
+    test_fused_double_forward_l0()
 
     print()
     print("Level 3: full NNUEModel forward + backward")
