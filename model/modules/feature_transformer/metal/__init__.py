@@ -242,11 +242,11 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
     @staticmethod
     def forward(ctx, w_idx, w_val, b_idx, b_val,
                 weight_a, weight_b, virtual_w, bias,
-                us, them, L1, psqt, boundary, vw_period):
+                us, them, L1, psqt, vw_period):
         wp, bp = _cpp.sparse_linear_composed_double_forward(
             w_idx, w_val, b_idx, b_val,
             weight_a, weight_b, virtual_w, bias,
-            boundary, vw_period,
+            vw_period,
             _get_shader("sparse_linear.metal"),
             _get_shader("sparse_linear_backward_cas.metal"),
             _get_shader("sparse_linear_backward_native.metal"),
@@ -257,7 +257,7 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
         )
         ctx.save_for_backward(w_idx, w_val, b_idx, b_val, us, wp, bp)
         ctx.num_inputs = weight_a.size(0) + weight_b.size(0)
-        ctx.boundary = boundary
+        ctx.boundary = weight_a.size(0)
         ctx.vw_period = vw_period
         return l0, wpsqt, bpsqt
 
@@ -285,18 +285,18 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
 
         return (None, None, None, None,
                 grad_weight_a, grad_weight_b, grad_virtual_w, bias_grad,
-                None, None, None, None, None, None)
+                None, None, None, None, None)
 
 
 def metal_fused_composed_double_forward_l0(
         w_idx, w_val, b_idx, b_val,
         weight_a, weight_b, virtual_w, bias,
-        us, them, L1, psqt, boundary, vw_period):
+        us, them, L1, psqt, vw_period):
     """Composed fused double sparse_linear + L0 mixing — no merged weight."""
     return FusedComposedDoubleForwardL0Function.apply(
         w_idx, w_val, b_idx, b_val,
         weight_a, weight_b, virtual_w, bias,
-        us, them, L1, psqt, boundary, vw_period,
+        us, them, L1, psqt, vw_period,
     )
 
 

@@ -396,7 +396,7 @@ sparse_linear_composed_double_forward_metal(
         torch::Tensor b_indices, torch::Tensor b_values,
         torch::Tensor weight_a,  torch::Tensor weight_b,
         torch::Tensor virtual_w, torch::Tensor bias,
-        int64_t       boundary,  int64_t       vw_period,
+        int64_t       vw_period,
         const std::string& fwd_src,
         const std::string& bwd_cas_src,
         const std::string& bwd_native_src) {

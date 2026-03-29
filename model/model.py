@@ -89,7 +89,7 @@ class NNUEModel(nn.Module):
                     white_indices, white_values, black_indices, black_values,
                     fa.weight, fb.weight, fb.virtual_weight, ft.bias,
                     us, them, self.L1, self.num_psqt_buckets,
-                    fa.NUM_INPUTS, fb.NUM_INPUTS_VIRTUAL,
+                    fb.NUM_INPUTS_VIRTUAL,
                 )
             elif hasattr(ft, "weight"):
                 weight = ft.weight

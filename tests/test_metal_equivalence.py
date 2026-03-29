@@ -319,7 +319,7 @@ def test_fused_composed_double_forward_l0():
             w_idx.to(DEVICE), w_val.to(DEVICE),
             b_idx.to(DEVICE), b_val.to(DEVICE),
             wa_m, wb_m, vw_m, bi_m,
-            us.to(DEVICE), them.to(DEVICE), L1, PSQT, N_A, VW_P,
+            us.to(DEVICE), them.to(DEVICE), L1, PSQT, VW_P,
         )
         (l0_m.sum() + wp_m.sum() + bp_m.sum()).backward()
 
