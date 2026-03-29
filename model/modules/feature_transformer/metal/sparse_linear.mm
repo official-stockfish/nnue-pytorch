@@ -133,6 +133,28 @@ void set_buffer(id<MTLComputeCommandEncoder> enc,
            atIndex:idx];
 }
 
+static void prepare_sparse_forward(
+        id<MTLComputeCommandEncoder> enc,
+        id<MTLComputePipelineState> pipeline,
+        torch::Tensor weight, torch::Tensor bias,
+        uint32_t num_threads, uint32_t slice_size) {
+    [enc setComputePipelineState:pipeline];
+    [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
+    set_buffer(enc, weight, 2);
+    set_buffer(enc, bias,   3);
+}
+
+static void dispatch_sparse_perspective(
+        id<MTLComputeCommandEncoder> enc,
+        torch::Tensor indices, torch::Tensor values, torch::Tensor output,
+        uint32_t num_threads, int64_t batch_size) {
+    set_buffer(enc, indices, 0);
+    set_buffer(enc, values,  1);
+    set_buffer(enc, output,  4);
+    [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -177,15 +199,9 @@ torch::Tensor sparse_linear_forward_metal(
         auto stream = at::mps::getCurrentMPSStream();
         auto enc    = stream->commandEncoder();
 
-        [enc setComputePipelineState:pipeline];
-        [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
-        set_buffer(enc, input_indices, 0);
-        set_buffer(enc, input_values,  1);
-        set_buffer(enc, weight,        2);
-        set_buffer(enc, bias,          3);
-        set_buffer(enc, output,        4);
-        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+        prepare_sparse_forward(enc, pipeline, weight, bias, num_threads, slice_size);
+        dispatch_sparse_perspective(enc, input_indices, input_values, output,
+                                   num_threads, batch_size);
     }
 
     return output;
@@ -458,25 +474,12 @@ sparse_linear_composed_double_forward_metal(
             threadsPerThreadgroup:MTLSizeMake(merge_threads, 1, 1)];
 
         // 2) Standard sparse forward (both perspectives)
-        [enc setComputePipelineState:fwd_pipeline];
-        [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
-        set_buffer(enc, merged, 2);
-        set_buffer(enc, bias,   3);
-
         auto wp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
         auto bp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
 
-        set_buffer(enc, w_indices, 0);
-        set_buffer(enc, w_values,  1);
-        set_buffer(enc, wp,        4);
-        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
-
-        set_buffer(enc, b_indices, 0);
-        set_buffer(enc, b_values,  1);
-        set_buffer(enc, bp,        4);
-        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+        prepare_sparse_forward(enc, fwd_pipeline, merged, bias, num_threads, slice_size);
+        dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
 
         return std::make_tuple(wp, bp);
     }
@@ -528,22 +531,9 @@ sparse_linear_double_forward_metal(
         auto stream = at::mps::getCurrentMPSStream();
         auto enc    = stream->commandEncoder();
 
-        [enc setComputePipelineState:pipeline];
-        [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
-        set_buffer(enc, weight, 2);
-        set_buffer(enc, bias,   3);
-
-        set_buffer(enc, w_indices, 0);
-        set_buffer(enc, w_values,  1);
-        set_buffer(enc, wp,        4);
-        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
-
-        set_buffer(enc, b_indices, 0);
-        set_buffer(enc, b_values,  1);
-        set_buffer(enc, bp,        4);
-        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+        prepare_sparse_forward(enc, pipeline, weight, bias, num_threads, slice_size);
+        dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
     }
 
     return std::make_tuple(wp, bp);
