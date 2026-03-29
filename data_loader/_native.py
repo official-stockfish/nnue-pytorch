@@ -27,20 +27,23 @@ class SparseBatch(ctypes.Structure):
     ]
 
     def get_tensors(self, device):
-        # pin_memory is a CUDA-only optimisation for async transfers;
-        # on MPS (unified memory) it is both unnecessary and broken.
         use_pin = torch.cuda.is_available()
+        is_device_transfer = (device != "cpu" and device != torch.device("cpu"))
 
         def _prepare(arr, dtype_cast=None):
-            # .clone() copies out of the C-owned buffer before it is freed
-            # by destroy_part(); the original code relied on .pin_memory()
-            # for this copy, which is CUDA-only.
-            t = torch.from_numpy(arr).clone()
+            t = torch.from_numpy(arr)
             if dtype_cast is not None:
                 t = dtype_cast(t)
             if use_pin:
-                t = t.pin_memory()
-            return t.to(device=device, non_blocking=use_pin)
+                # CUDA path: clone into pinned memory for async DMA.
+                t = t.clone().pin_memory()
+                return t.to(device=device, non_blocking=True)
+            if is_device_transfer:
+                # MPS / other device: .to() already copies the data, so
+                # .clone() would be a redundant CPU-side memcpy.
+                return t.to(device=device)
+            # CPU-only: must clone to decouple from C-owned buffer.
+            return t.clone()
 
         white_values = _prepare(
             np.ctypeslib.as_array(

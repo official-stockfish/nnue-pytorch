@@ -147,11 +147,19 @@ def main():
     )
     data_iter = iter(ds)
 
-    print("Loading batches...", flush=True)
+    num_batches = WARMUP + STEPS
+    print(f"Loading {num_batches} batches...", flush=True)
     batches = []
-    for _ in range(WARMUP + STEPS):
+    load_times = []
+    for i in range(num_batches):
+        sync()
+        t0 = time.monotonic()
         batches.append(next(data_iter))
-    print(f"Loaded {len(batches)} batches.\n", flush=True)
+        sync()
+        load_times.append(time.monotonic() - t0)
+    load_med = sorted(load_times)[len(load_times) // 2]
+    print(f"Loaded {len(batches)} batches (median load: {load_med*1e3:.1f}ms).\n",
+          flush=True)
 
     gc.collect()
     gc.disable()
@@ -248,6 +256,7 @@ def main():
     avg_total = sum(timings["total"]) / len(timings["total"])
     results["total"] = {"median": round(total_med * 1e3, 2), "avg": round(avg_total * 1e3, 2)}
     results["throughput"] = round(BATCH_SIZE / total_med)
+    results["data_load"] = {"median": round(load_med * 1e3, 2)}
     results["optimizer_name"] = opt_name
     results["loss_name"] = loss_fn_name
 
