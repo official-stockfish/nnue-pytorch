@@ -133,3 +133,41 @@ kernel void l0_mixing_backward(
         gbp_b[FC_L1 + tid] = grad_bpsqt[b * FC_PSQT + tid];
     }
 }
+
+// ---------------------------------------------------------------------------
+// bias_grad = grad_wp.sum(dim=0) + grad_bp.sum(dim=0)
+//
+// One threadgroup per output column, each with TG_THREADS threads that
+// cooperatively reduce across the batch dimension using shared memory.
+// ---------------------------------------------------------------------------
+kernel void bias_grad_sum(
+    device const float* grad_a     [[buffer(0)]],  // (B, FC_OUT) - grad_wp
+    device const float* grad_b     [[buffer(1)]],  // (B, FC_OUT) - grad_bp
+    device float*       bias_grad  [[buffer(2)]],  // (FC_OUT,)
+    constant uint&      batch_size [[buffer(3)]],
+    uint tg_pos  [[threadgroup_position_in_grid]],
+    uint t_pos   [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]],
+    threadgroup float* shared [[threadgroup(0)]]
+) {
+    const uint col = tg_pos;
+    float sum = 0.0f;
+
+    for (uint i = t_pos; i < batch_size; i += tg_size) {
+        sum += grad_a[i * FC_OUT + col] + grad_b[i * FC_OUT + col];
+    }
+
+    shared[t_pos] = sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint stride = tg_size / 2; stride > 0; stride >>= 1) {
+        if (t_pos < stride) {
+            shared[t_pos] += shared[t_pos + stride];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    if (t_pos == 0) {
+        bias_grad[col] = shared[0];
+    }
+}

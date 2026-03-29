@@ -574,6 +574,12 @@ fused_backward_metal(
         g_bwd_library, "sparse_input_linear_backward",
         max_active, output_size, slice_size_bwd);
 
+    auto bias_grad = torch::empty({static_cast<int64_t>(output_size)}, opts);
+
+    auto bias_pipeline = get_l0_pipeline("bias_grad_sum", uL1, uH, uPSQT, uOUT);
+    constexpr uint32_t kBiasTgThreads = 256;
+    uint32_t batch_u32 = static_cast<uint32_t>(batch);
+
     @autoreleasepool {
         auto stream = at::mps::getCurrentMPSStream();
         auto enc    = stream->commandEncoder();
@@ -592,6 +598,17 @@ fused_backward_metal(
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(uH, 1, 1)];
 
+        // Bias grad reduction — one threadgroup per output column,
+        // dispatched right after L0 backward produces grad_wp/grad_bp.
+        [enc setComputePipelineState:bias_pipeline];
+        set_buffer(enc, grad_wp,    0);
+        set_buffer(enc, grad_bp,    1);
+        set_buffer(enc, bias_grad,  2);
+        [enc setBytes:&batch_u32 length:sizeof(uint32_t) atIndex:3];
+        [enc setThreadgroupMemoryLength:kBiasTgThreads * sizeof(float) atIndex:0];
+        [enc dispatchThreadgroups:MTLSizeMake(uOUT, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(kBiasTgThreads, 1, 1)];
+
         // Sparse backward — white perspective
         [enc setComputePipelineState:bwd_pipeline];
         set_buffer(enc, weight_grad, 2);
@@ -608,9 +625,6 @@ fused_backward_metal(
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
     }
-
-    // bias_grad = grad_wp.sum(0) + grad_bp.sum(0)
-    auto bias_grad = grad_wp.sum(0).add_(grad_bp.sum(0));
 
     return std::make_tuple(weight_grad, bias_grad);
 }
