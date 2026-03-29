@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .functions import sparse_linear
+from .functions import double_sparse_linear, sparse_linear
 
 
 class BaseFeatureTransformer(nn.Module):
@@ -51,17 +51,11 @@ class DoubleFeatureTransformer(BaseFeatureTransformer):
     def forward(
         self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
     ):
-        return (
-            sparse_linear(
-                feature_indices_0,
-                feature_values_0,
-                self.weight,
-                self.bias,
-            ),
-            sparse_linear(
-                feature_indices_1,
-                feature_values_1,
-                self.weight,
-                self.bias,
-            ),
+        return double_sparse_linear(
+            feature_indices_0,
+            feature_values_0,
+            feature_indices_1,
+            feature_values_1,
+            self.weight,
+            self.bias,
         )

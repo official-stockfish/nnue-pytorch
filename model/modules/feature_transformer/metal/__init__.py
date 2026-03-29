@@ -125,6 +125,95 @@ def metal_sparse_linear(feature_indices, feature_values, weight, bias):
     )
 
 
+class DoubleMetalSparseLinearFunction(autograd.Function):
+    """Both perspectives in one autograd node — shares a single weight_grad
+    tensor in the backward, eliminating the ~0.84 ms autograd accumulation
+    overhead from adding two separate 96 MB gradient tensors."""
+
+    @staticmethod
+    def forward(ctx, w_indices, w_values, b_indices, b_values, weight, bias):
+        ctx.save_for_backward(w_indices, w_values, b_indices, b_values, weight, bias)
+        wp, bp = _cpp.sparse_linear_double_forward(
+            w_indices, w_values, b_indices, b_values, weight, bias,
+            _get_shader("sparse_linear.metal"),
+            _get_shader("sparse_linear_backward_cas.metal"),
+            _get_shader("sparse_linear_backward_native.metal"),
+        )
+        return wp, bp
+
+    @staticmethod
+    def backward(ctx, grad_wp, grad_bp):
+        w_indices, w_values, b_indices, b_values, weight, bias = ctx.saved_tensors
+        grad_wp = grad_wp.contiguous()
+        grad_bp = grad_bp.contiguous()
+        weight_grad = _cpp.sparse_linear_double_backward(
+            w_indices, w_values, b_indices, b_values,
+            grad_wp, grad_bp, weight.size(0),
+            _get_shader("sparse_linear.metal"),
+            _get_shader("sparse_linear_backward_cas.metal"),
+            _get_shader("sparse_linear_backward_native.metal"),
+        )
+        bias_grad = grad_wp.sum(dim=0) + grad_bp.sum(dim=0)
+        return None, None, None, None, weight_grad, bias_grad
+
+
+def metal_double_sparse_linear(w_indices, w_values, b_indices, b_values, weight, bias):
+    """Double-perspective sparse linear with shared weight_grad in backward."""
+    return DoubleMetalSparseLinearFunction.apply(
+        w_indices, w_values, b_indices, b_values, weight, bias
+    )
+
+
+class FusedDoubleForwardL0Function(autograd.Function):
+    """Single autograd node for: double sparse_linear → L0 mixing.
+
+    Eliminates autograd overhead for the intermediate wp/bp tensors and
+    uses a single shared weight_grad in the backward (saves ~0.84 ms per
+    step from avoiding the redundant alloc + element-wise addition)."""
+
+    @staticmethod
+    def forward(ctx, w_idx, w_val, b_idx, b_val, weight, bias, us, them, L1, psqt):
+        wp, bp = _cpp.sparse_linear_double_forward(
+            w_idx, w_val, b_idx, b_val, weight, bias,
+            _get_shader("sparse_linear.metal"),
+            _get_shader("sparse_linear_backward_cas.metal"),
+            _get_shader("sparse_linear_backward_native.metal"),
+        )
+        l0, wpsqt, bpsqt = _cpp.l0_mixing_forward(
+            wp, bp, us, them, L1, psqt,
+            _get_shader("l0_mixing.metal"),
+        )
+        ctx.save_for_backward(w_idx, w_val, b_idx, b_val, us, wp, bp)
+        ctx.num_inputs = weight.size(0)
+        return l0, wpsqt, bpsqt
+
+    @staticmethod
+    def backward(ctx, grad_l0, grad_wpsqt, grad_bpsqt):
+        w_idx, w_val, b_idx, b_val, us, wp, bp = ctx.saved_tensors
+        them = 1.0 - us
+
+        weight_grad, grad_wp, grad_bp = _cpp.fused_backward(
+            grad_l0.contiguous(), grad_wpsqt.contiguous(), grad_bpsqt.contiguous(),
+            wp, bp, us, them,
+            w_idx, w_val, b_idx, b_val,
+            ctx.num_inputs,
+            _get_shader("sparse_linear.metal"),
+            _get_shader("sparse_linear_backward_cas.metal"),
+            _get_shader("sparse_linear_backward_native.metal"),
+            _get_shader("l0_mixing.metal"),
+        )
+        bias_grad = grad_wp.sum(dim=0) + grad_bp.sum(dim=0)
+        return None, None, None, None, weight_grad, bias_grad, None, None, None, None
+
+
+def metal_fused_double_forward_l0(w_idx, w_val, b_idx, b_val, weight, bias,
+                                   us, them, L1, psqt):
+    """Fused double sparse_linear + L0 mixing — single autograd node."""
+    return FusedDoubleForwardL0Function.apply(
+        w_idx, w_val, b_idx, b_val, weight, bias, us, them, L1, psqt
+    )
+
+
 class FusedL0MixingFunction(autograd.Function):
     @staticmethod
     def forward(ctx, wp, bp, us, them, L1, psqt):

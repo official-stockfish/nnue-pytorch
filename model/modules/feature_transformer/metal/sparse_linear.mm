@@ -381,13 +381,252 @@ l0_mixing_backward_metal(
 }
 
 // ---------------------------------------------------------------------------
+// Double-perspective forward — dispatches both perspectives in one C++→Metal
+// call, sharing the same command encoder session.
+// ---------------------------------------------------------------------------
+std::tuple<torch::Tensor, torch::Tensor>
+sparse_linear_double_forward_metal(
+        torch::Tensor w_indices, torch::Tensor w_values,
+        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor weight,    torch::Tensor bias,
+        const std::string& fwd_src,
+        const std::string& bwd_cas_src,
+        const std::string& bwd_native_src) {
+
+    ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
+
+    w_indices = w_indices.contiguous();
+    w_values  = w_values.contiguous();
+    b_indices = b_indices.contiguous();
+    b_values  = b_values.contiguous();
+    weight    = weight.contiguous();
+    bias      = bias.contiguous();
+
+    const int64_t  batch_size  = w_indices.size(0);
+    const uint32_t max_active  = static_cast<uint32_t>(w_indices.size(1));
+    const uint32_t output_size = static_cast<uint32_t>(weight.size(1));
+
+    auto opts = w_indices.options().dtype(torch::kFloat32);
+    if (batch_size == 0 || output_size == 0) {
+        auto z = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+        return std::make_tuple(z, z.clone());
+    }
+
+    uint32_t num_threads = find_nearest_divisor(output_size, 512);
+    uint32_t slice_size  = output_size / num_threads;
+
+    auto pipeline = get_pipeline(
+        g_fwd_library, "sparse_input_linear_forward",
+        max_active, output_size, slice_size);
+
+    auto wp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+    auto bp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, weight, 2);
+        set_buffer(enc, bias,   3);
+
+        set_buffer(enc, w_indices, 0);
+        set_buffer(enc, w_values,  1);
+        set_buffer(enc, wp,        4);
+        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+
+        set_buffer(enc, b_indices, 0);
+        set_buffer(enc, b_values,  1);
+        set_buffer(enc, bp,        4);
+        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+    }
+
+    return std::make_tuple(wp, bp);
+}
+
+// ---------------------------------------------------------------------------
+// Double-perspective backward — dispatches both perspectives into ONE shared
+// weight_grad tensor, eliminating the 96 MB allocation + element-wise
+// addition that autograd would otherwise perform.
+// ---------------------------------------------------------------------------
+torch::Tensor sparse_linear_double_backward_metal(
+        torch::Tensor w_indices, torch::Tensor w_values,
+        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor grad_wp,   torch::Tensor grad_bp,
+        int64_t       num_inputs,
+        const std::string& fwd_src,
+        const std::string& bwd_cas_src,
+        const std::string& bwd_native_src) {
+
+    ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
+
+    w_indices = w_indices.contiguous();
+    w_values  = w_values.contiguous();
+    b_indices = b_indices.contiguous();
+    b_values  = b_values.contiguous();
+    grad_wp   = grad_wp.contiguous();
+    grad_bp   = grad_bp.contiguous();
+
+    const int64_t  batch_size  = w_indices.size(0);
+    const uint32_t max_active  = static_cast<uint32_t>(w_indices.size(1));
+    const uint32_t output_size = static_cast<uint32_t>(grad_wp.size(1));
+
+    auto opts = w_indices.options().dtype(torch::kFloat32);
+
+    if (batch_size == 0 || output_size == 0) {
+        return torch::zeros(
+            {num_inputs, static_cast<int64_t>(output_size)}, opts);
+    }
+
+    uint32_t num_threads = find_nearest_divisor(output_size, 512);
+    uint32_t slice_size  = output_size / num_threads;
+
+    auto pipeline = get_pipeline(
+        g_bwd_library, "sparse_input_linear_backward",
+        max_active, output_size, slice_size);
+
+    auto weight_grad = torch::empty(
+        {num_inputs, static_cast<int64_t>(output_size)}, opts).fill_(0);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+
+        [enc setComputePipelineState:pipeline];
+        set_buffer(enc, weight_grad, 2);
+
+        set_buffer(enc, w_indices, 0);
+        set_buffer(enc, w_values,  1);
+        set_buffer(enc, grad_wp,   3);
+        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+
+        set_buffer(enc, b_indices, 0);
+        set_buffer(enc, b_values,  1);
+        set_buffer(enc, grad_bp,   3);
+        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+    }
+
+    return weight_grad;
+}
+
+// ---------------------------------------------------------------------------
+// Fused backward: L0 mixing backward → double sparse backward, chained in
+// one C++ call to avoid Python roundtrip between kernels.  Returns
+// (weight_grad, grad_wp, grad_bp) — grad_wp/bp still needed for bias_grad.
+// ---------------------------------------------------------------------------
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+fused_backward_metal(
+        torch::Tensor grad_l0,    torch::Tensor grad_wpsqt,
+        torch::Tensor grad_bpsqt, torch::Tensor wp,
+        torch::Tensor bp,         torch::Tensor us,
+        torch::Tensor them,
+        torch::Tensor w_indices,  torch::Tensor w_values,
+        torch::Tensor b_indices,  torch::Tensor b_values,
+        int64_t       num_inputs,
+        const std::string& fwd_src,
+        const std::string& bwd_cas_src,
+        const std::string& bwd_native_src,
+        const std::string& l0_src) {
+
+    ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
+    ensure_l0_init(l0_src);
+
+    grad_l0    = grad_l0.contiguous();
+    grad_wpsqt = grad_wpsqt.contiguous();
+    grad_bpsqt = grad_bpsqt.contiguous();
+    w_indices  = w_indices.contiguous();
+    w_values   = w_values.contiguous();
+    b_indices  = b_indices.contiguous();
+    b_values   = b_values.contiguous();
+
+    const int64_t batch  = wp.size(0);
+    const int64_t out    = wp.size(1);
+    const int64_t psqt   = grad_wpsqt.size(1);
+    const int64_t L1     = out - psqt;
+    const uint32_t uL1   = static_cast<uint32_t>(L1);
+    const uint32_t uH    = uL1 / 2;
+    const uint32_t uPSQT = static_cast<uint32_t>(psqt);
+    const uint32_t uOUT  = static_cast<uint32_t>(out);
+
+    auto opts = w_indices.options().dtype(torch::kFloat32);
+
+    // L0 backward outputs
+    auto grad_wp = torch::empty({batch, out}, wp.options());
+    auto grad_bp = torch::empty({batch, out}, wp.options());
+
+    // Shared weight_grad (zeroed once)
+    const uint32_t max_active  = static_cast<uint32_t>(w_indices.size(1));
+    const uint32_t output_size = static_cast<uint32_t>(out);
+    uint32_t num_threads_bwd = find_nearest_divisor(output_size, 512);
+    uint32_t slice_size_bwd  = output_size / num_threads_bwd;
+
+    auto weight_grad = torch::empty(
+        {num_inputs, static_cast<int64_t>(output_size)}, opts).fill_(0);
+
+    // L0 backward pipeline
+    auto l0_pipeline = get_l0_pipeline("l0_mixing_backward", uL1, uH, uPSQT, uOUT);
+
+    // Sparse backward pipeline
+    auto bwd_pipeline = get_pipeline(
+        g_bwd_library, "sparse_input_linear_backward",
+        max_active, output_size, slice_size_bwd);
+
+    @autoreleasepool {
+        auto stream = at::mps::getCurrentMPSStream();
+        auto enc    = stream->commandEncoder();
+
+        // L0 mixing backward
+        [enc setComputePipelineState:l0_pipeline];
+        set_buffer(enc, grad_l0,    0);
+        set_buffer(enc, grad_wpsqt, 1);
+        set_buffer(enc, grad_bpsqt, 2);
+        set_buffer(enc, wp,         3);
+        set_buffer(enc, bp,         4);
+        set_buffer(enc, us,         5);
+        set_buffer(enc, them,       6);
+        set_buffer(enc, grad_wp,    7);
+        set_buffer(enc, grad_bp,    8);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(uH, 1, 1)];
+
+        // Sparse backward — white perspective
+        [enc setComputePipelineState:bwd_pipeline];
+        set_buffer(enc, weight_grad, 2);
+        set_buffer(enc, w_indices,   0);
+        set_buffer(enc, w_values,    1);
+        set_buffer(enc, grad_wp,     3);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
+
+        // Sparse backward — black perspective (same weight_grad)
+        set_buffer(enc, b_indices, 0);
+        set_buffer(enc, b_values,  1);
+        set_buffer(enc, grad_bp,   3);
+        [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
+    }
+
+    return std::make_tuple(weight_grad, grad_wp, grad_bp);
+}
+
+// ---------------------------------------------------------------------------
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("sparse_linear_forward",  &sparse_linear_forward_metal,
           "Sparse linear forward pass (Metal)");
     m.def("sparse_linear_backward", &sparse_linear_backward_metal,
           "Sparse linear backward pass (Metal)");
+    m.def("sparse_linear_double_forward",  &sparse_linear_double_forward_metal,
+          "Double-perspective sparse linear forward (Metal)");
+    m.def("sparse_linear_double_backward", &sparse_linear_double_backward_metal,
+          "Double-perspective sparse linear backward (Metal)");
     m.def("l0_mixing_forward",  &l0_mixing_forward_metal,
           "Fused L0 mixing forward (Metal)");
     m.def("l0_mixing_backward", &l0_mixing_backward_metal,
           "Fused L0 mixing backward (Metal)");
+    m.def("fused_backward", &fused_backward_metal,
+          "Fused L0 backward + double sparse backward (Metal)");
 }
