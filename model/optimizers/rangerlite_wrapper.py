@@ -66,9 +66,10 @@ class RangerLiteWrapper:
             )
 
         else:
-            scheduler = SafeOneCycleLR(
+            one_cycle_scheduler = SafeOneCycleLR(
                 self.optimizer, max_lr=self.lr, total_steps=self.cycle_steps, final_div_factor=1e3
             )
+            scheduler = {"scheduler": one_cycle_scheduler, "interval": "step"}
 
         print(
             f"[RangerLiteSetup] gamma={self.gamma} pnm_momentum={self.pnm_momentum}."
