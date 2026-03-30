@@ -82,6 +82,11 @@ def _load_extension():
         return None
 
 
+def _mps_sync():
+    """No-op — synchronization is handled inside MetalScope in C++."""
+    pass
+
+
 def is_available() -> bool:
     """True when Metal kernels can be used (macOS + MPS + extension builds)."""
     if sys.platform != "darwin":
@@ -107,6 +112,7 @@ class MetalSparseLinearFunction(autograd.Function):
         assert weight.dtype == torch.float32
         assert bias.dtype == torch.float32
 
+        _mps_sync()
         return _cpp.sparse_linear_forward(
             feature_indices,
             feature_values,
@@ -121,6 +127,7 @@ class MetalSparseLinearFunction(autograd.Function):
     def backward(ctx, grad_output):
         feature_indices, feature_values, weight, bias = ctx.saved_tensors
         grad_output = grad_output.contiguous()
+        _mps_sync()
         weight_grad = _cpp.sparse_linear_backward(
             feature_indices,
             feature_values,
@@ -149,6 +156,7 @@ class DoubleMetalSparseLinearFunction(autograd.Function):
     @staticmethod
     def forward(ctx, w_indices, w_values, b_indices, b_values, weight, bias):
         ctx.save_for_backward(w_indices, w_values, b_indices, b_values, weight, bias)
+        _mps_sync()
         wp, bp = _cpp.sparse_linear_double_forward(
             w_indices, w_values, b_indices, b_values, weight, bias,
             _get_shader("sparse_linear.metal"),
@@ -162,6 +170,7 @@ class DoubleMetalSparseLinearFunction(autograd.Function):
         w_indices, w_values, b_indices, b_values, weight, bias = ctx.saved_tensors
         grad_wp = grad_wp.contiguous()
         grad_bp = grad_bp.contiguous()
+        _mps_sync()
         weight_grad = _cpp.sparse_linear_double_backward(
             w_indices, w_values, b_indices, b_values,
             grad_wp, grad_bp, weight.size(0),
@@ -169,6 +178,7 @@ class DoubleMetalSparseLinearFunction(autograd.Function):
             _get_shader("sparse_linear_backward_cas.metal"),
             _get_shader("sparse_linear_backward_native.metal"),
         )
+        _mps_sync()
         bias_grad = _cpp.bias_grad_sum(
             grad_wp, grad_bp, _get_shader("l0_mixing.metal"),
         )
@@ -191,12 +201,14 @@ class FusedDoubleForwardL0Function(autograd.Function):
 
     @staticmethod
     def forward(ctx, w_idx, w_val, b_idx, b_val, weight, bias, us, them, L1, psqt):
+        _mps_sync()
         wp, bp = _cpp.sparse_linear_double_forward(
             w_idx, w_val, b_idx, b_val, weight, bias,
             _get_shader("sparse_linear.metal"),
             _get_shader("sparse_linear_backward_cas.metal"),
             _get_shader("sparse_linear_backward_native.metal"),
         )
+        _mps_sync()
         l0, wpsqt, bpsqt = _cpp.l0_mixing_forward(
             wp, bp, us, them, L1, psqt,
             _get_shader("l0_mixing.metal"),
@@ -210,6 +222,7 @@ class FusedDoubleForwardL0Function(autograd.Function):
         w_idx, w_val, b_idx, b_val, us, wp, bp = ctx.saved_tensors
         them = 1.0 - us
 
+        _mps_sync()
         weight_grad, bias_grad = _cpp.fused_backward(
             grad_l0.contiguous(), grad_wpsqt.contiguous(), grad_bpsqt.contiguous(),
             wp, bp, us, them,
@@ -243,6 +256,7 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
     def forward(ctx, w_idx, w_val, b_idx, b_val,
                 weight_a, weight_b, virtual_w, bias,
                 us, them, L1, psqt, vw_period):
+        _mps_sync()
         wp, bp = _cpp.sparse_linear_composed_double_forward(
             w_idx, w_val, b_idx, b_val,
             weight_a, weight_b, virtual_w, bias,
@@ -251,6 +265,7 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
             _get_shader("sparse_linear_backward_cas.metal"),
             _get_shader("sparse_linear_backward_native.metal"),
         )
+        _mps_sync()
         l0, wpsqt, bpsqt = _cpp.l0_mixing_forward(
             wp, bp, us, them, L1, psqt,
             _get_shader("l0_mixing.metal"),
@@ -266,6 +281,7 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
         w_idx, w_val, b_idx, b_val, us, wp, bp = ctx.saved_tensors
         them = 1.0 - us
 
+        _mps_sync()
         weight_grad, bias_grad = _cpp.fused_backward(
             grad_l0.contiguous(), grad_wpsqt.contiguous(), grad_bpsqt.contiguous(),
             wp, bp, us, them,
@@ -308,6 +324,7 @@ class FusedL0MixingFunction(autograd.Function):
     @staticmethod
     def forward(ctx, wp, bp, us, them, L1, psqt):
         ctx.save_for_backward(wp, bp, us, them)
+        _mps_sync()
         l0, wpsqt, bpsqt = _cpp.l0_mixing_forward(
             wp, bp, us, them, L1, psqt,
             _get_shader("l0_mixing.metal"),
@@ -317,6 +334,7 @@ class FusedL0MixingFunction(autograd.Function):
     @staticmethod
     def backward(ctx, grad_l0, grad_wpsqt, grad_bpsqt):
         wp, bp, us, them = ctx.saved_tensors
+        _mps_sync()
         grad_wp, grad_bp = _cpp.l0_mixing_backward(
             grad_l0.contiguous(),
             grad_wpsqt.contiguous(),
@@ -339,6 +357,7 @@ class FusedLossFunction(autograd.Function):
     def forward(ctx, scorenet, score, outcome,
                 in_offset, in_scaling, out_offset, out_scaling,
                 actual_lambda, pow_exp, qp_asymmetry, w1_factor, w2):
+        _mps_sync()
         partial_wloss, partial_weights = _cpp.loss_forward(
             scorenet, score, outcome,
             in_offset, in_scaling, out_offset, out_scaling,
@@ -363,6 +382,7 @@ class FusedLossFunction(autograd.Function):
 
         grad_scale = (grad_output / weights_sum).view(1)
 
+        _mps_sync()
         grad_scorenet = _cpp.loss_backward(
             scorenet, score, outcome, grad_scale,
             in_offset, in_scaling, out_offset, out_scaling,
@@ -392,6 +412,7 @@ class IndexedStackedLinearFunction(autograd.Function):
 
     @staticmethod
     def forward(ctx, x, weight, bias, indices, out_size, count):
+        _mps_sync()
         output = _cpp.indexed_stacked_linear_forward(
             x, weight, bias, indices, out_size,
             _get_shader("stacked_linear.metal"),
@@ -408,6 +429,7 @@ class IndexedStackedLinearFunction(autograd.Function):
         count = ctx.count
         grad_output = grad_output.contiguous()
 
+        _mps_sync()
         grad_x = _cpp.indexed_stacked_linear_backward_x(
             grad_output, weight, indices,
             _get_shader("stacked_linear.metal"),
@@ -442,6 +464,7 @@ class FusedSqrCReluFunction(autograd.Function):
 
     @staticmethod
     def forward(ctx, l1c, L2):
+        _mps_sync()
         l1x, l1x_out = _cpp.sqr_crelu_forward(
             l1c, L2, _get_shader("stacked_linear.metal"),
         )
@@ -452,6 +475,7 @@ class FusedSqrCReluFunction(autograd.Function):
     @staticmethod
     def backward(ctx, grad_l1x, grad_l1x_out):
         l1c, = ctx.saved_tensors
+        _mps_sync()
         grad_l1c = _cpp.sqr_crelu_backward(
             grad_l1x.contiguous(), grad_l1x_out.contiguous(),
             l1c, ctx.L2, _get_shader("stacked_linear.metal"),
@@ -469,6 +493,7 @@ def metal_fused_adam_step_multi(params, grads, grad_mas, variance_mas,
                                 beta2, one_minus_beta2,
                                 inv_sqrt_bc2, step_size, eps):
     """Multi-tensor fused Adam step — one C++ call for all params."""
+    _mps_sync()
     _cpp.fused_adam_step_multi(
         params, grads, grad_mas, variance_mas,
         beta1_sq, one_minus_beta1_sq,

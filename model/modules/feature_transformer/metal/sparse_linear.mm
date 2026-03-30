@@ -133,6 +133,45 @@ void set_buffer(id<MTLComputeCommandEncoder> enc,
            atIndex:idx];
 }
 
+// PyTorch 2.11+'s MPS stream can leave its internal _commandBuffer in a
+// committed state after tensor-copy ops (.to(device)).  Calling the
+// stream's commandEncoder() then aborts with
+//   "failed assertion _status < MTLCommandBufferStatusCommitted".
+//
+// Fix: allocate a fresh command buffer on the stream's command queue for
+// each custom kernel dispatch.  mps_drain() (exposed to Python) must be
+// called before each dispatch to flush pending PyTorch MPS work on the
+// serial queue and commit/wait the stream's buffer so that all input
+// tensor data is available to the GPU.
+
+struct MetalScope {
+    id<MTLComputeCommandEncoder> enc;
+
+    MetalScope() {
+        auto stream = at::mps::getCurrentMPSStream();
+        at::mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
+            stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
+        });
+        _buf = [stream->commandQueue() commandBuffer];
+        enc = [_buf computeCommandEncoder];
+    }
+
+    void finish() {
+        [enc endEncoding];
+        [_buf commit];
+    }
+
+private:
+    id<MTLCommandBuffer> _buf;
+};
+
+void mps_drain() {
+    auto stream = at::mps::getCurrentMPSStream();
+    at::mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
+        stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
+    });
+}
+
 static void prepare_sparse_forward(
         id<MTLComputeCommandEncoder> enc,
         id<MTLComputePipelineState> pipeline,
@@ -196,12 +235,14 @@ torch::Tensor sparse_linear_forward_metal(
         input_indices.options().dtype(torch::kFloat32));
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         prepare_sparse_forward(enc, pipeline, weight, bias, num_threads, slice_size);
         dispatch_sparse_perspective(enc, input_indices, input_values, output,
                                    num_threads, batch_size);
+
+        scope.finish();
     }
 
     return output;
@@ -247,8 +288,8 @@ torch::Tensor sparse_linear_backward_metal(
         {num_inputs, static_cast<int64_t>(output_size)}, opts).fill_(0);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         [enc setComputePipelineState:pipeline];
         [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
@@ -258,6 +299,8 @@ torch::Tensor sparse_linear_backward_metal(
         set_buffer(enc, grad_output,   3);
         [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+
+        scope.finish();
     }
 
     return weight_grad;
@@ -336,8 +379,8 @@ l0_mixing_forward_metal(
     auto pipeline = get_l0_pipeline("l0_mixing_forward", uL1, uH, uPSQT, uOUT);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
         [enc setComputePipelineState:pipeline];
         set_buffer(enc, wp, 0);
         set_buffer(enc, bp, 1);
@@ -348,6 +391,7 @@ l0_mixing_forward_metal(
         set_buffer(enc, bpsqt, 6);
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(uH, 1, 1)];
+        scope.finish();
     }
 
     return std::make_tuple(l0, wpsqt, bpsqt);
@@ -382,8 +426,8 @@ l0_mixing_backward_metal(
     auto pipeline = get_l0_pipeline("l0_mixing_backward", uL1, uH, uPSQT, uOUT);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
         [enc setComputePipelineState:pipeline];
         set_buffer(enc, grad_l0, 0);
         set_buffer(enc, grad_wpsqt, 1);
@@ -396,6 +440,7 @@ l0_mixing_backward_metal(
         set_buffer(enc, grad_bp, 8);
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(uH, 1, 1)];
+        scope.finish();
     }
 
     return std::make_tuple(grad_wp, grad_bp);
@@ -458,9 +503,12 @@ sparse_linear_composed_double_forward_metal(
         g_fwd_library, "sparse_input_linear_forward",
         max_active, output_size, slice_size);
 
+    auto wp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+    auto bp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         // 1) Fused weight merge: cat(weight_a, weight_b + virtual_w) → merged
         [enc setComputePipelineState:merge_pipeline];
@@ -474,13 +522,11 @@ sparse_linear_composed_double_forward_metal(
             threadsPerThreadgroup:MTLSizeMake(merge_threads, 1, 1)];
 
         // 2) Standard sparse forward (both perspectives)
-        auto wp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
-        auto bp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
-
         prepare_sparse_forward(enc, fwd_pipeline, merged, bias, num_threads, slice_size);
         dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
         dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
 
+        scope.finish();
         return std::make_tuple(wp, bp);
     }
 }
@@ -528,12 +574,14 @@ sparse_linear_double_forward_metal(
     auto bp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         prepare_sparse_forward(enc, pipeline, weight, bias, num_threads, slice_size);
         dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
         dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
+
+        scope.finish();
     }
 
     return std::make_tuple(wp, bp);
@@ -584,8 +632,8 @@ torch::Tensor sparse_linear_double_backward_metal(
         {num_inputs, static_cast<int64_t>(output_size)}, opts).fill_(0);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         [enc setComputePipelineState:pipeline];
         [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
@@ -602,6 +650,8 @@ torch::Tensor sparse_linear_double_backward_metal(
         set_buffer(enc, grad_bp,   3);
         [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+
+        scope.finish();
     }
 
     return weight_grad;
@@ -668,8 +718,8 @@ fused_backward_metal(
     auto bg_pipeline = get_l0_pipeline("bias_grad_sum", uL1, uH, uPSQT, uOUT);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         // L0 mixing backward
         [enc setComputePipelineState:l0_pipeline];
@@ -713,6 +763,8 @@ fused_backward_metal(
         [enc setThreadgroupMemoryLength:kBiasGradThreads * sizeof(float) atIndex:0];
         [enc dispatchThreadgroups:MTLSizeMake(uOUT, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(kBiasGradThreads, 1, 1)];
+
+        scope.finish();
     }
 
     return std::make_tuple(weight_grad, bias_grad);
@@ -801,8 +853,8 @@ loss_forward_metal(
     auto pipeline = get_loss_pipeline("loss_forward");
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         [enc setComputePipelineState:pipeline];
         set_buffer(enc, scorenet,        0);
@@ -815,6 +867,8 @@ loss_forward_metal(
         [enc setThreadgroupMemoryLength:2 * kTgThreads * sizeof(float) atIndex:0];
         [enc dispatchThreadgroups:MTLSizeMake(num_tg, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
+
+        scope.finish();
     }
 
     return std::make_tuple(partial_wloss, partial_weights);
@@ -856,8 +910,8 @@ torch::Tensor loss_backward_metal(
     auto pipeline = get_loss_pipeline("loss_backward");
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         [enc setComputePipelineState:pipeline];
         set_buffer(enc, scorenet,       0);
@@ -869,6 +923,8 @@ torch::Tensor loss_backward_metal(
         [enc setBytes:&batch_u32  length:sizeof(uint32_t)      atIndex:6];
         [enc dispatchThreadgroups:MTLSizeMake(num_tg, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
+
+        scope.finish();
     }
 
     return grad_scorenet;
@@ -947,8 +1003,8 @@ void fused_adam_step_multi_metal(
     auto pipeline = get_opt_pipeline("fused_adam_step");
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         [enc setComputePipelineState:pipeline];
         [enc setBytes:&sp length:sizeof(StepParamsGPU) atIndex:4];
@@ -967,6 +1023,8 @@ void fused_adam_step_multi_metal(
             [enc dispatchThreadgroups:MTLSizeMake(num_tg, 1, 1)
                 threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
         }
+
+        scope.finish();
     }
 }
 
@@ -1038,8 +1096,8 @@ torch::Tensor indexed_stacked_linear_forward_metal(
         "indexed_stacked_linear_forward", in_u, out_u);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
         [enc setComputePipelineState:pipeline];
         set_buffer(enc, x,       0);
         set_buffer(enc, weight,  1);
@@ -1048,6 +1106,7 @@ torch::Tensor indexed_stacked_linear_forward_metal(
         set_buffer(enc, output,  4);
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(out_u, 1, 1)];
+        scope.finish();
     }
     return output;
 }
@@ -1077,8 +1136,8 @@ torch::Tensor indexed_stacked_linear_backward_x_metal(
         "indexed_stacked_linear_backward_x", in_u, out_u);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
         [enc setComputePipelineState:pipeline];
         set_buffer(enc, grad_output, 0);
         set_buffer(enc, weight,      1);
@@ -1086,6 +1145,7 @@ torch::Tensor indexed_stacked_linear_backward_x_metal(
         set_buffer(enc, grad_x,     3);
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
+        scope.finish();
     }
     return grad_x;
 }
@@ -1112,14 +1172,15 @@ sqr_crelu_forward_metal(
     auto pipeline = get_stacked_pipeline("sqr_crelu_forward", L2_u, 2 * L2_u);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
         [enc setComputePipelineState:pipeline];
         set_buffer(enc, l1c,     0);
         set_buffer(enc, l1x,     1);
         set_buffer(enc, l1x_out, 2);
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(L2_u, 1, 1)];
+        scope.finish();
     }
     return std::make_tuple(l1x, l1x_out);
 }
@@ -1146,8 +1207,8 @@ torch::Tensor sqr_crelu_backward_metal(
     auto pipeline = get_stacked_pipeline("sqr_crelu_backward", L2_u, 2 * L2_u);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
         [enc setComputePipelineState:pipeline];
         set_buffer(enc, grad_l1x,     0);
         set_buffer(enc, grad_l1x_out, 1);
@@ -1155,6 +1216,7 @@ torch::Tensor sqr_crelu_backward_metal(
         set_buffer(enc, grad_l1c,     3);
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(L2_u, 1, 1)];
+        scope.finish();
     }
     return grad_l1c;
 }
@@ -1187,8 +1249,8 @@ torch::Tensor bias_grad_sum_metal(
     auto pipeline = get_l0_pipeline("bias_grad_sum", uL1, uH, uPSQT, uOUT);
 
     @autoreleasepool {
-        auto stream = at::mps::getCurrentMPSStream();
-        auto enc    = stream->commandEncoder();
+        MetalScope scope;
+        auto enc = scope.enc;
 
         constexpr uint32_t kTgThreads = 256;
         uint32_t batch_u32 = static_cast<uint32_t>(batch);
@@ -1201,6 +1263,8 @@ torch::Tensor bias_grad_sum_metal(
         [enc setThreadgroupMemoryLength:kTgThreads * sizeof(float) atIndex:0];
         [enc dispatchThreadgroups:MTLSizeMake(uOUT, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(kTgThreads, 1, 1)];
+
+        scope.finish();
     }
 
     return bias_grad;
@@ -1208,6 +1272,8 @@ torch::Tensor bias_grad_sum_metal(
 
 // ---------------------------------------------------------------------------
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("mps_drain", &mps_drain,
+          "Flush pending MPS stream work so custom Metal kernels see up-to-date data");
     m.def("sparse_linear_forward",  &sparse_linear_forward_metal,
           "Sparse linear forward pass (Metal)");
     m.def("sparse_linear_backward", &sparse_linear_backward_metal,
