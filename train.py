@@ -440,10 +440,9 @@ def main():
         trainer.fit(nnue, train, val)
 
     if 0 <= args.swa_start_epoch < args.max_epochs:
-        if not trainer.is_global_zero:
-            return
-
-        swa_state_dict = swa_callback.swa_model.module.state_dict()
+        swa_state_dict = swa_callback.swa_model.module.state_dict() if trainer.is_global_zero else None
+        swa_state_dict = trainer.strategy.broadcast(swa_state_dict, src=0)
+        
         nnue.train()
         nnue.model.load_state_dict(swa_state_dict)
         nnue.eval()
@@ -451,11 +450,15 @@ def main():
         # NOTE: If BN is used, it has to be updated here. Be careful when using DDP.
         swa_savepath = os.path.join(logdir, "lightning_logs", f"version_{tb_logger.version}", "checkpoints", "last_swa.ckpt")
         trainer.save_checkpoint(swa_savepath)
-        print(f"SWA model saved to {swa_savepath}")
+        
+        if trainer.is_global_zero:
+            print(f"SWA model saved to {swa_savepath}")
+            
         if val is not None:
             trainer.validate(nnue, val)
         else:
             trainer.validate(nnue, train)
+
 
     if trainer.is_global_zero:
         with open(os.path.join(logdir, "training_finished"), "w"):
