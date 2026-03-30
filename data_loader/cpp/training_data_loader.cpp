@@ -114,6 +114,9 @@ constexpr auto threatfeaturecalc = []() {
                 else if (from >= (int) a2 && from <= (int) h7) {
                     Bitboard attacks =
                       bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color());
+                    int push = piecetbl[piece].color() == Color::White ? 8 : -8;
+                    Bitboard s = Bitboard::square(Square(from + push));
+                    attacks |= s;
                     squareoffset += attacks.count();
                 }
             }
@@ -126,7 +129,7 @@ constexpr auto threatfeaturecalc = []() {
 
 constexpr ThreatOffsetTable threatoffsets  = threatfeaturecalc.table;
 constexpr int               threatfeatures = threatfeaturecalc.totalfeatures;
-static_assert(threatfeatures == 60144);
+static_assert(threatfeatures == 60720);
 
 struct FullThreats {
     static constexpr std::string_view NAME = "Full_Threats";
@@ -137,7 +140,7 @@ struct FullThreats {
     static constexpr int PIECE_TYPE_NB       = 6;
     static constexpr int MAX_ACTIVE_FEATURES = 128;
 
-    static constexpr int INPUTS = threatfeatures;  // 60,144
+    static constexpr int INPUTS = threatfeatures;  // 60,720
 
         // clang-format off
     static constexpr Square OrientTBL[COLOR_NB][SQUARE_NB] = {
@@ -186,6 +189,13 @@ struct FullThreats {
         Bitboard attacks = (attkr.type() == PieceType::Pawn)
                            ? bb::pawnAttacks(Bitboard::square(Square(from)), attkr.color())
                            : bb::detail::pseudoAttacks()[attkr.type()][Square(from)];
+        if (attkr.type() == PieceType::Pawn) {
+            if (attkr.color() == Color::White) {
+                attacks |= Bitboard::square(Square(int(from) + 8));
+            } else {
+                attacks |= Bitboard::square(Square(int(from) - 8));
+            }
+        }
         Bitboard upto    = Bitboard::square(to);
         return int(threatoffsets[(int) attkr][65]
                    + (int(attkd.color()) * (numvalidtargets[(int) attkr] / 2)

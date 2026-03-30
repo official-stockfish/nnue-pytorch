@@ -10,8 +10,8 @@ class FullThreats(InputFeature):
     INPUT_FEATURE_NAME = "Full_Threats"
     MAX_ACTIVE_FEATURES = 128
 
-    NUM_INPUTS = 60144
-    NUM_REAL_FEATURES = 60144
+    NUM_INPUTS = 60720
+    NUM_REAL_FEATURES = 60720
     EXPORT_WEIGHT_DTYPE = torch.int8
 
     def __init__(self, num_outputs: int):
