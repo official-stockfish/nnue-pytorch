@@ -404,6 +404,18 @@ def main():
     )
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
+    trainer_callbacks = [
+            checkpoint_callback,
+            SimpleLineLogger(refresh_rate=refresh_rate),
+            TimeLimitAfterCheckpoint(args.max_time),
+            M.WeightClippingCallback(),
+        ]
+    if 0 <= args.swa_start_epoch < args.max_epochs:
+        swa_callback = M.ExplicitSWACallback(args.swa_start_epoch)
+        trainer_callbacks.append(
+            swa_callback
+        )
+
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
@@ -411,12 +423,7 @@ def main():
         strategy="ddp" if len(devices) > 1 else "auto",
         devices=devices,
         logger=loggers,
-        callbacks=[
-            checkpoint_callback,
-            SimpleLineLogger(refresh_rate=refresh_rate),
-            TimeLimitAfterCheckpoint(args.max_time),
-            M.WeightClippingCallback(),
-        ],
+        callbacks=trainer_callbacks,
         log_every_n_steps=refresh_rate,
         enable_progress_bar=False,
         enable_checkpointing=True,
@@ -431,6 +438,20 @@ def main():
         trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)
     else:
         trainer.fit(nnue, train, val)
+
+    if 0 <= args.swa_start_epoch < args.max_epochs:
+        if not trainer.is_global_zero:
+            return
+
+        swa_state_dict = swa_callback.swa_model.module.state_dict()
+        nnue.model.load_state_dict(swa_state_dict)        # NOTE: If BN is used, it has to be updated here. Be careful when using DDP.
+        swa_savepath = os.path.join(logdir, "lightning_logs", f"version_{tb_logger.version}", "checkpoints", "last_swa.ckpt")
+        trainer.save_checkpoint(swa_savepath)
+        print(f"SWA model saved to {swa_savepath}")
+        if val is not None:
+            trainer.validate(nnue, val)
+        else:
+            trainer.validate(nnue, train)
 
     if trainer.is_global_zero:
         with open(os.path.join(logdir, "training_finished"), "w"):

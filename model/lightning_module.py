@@ -224,7 +224,8 @@ class NNUE(L.LightningModule):
         t = outcome
         actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
             self.current_epoch / self.max_epoch
-        )
+        ) + torch.randn_like(qf) * p.jitter_lambda
+        actual_lambda = actual_lambda.clamp(0.0, 1.0)
         pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
         # use a MSE-like loss function

@@ -4,13 +4,16 @@ import torch
 from dataclasses import dataclass
 from .ranger_lite import RangerLite
 
-@dataclass
+@dataclass(kw_only=True, frozen=False)
 class RangerLiteConfig:
     gamma: float = 0.992
     """Multiplicative factor applied to the learning rate after every epoch."""
 
     one_cycle_steps: int = 0
     """Number of steps for the One Cycle LR scheduler. If set to a positive value, One Cycle LR scheduler will be used. If set to 0 or a negative value, StepLR with step_size=1 will be used."""
+
+    one_cycle_final_div: float = 1e3
+    """Final lr div factor when using One Cycle LR scheduler."""
 
     pnm_active: bool = True
     """Whether to activate Positive Negative Momentum."""
@@ -42,8 +45,11 @@ class RangerLiteWrapper:
         self.lookahead_alpha = config.lookahead_alpha
         self.lookahead_steps = config.lookahead_steps
         self.cycle_steps = config.one_cycle_steps
+        self.one_cycle_final_div = config.one_cycle_final_div
         self.legacy_mode = legacy_mode
         self.needs_train_flip = True
+
+        self.optimizer = None
 
     def configure_optimizers(self, train_params):
         # train_params is expected to be a list of dicts: [{'params': ..., 'lr': ..., 'weight_decay': ...}]
@@ -67,7 +73,13 @@ class RangerLiteWrapper:
 
         else:
             one_cycle_scheduler = SafeOneCycleLR(
-                self.optimizer, max_lr=self.lr, total_steps=self.cycle_steps, final_div_factor=1e3
+                self.optimizer,
+                max_lr=self.lr,
+                total_steps=self.cycle_steps,
+                final_div_factor=self.one_cycle_final_div,
+                div_factor=1e2,
+                pct_start=0.2,
+                cycle_momentum=False,
             )
             scheduler = {"scheduler": one_cycle_scheduler, "interval": "step"}
 
@@ -79,30 +91,30 @@ class RangerLiteWrapper:
 
     def on_train_batch_start(self, pl_module: L.LightningModule, batch, batch_idx):
         if self.needs_train_flip and not self.legacy_mode:
-            self.optimizer.restore_for_training()
+            self.optimizer.train()
             self.needs_train_flip = False
 
     def on_validation_epoch_start(self, pl_module: L.LightningModule):
         if not self.legacy_mode:
-            self.optimizer.swap_for_inference()
+            self.optimizer.eval()
             self.needs_train_flip = True
 
     def on_test_epoch_start(self, pl_module: L.LightningModule):
         if not self.legacy_mode:
-            self.optimizer.swap_for_inference()
+            self.optimizer.eval()
             self.needs_train_flip = True
 
     def on_train_epoch_end(self, pl_module: L.LightningModule):
         if not self.legacy_mode:
-            self.optimizer.swap_for_inference()
+            self.optimizer.eval()
             self.needs_train_flip = True
 
     def on_save_checkpoint(self, pl_module: L.LightningModule, checkpoint):
         if not self.legacy_mode:
-            self.optimizer.swap_for_inference()
+            self.optimizer.eval()
             self.needs_train_flip = True
 
     def on_train_epoch_start(self, pl_module: L.LightningModule):
         if not self.legacy_mode:
-            self.optimizer.restore_for_training()
+            self.optimizer.train()
             self.needs_train_flip = False

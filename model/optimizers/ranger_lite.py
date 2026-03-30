@@ -224,7 +224,6 @@ class RangerLite(torch.optim.Optimizer):
                     step_size = lr / bias_correction1
                     p.addcdiv_(grad_ma, denom, value=-step_size)
 
-
         if self.lookahead_active:
             self.lookahead_process_step()
 
@@ -255,6 +254,16 @@ class RangerLite(torch.optim.Optimizer):
                     )
                     # save for next merge
                     param_state["lookahead_params"].copy_(p.data)
+
+    def train(self):
+        """Switches optimizer to training mode. For optimizers with train/eval behavior, this should enable training behavior."""
+        if self.lookahead_active:
+            self.restore_for_training()
+
+    def eval(self):
+        """Switches optimizer to eval mode. For optimizers with train/eval behavior, this should enable evaluation behavior (e.g. swapping in slow weights)."""
+        if self.lookahead_active:
+            self.swap_for_inference()
 
     def swap_for_inference(self):
         """Safely loads slow weights for eval/saving. Idempotent."""

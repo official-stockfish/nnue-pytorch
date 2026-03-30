@@ -25,42 +25,44 @@ class ScheduleFreeWrapper:
         self.warmup_steps = config.warmup_steps
         self.needs_train_flip = False
 
+        self.optimzier = None
+
     def configure_optimizers(self, train_params):
         if _schedulefree_import_error:
             raise ImportError("The required schedulefree library is not installed. ")
         print(
             f"[SchedulefreeSetup] warmup_steps={self.warmup_steps}."
         )
-        optimizer = schedulefree.AdamWScheduleFree(
+        self.optimzier = schedulefree.AdamWScheduleFree(
             train_params,
             lr=self.lr,
             betas=(0.9, 0.999),
             eps=1.0e-7,
             warmup_steps=self.warmup_steps,
         )
-        return optimizer
+        return self.optimzier
 
     def on_train_epoch_start(self, pl_module: L.LightningModule):
-        pl_module.optimizers().optimizer.train()
+        self.optimizer.train()
         self.needs_train_flip = False
 
     def on_train_epoch_end(self, pl_module: L.LightningModule):
-        pl_module.optimizers().optimizer.eval()
+        self.optimizer.eval()
         self.needs_train_flip = True
 
     def on_validation_epoch_start(self, pl_module: L.LightningModule):
-        pl_module.optimizers().optimizer.eval()
+        self.optimizer.eval()
         self.needs_train_flip = True
 
     def on_test_epoch_start(self, pl_module: L.LightningModule):
-        pl_module.optimizers().optimizer.eval()
+        self.optimizer.eval()
         self.needs_train_flip = True
 
     def on_save_checkpoint(self, pl_module: L.LightningModule, checkpoint):
-        pl_module.optimizers().optimizer.eval()
+        self.optimizer.eval()
         self.needs_train_flip = True
 
     def on_train_batch_start(self, pl_module: L.LightningModule, batch, batch_idx):
         if self.needs_train_flip:
-            pl_module.optimizers().optimizer.train()
+            self.optimizer.train()
             self.needs_train_flip = False
