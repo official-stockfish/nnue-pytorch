@@ -221,8 +221,10 @@ struct FullThreats {
                 if (pt == PieceType::Pawn) {
                     auto right         = (c == Color::White) ? Offset(1, 1) : Offset(-1, -1);
                     auto left          = (c == Color::White) ? Offset(-1, 1) : Offset(1, -1);
+                    auto push          = (c == Color::White) ? Offset(0, 1) : Offset(0, -1);
                     auto attacks_left  = bb.shifted(right) & pieces;
                     auto attacks_right = bb.shifted(left) & pieces;
+                    auto attacks_forward = bb.shifted(push) & (pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn));
                     for (Square to : attacks_left) {
                         Square from  = Square((int) to - (c == Color::White ? 9 : -9));
                         Piece  attkd = pos.pieceAt(to);
@@ -243,6 +245,17 @@ struct FullThreats {
                             k++;
                         }
                     }
+                    for (Square to : attacks_forward) {
+                        Square from  = Square((int) to - (c == Color::White ? 8 : -8));
+                        Piece  attkd = pos.pieceAt(to);
+                        int    index = threat_index(color, attkr, from, to, attkd, ksq);
+                        if (index >= 0) {
+                            values[k]   = 1.0f;
+                            features[k] = index;
+                            k++;
+                        }
+                    }
+
                 }
                 else {
                     for (Square from : bb) {
