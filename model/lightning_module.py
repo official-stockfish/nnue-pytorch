@@ -163,6 +163,23 @@ class NNUE(L.LightningModule):
             on_step=False,
         )
 
+    # --- train / eval switch ---
+    def train(self, mode: bool = True):
+        super().train(mode)
+
+        if self.trainer and self.trainer.optimizers:
+            for opt in self.trainer.optimizers:
+                if mode:
+                    if hasattr(opt, 'train') and callable(opt.train):
+                        opt.train()
+                else:
+                    if hasattr(opt, 'eval') and callable(opt.eval):
+                        opt.eval()
+
+
+    def eval(self):
+        return self.train(False)
+
     # --- Training step implementation ---
 
     def forward(self, *args, **kwargs):

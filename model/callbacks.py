@@ -34,15 +34,9 @@ class ExplicitSWACallback(L.Callback):
     def on_train_epoch_end(self, trainer, pl_module):
         if not trainer.is_global_zero or trainer.current_epoch < self.swa_start_epoch:
             return
-        optimizers = pl_module.optimizers()
-        if hasattr(optimizers, 'eval') and callable(optimizers.eval):
-            print("[ExplicitSWACallback] Switching optimizer to eval mode before SWA update.")
-            optimizers.eval()
-        optimizers.eval()
+        pl_module.eval()
         self.swa_model.update_parameters(pl_module.model)
-        if hasattr(optimizers, 'train') and callable(optimizers.train):
-            print("[ExplicitSWACallback] Switching optimizer to train mode after SWA update.")
-            optimizers.train()
+        pl_module.train()
 
     def state_dict(self):
         # Prevent Lightning from saving the SWA callback's internal state
