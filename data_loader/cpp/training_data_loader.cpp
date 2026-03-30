@@ -394,17 +394,14 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
     num_active_white_features = 0;
     num_active_black_features = 0;
 
-        for (int i = 0; i < size * max_active_features; ++i)
-            white[i] = -1;
-        for (int i = 0; i < size * max_active_features; ++i)
-            black[i] = -1;
-        for (int i = 0; i < size * max_active_features; ++i)
-            white_values[i] = 0.0f;
-        for (int i = 0; i < size * max_active_features; ++i)
-            black_values[i] = 0.0f;
+    const size_t n = static_cast<size_t>(size) * max_active_features;
+    std::memset(white,        0xFF, n * sizeof(int));
+    std::memset(black,        0xFF, n * sizeof(int));
+    std::memset(white_values, 0,    n * sizeof(float));
+    std::memset(black_values, 0,    n * sizeof(float));
 
-        for (int i = 0; i < size; ++i)
-            fill_entry(feature_set, i, entries[i]);
+    for (int i = 0; i < size; ++i)
+        fill_entry(feature_set, i, entries[i]);
 }
 
 SparseBatch::~SparseBatch() {
