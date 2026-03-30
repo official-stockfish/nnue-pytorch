@@ -133,16 +133,16 @@ void set_buffer(id<MTLComputeCommandEncoder> enc,
            atIndex:idx];
 }
 
-// PyTorch 2.11+'s MPS stream can leave its internal _commandBuffer in a
+// PyTorch's MPS stream can leave its internal _commandBuffer in a
 // committed state after tensor-copy ops (.to(device)).  Calling the
 // stream's commandEncoder() then aborts with
 //   "failed assertion _status < MTLCommandBufferStatusCommitted".
 //
-// Fix: allocate a fresh command buffer on the stream's command queue for
-// each custom kernel dispatch.  mps_drain() (exposed to Python) must be
-// called before each dispatch to flush pending PyTorch MPS work on the
-// serial queue and commit/wait the stream's buffer so that all input
-// tensor data is available to the GPU.
+// MetalScope works around this by draining the stream (dispatch_sync +
+// COMMIT on the serial queue) and then allocating a fresh command buffer
+// for each custom kernel dispatch.  COMMIT (not COMMIT_AND_WAIT) is safe
+// because Metal guarantees FIFO execution within a single command queue,
+// and dispatch_sync on the serial queue prevents MPSGraph race conditions.
 
 struct MetalScope {
     id<MTLComputeCommandEncoder> enc;
@@ -150,7 +150,7 @@ struct MetalScope {
     MetalScope() {
         auto stream = at::mps::getCurrentMPSStream();
         at::mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
-            stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
+            stream->synchronize(at::mps::SyncType::COMMIT);
         });
         _buf = [stream->commandQueue() commandBuffer];
         enc = [_buf computeCommandEncoder];
@@ -164,13 +164,6 @@ struct MetalScope {
 private:
     id<MTLCommandBuffer> _buf;
 };
-
-void mps_drain() {
-    auto stream = at::mps::getCurrentMPSStream();
-    at::mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
-        stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
-    });
-}
 
 static void prepare_sparse_forward(
         id<MTLComputeCommandEncoder> enc,
@@ -532,6 +525,122 @@ sparse_linear_composed_double_forward_metal(
 }
 
 // ---------------------------------------------------------------------------
+// Composed double forward + L0 mixing in a single command buffer, saving one
+// full dispatch_sync + COMMIT_AND_WAIT barrier per training step.
+// ---------------------------------------------------------------------------
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor,
+           torch::Tensor, torch::Tensor>
+sparse_linear_composed_double_forward_l0_metal(
+        torch::Tensor w_indices, torch::Tensor w_values,
+        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor weight_a,  torch::Tensor weight_b,
+        torch::Tensor virtual_w, torch::Tensor bias,
+        int64_t       vw_period,
+        torch::Tensor us, torch::Tensor them,
+        int64_t L1, int64_t psqt,
+        const std::string& fwd_src,
+        const std::string& bwd_cas_src,
+        const std::string& bwd_native_src,
+        const std::string& l0_src) {
+
+    ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
+    ensure_l0_init(l0_src);
+
+    w_indices = w_indices.contiguous();
+    w_values  = w_values.contiguous();
+    b_indices = b_indices.contiguous();
+    b_values  = b_values.contiguous();
+    weight_a  = weight_a.contiguous();
+    weight_b  = weight_b.contiguous();
+    virtual_w = virtual_w.contiguous();
+    bias      = bias.contiguous();
+    us        = us.contiguous();
+    them      = them.contiguous();
+
+    const int64_t  batch_size  = w_indices.size(0);
+    const uint32_t max_active  = static_cast<uint32_t>(w_indices.size(1));
+    const int64_t  num_a       = weight_a.size(0);
+    const int64_t  num_b       = weight_b.size(0);
+    const int64_t  total_rows  = num_a + num_b;
+    const uint32_t output_size = static_cast<uint32_t>(weight_a.size(1));
+
+    auto opts = w_indices.options().dtype(torch::kFloat32);
+    if (batch_size == 0 || output_size == 0) {
+        auto z = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+        auto z2 = torch::empty({batch_size, L1}, opts);
+        auto z3 = torch::empty({batch_size, psqt}, opts);
+        return std::make_tuple(z2, z3, z3.clone(), z, z.clone());
+    }
+
+    // --- sparse forward setup ---
+    uint32_t num_threads = find_nearest_divisor(output_size, kSparseThreadTarget);
+    uint32_t slice_size  = output_size / num_threads;
+
+    auto merged = torch::empty({total_rows, static_cast<int64_t>(output_size)}, opts);
+    uint32_t merge_threads = output_size / 4;
+    uint32_t num_a_u32     = static_cast<uint32_t>(num_a);
+    uint32_t vw_period_u32 = static_cast<uint32_t>(vw_period);
+
+    auto merge_pipeline = get_pipeline(
+        g_fwd_library, "fused_weight_merge", 0, output_size, 0);
+    auto fwd_pipeline = get_pipeline(
+        g_fwd_library, "sparse_input_linear_forward",
+        max_active, output_size, slice_size);
+
+    auto wp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+    auto bp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+
+    // --- L0 mixing setup ---
+    const uint32_t uL1   = static_cast<uint32_t>(L1);
+    const uint32_t uH    = uL1 / 2;
+    const uint32_t uPSQT = static_cast<uint32_t>(psqt);
+    const uint32_t uOUT  = uL1 + uPSQT;
+
+    auto l0    = torch::empty({batch_size, L1}, opts);
+    auto wpsqt = torch::empty({batch_size, psqt}, opts);
+    auto bpsqt = torch::empty({batch_size, psqt}, opts);
+
+    auto l0_pipeline = get_l0_pipeline("l0_mixing_forward", uL1, uH, uPSQT, uOUT);
+
+    @autoreleasepool {
+        MetalScope scope;
+        auto enc = scope.enc;
+
+        // 1) Fused weight merge
+        [enc setComputePipelineState:merge_pipeline];
+        set_buffer(enc, weight_a,  0);
+        set_buffer(enc, weight_b,  1);
+        set_buffer(enc, virtual_w, 2);
+        set_buffer(enc, merged,    3);
+        [enc setBytes:&num_a_u32     length:sizeof(uint32_t) atIndex:4];
+        [enc setBytes:&vw_period_u32 length:sizeof(uint32_t) atIndex:5];
+        [enc dispatchThreadgroups:MTLSizeMake(total_rows, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(merge_threads, 1, 1)];
+
+        // 2) Sparse forward (both perspectives)
+        prepare_sparse_forward(enc, fwd_pipeline, merged, bias, num_threads, slice_size);
+        dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
+
+        // 3) L0 mixing (reads wp, bp; writes l0, wpsqt, bpsqt)
+        [enc setComputePipelineState:l0_pipeline];
+        set_buffer(enc, wp,    0);
+        set_buffer(enc, bp,    1);
+        set_buffer(enc, us,    2);
+        set_buffer(enc, them,  3);
+        set_buffer(enc, l0,    4);
+        set_buffer(enc, wpsqt, 5);
+        set_buffer(enc, bpsqt, 6);
+        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(uH, 1, 1)];
+
+        scope.finish();
+    }
+
+    return std::make_tuple(l0, wpsqt, bpsqt, wp, bp);
+}
+
+// ---------------------------------------------------------------------------
 // Double-perspective forward — dispatches both perspectives in one C++→Metal
 // call, sharing the same command encoder session.
 // ---------------------------------------------------------------------------
@@ -585,6 +694,94 @@ sparse_linear_double_forward_metal(
     }
 
     return std::make_tuple(wp, bp);
+}
+
+// ---------------------------------------------------------------------------
+// Double forward + L0 mixing in a single command buffer (non-composed variant).
+// ---------------------------------------------------------------------------
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor,
+           torch::Tensor, torch::Tensor>
+sparse_linear_double_forward_l0_metal(
+        torch::Tensor w_indices, torch::Tensor w_values,
+        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor weight,    torch::Tensor bias,
+        torch::Tensor us, torch::Tensor them,
+        int64_t L1, int64_t psqt,
+        const std::string& fwd_src,
+        const std::string& bwd_cas_src,
+        const std::string& bwd_native_src,
+        const std::string& l0_src) {
+
+    ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
+    ensure_l0_init(l0_src);
+
+    w_indices = w_indices.contiguous();
+    w_values  = w_values.contiguous();
+    b_indices = b_indices.contiguous();
+    b_values  = b_values.contiguous();
+    weight    = weight.contiguous();
+    bias      = bias.contiguous();
+    us        = us.contiguous();
+    them      = them.contiguous();
+
+    const int64_t  batch_size  = w_indices.size(0);
+    const uint32_t max_active  = static_cast<uint32_t>(w_indices.size(1));
+    const uint32_t output_size = static_cast<uint32_t>(weight.size(1));
+
+    auto opts = w_indices.options().dtype(torch::kFloat32);
+    if (batch_size == 0 || output_size == 0) {
+        auto z = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+        auto z2 = torch::empty({batch_size, L1}, opts);
+        auto z3 = torch::empty({batch_size, psqt}, opts);
+        return std::make_tuple(z2, z3, z3.clone(), z, z.clone());
+    }
+
+    uint32_t num_threads = find_nearest_divisor(output_size, kSparseThreadTarget);
+    uint32_t slice_size  = output_size / num_threads;
+
+    auto fwd_pipeline = get_pipeline(
+        g_fwd_library, "sparse_input_linear_forward",
+        max_active, output_size, slice_size);
+
+    auto wp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+    auto bp = torch::empty({batch_size, static_cast<int64_t>(output_size)}, opts);
+
+    const uint32_t uL1   = static_cast<uint32_t>(L1);
+    const uint32_t uH    = uL1 / 2;
+    const uint32_t uPSQT = static_cast<uint32_t>(psqt);
+    const uint32_t uOUT  = uL1 + uPSQT;
+
+    auto l0    = torch::empty({batch_size, L1}, opts);
+    auto wpsqt = torch::empty({batch_size, psqt}, opts);
+    auto bpsqt = torch::empty({batch_size, psqt}, opts);
+
+    auto l0_pipeline = get_l0_pipeline("l0_mixing_forward", uL1, uH, uPSQT, uOUT);
+
+    @autoreleasepool {
+        MetalScope scope;
+        auto enc = scope.enc;
+
+        // 1) Sparse forward (both perspectives)
+        prepare_sparse_forward(enc, fwd_pipeline, weight, bias, num_threads, slice_size);
+        dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
+
+        // 2) L0 mixing
+        [enc setComputePipelineState:l0_pipeline];
+        set_buffer(enc, wp,    0);
+        set_buffer(enc, bp,    1);
+        set_buffer(enc, us,    2);
+        set_buffer(enc, them,  3);
+        set_buffer(enc, l0,    4);
+        set_buffer(enc, wpsqt, 5);
+        set_buffer(enc, bpsqt, 6);
+        [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(uH, 1, 1)];
+
+        scope.finish();
+    }
+
+    return std::make_tuple(l0, wpsqt, bpsqt, wp, bp);
 }
 
 // ---------------------------------------------------------------------------
@@ -1150,6 +1347,7 @@ torch::Tensor indexed_stacked_linear_backward_x_metal(
     return grad_x;
 }
 
+
 // ---------------------------------------------------------------------------
 // Fused squared-clamp-relu activation for layer stack l1.
 // ---------------------------------------------------------------------------
@@ -1272,8 +1470,6 @@ torch::Tensor bias_grad_sum_metal(
 
 // ---------------------------------------------------------------------------
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("mps_drain", &mps_drain,
-          "Flush pending MPS stream work so custom Metal kernels see up-to-date data");
     m.def("sparse_linear_forward",  &sparse_linear_forward_metal,
           "Sparse linear forward pass (Metal)");
     m.def("sparse_linear_backward", &sparse_linear_backward_metal,
@@ -1283,6 +1479,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("sparse_linear_composed_double_forward",
           &sparse_linear_composed_double_forward_metal,
           "Composed double-perspective sparse linear forward (Metal)");
+    m.def("sparse_linear_composed_double_forward_l0",
+          &sparse_linear_composed_double_forward_l0_metal,
+          "Composed double-perspective sparse linear forward + L0 mixing (Metal)");
+    m.def("sparse_linear_double_forward_l0",
+          &sparse_linear_double_forward_l0_metal,
+          "Double-perspective sparse linear forward + L0 mixing (Metal)");
     m.def("sparse_linear_double_backward", &sparse_linear_double_backward_metal,
           "Double-perspective sparse linear backward (Metal)");
     m.def("l0_mixing_forward",  &l0_mixing_forward_metal,
