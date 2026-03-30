@@ -50,7 +50,7 @@ class LossParams:
     end_lambda: float | None = None
     """lambda to use at last epoch."""
     jitter_lambda: float = 0.0
-    """variance of normal distributed jitter to add to lambda (default=0.0, no jitter)"""
+    """std of normal distributed jitter to add to lambda (default=0.0, no jitter)"""
     pow_exp: float = 2.5
     """exponent of the power law used for the mean error (default=2.5)"""
     qp_asymmetry: float = 0.0
