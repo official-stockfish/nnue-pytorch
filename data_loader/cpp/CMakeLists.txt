@@ -52,39 +52,44 @@ set(CMAKE_CXX_FLAGS_PGO_USE "${CMAKE_CXX_FLAGS_RELEASE}")
 
 include(CheckCXXCompilerFlag)
 
-# BMI2 detection
-execute_process(
-    COMMAND bash -c "awk '/^vendor_id/{{print \$3; exit}}' /proc/cpuinfo"
-    OUTPUT_VARIABLE VENDOR_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-execute_process(
-    COMMAND bash -c "awk '/^cpu family/{{print \$4; exit}}' /proc/cpuinfo"
-    OUTPUT_VARIABLE CPU_FAMILY
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-execute_process(
-    COMMAND bash -c "grep -m1 -o 'bmi2' /proc/cpuinfo"
-    OUTPUT_VARIABLE CPU_BMI2
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+# CPU feature detection
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+  message(STATUS "AArch64 detected — NEON available via -march=native")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # BMI2 detection via /proc/cpuinfo (Linux x86 only)
+  execute_process(
+      COMMAND bash -c "awk '/^vendor_id/{{print \$3; exit}}' /proc/cpuinfo"
+      OUTPUT_VARIABLE VENDOR_ID
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  execute_process(
+      COMMAND bash -c "awk '/^cpu family/{{print \$4; exit}}' /proc/cpuinfo"
+      OUTPUT_VARIABLE CPU_FAMILY
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  execute_process(
+      COMMAND bash -c "grep -m1 -o 'bmi2' /proc/cpuinfo"
+      OUTPUT_VARIABLE CPU_BMI2
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
 
-if(VENDOR_ID STREQUAL "AuthenticAMD")
-  if(CPU_FAMILY GREATER_EQUAL "23" AND CPU_BMI2 STREQUAL "bmi2")
+  if(VENDOR_ID STREQUAL "AuthenticAMD")
+    if(CPU_FAMILY GREATER_EQUAL "23" AND CPU_BMI2 STREQUAL "bmi2")
+      set(CPU_SUPPORTS_BMI2 TRUE)
+    endif()
+  elseif(CPU_BMI2 STREQUAL "bmi2")
     set(CPU_SUPPORTS_BMI2 TRUE)
+  else()
+    set(CPU_SUPPORTS_BMI2 FALSE)
   endif()
-elseif(CPU_BMI2 STREQUAL "bmi2")
-  set(CPU_SUPPORTS_BMI2 TRUE)
-else()
-  set(CPU_SUPPORTS_BMI2 FALSE)
-endif()
 
-if(CPU_SUPPORTS_BMI2)
-  message(STATUS "Adding BMI2 support")
-  add_definitions(-DHAS_BMI2)
-  add_compile_options(-mbmi2)
-else()
-  message(STATUS "No BMI2 support")
+  if(CPU_SUPPORTS_BMI2)
+    message(STATUS "Adding BMI2 support")
+    add_definitions(-DHAS_BMI2)
+    add_compile_options(-mbmi2)
+  else()
+    message(STATUS "No BMI2 support")
+  endif()
 endif()
 
 find_package(Threads REQUIRED)
