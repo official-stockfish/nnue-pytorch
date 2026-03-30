@@ -167,7 +167,7 @@ class NNUE(L.LightningModule):
     def train(self, mode: bool = True):
         super().train(mode)
 
-        if self.trainer and self.trainer.optimizers:
+        if hasattr(self, '_trainer') and self._trainer and self.trainer.optimizers:
             for opt in self.trainer.optimizers:
                 if mode:
                     if hasattr(opt, 'train') and callable(opt.train):
