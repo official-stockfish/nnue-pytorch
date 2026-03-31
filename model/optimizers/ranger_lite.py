@@ -181,7 +181,6 @@ class RangerLite(torch.optim.Optimizer):
                 grad_ma = state["grad_ma"]
                 variance_ma = state["variance_ma"]
 
-                bias_correction1 = 1 - beta1 ** step
                 bias_correction2 = 1 - beta2 ** step
 
                 # Despite the comment. Ranger21 doesnt actually use variance_ma_max for denominator
@@ -198,11 +197,15 @@ class RangerLite(torch.optim.Optimizer):
                     pnm_grad_ma.mul_(beta1 ** 2).add_(grad, alpha=(1 - beta1 ** 2))
 
                     if self.use_legacy_scoping_bug:
-                        # Legacy noise calculation
+                        # Legacy calculation
+                        bias_correction1 = 1 - beta1 ** step
                         noise_norm = math.sqrt((1 + beta2) ** 2 + beta2 ** 2)
 
                     else:
-                        # Corrected: Normalization must be based on the coefficients of the linear combination
+                        # Corrected: Bias updated with exact number of effective steps
+                        effective_step = ((step + 1) // 2) * 2
+                        bias_correction1 = 1 - beta1 ** effective_step
+                        # Corrected: Normalization calculated from pnm_factor like in original paper. However lr tuning is likely still required.
                         noise_norm = math.sqrt((1 + pnm_factor) ** 2 + pnm_factor ** 2)
 
                     pnm_val = (

@@ -12,6 +12,9 @@ class RangerLiteConfig:
     one_cycle_steps: int = 0
     """Number of steps for the One Cycle LR scheduler. If set to a positive value, One Cycle LR scheduler will be used. If set to 0 or a negative value, StepLR with step_size=1 will be used."""
 
+    one_cycle_warmup_pct: float = 0.2
+    """Fraction of the cycle to spend increasing the learning rate in the One Cycle LR scheduler."""
+
     one_cycle_final_div: float = 1e3
     """Final lr div factor when using One Cycle LR scheduler."""
 
@@ -45,6 +48,7 @@ class RangerLiteWrapper:
         self.lookahead_alpha = config.lookahead_alpha
         self.lookahead_steps = config.lookahead_steps
         self.cycle_steps = config.one_cycle_steps
+        self.one_cycle_warmup_pct = config.one_cycle_warmup_pct
         self.one_cycle_final_div = config.one_cycle_final_div
         self.legacy_mode = legacy_mode
         self.needs_train_flip = True
@@ -77,8 +81,8 @@ class RangerLiteWrapper:
                 max_lr=self.lr,
                 total_steps=self.cycle_steps,
                 final_div_factor=self.one_cycle_final_div,
+                pct_start=self.one_cycle_warmup_pct,
                 div_factor=1e2,
-                pct_start=0.2,
                 cycle_momentum=False,
             )
             scheduler = {"scheduler": one_cycle_scheduler, "interval": "step"}
