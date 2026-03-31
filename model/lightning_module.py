@@ -241,7 +241,10 @@ class NNUE(L.LightningModule):
         t = outcome
         actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
             self.current_epoch / self.max_epoch
-        ) + torch.randn_like(qf) * p.jitter_lambda
+        )
+        batch_jitter = qf.new_empty(()).normal_(0, 1) * p.jitter_lambda_batch
+        sample_jitter = qf.new_empty(qf.shape).normal_(0, 1) * p.jitter_lambda_sample
+        actual_lambda = actual_lambda + batch_jitter + sample_jitter
         actual_lambda = actual_lambda.clamp(0.0, 1.0)
         pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
