@@ -1,8 +1,6 @@
 import lightning as L
-import os
-import copy
 import torch
-from torch.optim.swa_utils import AveragedModel, update_bn
+from torch.optim.swa_utils import AveragedModel
 
 from .lightning_module import NNUE
 
