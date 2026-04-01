@@ -59,7 +59,7 @@ def decode_leb_128_array(arr: bytes, n: int) -> npt.NDArray:
 
 
 # hardcoded for now
-VERSION = 0x7AF32F20
+VERSION = 0x6A448AFA
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
 
 
@@ -216,11 +216,10 @@ class NNUEReader:
         f: BinaryIO,
         feature_name: str,
         config: ModelConfig,
-        quantize_config: QuantizationConfig,
     ):
         self.f = f
         self.feature_name = feature_name
-        self.model = NNUEModel(feature_name, config, quantize_config)
+        self.model = NNUEModel(feature_name, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 

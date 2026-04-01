@@ -11,7 +11,6 @@ class NNUEModel(nn.Module):
         self,
         feature_name: str,
         config: ModelConfig,
-        quantize_config: QuantizationConfig,
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
     ):
@@ -31,7 +30,7 @@ class NNUEModel(nn.Module):
         self.feature_hash = self.input.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
 
-        self.quantization = QuantizationManager(quantize_config)
+        self.quantization = QuantizationManager(config.quantize_config)
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
         self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
