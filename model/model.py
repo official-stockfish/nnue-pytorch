@@ -3,7 +3,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .modules import LayerStacks, get_feature_cls
-from .quantize import QuantizationConfig, QuantizationManager
+from .quantize import QuantizationManager
 
 
 class NNUEModel(nn.Module):
@@ -21,6 +21,9 @@ class NNUEModel(nn.Module):
         self.L2 = config.L2
         self.L3 = config.L3
 
+        self.quantize_config = config.quantize_config
+        self.quantization = QuantizationManager(config.quantize_config)
+
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
@@ -28,9 +31,8 @@ class NNUEModel(nn.Module):
         self.feature_name = self.input.FEATURE_NAME
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
-        self.layer_stacks = LayerStacks(self.num_ls_buckets, config)
+        self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
 
-        self.quantization = QuantizationManager(config.quantize_config)
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
         self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
@@ -82,13 +84,12 @@ class NNUEModel(nn.Module):
         w, wpsqt = torch.split(wp, self.L1, dim=1)
         b, bpsqt = torch.split(bp, self.L1, dim=1)
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-        l0_ = torch.clamp(l0_, 0.0, 1.0)
+        l0_ = torch.clamp(l0_, 0.0, self.quantization.max_ft_activation)
 
         l0_s = torch.split(l0_, self.L1 // 2, dim=1)
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
-        # We multiply by 127/128 because in the quantized network 1.0 is represented by 127
-        # and it's more efficient to divide by 128 instead.
-        l0_ = torch.cat(l0_s1, dim=1) * (127 / 128)
+        # We multiply by a correction factor, so we can use only bitshift and multiplication at inference.
+        l0_ = torch.cat(l0_s1, dim=1) * self.quantization.l0_correction_factor
 
         psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
         wpsqt = wpsqt.gather(1, psqt_indices_unsq)

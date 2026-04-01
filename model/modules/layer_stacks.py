@@ -1,20 +1,21 @@
-from typing import Generator
+from typing import Generator, TYPE_CHECKING
 
 import torch
 from torch import nn
 
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 from .config import LayerStacksConfig
-
+from ..quantize import QuantizationManager
 
 class LayerStacks(nn.Module):
-    def __init__(self, count: int, config: LayerStacksConfig):
+    def __init__(self, count: int, config: LayerStacksConfig, quantization: QuantizationManager):
         super().__init__()
 
         self.count = count
         self.L1 = config.L1
         self.L2 = config.L2
         self.L3 = config.L3
+        self.quantization = quantization
 
         # Factorizer only for the first layer because later
         # there's a non-linearity and factorization breaks.
@@ -30,13 +31,15 @@ class LayerStacks(nn.Module):
     def forward(self, x: torch.Tensor, ls_indices: torch.Tensor):
         l1c_ = self.l1(x, ls_indices)
         l1x_, l1x_out = l1c_.split(self.L2, dim=1)
-        # multiply sqr crelu result by (255/256) to match quantized version
+        # multiply sqr crelu result by scale correction to match quantized version
         l1x_ = torch.clamp(
-            torch.cat([torch.pow(l1x_, 2.0) * (255 / 256), l1x_], dim=1), 0.0, 1.0
+            torch.cat([torch.pow(l1x_, 2.0) * (self.quantization.sqcrele_correction_factor), l1x_], dim=1),
+            0.0,
+            self.quantization.max_hidden_activation,
         )
 
         l2c_ = self.l2(l1x_, ls_indices)
-        l2x_ = torch.clamp(l2c_, 0.0, 1.0)
+        l2x_ = torch.clamp(l2c_, 0.0, self.quantization.max_hidden_activation)
 
         l3c_ = self.output(l2x_, ls_indices)
         l3x_ = l3c_ + l1x_out

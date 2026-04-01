@@ -87,7 +87,7 @@ class NNUEWriter:
             self.int32(fc_hash)  # FC layers hash
             self.write_fc_layer(model, l1)
             self.write_fc_layer(model, l2)
-            self.write_fc_layer(model, output, is_output=True)
+            self.write_fc_layer(model, output)
 
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
@@ -168,7 +168,7 @@ class NNUEWriter:
         self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
 
     def write_fc_layer(
-        self, model: NNUEModel, layer: nn.Linear, is_output=False
+        self, model: NNUEModel, layer: nn.Linear
     ) -> None:
         # FC layers are stored as int8 weights, and int32 biases
         bias = layer.bias.data
@@ -191,7 +191,7 @@ class NNUEWriter:
             ascii_hist("fc weight:", weight.numpy())
 
         bias, weight = model.quantization.quantize_fc_layer(
-            bias, weight, is_output, histogram_callback
+            bias, weight, histogram_callback
         )
 
         # FC inputs are padded to 32 elements by spec.
@@ -250,7 +250,6 @@ class NNUEReader:
                 self.read_fc_layer(
                     l_w_slices[layer_idx][b],
                     l_b_slices[layer_idx][b],
-                    is_output=(layer_idx == len(layers) - 1),
                 )
 
     def read_header(self, feature_hash: int, fc_hash: int) -> None:
@@ -331,7 +330,6 @@ class NNUEReader:
         self,
         layer_weight_t: torch.Tensor,
         layer_bias_t: torch.Tensor,
-        is_output: bool = False,
     ) -> None:
         # FC inputs are padded to 32 elements by spec.
         non_padded_shape = layer_weight_t.shape
@@ -341,7 +339,7 @@ class NNUEReader:
         weight = self.tensor(np.int8, padded_shape)
 
         bias, weight = self.model.quantization.dequantize_fc_layer(
-            bias, weight, is_output
+            bias, weight
         )
 
         layer_bias = bias
