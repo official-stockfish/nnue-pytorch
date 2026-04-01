@@ -11,7 +11,6 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
-from ..quantize import QuantizationConfig
 
 
 def ascii_hist(name, x, bins=6):

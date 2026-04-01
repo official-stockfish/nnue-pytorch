@@ -1,4 +1,4 @@
-from typing import Generator, TYPE_CHECKING
+from typing import Generator
 
 import torch
 from torch import nn
