@@ -13,6 +13,17 @@ class WeightClippingConfig(TypedDict):
     max_weight: float
     virtual_params: NotRequired[torch.Tensor]
 
+def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
+    _info = torch.iinfo(target_dtype)
+    # Symmetric range: [-max, max]
+    min_val = -_info.max
+    max_val = _info.max
+
+    rounded_value = value.round()
+    clamped_value = rounded_value.clamp(min_val, max_val)
+    num_clipped = (rounded_value != clamped_value).sum()
+    quantized_value = clamped_value.to(target_dtype)
+    return quantized_value, num_clipped
 
 @dataclass
 class QuantizationConfig:
@@ -87,36 +98,26 @@ class QuantizationManager:
             },
         ]
 
-    def _safe_convert(self, value, target_dtype):
-        _info = torch.iinfo(target_dtype)
-        # Symmetric range: [-max, max]
-        min_val = -_info.max
-        max_val = _info.max
-
-        rounded_value = value.round()
-        clamped_value = rounded_value.clamp(min_val, max_val)
-        num_clipped = (rounded_value != clamped_value).sum()
-        quantized_value = clamped_value.to(target_dtype)
-        return quantized_value, num_clipped
-
     def quantize_feature_transformer(
         self,
         bias: torch.Tensor,
         weight: torch.Tensor,
         psqt_weight: torch.Tensor,
+        f_weight_export_dtype: torch.dtype = torch.int16,
         callback: Optional[Callable] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         psqt_weight = psqt_weight.mul(self.nnue2score * self.weight_scale_out)
         bias = bias.mul(self.ft_quantized_one)
         weight = weight.mul(self.ft_quantized_one)
 
-        bias, bias_clipped = self._safe_convert(bias, torch.int16)
-        weight, weight_clipped = self._safe_convert(weight, torch.int16)
-        psqt_weight, psqt_weight_clipped = self._safe_convert(psqt_weight, torch.int32)
+         # only weight can have different dtypes, bias is always int16, psqt_weight is always int32
+        bias, bias_clipped = _safe_convert(bias, torch.int16)
+        weight, weight_clipped = _safe_convert(weight, f_weight_export_dtype)
+        psqt_weight, psqt_weight_clipped = _safe_convert(psqt_weight, torch.int32)
 
         if callback is not None:
-            callback("fc_weight", weight, weight_clipped)
-            callback("fc_bias", bias, bias_clipped)
+            callback("fct_weight", weight, weight_clipped)
+            callback("ft_bias", bias, bias_clipped)
             callback("psqt_weight", psqt_weight, psqt_weight_clipped)
 
         return bias, weight, psqt_weight
@@ -142,8 +143,8 @@ class QuantizationManager:
         kBiasScaleHidden = self.weight_scale_hidden * self.hidden_quantized_one
         kWeightScaleHidden = self.weight_scale_hidden
 
-        bias, bias_clipped = self._safe_convert(bias.mul(kBiasScaleHidden), torch.int32)
-        weight, weight_clipped = self._safe_convert(weight.mul(kWeightScaleHidden), torch.int8)
+        bias, bias_clipped = _safe_convert(bias.mul(kBiasScaleHidden), torch.int32)
+        weight, weight_clipped = _safe_convert(weight.mul(kWeightScaleHidden), torch.int8)
 
         if callback is not None:
             callback("fc_weight", weight, weight_clipped)
