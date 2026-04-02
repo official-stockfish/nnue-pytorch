@@ -141,7 +141,6 @@ class QuantizationManager:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         kBiasScaleHidden = self.weight_scale_hidden * self.hidden_quantized_one
         kWeightScaleHidden = self.weight_scale_hidden
-        kMaxWeight = self.max_hidden_weight
 
         bias, bias_clipped = self._safe_convert(bias.mul(kBiasScaleHidden), torch.int32)
         weight, weight_clipped = self._safe_convert(weight.mul(kWeightScaleHidden), torch.int8)
@@ -157,12 +156,10 @@ class QuantizationManager:
         bias: torch.Tensor,
         weight: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        kWeightScaleHidden = self.weight_scale_hidden
-        kWeightScale = kWeightScaleHidden
         kBiasScaleHidden = self.weight_scale_hidden * self.hidden_quantized_one
-        kBiasScale = kBiasScaleHidden
+        kWeightScaleHidden = self.weight_scale_hidden
 
-        bias = bias.divide(kBiasScale)
-        weight = weight.divide(kWeightScale)
+        bias = bias.divide(kBiasScaleHidden)
+        weight = weight.divide(kWeightScaleHidden)
 
         return bias, weight
