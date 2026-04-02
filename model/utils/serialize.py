@@ -24,6 +24,34 @@ def ascii_hist(name, x, bins=6):
         xi = "{0: <8.4g}".format(xi).ljust(10)
         print("{0}| {1}".format(xi, bar))
 
+def get_histogram_callback(hist_title: str, verbose: bool):
+    if not verbose:
+        return None
+
+    def histogram_callback(
+        hist_subtitle: str,
+        values: torch.Tensor,
+        num_clipped: torch.Tensor,
+    ):
+        total_elements = values.numel()
+        hist_desc = [hist_title, hist_subtitle]
+        hist_desc = " ".join(filter(None, hist_desc))
+
+        if total_elements == 0:
+            print(f"Layer '{hist_desc}' is empty.")
+            return
+
+        num_clipped = int(num_clipped.sum().item())
+        max_value = values.max().item()
+        num_argmax = int((values == max_value).sum().item())
+
+        ascii_hist(f"{hist_desc}: ", values.numpy())
+        print(
+            f"Layer has {num_clipped}/{total_elements} clipped weights after rounding."
+            f"Maximum absval in layer is {max_value}, occurring {num_argmax} times."
+        )
+
+    return histogram_callback
 
 @njit
 def encode_leb_128_array(arr: npt.NDArray) -> list:
@@ -72,21 +100,31 @@ class NNUEWriter:
         model: NNUEModel,
         description: str | None = None,
         ft_compression: str = "none",
+        verbose: bool = True,
     ):
         if description is None:
             description = DEFAULT_DESCRIPTION
 
         self.buf = bytearray()
+        self.verbose = verbose
+
+        # it is the safest to call clip weights before exporting
+        # some weights might be clipped to smaller values than dtype.max
+        # (threat weights in particular)
+        # This does change the model weights in place,
+        # since it is supposed to be called after every training step anyway, this is fine
+        model.clip_weights()
+        model.clip_input_weights()
 
         fc_hash = self.fc_hash(model)
         self.write_header(model, fc_hash, description)
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model, ft_compression)
-        for l1, l2, output in model.layer_stacks.get_coalesced_layer_stacks():
+        for bucket, (l1, l2, output) in enumerate(model.layer_stacks.get_coalesced_layer_stacks()):
             self.int32(fc_hash)  # FC layers hash
-            self.write_fc_layer(model, l1)
-            self.write_fc_layer(model, l2)
-            self.write_fc_layer(model, output)
+            self.write_fc_layer(model, l1, f"bucket {bucket} l1")
+            self.write_fc_layer(model, l2, f"bucket {bucket} l2")
+            self.write_fc_layer(model, output, f"bucket {bucket} output")
 
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
@@ -142,15 +180,8 @@ class NNUEWriter:
         weight = export_weight[:, : model.L1]
         psqt_weight = export_weight[:, model.L1 :]
 
-        def histogram_callback(
-            bias: torch.Tensor, weight: torch.Tensor, psqt_weight: torch.Tensor
-        ):
-            ascii_hist("ft bias:", bias.numpy())
-            ascii_hist("ft weight:", weight.numpy())
-            ascii_hist("ft psqt weight:", psqt_weight.numpy())
-
         bias, weight, psqt_weight = model.quantization.quantize_feature_transformer(
-            bias, weight, psqt_weight, histogram_callback
+            bias, weight, psqt_weight, get_histogram_callback("", self.verbose)
         )
 
         # Weights stored as [num_features][outputs]
@@ -167,30 +198,14 @@ class NNUEWriter:
         self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
 
     def write_fc_layer(
-        self, model: NNUEModel, layer: nn.Linear
+        self, model: NNUEModel, layer: nn.Linear, desc: str
     ) -> None:
         # FC layers are stored as int8 weights, and int32 biases
         bias = layer.bias.data
         weight = layer.weight.data
 
-        def histogram_callback(
-            bias: torch.Tensor,
-            weight: torch.Tensor,
-            clipped: torch.Tensor,
-            total_elements: int,
-            clipped_max: torch.Tensor,
-            kMaxWeight: float,
-        ):
-            ascii_hist("fc bias:", bias.numpy())
-            print(
-                "layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(
-                    clipped, total_elements, clipped_max, kMaxWeight
-                )
-            )
-            ascii_hist("fc weight:", weight.numpy())
-
         bias, weight = model.quantization.quantize_fc_layer(
-            bias, weight, histogram_callback
+            bias, weight, get_histogram_callback(desc, self.verbose)
         )
 
         # FC inputs are padded to 32 elements by spec.
