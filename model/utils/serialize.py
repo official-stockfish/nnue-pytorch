@@ -127,9 +127,9 @@ class NNUEWriter:
         self.write_feature_transformer(model, ft_compression)
         for bucket, (l1, l2, output) in enumerate(model.layer_stacks.get_coalesced_layer_stacks()):
             self.int32(fc_hash)  # FC layers hash
-            self.write_fc_layer(model, l1, f"bucket {bucket} l1")
-            self.write_fc_layer(model, l2, f"bucket {bucket} l2")
-            self.write_fc_layer(model, output, f"bucket {bucket} output")
+            self.write_fc_layer(model, l1, 0, f"bucket {bucket} l1")
+            self.write_fc_layer(model, l2, 1, f"bucket {bucket} l2")
+            self.write_fc_layer(model, output, 2, f"bucket {bucket} output")
 
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
@@ -216,14 +216,18 @@ class NNUEWriter:
         self.write_tensor(psqt_weights.flatten().numpy(), ft_compression)
 
     def write_fc_layer(
-        self, model: NNUEModel, layer: nn.Linear, desc: str
+        self,
+        model: NNUEModel,
+        layer: nn.Linear,
+        layer_idx: int,
+        desc: str,
     ) -> None:
         # FC layers are stored as int8 weights, and int32 biases
         bias = layer.bias.data
         weight = layer.weight.data
 
         bias, weight = model.quantization.quantize_fc_layer(
-            bias, weight, get_histogram_callback(desc, self.verbose)
+            bias, weight, layer_idx, get_histogram_callback(desc, self.verbose)
         )
 
         # FC inputs are padded to 32 elements by spec.
@@ -282,6 +286,7 @@ class NNUEReader:
                 self.read_fc_layer(
                     l_w_slices[layer_idx][b],
                     l_b_slices[layer_idx][b],
+                    layer_idx,
                 )
 
     def read_header(self, feature_hash: int, fc_hash: int) -> None:
@@ -362,6 +367,7 @@ class NNUEReader:
         self,
         layer_weight_t: torch.Tensor,
         layer_bias_t: torch.Tensor,
+        layer_idx: int,
     ) -> None:
         # FC inputs are padded to 32 elements by spec.
         non_padded_shape = layer_weight_t.shape
@@ -371,7 +377,7 @@ class NNUEReader:
         weight = self.tensor(np.int8, padded_shape)
 
         bias, weight = self.model.quantization.dequantize_fc_layer(
-            bias, weight
+            bias, weight, layer_idx
         )
 
         layer_bias = bias

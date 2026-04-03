@@ -28,7 +28,9 @@ def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
 @dataclass
 class QuantizationConfig:
     nnue2score: float = 600.0
-    weight_scale_hidden: float = 64.0
+    weight_scale_hidden_0: float = 64.0
+    weight_scale_hidden_1: float = 64.0
+    weight_scale_hidden_2: float = 128.0
     weight_scale_out: float = 16.0
     weight_quantized_max_hidden: float = 127.0 # i8 max
     ft_quantized_one: float = 256.0
@@ -41,14 +43,18 @@ class QuantizationConfig:
 class QuantizationManager:
     def __init__(self, config: QuantizationConfig):
         self.nnue2score = config.nnue2score
-        self.weight_scale_hidden = config.weight_scale_hidden
+        self.weight_scale_hidden = [
+            config.weight_scale_hidden_0,
+            config.weight_scale_hidden_1,
+            config.weight_scale_hidden_2,
+        ]
         self.weight_scale_out = config.weight_scale_out
         self.weight_quantized_max_hidden = config.weight_quantized_max_hidden
         self.hidden_quantized_one = config.hidden_quantized_one
         self.ft_quantized_one = config.ft_quantized_one
 
         hidden_q_max = config.weight_quantized_max_hidden
-        self.max_hidden_weight = hidden_q_max / config.weight_scale_hidden
+        self.max_hidden_weight = [hidden_q_max / scale for scale in self.weight_scale_hidden]
         # Thread weights are treated separately. A bit hacky...
         # Threat weights are quantized to int8 after scaling by ft_quantized_one
         _i8 = torch.iinfo(torch.int8)
@@ -82,19 +88,19 @@ class QuantizationManager:
         return [
             {
                 "params": [model.layer_stacks.l1.linear.weight],
-                "min_weight": -self.max_hidden_weight,
-                "max_weight": self.max_hidden_weight,
+                "min_weight": -self.max_hidden_weight[0],
+                "max_weight": self.max_hidden_weight[0],
                 "virtual_params": model.layer_stacks.l1.factorized_linear.weight,
             },
             {
                 "params": [model.layer_stacks.l2.linear.weight],
-                "min_weight": -self.max_hidden_weight,
-                "max_weight": self.max_hidden_weight,
+                "min_weight": -self.max_hidden_weight[1],
+                "max_weight": self.max_hidden_weight[1],
             },
             {
                 "params": [model.layer_stacks.output.linear.weight],
-                "min_weight": -self.max_hidden_weight,
-                "max_weight": self.max_hidden_weight,
+                "min_weight": -self.max_hidden_weight[2],
+                "max_weight": self.max_hidden_weight[2],
             },
         ]
 
@@ -138,10 +144,11 @@ class QuantizationManager:
         self,
         bias: torch.Tensor,
         weight: torch.Tensor,
+        layer_idx: int,
         callback: Optional[Callable] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        kBiasScaleHidden = self.weight_scale_hidden * self.hidden_quantized_one
-        kWeightScaleHidden = self.weight_scale_hidden
+        kBiasScaleHidden = self.weight_scale_hidden[layer_idx] * self.hidden_quantized_one
+        kWeightScaleHidden = self.weight_scale_hidden[layer_idx]
 
         bias, bias_clipped = _safe_convert(bias.mul(kBiasScaleHidden), torch.int32)
         weight, weight_clipped = _safe_convert(weight.mul(kWeightScaleHidden), torch.int8)
@@ -156,9 +163,10 @@ class QuantizationManager:
         self,
         bias: torch.Tensor,
         weight: torch.Tensor,
+        layer_idx: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        kBiasScaleHidden = self.weight_scale_hidden * self.hidden_quantized_one
-        kWeightScaleHidden = self.weight_scale_hidden
+        kBiasScaleHidden = self.weight_scale_hidden[layer_idx] * self.hidden_quantized_one
+        kWeightScaleHidden = self.weight_scale_hidden[layer_idx]
 
         bias = bias.divide(kBiasScaleHidden)
         weight = weight.divide(kWeightScaleHidden)
