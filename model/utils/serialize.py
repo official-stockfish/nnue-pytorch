@@ -51,8 +51,8 @@ def get_histogram_callback(hist_title: str, verbose: bool):
 
         ascii_hist(f"{hist_desc}: ", values.numpy())
         print(
-            f"Layer has {num_clipped}/{total_elements} clipped weights after rounding. "
-            f"Minimum absval in layer is {min_value}, occurring {num_argmin} times. "
+            f"Layer has {num_clipped}/{total_elements} clipped weights after rounding.\n"
+            f"Minimum absval in layer is {min_value}, occurring {num_argmin} times.\n"
             f"Maximum absval in layer is {max_value}, occurring {num_argmax} times."
         )
 

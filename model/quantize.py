@@ -28,7 +28,7 @@ def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
 @dataclass
 class QuantizationConfig:
     nnue2score: float = 600.0
-    weight_scale_hidden_0: float = 64.0
+    weight_scale_hidden_0: float = 128.0
     weight_scale_hidden_1: float = 64.0
     weight_scale_hidden_2: float = 128.0
     weight_scale_out: float = 16.0
