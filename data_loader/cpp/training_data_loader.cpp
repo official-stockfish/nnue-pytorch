@@ -659,7 +659,6 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 
             auto do_filter = [&]() { return (e.isCapturingMove() || e.isInCheck()); };
 
-            if (e.score == 0) return true;
             if (e.score == VALUE_NONE) return true;
             if (e.ply <= config.early_fen_skipping) return true;
             if (config.random_fen_skipping && do_skip()) return true;
