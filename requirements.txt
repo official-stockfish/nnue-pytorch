@@ -10,3 +10,5 @@ requests
 lightning
 tyro
 ruff
+ranger21
+schedulefree

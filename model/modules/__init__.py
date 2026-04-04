@@ -14,6 +14,7 @@ from .features import (
     add_feature_args,
     FeatureConfig,
 )
+from .config import LayerStacksConfig
 from .layer_stacks import LayerStacks
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "add_feature_args",
     "FeatureConfig",
     "LayerStacks",
+    "LayerStacksConfig",
 ]

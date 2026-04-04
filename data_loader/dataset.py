@@ -8,6 +8,16 @@ from . import stream
 from .config import DataloaderSkipConfig, DataloaderDDPConfig
 
 
+def _recursive_pin(obj):
+    if isinstance(obj, torch.Tensor):
+        return obj.pin_memory()
+    elif isinstance(obj, dict):
+        return {k: _recursive_pin(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return type(obj)(_recursive_pin(v) for v in obj)
+    return obj
+
+
 class FenBatchProvider:
     def __init__(
         self,
@@ -182,31 +192,44 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
 
 
 class FixedNumBatchesDataset(Dataset):
-    def __init__(self, dataset, num_batches):
+    def __init__(self, dataset, num_batches, pin_memory=False, queue_size_limit=None):
         super().__init__()
         self.dataset = dataset
         self.iter = None  # Deferred to _start_prefetching
         self.num_batches = num_batches
+        self.pin_memory = pin_memory
+        if queue_size_limit is None:
+            queue_size_limit = 10 if pin_memory else 100
 
-        self._prefetch_queue = queue.Queue(maxsize=100)
+        self._prefetch_queue = queue.Queue(maxsize=queue_size_limit)
         self._prefetch_thread = None
         self._stop_prefetching = threading.Event()
         self._prefetch_started = False
         self._lock = threading.Lock()
+
+    def _safe_put(self, item):
+        """Helper to ensure we don't hang on shutdown if queue is full."""
+        while not self._stop_prefetching.is_set():
+            try:
+                self._prefetch_queue.put(item, timeout=1.0)
+                break
+            except queue.Full:
+                continue
 
     def _prefetch_worker(self):
         try:
             while not self._stop_prefetching.is_set():
                 try:
                     item = next(self.iter)
-                    self._prefetch_queue.put(item)
+                    # Pin memory on worker thread if enabled.
+                    if self.pin_memory:
+                        item = _recursive_pin(item)
+                    self._safe_put(item)
                 except StopIteration:
-                    self._prefetch_queue.put(None)
+                    self._safe_put(None)
                     break
-                except queue.Full:
-                    continue
         except Exception as e:
-            self._prefetch_queue.put(e)
+            self._safe_put(e)
 
     def _start_prefetching(self):
         with self._lock:

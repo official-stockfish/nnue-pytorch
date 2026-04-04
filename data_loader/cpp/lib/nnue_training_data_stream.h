@@ -9,6 +9,8 @@
 #include <memory>
 #include <vector>
 #include <functional>
+#include <atomic>
+#include <mutex>
 
 namespace training_data {
 
@@ -53,9 +55,17 @@ namespace training_data {
                 vec.emplace_back(*v);
             }
         }
+        virtual void fill_threadsafe(std::vector<TrainingDataEntry>& vec, std::size_t n)
+        {
+            std::lock_guard<std::mutex> lock(fill_lock);
+            this->fill(vec, n);
+        }
 
         virtual bool eof() const = 0;
         virtual ~BasicSfenInputStream() {}
+
+    private:
+        std::mutex fill_lock;
     };
 
     struct BinSfenInputStream : BasicSfenInputStream
@@ -99,7 +109,7 @@ namespace training_data {
                         continue;
                     }
 
-                    m_eof = true;
+                    m_eof.store(true, std::memory_order_release);
                     return std::nullopt;
                 }
             }
@@ -107,7 +117,7 @@ namespace training_data {
 
         bool eof() const override
         {
-            return m_eof;
+            return m_eof.load();
         }
 
         ~BinSfenInputStream() override {}
@@ -115,7 +125,7 @@ namespace training_data {
     private:
         std::fstream m_stream;
         std::string m_filename;
-        bool m_eof;
+        std::atomic<bool> m_eof;
         bool m_cyclic;
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
     };
@@ -155,7 +165,7 @@ namespace training_data {
                         continue;
                     }
 
-                    m_eof = true;
+                    m_eof.store(true, std::memory_order_release);
                     return std::nullopt;
                 }
 
@@ -167,7 +177,7 @@ namespace training_data {
 
         bool eof() const override
         {
-            return m_eof;
+            return m_eof.load();
         }
 
         ~BinpackSfenInputStream() override {}
@@ -175,7 +185,7 @@ namespace training_data {
     private:
         std::unique_ptr<binpack::CompressedTrainingDataEntryReader> m_stream;
         std::string m_filename;
-        bool m_eof;
+        std::atomic<bool> m_eof;
         bool m_cyclic;
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
     };
@@ -188,8 +198,8 @@ namespace training_data {
         BinpackSfenInputParallelStream(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate, int rank = 0, int world_size = 1) :
             m_stream(std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(concurrency, filenames, openmode, cyclic, skipPredicate, rank, world_size)),
             m_filenames(filenames),
-            m_concurrency(concurrency),
             m_eof(false),
+            m_concurrency(concurrency),
             m_cyclic(cyclic),
             m_skipPredicate(skipPredicate)
         {
@@ -201,7 +211,7 @@ namespace training_data {
             auto v = m_stream->next();
             if (!v.has_value())
             {
-                m_eof = true;
+                m_eof.store(true, std::memory_order_release);
                 return std::nullopt;
             }
 
@@ -210,16 +220,21 @@ namespace training_data {
 
         void fill(std::vector<TrainingDataEntry>& v, std::size_t n) override
         {
+            fill_threadsafe(v, n);
+        }
+
+        void fill_threadsafe(std::vector<TrainingDataEntry>& v, std::size_t n) override
+        {
             auto k = m_stream->fill(v, n);
             if (n != k)
             {
-                m_eof = true;
+                m_eof.store(true, std::memory_order_release);
             }
         }
 
         bool eof() const override
         {
-            return m_eof;
+            return m_eof.load();
         }
 
         ~BinpackSfenInputParallelStream() override {}
@@ -227,8 +242,8 @@ namespace training_data {
     private:
         std::unique_ptr<binpack::CompressedTrainingDataEntryParallelReader> m_stream;
         std::vector<std::string> m_filenames;
+        std::atomic<bool> m_eof;
         int m_concurrency;
-        bool m_eof;
         bool m_cyclic;
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
     };
