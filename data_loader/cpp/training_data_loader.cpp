@@ -622,57 +622,110 @@ FenBatch* FenBatchStream::next() {
 }
 
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
-    if (!config.filtered && !config.random_fen_skipping && !config.wld_filtered && !config.early_fen_skipping) {
+    if (!config.filtered && !config.random_fen_skipping && !config.wld_filtered &&
+        !config.early_fen_skipping && config.soft_early_fen_skipping <= 0) {
         return nullptr;
     }
 
-    // Precompute the static random skipping threshold for the 64-bit PRNG
     const double skip_prob = double(config.random_fen_skipping) / (config.random_fen_skipping + 1);
     const uint64_t random_skip_threshold = config.random_fen_skipping ?
                                            static_cast<uint64_t>(skip_prob * static_cast<double>(~0ULL)) : 0;
 
+    // --- Precompute 5-Point Spline PC LUT ---
     std::array<double, 33> target_pc_weights_lut{};
     double target_pc_weights_total = 0.0;
 
+    auto desired_piece_count_weights = [&config](int pc) -> double {
+        double x = static_cast<double>(pc);
+        double y[5] = { config.pc_y0, config.pc_y1, config.pc_y2, config.pc_y3, config.pc_y4 };
+
+        if (x <= 0) return y[0];
+        if (x >= 32) return y[4];
+
+        int i = static_cast<int>(x / 8.0);
+        if (i > 3) i = 3;
+
+        double x0 = i * 8.0;
+        double t = (x - x0) / 8.0;
+
+        auto get_slope = [&](int idx) {
+            if (idx == 0) return (y[1] - y[0]);
+            if (idx == 4) return (y[4] - y[3]);
+            return (y[idx + 1] - y[idx - 1]) / 2.0;
+        };
+
+        double m0 = get_slope(i);
+        double m1 = get_slope(i + 1);
+
+        double t2 = t * t;
+        double t3 = t2 * t;
+
+        double h00 = 2 * t3 - 3 * t2 + 1;
+        double h10 = t3 - 2 * t2 + t;
+        double h01 = -2 * t3 + 3 * t2;
+        double h11 = t3 - t2;
+
+        double val = h00 * y[i] + h10 * m0 + h01 * y[i + 1] + h11 * m1;
+
+        return std::max(0.0, val);
+    };
+
     for (int i = 0; i < 33; ++i) {
-        double x  = i;
-        double x1 = 0, y1 = config.pc_y1;
-        double x2 = 16, y2 = config.pc_y2;
-        double x3 = 32, y3 = config.pc_y3;
-
-        double l1 = (x - x2) * (x - x3) / ((x1 - x2) * (x1 - x3));
-        double l2 = (x - x1) * (x - x3) / ((x2 - x1) * (x2 - x3));
-        double l3 = (x - x1) * (x - x2) / ((x3 - x1) * (x3 - x2));
-
-        target_pc_weights_lut[i] = std::max(0.0, l1 * y1 + l2 * y2 + l3 * y3);
+        target_pc_weights_lut[i] = desired_piece_count_weights(i);
         target_pc_weights_total += target_pc_weights_lut[i];
     }
-
     if (target_pc_weights_total <= 0.0) target_pc_weights_total = 1.0;
 
-    return [config, random_skip_threshold, target_pc_weights_lut, target_pc_weights_total](const TrainingDataEntry& e) {
+    // --- Precompute Soft Early Ply Filter LUT ---
+    std::vector<double> early_ply_accept_prob;
+
+    if (config.soft_early_fen_skipping > 0) {
+        size_t lut_size = static_cast<size_t>(config.soft_early_fen_skipping) + 1;
+        early_ply_accept_prob.resize(lut_size);
+
+        auto interpolate_ply = [&config](double ply) -> double {
+            struct Pt { double x, y; };
+            Pt pts[5] = {
+                {config.ply_x1, config.ply_y1},
+                {config.ply_x2, config.ply_y2},
+                {config.ply_x3, config.ply_y3},
+                {config.ply_x4, config.ply_y4},
+                {static_cast<double>(config.soft_early_fen_skipping), 1.0}
+            };
+
+            if (ply <= pts[0].x) return pts[0].y;
+            if (ply >= pts[4].x) return pts[4].y;
+
+            for (int i = 0; i < 4; ++i) {
+                if (ply >= pts[i].x && ply <= pts[i+1].x) {
+                    if (pts[i+1].x == pts[i].x) return pts[i].y;
+                    double t = (ply - pts[i].x) / (pts[i+1].x - pts[i].x);
+                    return pts[i].y + t * (pts[i+1].y - pts[i].y);
+                }
+            }
+            return 1.0;
+        };
+
+        for (size_t i = 0; i < lut_size; ++i) {
+            early_ply_accept_prob[i] = interpolate_ply(static_cast<double>(i));
+        }
+    }
+
+    return [config, random_skip_threshold, target_pc_weights_lut, target_pc_weights_total,
+            early_ply_accept_prob = std::move(early_ply_accept_prob)](const TrainingDataEntry& e) {
+
         static constexpr int VALUE_NONE = 32002;
 
-        static thread_local double alpha                            = 1.0;
-        static thread_local double pc_history_all[33]               = {0};
-        static thread_local double pc_history_passed[33]            = {0};
-        static thread_local double pc_history_all_total             = 0;
-        static thread_local double pc_history_passed_total          = 0;
-
-        const double max_pc_skip_rate = 0.95;
-
         if (e.score == VALUE_NONE) return true;
+
+        // 1. Hard Filter
         if (e.ply <= config.early_fen_skipping) return true;
 
         auto& prng = rng::get_thread_local_rng();
 
-        if (config.random_fen_skipping && (prng() < random_skip_threshold)) {
-            return true;
-        }
-
-        if (config.filtered && (e.isCapturingMove() || e.isInCheck())) {
-            return true;
-        }
+        // 2. Existing Fast Rejections
+        if (config.random_fen_skipping && (prng() < random_skip_threshold)) return true;
+        if (config.filtered && (e.isCapturingMove() || e.isInCheck())) return true;
 
         if (config.wld_filtered) {
             uint64_t wld_skip_threshold = static_cast<uint64_t>((1.0 - e.score_result_prob()) * static_cast<double>(~0ULL));
@@ -683,19 +736,40 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             return true;
         }
 
+        // 3. Configurable Soft Filter for Early Plies
+        if (config.soft_early_fen_skipping > 0 && e.ply < config.soft_early_fen_skipping) {
+            uint64_t ply_reject_threshold = static_cast<uint64_t>((1.0 - early_ply_accept_prob[e.ply]) * static_cast<double>(~0ULL));
+            if (prng() < ply_reject_threshold) {
+                return true;
+            }
+        }
+
+        // 4. Dynamic Piece Count Filter
         const int pc = e.pos.piecesBB().count();
         if (pc < 0 || pc > 32) return true;
 
-        pc_history_all[pc] += 1;
-        pc_history_all_total += 1;
+        static thread_local double alpha                            = 1.0;
+        static thread_local double pc_history_all[33]               = {0};
+        static thread_local double pc_history_passed[33]            = {0};
+        static thread_local double pc_history_all_total             = 0;
+        static thread_local double pc_history_passed_total          = 0;
+        static thread_local uint64_t step_count                     = 0;
 
-        // Recalculate alpha every 10,000 FENs to anchor the most overrepresented class to 10% acceptance
-        if (uint64_t(pc_history_all_total) % 10000 == 0) {
+        const double max_pc_skip_rate = 0.95;
+
+        pc_history_all[pc] += 1.0;
+        pc_history_all_total += 1.0;
+        step_count++;
+
+        bool should_update = (step_count == 100 || step_count == 500 || step_count == 1000 ||
+                              step_count == 2500 || step_count == 5000 ||
+                              (step_count > 5000 && step_count % 10000 == 0));
+
+        if (should_update) {
             double min_ratio = std::numeric_limits<double>::infinity();
             bool found_valid = false;
 
             for (int i = 0; i < 33; ++i) {
-                // Only evaluate ratios for piece counts that actually exist in target and history
                 if (target_pc_weights_lut[i] > 0.0 && pc_history_all[i] > 0.0) {
                     double current_ratio = (pc_history_all_total * target_pc_weights_lut[i]) /
                                            (target_pc_weights_total * pc_history_all[i]);
@@ -705,10 +779,15 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
                     }
                 }
             }
-
-            // Anchor the lowest ratio (most overrepresented) to max_pc_skip_rate
             if (found_valid && min_ratio > 0.0) {
                 alpha = (1.0 - max_pc_skip_rate) / min_ratio;
+            }
+
+            if (step_count >= 10000 && step_count % 10000 == 0) {
+                for (int i = 0; i < 33; ++i) {
+                    pc_history_all[i] *= 0.5;
+                }
+                pc_history_all_total *= 0.5;
             }
         }
 
@@ -719,15 +798,15 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             accept_prob = alpha * current_ratio;
         }
 
-        accept_prob = std::min(1.0, std::max(0.0, accept_prob));
+        accept_prob = std::clamp(accept_prob, 0.0, 1.0);
 
         uint64_t reject_threshold = static_cast<uint64_t>((1.0 - accept_prob) * static_cast<double>(~0ULL));
         if (prng() < reject_threshold) {
             return true;
         }
 
-        pc_history_passed[pc] += 1;
-        pc_history_passed_total += 1;
+        pc_history_passed[pc] += 1.0;
+        pc_history_passed_total += 1.0;
 
         return false;
     };
