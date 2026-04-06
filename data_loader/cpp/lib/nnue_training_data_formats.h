@@ -7924,7 +7924,8 @@ namespace binpack
                             // Atomically retrieve the total count and reset it to 0 without dropping concurrent increments
                             uint64_t count_to_print = timeout_count.exchange(0, std::memory_order_relaxed);
 
-                            std::cerr << "[Warning] Dataloader mutex acquisition timed out after "
+                            std::cerr << "[Warning] Dataloader mutex acquisition for file with ID "
+                                    << fileId << " timed out after "
                                     << kMaxLockWaitTime.count() << "s. Re-rolling file. "
                                     << "(" << count_to_print << " timeouts since last warning)\n";
                         }
