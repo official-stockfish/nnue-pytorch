@@ -7679,7 +7679,7 @@ namespace binpack
 
             for (size_t i = 0; i < m_inputFiles.size(); ++i)
             {
-                m_fileMutexes.push_back(std::make_unique<std::mutex>());
+                m_fileMutexes.push_back(std::make_unique<std::timed_mutex>());
             }
             m_distribution_weights = sizes;
             m_ringBuffer.reserve_internal(threadBufferSize);
@@ -7852,9 +7852,15 @@ namespace binpack
         std::vector<std::thread> m_workers;
 
         // Per File Lock
-        std::vector<std::unique_ptr<std::mutex>> m_fileMutexes;
+        std::vector<std::unique_ptr<std::timed_mutex>> m_fileMutexes;
         std::vector<double> m_distribution_weights;
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
+
+        // Prevent single file failure leading to crash
+        static constexpr std::chrono::milliseconds kMaxLockWaitTime{2000};
+        static constexpr int64_t kWarningCooldownSeconds = 300;
+        std::atomic<uint64_t> timeout_count{0};
+        std::atomic<int64_t> last_warning_time{-kWarningCooldownSeconds};
 
         // DDP support
         int m_rank;
@@ -7890,10 +7896,42 @@ namespace binpack
             if (m_offset + sizeof(PackedTrainingDataEntry) + 2 > m_chunk.size())
             {
                 auto& prng = rng::get_thread_local_rng();
-                const std::size_t fileId = local_dist(prng);
-                auto& inputFile = m_inputFiles[fileId];
 
-                std::unique_lock lock(*m_fileMutexes[fileId]);
+                std::size_t fileId;
+                std::unique_lock<std::remove_reference_t<decltype(*m_fileMutexes[0])>> lock;
+
+                while (true)
+                {
+                    fileId = local_dist(prng);
+                    lock = std::unique_lock(*m_fileMutexes[fileId], std::defer_lock);
+
+                    if (lock.try_lock_for(kMaxLockWaitTime))
+                    {
+                        break;
+                    }
+
+                    timeout_count.fetch_add(1, std::memory_order_relaxed);
+
+                    auto now = std::chrono::steady_clock::now().time_since_epoch();
+                    int64_t now_sec = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+                    int64_t last_sec = last_warning_time.load(std::memory_order_relaxed);
+
+                    if (now_sec - last_sec >= kWarningCooldownSeconds)
+                    {
+                        // Ensure only one thread evaluates this to true during the evaluation window
+                        if (last_warning_time.compare_exchange_strong(last_sec, now_sec, std::memory_order_relaxed))
+                        {
+                            // Atomically retrieve the total count and reset it to 0 without dropping concurrent increments
+                            uint64_t count_to_print = timeout_count.exchange(0, std::memory_order_relaxed);
+
+                            std::cerr << "[Warning] Dataloader mutex acquisition timed out after "
+                                    << kMaxLockWaitTime.count() << "s. Re-rolling file. "
+                                    << "(" << count_to_print << " timeouts since last warning)\n";
+                        }
+                    }
+                }
+
+                auto& inputFile = m_inputFiles[fileId];
 
                 auto seek_for_ddp_rank = [&](std::size_t rank) -> bool
                 {
