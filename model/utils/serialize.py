@@ -333,7 +333,6 @@ class NNUEReader:
             raise Exception("Invalid compression method.")
 
     def read_feature_transformer(self, layer, num_psqt_buckets: int) -> None:
-        num_export_features = layer.NUM_REAL_FEATURES
         num_outputs = layer.num_outputs
         L1 = num_outputs - num_psqt_buckets
 
