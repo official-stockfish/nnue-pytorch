@@ -50,9 +50,6 @@ class DataloaderDDPConfig:
     rank: int = 0
     world_size: int = 1
 
-
-import ctypes
-
 class CDataloaderSkipConfig(ctypes.Structure):
     _fields_ = [
         ("filtered", ctypes.c_bool),

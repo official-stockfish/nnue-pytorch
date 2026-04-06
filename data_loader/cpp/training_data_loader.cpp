@@ -755,7 +755,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
         static thread_local double pc_history_passed_total          = 0;
         static thread_local uint64_t step_count                     = 0;
 
-        const double max_pc_skip_rate = 0.95;
+        const double max_pc_skip_rate = 0.975;
 
         pc_history_all[pc] += 1.0;
         pc_history_all_total += 1.0;
