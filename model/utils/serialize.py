@@ -185,35 +185,31 @@ class NNUEWriter:
         weight = export_weight[:, : model.L1]
         psqt_weight = export_weight[:, model.L1 :]
 
-        # Somewhat hacky approach to overcome current reading limitation in Stockfish repository
-        biases, _, psqt_weights = model.quantization.quantize_feature_transformer(
-            bias, weight, psqt_weight
+        # biases are exported as i16s
+        biases, _, _ = model.quantization.quantize_feature_transformer(
+            bias, None, None, torch.int16, get_histogram_callback("", self.verbose)
         )
 
-        # Weights stored as [num_features][outputs]
+        self.write_tensor(biases.flatten().numpy(), ft_compression)
 
+        # Weights stored as [num_features][outputs]
         offset = 0
-        weight_segments = []
         for f in layer.features:
             n = f.NUM_REAL_FEATURES
             f_export_dtype = f.EXPORT_WEIGHT_DTYPE
 
             ft_histogram_callback = get_histogram_callback(f.FEATURE_NAME, self.verbose)
-            segment_bias = bias[offset : offset + n]
             segment_weight = weight[offset : offset + n]
             segment_psqt_weight = psqt_weight[offset : offset + n]
-            _, segment_weights, _ = model.quantization.quantize_feature_transformer(
-                segment_bias, segment_weight, segment_psqt_weight, f_export_dtype, ft_histogram_callback
+            _, segment_weight, segment_psqt_weight = model.quantization.quantize_feature_transformer(
+                None, segment_weight, segment_psqt_weight, f_export_dtype, ft_histogram_callback
             )
             # threat weights are expected to always be uncompressed -- should be changed in the future
             segment_compression = ft_compression if not f_export_dtype == torch.int8 else "none"
-            weight_segments.append(tuple((segment_weights, segment_compression)))
             offset += n
 
-        self.write_tensor(biases.flatten().numpy(), ft_compression)
-        for segment_weight, segment_compression in weight_segments:
             self.write_tensor(segment_weight.flatten().numpy(), segment_compression)
-        self.write_tensor(psqt_weights.flatten().numpy(), ft_compression)
+            self.write_tensor(segment_psqt_weight.flatten().numpy(), ft_compression)
 
     def write_fc_layer(
         self,
@@ -343,14 +339,17 @@ class NNUEReader:
 
         bias = self.tensor(np.int16, [L1])
         segments = []
+        segments_psqt = []
 
         for feature in layer.features:
             dtype = np.int8 if feature.EXPORT_WEIGHT_DTYPE == torch.int8 else np.int16
             s = self.tensor(dtype, [feature.NUM_REAL_FEATURES, L1])
+            s_psqt = self.tensor(np.int32, [feature.NUM_REAL_FEATURES, num_psqt_buckets])
             segments.append(s)
+            segments_psqt.append(s_psqt)
 
         weight = torch.cat(segments, dim=0)
-        psqt_weight = self.tensor(np.int32, [num_export_features, num_psqt_buckets])
+        psqt_weight = torch.cat(segments_psqt, dim=0)
 
         bias, weight, psqt_weight = (
             self.model.quantization.dequantize_feature_transformer(

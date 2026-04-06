@@ -112,19 +112,27 @@ class QuantizationManager:
         f_weight_export_dtype: torch.dtype = torch.int16,
         callback: Optional[Callable] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        psqt_weight = psqt_weight.mul(self.nnue2score * self.weight_scale_out)
-        bias = bias.mul(self.ft_quantized_one)
-        weight = weight.mul(self.ft_quantized_one)
+        if bias is not None:
+            # only weight can have different dtypes, bias is always int16, psqt_weight is always int32
+            bias = bias.mul(self.ft_quantized_one)
+            bias, bias_clipped = _safe_convert(bias, torch.int16)
 
-         # only weight can have different dtypes, bias is always int16, psqt_weight is always int32
-        bias, bias_clipped = _safe_convert(bias, torch.int16)
-        weight, weight_clipped = _safe_convert(weight, f_weight_export_dtype)
-        psqt_weight, psqt_weight_clipped = _safe_convert(psqt_weight, torch.int32)
+            if callback is not None:
+                callback("ft_bias", bias, bias_clipped)
 
-        if callback is not None:
-            callback("fct_weight", weight, weight_clipped)
-            callback("ft_bias", bias, bias_clipped)
-            callback("psqt_weight", psqt_weight, psqt_weight_clipped)
+        if weight is not None:
+            weight = weight.mul(self.ft_quantized_one)
+            weight, weight_clipped = _safe_convert(weight, f_weight_export_dtype)
+
+            if callback is not None:
+                callback("ft_weight", weight, weight_clipped)
+
+        if psqt_weight is not None:
+            psqt_weight = psqt_weight.mul(self.nnue2score * self.weight_scale_out)
+            psqt_weight, psqt_weight_clipped = _safe_convert(psqt_weight, torch.int32)
+
+            if callback is not None:
+                callback("psqt_weight", psqt_weight, psqt_weight_clipped)
 
         return bias, weight, psqt_weight
 
@@ -134,9 +142,9 @@ class QuantizationManager:
         weight: torch.Tensor,
         psqt_weight: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        bias = bias.divide(self.ft_quantized_one)
-        weight = weight.divide(self.ft_quantized_one)
-        psqt_weight = psqt_weight.divide(self.nnue2score * self.weight_scale_out)
+        bias = bias.divide(self.ft_quantized_one) if bias is not None else None
+        weight = weight.divide(self.ft_quantized_one) if weight is not None else None
+        psqt_weight = psqt_weight.divide(self.nnue2score * self.weight_scale_out) if psqt_weight is not None else None
 
         return bias, weight, psqt_weight
 
