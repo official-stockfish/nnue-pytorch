@@ -229,7 +229,7 @@ class RangerLite(torch.optim.Optimizer):
                     grad_ma.mul_(beta1).add_(grad, alpha=1 - beta1)
 
                     step_size = lr / bias_correction1
-                    p.sub_((pnm_val / denom) * step_size)
+                    p.sub_((grad_ma / denom) * step_size)
 
         if self.lookahead_active:
             self.lookahead_process_step()
