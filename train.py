@@ -171,7 +171,6 @@ class SimpleLineLogger(Callback):
             return
 
         pl_module._log_epoch_end("val")
-        val_loss = trainer.callback_metrics.get(self.val_metric, float('nan'))
         metric_strings = []
         for metric_key in self.val_metrics_epoch:
             metric_value = trainer.callback_metrics.get(metric_key, float('nan'))
