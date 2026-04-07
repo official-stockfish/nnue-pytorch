@@ -32,6 +32,7 @@ class QuantizationConfig:
     weight_scale_hidden_1: float = 64.0
     weight_scale_hidden_2: float = 128.0
     weight_scale_out: float = 16.0
+    weight_scale_router: float = 256.0
     weight_quantized_max_hidden: float = 127.0 # i8 max
     ft_quantized_one: float = 256.0
     ft_quantized_max: float = 255.0 # limited to 255 for safe squaring withing i16
@@ -49,6 +50,8 @@ class QuantizationManager:
             config.weight_scale_hidden_2,
         ]
         self.weight_scale_out = config.weight_scale_out
+        self.weight_scale_router = config.weight_scale_router
+
         self.weight_quantized_max_hidden = config.weight_quantized_max_hidden
         self.hidden_quantized_one = config.hidden_quantized_one
         self.ft_quantized_one = config.ft_quantized_one
@@ -175,6 +178,37 @@ class QuantizationManager:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         kBiasScaleHidden = self.weight_scale_hidden[layer_idx] * self.hidden_quantized_one
         kWeightScaleHidden = self.weight_scale_hidden[layer_idx]
+
+        bias = bias.divide(kBiasScaleHidden)
+        weight = weight.divide(kWeightScaleHidden)
+
+        return bias, weight
+
+    def quantize_router(
+        self,
+        bias: torch.Tensor,
+        weight: torch.Tensor,
+        callback: Optional[Callable] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        kBiasScaleHidden = self.weight_scale_router * self.hidden_quantized_one
+        kWeightScaleHidden = self.weight_scale_router
+
+        bias, bias_clipped = _safe_convert(bias.mul(kBiasScaleHidden), torch.int32)
+        weight, weight_clipped = _safe_convert(weight.mul(kWeightScaleHidden), torch.int8)
+
+        if callback is not None:
+            callback("router_weight", weight, weight_clipped)
+            callback("router_bias", bias, bias_clipped)
+
+        return bias, weight
+
+    def dequantize_router(
+        self,
+        bias: torch.Tensor,
+        weight: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        kBiasScaleHidden = self.weight_scale_router * self.hidden_quantized_one
+        kWeightScaleHidden = self.weight_scale_router
 
         bias = bias.divide(kBiasScaleHidden)
         weight = weight.divide(kWeightScaleHidden)

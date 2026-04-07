@@ -61,6 +61,8 @@ class LossParams:
     """weight boost parameter 1 (default=0.0)"""
     w2: float = 0.5
     """weight boost parameter 2 (default=0.5)"""
+    moe_loss_weight: float = 0.001
+    """weight of the MoE load balancing loss (default=0.001)"""
     lambda_: Annotated[float, tyro.conf.arg(name="lambda")] = 1.0
     """1.0=train on evaluations, 0.0=train on game results, interpolates between (default=1.0)."""
 

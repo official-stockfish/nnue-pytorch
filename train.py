@@ -46,14 +46,11 @@ class SimpleLineLogger(Callback):
     def __init__(
         self,
         refresh_rate=None,
-        train_metric_step="train_loss",
-        train_metric_epoch="train_loss_epoch",
-        val_metric="val_loss_epoch",
     ):
         super().__init__()
-        self.train_metric_step = train_metric_step
-        self.train_metric_epoch = train_metric_epoch
-        self.val_metric = val_metric
+        self.train_metric_step = "train_loss"
+        self.train_metrics_epoch = ["train_loss_epoch", "train_moe_loss_epoch", "train_moe_ratio_epoch"]
+        self.val_metrics_epoch = ["val_loss_epoch", "val_moe_loss_epoch", "val_moe_ratio_epoch"]
 
         self.refresh_rate = refresh_rate
 
@@ -121,11 +118,14 @@ class SimpleLineLogger(Callback):
         if trainer.global_rank != 0 or trainer.sanity_checking:
             return
 
-        pl_module._log_epoch_end(self.train_metric_epoch)
-        train_loss = trainer.callback_metrics.get(self.train_metric_epoch, float('nan'))
+        pl_module._log_epoch_end("train")
+        metric_strings = []
+        for metric_key in self.train_metrics_epoch:
+            metric_value = trainer.callback_metrics.get(metric_key, float('nan'))
+            metric_strings.append(f"{metric_key}={metric_value:.5f}")
+        combined_metric_string = ", ".join(metric_strings)
         print(
-            f"Epoch {trainer.current_epoch:>2} (Train): "
-            f"[{self.train_metric_epoch}={train_loss:.5f}]",
+            f"Epoch {trainer.current_epoch:>2} (Train): {combined_metric_string}",
             flush=True
         )
 
@@ -170,11 +170,15 @@ class SimpleLineLogger(Callback):
         if trainer.global_rank != 0 or trainer.sanity_checking:
             return
 
-        pl_module._log_epoch_end(self.val_metric)
+        pl_module._log_epoch_end("val")
         val_loss = trainer.callback_metrics.get(self.val_metric, float('nan'))
+        metric_strings = []
+        for metric_key in self.val_metrics_epoch:
+            metric_value = trainer.callback_metrics.get(metric_key, float('nan'))
+            metric_strings.append(f"{metric_key}={metric_value:.5f}")
+        combined_metric_string = ", ".join(metric_strings)
         print(
-            f"Epoch {trainer.current_epoch:>2} (Val): "
-            f"[{self.val_metric}={val_loss:.5f}]",
+            f"Epoch {trainer.current_epoch:>2} (Val): {combined_metric_string}",
             flush=True
         )
 

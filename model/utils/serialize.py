@@ -125,6 +125,11 @@ class NNUEWriter:
         self.write_header(model, fc_hash, description)
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model, ft_compression)
+
+        router_hash = self.router_hash(model)
+        self.int32(router_hash)
+        self.write_router(model, model.router)
+
         for bucket, (l1, l2, output) in enumerate(model.layer_stacks.get_coalesced_layer_stacks()):
             self.int32(fc_hash)  # FC layers hash
             self.write_fc_layer(model, l1, 0, f"bucket {bucket} l1")
@@ -153,6 +158,20 @@ class NNUEWriter:
                 layer_hash = (layer_hash + 0x538D24C7) & 0xFFFFFFFF
             prev_hash = layer_hash
         return layer_hash
+
+    @staticmethod
+    def router_hash(model: NNUEModel) -> int:
+        # Router hash
+        prev_hash = 0x538DC7E4
+        router_hash = 0x538DC7E4
+        router_hash += model.num_router_features_per_side * 2
+        router_hash ^= prev_hash >> 1
+        router_hash ^= (prev_hash << 31) & 0xFFFFFFFF
+
+        router_hash += model.num_ls_buckets
+        router_hash ^= prev_hash >> 1
+        router_hash ^= (prev_hash << 31) & 0xFFFFFFFF
+        return router_hash
 
     def write_header(self, model: NNUEModel, fc_hash: int, description: str) -> None:
         self.int32(VERSION)  # version
@@ -211,6 +230,31 @@ class NNUEWriter:
             self.write_tensor(segment_weight.flatten().numpy(), segment_compression)
             self.write_tensor(segment_psqt_weight.flatten().numpy(), ft_compression)
 
+    def write_router(
+        self,
+        model: NNUEModel,
+        layer: nn.Linear,
+    ) -> None:
+        # FC layers are stored as int8 weights, and int32 biases
+        bias = layer.bias.data
+        weight = layer.weight.data
+
+        bias, weight = model.quantization.quantize_router(
+            bias, weight, get_histogram_callback("", self.verbose)
+        )
+
+        # FC inputs are padded to 32 elements by spec.
+        num_input = weight.shape[1]
+        if num_input % 32 != 0:
+            num_input += 32 - (num_input % 32)
+            new_w = torch.zeros(weight.shape[0], num_input, dtype=torch.int8)
+            new_w[:, : weight.shape[1]] = weight
+            weight = new_w
+
+        self.buf.extend(bias.flatten().numpy().tobytes())
+        # Weights stored as [outputs][inputs], so we can flatten
+        self.buf.extend(weight.flatten().numpy().tobytes())
+
     def write_fc_layer(
         self,
         model: NNUEModel,
@@ -254,12 +298,16 @@ class NNUEReader:
         self.model = NNUEModel(feature_name, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
+        router_hash = NNUEWriter.router_hash(self.model)
 
         self.read_header(self.model.feature_hash, fc_hash)
         self.read_int32(
             self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
+
+        self.read_int32(router_hash)
+        self.read_router(self.model.router.weight, self.model.router.bias)
 
         layers = [
             self.model.layer_stacks.l1,
@@ -360,6 +408,29 @@ class NNUEReader:
         export_weight = torch.cat([weight, psqt_weight], dim=1)
         layer.load_export_weights(export_weight)
         layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
+
+    def read_router(
+        self,
+        layer_weight_t: torch.Tensor,
+        layer_bias_t: torch.Tensor,
+    ) -> None:
+        # router inputs are padded to 32 elements by spec.
+        non_padded_shape = layer_weight_t.shape
+        padded_shape = (non_padded_shape[0], ((non_padded_shape[1] + 31) // 32) * 32)
+
+        bias = self.tensor(np.int32, layer_bias_t.shape)
+        weight = self.tensor(np.int8, padded_shape)
+
+        bias, weight = self.model.quantization.dequantize_router(
+            bias, weight
+        )
+
+        layer_bias = bias
+        # Strip padding.
+        layer_weight = weight[: non_padded_shape[0], : non_padded_shape[1]]
+
+        layer_weight_t.data.copy_(layer_weight)
+        layer_bias_t.data.copy_(layer_bias)
 
     def read_fc_layer(
         self,

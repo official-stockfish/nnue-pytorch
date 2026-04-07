@@ -13,6 +13,7 @@ class NNUEModel(nn.Module):
         config: ModelConfig,
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
+        num_router_features_per_side: int = 16,
     ):
         super().__init__()
 
@@ -36,6 +37,10 @@ class NNUEModel(nn.Module):
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
         self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
+
+        self.num_router_features_per_side = num_router_features_per_side
+        self.router = nn.Linear(self.num_router_features_per_side * 2, self.num_ls_buckets)
+        self.logits_probe = nn.Identity()
 
     @torch.no_grad()
     def clip_weights(self):
@@ -80,6 +85,7 @@ class NNUEModel(nn.Module):
         psqt_indices: torch.Tensor,
         layer_stack_indices: torch.Tensor,
     ):
+        _, _ = psqt_indices, layer_stack_indices # legacy compatibility, no longer used
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
         w, wpsqt = torch.split(wp, self.L1, dim=1)
         b, bpsqt = torch.split(bp, self.L1, dim=1)
@@ -88,15 +94,37 @@ class NNUEModel(nn.Module):
 
         l0_s = torch.split(l0_, self.L1 // 2, dim=1)
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
-        # We multiply by a correction factor, so we can use only bitshift and multiplication at inference.
+
+        router_features = torch.cat(
+            [l0_s1[0][:, -self.num_router_features_per_side:], l0_s1[1][:, -self.num_router_features_per_side:]],
+            dim=1,
+        )
+
         l0_ = torch.cat(l0_s1, dim=1) * self.quantization.l0_correction_factor
 
-        psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
-        wpsqt = wpsqt.gather(1, psqt_indices_unsq)
-        bpsqt = bpsqt.gather(1, psqt_indices_unsq)
-        # The PSQT values are averaged over perspectives. "Their" perspective
-        # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
-        # which does both the averaging and sign flip for black to move)
-        x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
+        routing_logits = self.router(router_features)
+        # Gumbel-Softmax with hard=True produces a one-hot tensor with attached gradients.
+        routing_weights = torch.nn.functional.gumbel_softmax(routing_logits, tau=1.0, hard=True)
+        # Pass both the raw logits and the hard routing weights to the probe
+        self.logits_probe((routing_logits, routing_weights))
+
+        if self.training:
+            x = self.layer_stacks(l0_, routing_weights)
+
+            # Apply STE multiplication for PSQT
+            wpsqt_reshaped = wpsqt.view(-1, self.num_psqt_buckets, 1)
+            bpsqt_reshaped = bpsqt.view(-1, self.num_psqt_buckets, 1)
+
+            wpsqt_selected = (wpsqt_reshaped * routing_weights.unsqueeze(-1)).sum(dim=1)
+            bpsqt_selected = (bpsqt_reshaped * routing_weights.unsqueeze(-1)).sum(dim=1)
+        else:
+            dynamic_indices = routing_logits.argmax(dim=1)
+            x = self.layer_stacks(l0_, dynamic_indices)
+
+            psqt_indices_unsq = dynamic_indices.unsqueeze(dim=1)
+            wpsqt_selected = wpsqt.gather(1, psqt_indices_unsq)
+            bpsqt_selected = bpsqt.gather(1, psqt_indices_unsq)
+
+        x = x + (wpsqt_selected - bpsqt_selected) * (us - 0.5)
 
         return x

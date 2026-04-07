@@ -16,6 +16,81 @@ def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
     ]
 
 
+def sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
+    # convert the network and search scores to an estimate match result
+    # based on the win_rate_model, with scalings and offsets optimized
+    q = (scorenet - loss_params.in_offset) / loss_params.in_scaling
+    qm = (-scorenet - loss_params.in_offset) / loss_params.in_scaling
+    qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
+
+    s = (score - loss_params.out_offset) / loss_params.out_scaling
+    sm = (-score - loss_params.out_offset) / loss_params.out_scaling
+    pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
+
+    # blend that eval based score with the actual game outcome
+    t = outcome
+
+    pt = pf * actual_lambda + t * (1.0 - actual_lambda)
+
+    # use a MSE-like loss function
+    loss = torch.pow(torch.abs(pt - qf), loss_params.pow_exp)
+    if loss_params.qp_asymmetry != 0.0:
+        loss = loss * ((qf > pt) * loss_params.qp_asymmetry + 1)
+
+    weights = 1 + (2.0**loss_params.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), loss_params.w2)
+    loss = (loss * weights).sum() / weights.sum()
+
+    return loss
+
+class MoeLoss():
+    def __init__(self, logits_probe):
+        self.captured_routing_data = {}
+        logits_probe.register_forward_hook(self._capture_routing_hook)
+
+    def _capture_routing_hook(self, module, input, output):
+        self.captured_routing_data["routing_data"] = output
+
+    def get_captured_data(self):
+        return self.captured_routing_data.pop("routing_data")
+
+    def moe_load_balancing_loss(self, logits, hard_weights) -> torch.Tensor:
+        """
+        Standard MoE auxiliary loss (Switch Transformer / Shazeer et al.)
+        logits: (B, num_buckets) - The raw outputs of the router before softmax.
+        hard_weights: (B, num_buckets) - The one-hot discrete routing decisions from Gumbel-Softmax.
+        """
+        num_buckets = logits.size(-1)
+
+        # p_i: Mean routing probability per bucket
+        probs = torch.softmax(logits, dim=-1)
+        mean_probs = probs.mean(dim=0)
+
+        # f_i: Fraction of batch actually routed to each bucket (detached to stop gradients)
+        # hard_weights is already one-hot, so taking the mean gives the fraction per bucket
+        mean_fractions = hard_weights.float().mean(dim=0).detach()
+
+        # Scaled dot product
+        moe_loss = num_buckets * torch.sum(mean_fractions * mean_probs)
+
+        return moe_loss - 1.0  # Subtract 1 to make the loss zero when perfectly balanced (mean_fractions == mean_probs)
+
+    @torch.no_grad()
+    @torch.compiler.disable
+    def get_moe_ratio(self, hard_weights: torch.Tensor) -> float:
+        """
+        Calculates the ratio between the most and least utilized experts.
+        hard_weights: (B, num_experts) one-hot tensor
+        """
+        # Sum across the batch to get total tokens per expert
+        expert_counts = hard_weights.float().sum(dim=0)
+
+        max_usage = torch.max(expert_counts)
+        min_usage = torch.min(expert_counts)
+        min_usage = torch.clamp(min_usage, min=1e-6)
+
+        return max_usage / min_usage
+
+
 class NNUE(L.LightningModule):
     """
     lambda_ = 0.0 - purely based on game results
@@ -47,11 +122,18 @@ class NNUE(L.LightningModule):
 
         # lazy init so `resume_from_model` with config changes works correctly
         self.optimizer_wrapper = None
+        self.moe_loss = None
 
         self.loss_metrics = MetricCollection ({
             "train_loss_epoch": MeanMetric(),
             "val_loss_epoch": MeanMetric(),
             "test_loss_epoch": MeanMetric(),
+            "train_moe_loss_epoch": MeanMetric(),
+            "val_moe_loss_epoch": MeanMetric(),
+            "test_moe_loss_epoch": MeanMetric(),
+            "train_moe_ratio_epoch": MeanMetric(),
+            "val_moe_ratio_epoch": MeanMetric(),
+            "test_moe_ratio_epoch": MeanMetric(),
         })
 
     # --- setup optimizers and training hooks ---
@@ -121,28 +203,44 @@ class NNUE(L.LightningModule):
                 "lr": LR,
                 "weight_decay": 0.0,
             },
+            {
+                "params": [self.model.router.weight],
+                "lr": LR,
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [self.model.router.bias],
+                "lr": LR,
+                "weight_decay": 0.0,
+            },
         ]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
 
+    def on_train_start(self):
+        self.moe_loss = MoeLoss(self.model.logits_probe)
+
     def on_train_epoch_start(self):
         self.optimizer_wrapper.on_train_epoch_start(self)
 
+        for metric_key in self.loss_metrics:
+            self.loss_metrics[metric_key].reset()
+
     def on_train_epoch_end(self):
         self.optimizer_wrapper.on_train_epoch_end(self)
-        self._log_epoch_end("train_loss_epoch")
+        self._log_epoch_end("train")
 
     def on_validation_epoch_start(self):
         self.optimizer_wrapper.on_validation_epoch_start(self)
 
     def on_validation_epoch_end(self):
-        self._log_epoch_end("val_loss_epoch")
+        self._log_epoch_end("val")
 
     def on_test_epoch_start(self):
         self.optimizer_wrapper.on_test_epoch_start(self)
 
     def on_test_epoch_end(self):
-        self._log_epoch_end("test_loss_epoch")
+        self._log_epoch_end("test")
 
     def on_save_checkpoint(self, checkpoint):
         self.optimizer_wrapper.on_save_checkpoint(self, checkpoint)
@@ -151,14 +249,27 @@ class NNUE(L.LightningModule):
         self.optimizer_wrapper.on_train_batch_start(self, batch, batch_idx)
 
     def _log_epoch_end(self, loss_type):
-        self.log(
-            f"{loss_type}",
-            self.loss_metrics[f"{loss_type}"],
-            prog_bar=False,
-            sync_dist=True,
-            on_epoch=True,
-            on_step=False,
-        )
+        print(loss_type)
+        metrics_to_log = [
+            f"{loss_type}_loss_epoch",
+            f"{loss_type}_moe_loss_epoch",
+            f"{loss_type}_moe_ratio_epoch",
+        ]
+
+        for metric_key in metrics_to_log:
+            if metric_key not in self.loss_metrics:
+                print(f"[NNUE] Warning: Metric {metric_key} not found in loss_metrics.")
+                continue
+
+            self.log(
+                metric_key,
+                self.loss_metrics[metric_key],
+                prog_bar=False,
+                sync_dist=True,
+                on_epoch=True,
+                on_step=False,
+            )
+
 
     # --- Training step implementation ---
 
@@ -166,15 +277,15 @@ class NNUE(L.LightningModule):
         return self.model(*args, **kwargs)
 
     def training_step(self, batch, batch_idx):
-        return self.step_(batch, batch_idx, "train_loss")
+        return self.step_(batch, batch_idx, "train")
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        self.step_(batch, batch_idx, "val_loss")
+        self.step_(batch, batch_idx, "val")
 
     @torch.no_grad()
     def test_step(self, batch, batch_idx):
-        self.step_(batch, batch_idx, "test_loss")
+        self.step_(batch, batch_idx, "test")
 
     def step_(self, batch: tuple[Tensor, ...], batch_idx, loss_type):
         _ = batch_idx  # unused, but required by pytorch-lightning
@@ -206,36 +317,25 @@ class NNUE(L.LightningModule):
             * self.model.quantization.nnue2score
         )
 
-        p = self.config.loss_params
-        # convert the network and search scores to an estimate match result
-        # based on the win_rate_model, with scalings and offsets optimized
-        q = (scorenet - p.in_offset) / p.in_scaling
-        qm = (-scorenet - p.in_offset) / p.in_scaling
-        qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
-
-        s = (score - p.out_offset) / p.out_scaling
-        sm = (-score - p.out_offset) / p.out_scaling
-        pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
-
-        # blend that eval based score with the actual game outcome
-        t = outcome
-        actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
+        loss_params = self.config.loss_params
+        actual_lambda = loss_params.start_lambda + (loss_params.end_lambda - loss_params.start_lambda) * (
             self.current_epoch / self.max_epoch
         )
-        pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
-        # use a MSE-like loss function
-        loss = torch.pow(torch.abs(pt - qf), p.pow_exp)
-        if p.qp_asymmetry != 0.0:
-            loss = loss * ((qf > pt) * p.qp_asymmetry + 1)
+        fit_loss = sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
 
-        weights = 1 + (2.0**p.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), p.w2)
-        loss = (loss * weights).sum() / weights.sum()
+        logits, hard_weights = self.moe_loss.get_captured_data()
+        moe_loss = self.moe_loss.moe_load_balancing_loss(logits, hard_weights)
+        moe_ratio = self.moe_loss.get_moe_ratio(hard_weights)
 
-        self.loss_metrics[f"{loss_type}_epoch"].update(loss)
+        loss = fit_loss + loss_params.moe_loss_weight * moe_loss
+
+        self.loss_metrics[f"{loss_type}_loss_epoch"].update(fit_loss.detach())
+        self.loss_metrics[f"{loss_type}_moe_loss_epoch"].update(moe_loss.detach())
+        self.loss_metrics[f"{loss_type}_moe_ratio_epoch"].update(moe_ratio.detach())
         self.log(
-            loss_type,
-            loss,
+            f"{loss_type}_loss",
+            fit_loss,
             prog_bar=False,
             sync_dist=False,
             on_epoch=False,
