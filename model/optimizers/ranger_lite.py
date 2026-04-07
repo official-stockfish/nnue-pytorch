@@ -101,7 +101,7 @@ class RangerLite(torch.optim.Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state["step"] = p.new_zeros(1, dtype=torch.int64)
+                    state["step"] = 0
                     state["grad_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state["variance_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
@@ -187,39 +187,35 @@ class RangerLite(torch.optim.Optimizer):
                 denom = (variance_ma.sqrt() / math.sqrt(bias_correction2)).add_(group["eps"])
 
                 if self.pnm_active:
-                    # Ensure 'step' is a Tensor, not a Python int, to avoid recompilation per step
-                    is_odd = (step % 2 == 1)
+                    # PNM Adam Core Setup
+                    if step % 2 == 1:
+                        pnm_grad_ma, pnm_neg_grad_ma = state["grad_ma"], state["neg_grad_ma"]
+                    else:
+                        pnm_grad_ma, pnm_neg_grad_ma = state["neg_grad_ma"], state["grad_ma"]
 
-                    grad_ma = state["grad_ma"]
-                    neg_grad_ma = state["neg_grad_ma"]
-
-                    # Select active and passive moving averages using tensor logic
-                    active_ma = torch.where(is_odd, grad_ma, neg_grad_ma)
-                    passive_ma = torch.where(is_odd, neg_grad_ma, grad_ma)
-
-                    # Compute the new active state
-                    new_active_ma = active_ma * (beta1 ** 2) + grad * (1 - beta1 ** 2)
-
-                    # Write back to state in-place
-                    grad_ma.copy_(torch.where(is_odd, new_active_ma, grad_ma))
-                    neg_grad_ma.copy_(torch.where(is_odd, neg_grad_ma, new_active_ma))
+                    # Update neg_grad_ma
+                    pnm_grad_ma.mul_(beta1 ** 2).add_(grad, alpha=(1 - beta1 ** 2))
 
                     if self.use_legacy_scoping_bug:
                         # Legacy calculation
                         bias_correction1 = 1 - beta1 ** step
                         noise_norm = math.sqrt((1 + beta2) ** 2 + beta2 ** 2)
+
                     else:
-                        # Corrected calculation
+                        # Corrected: Bias updated with exact number of effective steps
                         effective_step = ((step + 1) // 2) * 2
                         bias_correction1 = 1 - beta1 ** effective_step
+                        # Corrected: Normalization calculated from pnm_factor like in original paper. However lr tuning is likely still required.
                         noise_norm = math.sqrt((1 + pnm_factor) ** 2 + pnm_factor ** 2)
 
                     pnm_val = (
-                        new_active_ma * (1 + pnm_factor) - passive_ma * pnm_factor
-                    ) / noise_norm
+                        pnm_grad_ma.mul(1 + pnm_factor)
+                        .add(pnm_neg_grad_ma, alpha=-pnm_factor)
+                        .mul(1 / noise_norm)
+                    )
 
                     step_size = lr / bias_correction1
-                    p.sub_((pnm_val / denom) * step_size)
+                    p.addcdiv_(pnm_val, denom, value=-step_size)
 
                 else:
                     # Standard Adam update
@@ -229,7 +225,7 @@ class RangerLite(torch.optim.Optimizer):
                     grad_ma.mul_(beta1).add_(grad, alpha=1 - beta1)
 
                     step_size = lr / bias_correction1
-                    p.sub_((grad_ma / denom) * step_size)
+                    p.addcdiv_(grad_ma, denom, value=-step_size)
 
         if self.lookahead_active:
             self.lookahead_process_step()
