@@ -2655,7 +2655,7 @@ void feature_transformer_slice_backward(
           float*   const weight_grad,
           float*   const bias_grad,
     const float*   const output_grad
-) {{
+) {
     // The helper indices and pointers we compute are very similar
     // to the forward pass, we're just going to be doing it backward.
     const uint32_t       max_active_features      = ...;
