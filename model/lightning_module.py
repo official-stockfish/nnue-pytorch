@@ -249,7 +249,6 @@ class NNUE(L.LightningModule):
         self.optimizer_wrapper.on_train_batch_start(self, batch, batch_idx)
 
     def _log_epoch_end(self, loss_type):
-        print(loss_type)
         metrics_to_log = [
             f"{loss_type}_loss_epoch",
             f"{loss_type}_moe_loss_epoch",
