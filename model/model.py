@@ -103,7 +103,7 @@ class NNUEModel(nn.Module):
 
         l0_ = torch.cat(l0_s1, dim=1) * self.quantization.l0_correction_factor
 
-        routing_logits = self.router(router_features)
+        routing_logits = self.router_ls * self.router(router_features)
         # Gumbel-Softmax with hard=True produces a one-hot tensor with attached gradients.
         routing_weights = torch.nn.functional.gumbel_softmax(routing_logits, tau=self.gumbel_tau, hard=True)
         # Pass both the raw logits and the hard routing weights to the probe
