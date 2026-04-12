@@ -40,7 +40,7 @@ class NNUEModel(nn.Module):
         self.gumbel_tau = config.gumbel_tau
         self.num_router_features_per_side = config.num_router_features_per_side
         self.router = nn.Linear(self.num_router_features_per_side * 2, self.num_ls_buckets)
-        self.router_ls = nn.Parameter(1e-2 * torch.ones(1))
+        self.router_ls = nn.Parameter(1.0 * torch.ones(1))
         self.logits_probe = nn.Identity()
 
     @torch.no_grad()
