@@ -217,7 +217,7 @@ class NNUE(L.LightningModule):
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
 
-    def on_train_start(self):
+    def setup(self, stage: str) -> None:
         self.moe_loss = MoeLoss(self.model.logits_probe)
 
     def on_train_epoch_start(self):
@@ -323,15 +323,21 @@ class NNUE(L.LightningModule):
 
         fit_loss = sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
 
-        logits, hard_weights = self.moe_loss.get_captured_data()
-        moe_loss = self.moe_loss.moe_load_balancing_loss(logits, hard_weights)
-        moe_ratio = self.moe_loss.get_moe_ratio(hard_weights)
+        if self.moe_loss is not None:
+            logits, hard_weights = self.moe_loss.get_captured_data()
+            moe_loss = self.moe_loss.moe_load_balancing_loss(logits, hard_weights)
+            moe_ratio = self.moe_loss.get_moe_ratio(hard_weights)
+            # logging unweighted moe_loss
+            self.loss_metrics[f"{loss_type}_moe_loss_epoch"].update(moe_loss.detach())
+            self.loss_metrics[f"{loss_type}_moe_ratio_epoch"].update(moe_ratio.detach())
+            moe_loss = loss_params.moe_loss_weight * moe_loss
 
-        loss = fit_loss + loss_params.moe_loss_weight * moe_loss
+        else:
+            moe_loss = 0.0
+
+        loss = fit_loss + moe_loss
 
         self.loss_metrics[f"{loss_type}_loss_epoch"].update(fit_loss.detach())
-        self.loss_metrics[f"{loss_type}_moe_loss_epoch"].update(moe_loss.detach())
-        self.loss_metrics[f"{loss_type}_moe_ratio_epoch"].update(moe_ratio.detach())
         self.log(
             f"{loss_type}_loss",
             fit_loss,

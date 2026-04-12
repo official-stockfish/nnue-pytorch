@@ -13,7 +13,6 @@ class NNUEModel(nn.Module):
         config: ModelConfig,
         num_psqt_buckets: int = 8,
         num_ls_buckets: int = 8,
-        num_router_features_per_side: int = 16,
     ):
         super().__init__()
 
@@ -38,8 +37,10 @@ class NNUEModel(nn.Module):
 
         self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
 
-        self.num_router_features_per_side = num_router_features_per_side
+        self.gumbel_tau = config.gumbel_tau
+        self.num_router_features_per_side = config.num_router_features_per_side
         self.router = nn.Linear(self.num_router_features_per_side * 2, self.num_ls_buckets)
+        self.router_ls = nn.Parameter(1e-2 * torch.ones(1))
         self.logits_probe = nn.Identity()
 
     @torch.no_grad()
@@ -104,7 +105,7 @@ class NNUEModel(nn.Module):
 
         routing_logits = self.router(router_features)
         # Gumbel-Softmax with hard=True produces a one-hot tensor with attached gradients.
-        routing_weights = torch.nn.functional.gumbel_softmax(routing_logits, tau=1.0, hard=True)
+        routing_weights = torch.nn.functional.gumbel_softmax(routing_logits, tau=self.gumbel_tau, hard=True)
         # Pass both the raw logits and the hard routing weights to the probe
         self.logits_probe((routing_logits, routing_weights))
 

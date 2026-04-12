@@ -34,6 +34,11 @@ class ModelConfig(LayerStacksConfig):
         config.L2 = args.L2
         return config
 
+    gumbel_tau: float = 0.2
+    """Argument for router gumbel softmax."""
+
+    num_router_features_per_side: int = 16
+    """How many features per side from ft are used for router."""
     # Not ommiting prefix on purpose.
     quantize_config: QuantizationConfig = field(default_factory=QuantizationConfig)
 
