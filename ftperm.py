@@ -676,7 +676,6 @@ def command_gather(args: FeaturePermutationConfig) -> None:
             args.subcommand.checkpoint,
             feature_name=args.feature_config.features,
             config=args.model_config,
-            quantize_config=QuantizationConfig(),
         )
         model = nnue.model
     else:
@@ -685,7 +684,6 @@ def command_gather(args: FeaturePermutationConfig) -> None:
             args.subcommand.net,
             args.feature_config.features,
             args.model_config,
-            QuantizationConfig(),
         )
 
     model.eval()

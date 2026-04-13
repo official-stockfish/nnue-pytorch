@@ -186,14 +186,12 @@ def main():
             args.checkpoint,
             feature_name=feature_name,
             config=ModelConfig.get_model_config(args),
-            quantize_config=QuantizationConfig(),
         )
     else:
         model = read_model(
             args.net,
             feature_name,
             ModelConfig.get_model_config(args),
-            QuantizationConfig(),
         )
     model.eval()
     input_feature_name = model.model.input_feature_name

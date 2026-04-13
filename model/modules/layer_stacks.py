@@ -33,7 +33,7 @@ class LayerStacks(nn.Module):
         l1x_, l1x_out = l1c_.split(self.L2, dim=1)
         # multiply sqr crelu result by scale correction to match quantized version
         l1x_ = torch.clamp(
-            torch.cat([torch.pow(l1x_, 2.0) * (self.quantization.sqcrele_correction_factor), l1x_], dim=1),
+            torch.cat([torch.pow(l1x_, 2.0) * (self.quantization.sqr_crelu_correction_factor), l1x_], dim=1),
             0.0,
             self.quantization.max_hidden_activation,
         )

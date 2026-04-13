@@ -34,11 +34,11 @@ class QuantizationConfig:
     weight_scale_out: float = 16.0
     weight_quantized_max_hidden: float = 127.0 # i8 max
     ft_quantized_one: float = 256.0
-    ft_quantized_max: float = 255.0 # limited to 255 for safe squaring withing i16
+    ft_quantized_max: float = 255.0 # limited to 255 for safe squaring within i16
     hidden_quantized_one: float = 128.0
     hidden_quantized_max: float = 127.0 # i8 max
     inference_l0_division_factor: float = 512.0
-    inference_sqcrele_division_factor: float = 128.0
+    inference_sqr_crelu_division_factor: float = 128.0
 
 class QuantizationManager:
     def __init__(self, config: QuantizationConfig):
@@ -55,14 +55,14 @@ class QuantizationManager:
 
         hidden_q_max = config.weight_quantized_max_hidden
         self.max_hidden_weight = [hidden_q_max / scale for scale in self.weight_scale_hidden]
-        # Thread weights are treated separately. A bit hacky...
+        # Threat weights are treated separately. A bit hacky...
         # Threat weights are quantized to int8 after scaling by ft_quantized_one
         _i8 = torch.iinfo(torch.int8)
         self.min_threat_weight = -_i8.max / config.ft_quantized_one  # -127/256
         self.max_threat_weight = _i8.max / config.ft_quantized_one  # 127/256
 
         self._l0_correction_factor = config.ft_quantized_one ** 2 / config.inference_l0_division_factor / self.hidden_quantized_one
-        self._sqcrele_correction_factor = config.hidden_quantized_one / config.inference_sqcrele_division_factor
+        self._sqr_crelu_correction_factor = config.hidden_quantized_one / config.inference_sqr_crelu_division_factor
         self._max_ft_activation = config.ft_quantized_max / config.ft_quantized_one
         self._max_hidden_activation = config.hidden_quantized_max / config.hidden_quantized_one
 
@@ -71,8 +71,8 @@ class QuantizationManager:
         return self._l0_correction_factor
 
     @property
-    def sqcrele_correction_factor(self):
-        return self._sqcrele_correction_factor
+    def sqr_crelu_correction_factor(self):
+        return self._sqr_crelu_correction_factor
 
     @property
     def max_ft_activation(self):
@@ -106,9 +106,9 @@ class QuantizationManager:
 
     def quantize_feature_transformer(
         self,
-        bias: torch.Tensor,
-        weight: torch.Tensor,
-        psqt_weight: torch.Tensor,
+        bias: Optional[torch.Tensor],
+        weight: Optional[torch.Tensor],
+        psqt_weight: Optional[torch.Tensor],
         f_weight_export_dtype: torch.dtype = torch.int16,
         callback: Optional[Callable] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

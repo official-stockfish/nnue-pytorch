@@ -10,7 +10,6 @@ def load_model(
     filename: str,
     feature_name: str,
     config: ModelConfig,
-    quantize_config: QuantizationConfig,
 ) -> NNUEModel:
     if filename.endswith(".pt"):
         model = torch.load(filename, weights_only=False)
@@ -24,7 +23,6 @@ def load_model(
             filename,
             feature_name=feature_name,
             config=config,
-            quantize_config=quantize_config,
         )
         model.eval()
         return model.model

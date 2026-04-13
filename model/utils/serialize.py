@@ -14,8 +14,12 @@ from ..model import NNUEModel
 
 
 def ascii_hist(name, x, bins=7):
-    start, end = x.min(), x.max()
+    start, end = int(x.min()), int(x.max())
+    if start >= end - bins:
+        start -= (bins + 1) // 2
+        end += bins // 2
     edges = np.linspace(start, end + 1, bins + 1).astype(int)
+    edges = np.unique(edges)
     N, X = np.histogram(x, bins=edges)
     width = 50
     nmax = N.max()

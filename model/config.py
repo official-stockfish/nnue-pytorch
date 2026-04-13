@@ -34,7 +34,7 @@ class ModelConfig(LayerStacksConfig):
         config.L2 = args.L2
         return config
 
-    # Not ommiting prefix on purpose.
+    # Not omitting prefix on purpose.
     quantize_config: QuantizationConfig = field(default_factory=QuantizationConfig)
 
 
