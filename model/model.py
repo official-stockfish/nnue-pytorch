@@ -38,6 +38,9 @@ class NNUEModel(nn.Module):
         self.gumbel_tau = config.gumbel_tau
         self.num_router_features_per_side = config.num_router_features_per_side
         self.router = nn.Linear(self.num_router_features_per_side * 2, self.num_ls_buckets)
+        # router_ls is only for training dynamics and is not exported to the final engine,
+        # it allows the model to adjust the scale of the router's output during training
+        # at inference, only the argmax is used anyway, so the scale does not matter
         self.router_ls = nn.Parameter(1.0 * torch.ones(1))
         self.logits_probe = nn.Identity()
 
