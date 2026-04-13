@@ -511,7 +511,7 @@ def read_model(
     config: M.ModelConfig,
 ) -> NNUEModel:
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_name, config, quantize_config)
+        reader = NNUEReader(f, feature_name, config)
         return reader.model
 
 
