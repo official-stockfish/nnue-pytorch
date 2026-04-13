@@ -3,7 +3,7 @@ from typing import Generator
 import torch
 from torch import nn
 
-from .stacked_linear import FactorizedStackedLinear, StackedLinear
+from .stacked_linear import StackedLinear
 from .config import LayerStacksConfig
 from ..quantize import QuantizationManager
 

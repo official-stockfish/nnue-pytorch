@@ -93,7 +93,7 @@ class QuantizationManager:
                 "params": [model.layer_stacks.l1.linear.weight],
                 "min_weight": -self.max_hidden_weight[0],
                 "max_weight": self.max_hidden_weight[0],
-                "virtual_params": model.layer_stacks.l1.factorized_linear.weight,
+                "virtual_params": model.layer_stacks.l1.linear.weight,
             },
             {
                 "params": [model.layer_stacks.l2.linear.weight],
