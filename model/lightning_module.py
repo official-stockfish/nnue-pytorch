@@ -199,7 +199,7 @@ class NNUE(L.LightningModule):
                 "weight_decay": dense_wd,
             },
             {
-                "params": [self.model.router.bias],
+                "params": [self.model.router.bias, self.model.router_ls],
                 "lr": LR,
                 "weight_decay": 0.0,
             },

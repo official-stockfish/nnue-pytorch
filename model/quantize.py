@@ -107,8 +107,8 @@ class QuantizationManager:
             },
             {
                 "params": [model.router.linear.weight],
-                "min_weight": -self.max_hidden_weight[2],
-                "max_weight": self.max_hidden_weight[2],
+                "min_weight": -self.max_router_weight,
+                "max_weight": self.max_router_weight,
             },
         ]
 

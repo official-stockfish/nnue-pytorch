@@ -35,15 +35,14 @@ class NNUEModel(nn.Module):
         self.feature_hash = self.input.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
 
-        self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
-
-        self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
-
         self.gumbel_tau = config.gumbel_tau
         self.num_router_features_per_side = config.num_router_features_per_side
         self.router = nn.Linear(self.num_router_features_per_side * 2, self.num_ls_buckets)
         self.router_ls = nn.Parameter(1.0 * torch.ones(1))
         self.logits_probe = nn.Identity()
+
+        self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
+        self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
 
     @torch.no_grad()
     def clip_weights(self):
