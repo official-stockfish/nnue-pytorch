@@ -35,7 +35,7 @@ class QuantizationConfig:
     weight_scale_router: float = 256.0
     weight_quantized_max_hidden: float = 127.0 # i8 max
     ft_quantized_one: float = 256.0
-    ft_quantized_max: float = 255.0 # limited to 255 for safe squaring withing i16
+    ft_quantized_max: float = 255.0 # limited to 255 for safe squaring within i16
     hidden_quantized_one: float = 128.0
     hidden_quantized_max: float = 127.0 # i8 max
     inference_l0_division_factor: float = 512.0
@@ -58,6 +58,7 @@ class QuantizationManager:
 
         hidden_q_max = config.weight_quantized_max_hidden
         self.max_hidden_weight = [hidden_q_max / scale for scale in self.weight_scale_hidden]
+        self.max_router_weight = hidden_q_max / config.weight_scale_router
         # Thread weights are treated separately. A bit hacky...
         # Threat weights are quantized to int8 after scaling by ft_quantized_one
         _i8 = torch.iinfo(torch.int8)
@@ -93,7 +94,6 @@ class QuantizationManager:
                 "params": [model.layer_stacks.l1.linear.weight],
                 "min_weight": -self.max_hidden_weight[0],
                 "max_weight": self.max_hidden_weight[0],
-                "virtual_params": model.layer_stacks.l1.linear.weight,
             },
             {
                 "params": [model.layer_stacks.l2.linear.weight],
@@ -102,6 +102,11 @@ class QuantizationManager:
             },
             {
                 "params": [model.layer_stacks.output.linear.weight],
+                "min_weight": -self.max_hidden_weight[2],
+                "max_weight": self.max_hidden_weight[2],
+            },
+            {
+                "params": [model.router.linear.weight],
                 "min_weight": -self.max_hidden_weight[2],
                 "max_weight": self.max_hidden_weight[2],
             },

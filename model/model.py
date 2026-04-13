@@ -16,6 +16,8 @@ class NNUEModel(nn.Module):
     ):
         super().__init__()
 
+        assert num_psqt_buckets == num_ls_buckets, "num_psqt_buckets and num_ls_buckets must be the same for dynamic routing"
+
         feature_cls = get_feature_cls(feature_name)
         self.L1 = config.L1
         self.L2 = config.L2
