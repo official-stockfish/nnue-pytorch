@@ -174,16 +174,6 @@ class NNUE(L.LightningModule):
                 "weight_decay": 0.0,
             },
             {
-                "params": [self.model.layer_stacks.l1.linear.weight],
-                "lr": LR,
-                "weight_decay": dense_wd,
-            },
-            {
-                "params": [self.model.layer_stacks.l1.linear.bias],
-                "lr": LR,
-                "weight_decay": 0.0,
-            },
-            {
                 "params": [self.model.layer_stacks.l2.linear.weight],
                 "lr": LR,
                 "weight_decay": dense_wd,
