@@ -5,7 +5,6 @@ from torchmetrics import MeanMetric, MetricCollection
 
 from .config import NNUELightningConfig
 from .model import NNUEModel
-from .quantize import QuantizationConfig
 
 
 def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
@@ -29,7 +28,6 @@ class NNUE(L.LightningModule):
         config: NNUELightningConfig,
         max_epoch=None,
         num_batches_per_epoch=None,
-        quantize_config=QuantizationConfig(),
         param_index=0,
         num_psqt_buckets=8,
         num_ls_buckets=8,
@@ -39,7 +37,6 @@ class NNUE(L.LightningModule):
         self.model: NNUEModel = NNUEModel(
             config.features,
             config.model_config,
-            quantize_config,
             num_psqt_buckets,
             num_ls_buckets,
         )
