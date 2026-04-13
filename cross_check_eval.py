@@ -10,7 +10,6 @@ from model import (
     NNUE,
     NNUEReader,
     ModelConfig,
-    QuantizationConfig,
 )
 
 
@@ -18,10 +17,9 @@ def read_model(
     nnue_path,
     feature_name: str,
     config: ModelConfig,
-    quantize_config: QuantizationConfig,
 ):
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_name, config, quantize_config)
+        reader = NNUEReader(f, feature_name, config)
         return reader.model
 
 

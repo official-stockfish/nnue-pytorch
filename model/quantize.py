@@ -28,9 +28,9 @@ def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
 @dataclass
 class QuantizationConfig:
     nnue2score: float = 600.0
-    weight_scale_hidden_0: float = 128.0
-    weight_scale_hidden_1: float = 64.0
-    weight_scale_hidden_2: float = 128.0
+    weight_scale_l1: float = 128.0
+    weight_scale_l2: float = 64.0
+    weight_scale_output: float = 128.0
     weight_scale_out: float = 16.0
     weight_quantized_max_hidden: float = 127.0 # i8 max
     ft_quantized_one: float = 256.0
@@ -44,9 +44,9 @@ class QuantizationManager:
     def __init__(self, config: QuantizationConfig):
         self.nnue2score = config.nnue2score
         self.weight_scale_hidden = [
-            config.weight_scale_hidden_0,
-            config.weight_scale_hidden_1,
-            config.weight_scale_hidden_2,
+            config.weight_scale_l1,
+            config.weight_scale_l2,
+            config.weight_scale_output,
         ]
         self.weight_scale_out = config.weight_scale_out
         self.weight_quantized_max_hidden = config.weight_quantized_max_hidden

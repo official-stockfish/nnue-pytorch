@@ -53,11 +53,11 @@ def get_histogram_callback(hist_title: str, verbose: bool):
         max_value = values.max().item()
         num_argmax = int((values == max_value).sum().item())
 
-        ascii_hist(f"{hist_desc}: ", values.numpy())
+        ascii_hist(f"{hist_desc}: ", values.detach().cpu().numpy())
         print(
             f"Layer has {num_clipped}/{total_elements} clipped weights after rounding.\n"
-            f"Minimum absval in layer is {min_value}, occurring {num_argmin} times.\n"
-            f"Maximum absval in layer is {max_value}, occurring {num_argmax} times."
+            f"Minimum value in layer is {min_value}, occurring {num_argmin} times.\n"
+            f"Maximum value in layer is {max_value}, occurring {num_argmax} times."
         )
 
     return histogram_callback
@@ -170,7 +170,8 @@ class NNUEWriter:
         self.int32(len(buf))
         self.buf.extend(buf)
 
-    def write_tensor(self, arr: npt.NDArray, compression="none") -> None:
+    def write_tensor(self, arr: torch.Tensor, compression="none") -> None:
+        arr = arr.detach().flatten().cpu().numpy()
         if compression == "none":
             self.buf.extend(arr.tobytes())
         elif compression == "leb128":
@@ -194,7 +195,7 @@ class NNUEWriter:
             bias, None, None, torch.int16, get_histogram_callback("", self.verbose)
         )
 
-        self.write_tensor(biases.flatten().numpy(), ft_compression)
+        self.write_tensor(biases, ft_compression)
 
         # Weights stored as [num_features][outputs]
         offset = 0
@@ -212,8 +213,8 @@ class NNUEWriter:
             segment_compression = ft_compression if not f_export_dtype == torch.int8 else "none"
             offset += n
 
-            self.write_tensor(segment_weight.flatten().numpy(), segment_compression)
-            self.write_tensor(segment_psqt_weight.flatten().numpy(), ft_compression)
+            self.write_tensor(segment_weight, segment_compression)
+            self.write_tensor(segment_psqt_weight, ft_compression)
 
     def write_fc_layer(
         self,
@@ -238,9 +239,9 @@ class NNUEWriter:
             new_w[:, : weight.shape[1]] = weight
             weight = new_w
 
-        self.buf.extend(bias.flatten().numpy().tobytes())
+        self.write_tensor(bias, "none")
         # Weights stored as [outputs][inputs], so we can flatten
-        self.buf.extend(weight.flatten().numpy().tobytes())
+        self.write_tensor(weight, "none")
 
     def int32(self, v: int) -> None:
         self.buf.extend(struct.pack("<I", v))
