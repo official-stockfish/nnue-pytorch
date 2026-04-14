@@ -243,12 +243,21 @@ def enforce_gpu_numa_affinity():
         return _get_fallback_core_count("Failed to set CPU affinity: " + str(e))
 
 
-def setup_environment(requested_threads: int = -1, requested_workers: int = 0):
+def setup_environment(
+    requested_threads: int = -1,
+    requested_workers: int = 0,
+    bind_affinity: bool = True,
+):
     """
     Applies OS constraints before heavy library loading.
     """
     os.environ["PYTHONUNBUFFERED"] = "1"
-    available_cores = enforce_gpu_numa_affinity()
+    if bind_affinity:
+        available_cores = enforce_gpu_numa_affinity()
+    else:
+        available_cores = _get_fallback_core_count(
+            "Affinity binding disabled by user request"
+        )
 
     usable_cores = max(1, available_cores - 1)
     if requested_threads < 0:
