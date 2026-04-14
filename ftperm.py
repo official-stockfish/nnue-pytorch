@@ -606,24 +606,26 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor
 def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
     permutation = list(perm)
 
-    l1_size = model.layer_stacks.l1.linear.in_features
-    if l1_size != len(permutation) * 2:
+    l1_size = model.L1
+    l1_size_safe = l1_size - 2 * model.num_router_features_per_side
+    if l1_size_safe != len(permutation) * 2:
         raise Exception(
-            f"Invalid permutation size. Expected {l1_size}. Got {len(permutation) * 2}."
+            f"Invalid permutation size. Expected {l1_size_safe}. Got {len(permutation) * 2}."
         )
 
     # Both sides of the FT must use the same permutation.
-    permutation.extend([x + l1_size // 2 for x in permutation])
+    permutation.extend([x + l1_size_safe // 2 for x in permutation])
 
-    # Add identity permutation for PSQT weights
-    ft_permutation = permutation + list(range(l1_size, model.input.num_outputs))
+    # Add identity permutation for weights affecting router features and PSQT weights
+    ls_permutation = permutation + list(range(l1_size_safe, model.L1))
+    ft_permutation = ls_permutation + list(range(model.L1, model.input.num_outputs))
 
     # Apply the permutation in place.
     for f in model.input.features:
         f.weight.data = f.weight.data[:, ft_permutation]
     model.input.bias.data = model.input.bias.data[ft_permutation]
     model.layer_stacks.l1.linear.weight.data = model.layer_stacks.l1.linear.weight.data[
-        :, permutation
+        :, ls_permutation
     ]
 
 
@@ -735,7 +737,8 @@ def command_find_perm(args: FeaturePermutationConfig) -> None:
     with open(args.subcommand.data, "rb") as file:
         actmat = np.load(file)
 
-    perm = find_perm_impl(actmat, args.use_cupy, args.model_config.L1)
+    l1_safe = args.model_config.L1 - 2 * args.model_config.num_router_features_per_side
+    perm = find_perm_impl(actmat, args.use_cupy, l1_safe)
 
     # perm = np.random.permutation([i for i in range(L1)])
     with open(args.subcommand.out, "wb") as file:
@@ -757,7 +760,8 @@ def ft_optimize(
             np.save(file, actmat)
 
     print("Finding permutation...")
-    perm = find_perm_impl(actmat, use_cupy, model.L1)
+    l1_safe = model.L1 - 2 * model.num_router_features_per_side
+    perm = find_perm_impl(actmat, use_cupy, l1_safe)
     if perm_save_path is not None:
         with open(perm_save_path, "wb") as file:
             np.save(file, perm)
