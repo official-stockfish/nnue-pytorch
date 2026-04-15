@@ -22,13 +22,16 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--num-workers", dest="num_workers", type=int, default=0)
     parser.add_argument("--threads", type=int, default=-1)
+    parser.add_argument("--no-affinity", action="store_true")
 
     # args contains our intercepted values; unknown_args contains everything else
     args, unknown_args = parser.parse_known_args(train_args)
 
     # 3. Apply constraints and get the optimal bounds
     actual_threads, actual_workers = setup_environment(
-        requested_threads=args.threads, requested_workers=args.num_workers
+        requested_threads=args.threads,
+        requested_workers=args.num_workers,
+        bind_affinity=not args.no_affinity,
     )
 
     # 4. Reconstruct the command line for the target script
@@ -44,6 +47,7 @@ def main():
             f"[Launcher] Intercepted requests: threads={args.threads}, workers={args.num_workers}",
             flush=True,
         )
+        print(f"[Launcher] Affinity binding   : {not args.no_affinity}", flush=True)
         print(
             f"[Launcher] Applied constraints : threads={actual_threads}, workers={actual_workers}",
             flush=True,
