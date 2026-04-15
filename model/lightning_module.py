@@ -163,6 +163,23 @@ class NNUE(L.LightningModule):
             on_step=False,
         )
 
+    # --- train / eval switch ---
+    def train(self, mode: bool = True):
+        super().train(mode)
+
+        if hasattr(self, '_trainer') and self._trainer and self.trainer.optimizers:
+            for opt in self.trainer.optimizers:
+                if mode:
+                    if hasattr(opt, 'train') and callable(opt.train):
+                        opt.train()
+                else:
+                    if hasattr(opt, 'eval') and callable(opt.eval):
+                        opt.eval()
+
+
+    def eval(self):
+        return self.train(False)
+
     # --- Training step implementation ---
 
     def forward(self, *args, **kwargs):
@@ -225,6 +242,10 @@ class NNUE(L.LightningModule):
         actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
             self.current_epoch / self.max_epoch
         )
+        batch_jitter = qf.new_empty(()).normal_(0, 1) * p.jitter_lambda_batch
+        sample_jitter = qf.new_empty(qf.shape).normal_(0, 1) * p.jitter_lambda_sample
+        actual_lambda = actual_lambda + batch_jitter + sample_jitter
+        actual_lambda = actual_lambda.clamp(0.0, 1.0)
         pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
         # use a MSE-like loss function
