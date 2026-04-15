@@ -715,15 +715,31 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             early_ply_accept_prob = std::move(early_ply_accept_prob)](const TrainingDataEntry& e) {
 
         static constexpr int VALUE_NONE = 32002;
+        static thread_local int last_ply = -1;
+        static thread_local bool last_score = VALUE_NONE;
+
+        // skip when 0 was used as placeholder for unavailable value
+        // detected through heuristic: Game was not a draw
+        // and last value was somewhat large
+        bool skip_placeholder_zero =
+            e.ply > last_ply &&
+            last_score != VALUE_NONE &&
+            std::abs(last_score) > 100 &&
+            e.result != 0;
+
+        last_ply = e.ply;
 
         if (e.score == VALUE_NONE) return true;
+        if (skip_placeholder_zero) return true;
 
-        // 1. Hard Filter
+        // Only update if valid score.
+        last_score = e.score;
+
+        // Hard Early Ply Filter
         if (e.ply <= config.early_fen_skipping) return true;
 
         auto& prng = rng::get_thread_local_rng();
 
-        // 2. Existing Fast Rejections
         if (config.random_fen_skipping && (prng() < random_skip_threshold)) return true;
         if (config.filtered && (e.isCapturingMove() || e.isInCheck())) return true;
 
@@ -736,7 +752,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             return true;
         }
 
-        // 3. Configurable Soft Filter for Early Plies
+        // Soft Early Ply Filter
         if (config.soft_early_fen_skipping > 0 && e.ply < config.soft_early_fen_skipping) {
             uint64_t ply_reject_threshold = static_cast<uint64_t>((1.0 - early_ply_accept_prob[e.ply]) * static_cast<double>(~0ULL));
             if (prng() < ply_reject_threshold) {
@@ -744,7 +760,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             }
         }
 
-        // 4. Dynamic Piece Count Filter
+        // Dynamic Piece Count Filter
         const int pc = e.pos.piecesBB().count();
         if (pc < 0 || pc > 32) return true;
 
