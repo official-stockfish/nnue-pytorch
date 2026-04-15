@@ -81,24 +81,8 @@ def make_optimizer(nnue_model):
         num_batches_per_epoch=NUM_BATCHES_PER_EPOCH,
     )
 
-    try:
-        optimizers, _ = wrapper.configure_optimizers(train_params)
-        return optimizers[0]
-    except Exception as e:
-        print(f"  WARNING: Wrapper optimizer failed ({e}), retrying without momentum_type...",
-              flush=True)
-        import ranger21 as r21
-        opt = r21.Ranger21(
-            train_params, lr=1.0, betas=(0.9, 0.999), eps=1e-7,
-            using_gc=False, using_normgc=False, weight_decay=0.0,
-            num_batches_per_epoch=NUM_BATCHES_PER_EPOCH,
-            num_epochs=MAX_EPOCH, warmdown_active=False,
-            use_warmup=False, use_adaptive_gradient_clipping=False,
-            softplus=False, pnm_momentum_factor=0.0,
-            lookahead_active=False, normloss_active=False,
-            logging_active=False,
-        )
-        return opt
+    optimizers, _ = wrapper.configure_optimizers(train_params)
+    return optimizers[0]
 
 
 def main():
