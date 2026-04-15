@@ -642,6 +642,8 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             static thread_local double piece_count_history_passed[33]   = {0};
             static thread_local double piece_count_history_all_total    = 0;
             static thread_local double piece_count_history_passed_total = 0;
+            static thread_local bool   has_last_score                   = false;
+            static thread_local int    last_score                       = VALUE_NONE;
 
             static constexpr double max_skipping_rate = 10.0;
 
@@ -659,7 +661,17 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 
             auto do_filter = [&]() { return (e.isCapturingMove() || e.isInCheck()); };
 
+            const bool skip_zero_after_large_previous =
+              e.score == 0 && has_last_score && std::abs(last_score) > 100;
+
+            if (e.score != VALUE_NONE)
+            {
+                last_score     = e.score;
+                has_last_score = true;
+            }
+
             if (e.score == VALUE_NONE) return true;
+            if (skip_zero_after_large_previous) return true;
             if (e.ply <= config.early_fen_skipping) return true;
             if (config.random_fen_skipping && do_skip()) return true;
             if (config.filtered && do_filter()) return true;
