@@ -74,9 +74,7 @@ class NNUEModel(nn.Module):
         us: torch.Tensor,
         them: torch.Tensor,
         white_indices: torch.Tensor,
-        white_values: torch.Tensor,
         black_indices: torch.Tensor,
-        black_values: torch.Tensor,
         psqt_indices: torch.Tensor,
         layer_stack_indices: torch.Tensor,
     ):
@@ -86,7 +84,7 @@ class NNUEModel(nn.Module):
                     and hasattr(ft.features[1], "virtual_weight")):
                 fa, fb = ft.features
                 l0_, wpsqt, bpsqt = metal_fused_composed_double_forward_l0(
-                    white_indices, white_values, black_indices, black_values,
+                    white_indices, black_indices,
                     fa.weight, fb.weight, fb.virtual_weight, ft.bias,
                     us, them, self.L1, self.num_psqt_buckets,
                     fb.NUM_INPUTS_VIRTUAL,
@@ -94,7 +92,7 @@ class NNUEModel(nn.Module):
             elif hasattr(ft, "weight"):
                 weight = ft.weight
                 l0_, wpsqt, bpsqt = metal_fused_double_forward_l0(
-                    white_indices, white_values, black_indices, black_values,
+                    white_indices, black_indices,
                     weight, ft.bias, us, them, self.L1, self.num_psqt_buckets,
                 )
             else:
@@ -105,9 +103,7 @@ class NNUEModel(nn.Module):
                     f"feature with virtual_weight on the second component."
                 )
         else:
-            wp, bp = self.input(
-                white_indices, white_values, black_indices, black_values
-            )
+            wp, bp = self.input(white_indices, black_indices)
             w, wpsqt = torch.split(wp, self.L1, dim=1)
             b, bpsqt = torch.split(bp, self.L1, dim=1)
             l0_ = (us * torch.cat([w, b], dim=1)) + (

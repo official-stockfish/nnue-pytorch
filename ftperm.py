@@ -554,13 +554,11 @@ def forward_ft(
     us: torch.Tensor,
     them: torch.Tensor,
     white_indices: torch.Tensor,
-    white_values: torch.Tensor,
     black_indices: torch.Tensor,
-    black_values: torch.Tensor,
     psqt_indices: torch.Tensor,
     layer_stack_indices: torch.Tensor,
 ) -> torch.Tensor:
-    wp, bp = model.input(white_indices, white_values, black_indices, black_values)
+    wp, bp = model.input(white_indices, black_indices)
     w, _ = torch.split(wp, model.L1, dim=1)
     b, _ = torch.split(bp, model.L1, dim=1)
     l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
@@ -581,9 +579,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor
             us,
             them,
             white_indices,
-            white_values,
             black_indices,
-            black_values,
             outcome,
             score,
             psqt_indices,
@@ -594,9 +590,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor
             us,
             them,
             white_indices,
-            white_values,
             black_indices,
-            black_values,
             psqt_indices,
             layer_stack_indices,
         )

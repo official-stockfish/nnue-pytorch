@@ -20,37 +20,38 @@ except (ImportError, ModuleNotFoundError):
     pass
 
 
-def sparse_linear(feature_indices, feature_values, weight, bias):
-    """Sparse linear: output[b] = sum_k(weight[indices[b,k]] * values[b,k]) + bias.
+def sparse_linear(feature_indices, weight, bias):
+    """Sparse linear: output[b] = sum_k(weight[indices[b,k]]) + bias.
 
+    Feature values are always 1.0 and have been removed from the interface.
     Dispatches to a hand-tuned CuPy CUDA kernel when available, a custom Metal
     kernel on MPS, or falls back to a pure-PyTorch implementation.
     """
     if _HAS_CUPY_KERNELS and feature_indices.is_cuda:
         return _CudaSparseLinearFunction.apply(
-            feature_indices, feature_values, weight, bias
+            feature_indices, weight, bias
         )
     if MPS_AVAILABLE and feature_indices.device.type == "mps":
-        return metal_sparse_linear(feature_indices, feature_values, weight, bias)
-    return _torch_sparse_linear(feature_indices, feature_values, weight, bias)
+        return metal_sparse_linear(feature_indices, weight, bias)
+    return _torch_sparse_linear(feature_indices, weight, bias)
 
 
 def double_sparse_linear(
-    w_indices, w_values, b_indices, b_values, weight, bias
+    w_indices, b_indices, weight, bias
 ):
     """Both perspectives in one call — saves ~0.84 ms on MPS by sharing
     the weight_grad allocation in the backward pass."""
     if MPS_AVAILABLE and w_indices.device.type == "mps":
         return metal_double_sparse_linear(
-            w_indices, w_values, b_indices, b_values, weight, bias
+            w_indices, b_indices, weight, bias
         )
     return (
-        sparse_linear(w_indices, w_values, weight, bias),
-        sparse_linear(b_indices, b_values, weight, bias),
+        sparse_linear(w_indices, weight, bias),
+        sparse_linear(b_indices, weight, bias),
     )
 
 
-def _torch_sparse_linear(feature_indices, feature_values, weight, bias):
+def _torch_sparse_linear(feature_indices, weight, bias):
     """Pure PyTorch implementation using F.embedding_bag for memory efficiency.
 
     Instead of materialising the full (batch, max_active, output_size) gathered
@@ -61,7 +62,7 @@ def _torch_sparse_linear(feature_indices, feature_values, weight, bias):
 
     mask = feature_indices >= 0
     safe_indices = feature_indices.clamp(min=0).long().reshape(-1)
-    per_sample_weights = (feature_values * mask).reshape(-1)
+    per_sample_weights = mask.float().reshape(-1)
 
     offsets = torch.arange(
         0,
@@ -82,15 +83,12 @@ def _torch_sparse_linear(feature_indices, feature_values, weight, bias):
 
 class _CudaSparseLinearFunction(autograd.Function):
     @staticmethod
-    def forward(ctx, feature_indices, feature_values, weight, bias):
+    def forward(ctx, feature_indices, weight, bias):
+        feature_values = torch.ones_like(feature_indices, dtype=torch.float32)
         ctx.save_for_backward(feature_indices, feature_values, weight, bias)
 
         assert len(feature_indices.shape) == 2
-        assert len(feature_values.shape) == 2
-        assert feature_indices.shape[0] == feature_values.shape[0]
-        assert feature_indices.shape[1] == feature_values.shape[1]
         assert feature_indices.dtype == torch.int32
-        assert feature_values.dtype == torch.float32
 
         assert len(weight.shape) == 2
         assert weight.dtype == torch.float32
@@ -99,16 +97,13 @@ class _CudaSparseLinearFunction(autograd.Function):
         assert bias.dtype == torch.float32
 
         assert feature_indices.is_cuda
-        assert feature_values.is_cuda
         assert weight.is_cuda
         assert bias.is_cuda
 
-        assert feature_values.device == feature_indices.device
         assert weight.device == feature_indices.device
         assert bias.device == feature_indices.device
 
         assert feature_indices.is_contiguous()
-        assert feature_values.is_contiguous()
         assert weight.is_contiguous()
         assert bias.is_contiguous()
 
@@ -144,7 +139,6 @@ class _CudaSparseLinearFunction(autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         assert not ctx.needs_input_grad[0]
-        assert not ctx.needs_input_grad[1]
 
         grad_output = grad_output.contiguous()
 
@@ -174,7 +168,7 @@ class _CudaSparseLinearFunction(autograd.Function):
             ),
         )
 
-        return None, None, weight_grad, bias_grad
+        return None, weight_grad, bias_grad
 
 
 # Legacy alias

@@ -172,17 +172,16 @@ static void prepare_sparse_forward(
         uint32_t num_threads, uint32_t slice_size) {
     [enc setComputePipelineState:pipeline];
     [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
-    set_buffer(enc, weight, 2);
-    set_buffer(enc, bias,   3);
+    set_buffer(enc, weight, 1);
+    set_buffer(enc, bias,   2);
 }
 
 static void dispatch_sparse_perspective(
         id<MTLComputeCommandEncoder> enc,
-        torch::Tensor indices, torch::Tensor values, torch::Tensor output,
+        torch::Tensor indices, torch::Tensor output,
         uint32_t num_threads, int64_t batch_size) {
     set_buffer(enc, indices, 0);
-    set_buffer(enc, values,  1);
-    set_buffer(enc, output,  4);
+    set_buffer(enc, output,  3);
     [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
 }
@@ -194,7 +193,6 @@ static void dispatch_sparse_perspective(
 // ---------------------------------------------------------------------------
 torch::Tensor sparse_linear_forward_metal(
         torch::Tensor input_indices,
-        torch::Tensor input_values,
         torch::Tensor weight,
         torch::Tensor bias,
         const std::string& fwd_src,
@@ -204,7 +202,6 @@ torch::Tensor sparse_linear_forward_metal(
     ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
 
     input_indices = input_indices.contiguous();
-    input_values  = input_values.contiguous();
     weight        = weight.contiguous();
     bias          = bias.contiguous();
 
@@ -232,7 +229,7 @@ torch::Tensor sparse_linear_forward_metal(
         auto enc = scope.enc;
 
         prepare_sparse_forward(enc, pipeline, weight, bias, num_threads, slice_size);
-        dispatch_sparse_perspective(enc, input_indices, input_values, output,
+        dispatch_sparse_perspective(enc, input_indices, output,
                                    num_threads, batch_size);
 
         scope.finish();
@@ -246,7 +243,6 @@ torch::Tensor sparse_linear_forward_metal(
 // ---------------------------------------------------------------------------
 torch::Tensor sparse_linear_backward_metal(
         torch::Tensor input_indices,
-        torch::Tensor input_values,
         torch::Tensor grad_output,
         int64_t       num_inputs,
         const std::string& fwd_src,
@@ -256,7 +252,6 @@ torch::Tensor sparse_linear_backward_metal(
     ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
 
     input_indices = input_indices.contiguous();
-    input_values  = input_values.contiguous();
     grad_output   = grad_output.contiguous();
 
     const int64_t  batch_size  = input_indices.size(0);
@@ -287,9 +282,8 @@ torch::Tensor sparse_linear_backward_metal(
         [enc setComputePipelineState:pipeline];
         [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
         set_buffer(enc, input_indices, 0);
-        set_buffer(enc, input_values,  1);
-        set_buffer(enc, weight_grad,   2);
-        set_buffer(enc, grad_output,   3);
+        set_buffer(enc, weight_grad,   1);
+        set_buffer(enc, grad_output,   2);
         [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
 
@@ -446,8 +440,8 @@ l0_mixing_backward_metal(
 // ---------------------------------------------------------------------------
 std::tuple<torch::Tensor, torch::Tensor>
 sparse_linear_composed_double_forward_metal(
-        torch::Tensor w_indices, torch::Tensor w_values,
-        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor w_indices,
+        torch::Tensor b_indices,
         torch::Tensor weight_a,  torch::Tensor weight_b,
         torch::Tensor virtual_w, torch::Tensor bias,
         int64_t       vw_period,
@@ -458,9 +452,7 @@ sparse_linear_composed_double_forward_metal(
     ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
 
     w_indices = w_indices.contiguous();
-    w_values  = w_values.contiguous();
     b_indices = b_indices.contiguous();
-    b_values  = b_values.contiguous();
     weight_a  = weight_a.contiguous();
     weight_b  = weight_b.contiguous();
     virtual_w = virtual_w.contiguous();
@@ -516,8 +508,8 @@ sparse_linear_composed_double_forward_metal(
 
         // 2) Standard sparse forward (both perspectives)
         prepare_sparse_forward(enc, fwd_pipeline, merged, bias, num_threads, slice_size);
-        dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
-        dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, w_indices, wp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, b_indices, bp, num_threads, batch_size);
 
         scope.finish();
         return std::make_tuple(wp, bp);
@@ -531,8 +523,8 @@ sparse_linear_composed_double_forward_metal(
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor,
            torch::Tensor, torch::Tensor>
 sparse_linear_composed_double_forward_l0_metal(
-        torch::Tensor w_indices, torch::Tensor w_values,
-        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor w_indices,
+        torch::Tensor b_indices,
         torch::Tensor weight_a,  torch::Tensor weight_b,
         torch::Tensor virtual_w, torch::Tensor bias,
         int64_t       vw_period,
@@ -547,9 +539,7 @@ sparse_linear_composed_double_forward_l0_metal(
     ensure_l0_init(l0_src);
 
     w_indices = w_indices.contiguous();
-    w_values  = w_values.contiguous();
     b_indices = b_indices.contiguous();
-    b_values  = b_values.contiguous();
     weight_a  = weight_a.contiguous();
     weight_b  = weight_b.contiguous();
     virtual_w = virtual_w.contiguous();
@@ -619,8 +609,8 @@ sparse_linear_composed_double_forward_l0_metal(
 
         // 2) Sparse forward (both perspectives)
         prepare_sparse_forward(enc, fwd_pipeline, merged, bias, num_threads, slice_size);
-        dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
-        dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, w_indices, wp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, b_indices, bp, num_threads, batch_size);
 
         // 3) L0 mixing (reads wp, bp; writes l0, wpsqt, bpsqt)
         [enc setComputePipelineState:l0_pipeline];
@@ -646,8 +636,8 @@ sparse_linear_composed_double_forward_l0_metal(
 // ---------------------------------------------------------------------------
 std::tuple<torch::Tensor, torch::Tensor>
 sparse_linear_double_forward_metal(
-        torch::Tensor w_indices, torch::Tensor w_values,
-        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor w_indices,
+        torch::Tensor b_indices,
         torch::Tensor weight,    torch::Tensor bias,
         const std::string& fwd_src,
         const std::string& bwd_cas_src,
@@ -656,9 +646,7 @@ sparse_linear_double_forward_metal(
     ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
 
     w_indices = w_indices.contiguous();
-    w_values  = w_values.contiguous();
     b_indices = b_indices.contiguous();
-    b_values  = b_values.contiguous();
     weight    = weight.contiguous();
     bias      = bias.contiguous();
 
@@ -687,8 +675,8 @@ sparse_linear_double_forward_metal(
         auto enc = scope.enc;
 
         prepare_sparse_forward(enc, pipeline, weight, bias, num_threads, slice_size);
-        dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
-        dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, w_indices, wp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, b_indices, bp, num_threads, batch_size);
 
         scope.finish();
     }
@@ -702,8 +690,8 @@ sparse_linear_double_forward_metal(
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor,
            torch::Tensor, torch::Tensor>
 sparse_linear_double_forward_l0_metal(
-        torch::Tensor w_indices, torch::Tensor w_values,
-        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor w_indices,
+        torch::Tensor b_indices,
         torch::Tensor weight,    torch::Tensor bias,
         torch::Tensor us, torch::Tensor them,
         int64_t L1, int64_t psqt,
@@ -716,9 +704,7 @@ sparse_linear_double_forward_l0_metal(
     ensure_l0_init(l0_src);
 
     w_indices = w_indices.contiguous();
-    w_values  = w_values.contiguous();
     b_indices = b_indices.contiguous();
-    b_values  = b_values.contiguous();
     weight    = weight.contiguous();
     bias      = bias.contiguous();
     us        = us.contiguous();
@@ -763,8 +749,8 @@ sparse_linear_double_forward_l0_metal(
 
         // 1) Sparse forward (both perspectives)
         prepare_sparse_forward(enc, fwd_pipeline, weight, bias, num_threads, slice_size);
-        dispatch_sparse_perspective(enc, w_indices, w_values, wp, num_threads, batch_size);
-        dispatch_sparse_perspective(enc, b_indices, b_values, bp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, w_indices, wp, num_threads, batch_size);
+        dispatch_sparse_perspective(enc, b_indices, bp, num_threads, batch_size);
 
         // 2) L0 mixing
         [enc setComputePipelineState:l0_pipeline];
@@ -790,8 +776,8 @@ sparse_linear_double_forward_l0_metal(
 // addition that autograd would otherwise perform.
 // ---------------------------------------------------------------------------
 torch::Tensor sparse_linear_double_backward_metal(
-        torch::Tensor w_indices, torch::Tensor w_values,
-        torch::Tensor b_indices, torch::Tensor b_values,
+        torch::Tensor w_indices,
+        torch::Tensor b_indices,
         torch::Tensor grad_wp,   torch::Tensor grad_bp,
         int64_t       num_inputs,
         const std::string& fwd_src,
@@ -801,9 +787,7 @@ torch::Tensor sparse_linear_double_backward_metal(
     ensure_init(fwd_src, bwd_cas_src, bwd_native_src);
 
     w_indices = w_indices.contiguous();
-    w_values  = w_values.contiguous();
     b_indices = b_indices.contiguous();
-    b_values  = b_values.contiguous();
     grad_wp   = grad_wp.contiguous();
     grad_bp   = grad_bp.contiguous();
 
@@ -834,17 +818,15 @@ torch::Tensor sparse_linear_double_backward_metal(
 
         [enc setComputePipelineState:pipeline];
         [enc setThreadgroupMemoryLength:num_threads * slice_size * sizeof(float) atIndex:0];
-        set_buffer(enc, weight_grad, 2);
+        set_buffer(enc, weight_grad, 1);
 
         set_buffer(enc, w_indices, 0);
-        set_buffer(enc, w_values,  1);
-        set_buffer(enc, grad_wp,   3);
+        set_buffer(enc, grad_wp,   2);
         [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
 
         set_buffer(enc, b_indices, 0);
-        set_buffer(enc, b_values,  1);
-        set_buffer(enc, grad_bp,   3);
+        set_buffer(enc, grad_bp,   2);
         [enc dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads, 1, 1)];
 
@@ -864,8 +846,8 @@ fused_backward_metal(
         torch::Tensor grad_bpsqt, torch::Tensor wp,
         torch::Tensor bp,         torch::Tensor us,
         torch::Tensor them,
-        torch::Tensor w_indices,  torch::Tensor w_values,
-        torch::Tensor b_indices,  torch::Tensor b_values,
+        torch::Tensor w_indices,
+        torch::Tensor b_indices,
         int64_t       num_inputs,
         const std::string& fwd_src,
         const std::string& bwd_cas_src,
@@ -879,9 +861,7 @@ fused_backward_metal(
     grad_wpsqt = grad_wpsqt.contiguous();
     grad_bpsqt = grad_bpsqt.contiguous();
     w_indices  = w_indices.contiguous();
-    w_values   = w_values.contiguous();
     b_indices  = b_indices.contiguous();
-    b_values   = b_values.contiguous();
 
     const int64_t batch  = wp.size(0);
     const int64_t out    = wp.size(1);
@@ -936,16 +916,14 @@ fused_backward_metal(
         // dispatches (white + black perspectives).
         [enc setComputePipelineState:bwd_pipeline];
         [enc setThreadgroupMemoryLength:num_threads_bwd * slice_size_bwd * sizeof(float) atIndex:0];
-        set_buffer(enc, weight_grad, 2);
+        set_buffer(enc, weight_grad, 1);
         set_buffer(enc, w_indices,   0);
-        set_buffer(enc, w_values,    1);
-        set_buffer(enc, grad_wp,     3);
+        set_buffer(enc, grad_wp,     2);
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
 
         set_buffer(enc, b_indices, 0);
-        set_buffer(enc, b_values,  1);
-        set_buffer(enc, grad_bp,   3);
+        set_buffer(enc, grad_bp,   2);
         [enc dispatchThreadgroups:MTLSizeMake(batch, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(num_threads_bwd, 1, 1)];
 
@@ -1471,22 +1449,22 @@ torch::Tensor bias_grad_sum_metal(
 // ---------------------------------------------------------------------------
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("sparse_linear_forward",  &sparse_linear_forward_metal,
-          "Sparse linear forward pass (Metal)");
+          "Sparse linear forward pass (Metal) — values elided");
     m.def("sparse_linear_backward", &sparse_linear_backward_metal,
-          "Sparse linear backward pass (Metal)");
+          "Sparse linear backward pass (Metal) — values elided");
     m.def("sparse_linear_double_forward",  &sparse_linear_double_forward_metal,
-          "Double-perspective sparse linear forward (Metal)");
+          "Double-perspective sparse linear forward (Metal) — values elided");
     m.def("sparse_linear_composed_double_forward",
           &sparse_linear_composed_double_forward_metal,
-          "Composed double-perspective sparse linear forward (Metal)");
+          "Composed double-perspective sparse linear forward (Metal) — values elided");
     m.def("sparse_linear_composed_double_forward_l0",
           &sparse_linear_composed_double_forward_l0_metal,
-          "Composed double-perspective sparse linear forward + L0 mixing (Metal)");
+          "Composed double-perspective sparse linear forward + L0 mixing (Metal) — values elided");
     m.def("sparse_linear_double_forward_l0",
           &sparse_linear_double_forward_l0_metal,
-          "Double-perspective sparse linear forward + L0 mixing (Metal)");
+          "Double-perspective sparse linear forward + L0 mixing (Metal) — values elided");
     m.def("sparse_linear_double_backward", &sparse_linear_double_backward_metal,
-          "Double-perspective sparse linear backward (Metal)");
+          "Double-perspective sparse linear backward (Metal) — values elided");
     m.def("l0_mixing_forward",  &l0_mixing_forward_metal,
           "Fused L0 mixing forward (Metal)");
     m.def("l0_mixing_backward", &l0_mixing_backward_metal,

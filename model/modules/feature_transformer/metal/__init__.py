@@ -100,18 +100,15 @@ class MetalSparseLinearFunction(autograd.Function):
     used by tests and ComposedFeatureTransformer.forward (CPU/CUDA fallback)."""
 
     @staticmethod
-    def forward(ctx, feature_indices, feature_values, weight, bias):
-        ctx.save_for_backward(feature_indices, feature_values, weight, bias)
+    def forward(ctx, feature_indices, weight, bias):
+        ctx.save_for_backward(feature_indices, weight, bias)
 
         assert feature_indices.dtype == torch.int32
-        assert feature_values.dtype == torch.float32
         assert weight.dtype == torch.float32
         assert bias.dtype == torch.float32
 
-
         return _cpp.sparse_linear_forward(
             feature_indices,
-            feature_values,
             weight,
             bias,
             _get_shader("sparse_linear.metal"),
@@ -121,12 +118,11 @@ class MetalSparseLinearFunction(autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        feature_indices, feature_values, weight, bias = ctx.saved_tensors
+        feature_indices, weight, bias = ctx.saved_tensors
         grad_output = grad_output.contiguous()
 
         weight_grad = _cpp.sparse_linear_backward(
             feature_indices,
-            feature_values,
             grad_output,
             weight.size(0),
             _get_shader("sparse_linear.metal"),
@@ -134,13 +130,13 @@ class MetalSparseLinearFunction(autograd.Function):
             _get_shader("sparse_linear_backward_native.metal"),
         )
         bias_grad = grad_output.sum(dim=0)
-        return None, None, weight_grad, bias_grad
+        return None, weight_grad, bias_grad
 
 
-def metal_sparse_linear(feature_indices, feature_values, weight, bias):
+def metal_sparse_linear(feature_indices, weight, bias):
     """Drop-in replacement for sparse_linear when tensors are on MPS."""
     return MetalSparseLinearFunction.apply(
-        feature_indices, feature_values, weight, bias
+        feature_indices, weight, bias
     )
 
 
@@ -150,11 +146,11 @@ class DoubleMetalSparseLinearFunction(autograd.Function):
     Kept for DoubleFeatureTransformer compatibility and tests."""
 
     @staticmethod
-    def forward(ctx, w_indices, w_values, b_indices, b_values, weight, bias):
-        ctx.save_for_backward(w_indices, w_values, b_indices, b_values, weight, bias)
+    def forward(ctx, w_indices, b_indices, weight, bias):
+        ctx.save_for_backward(w_indices, b_indices, weight, bias)
 
         wp, bp = _cpp.sparse_linear_double_forward(
-            w_indices, w_values, b_indices, b_values, weight, bias,
+            w_indices, b_indices, weight, bias,
             _get_shader("sparse_linear.metal"),
             _get_shader("sparse_linear_backward_cas.metal"),
             _get_shader("sparse_linear_backward_native.metal"),
@@ -163,12 +159,12 @@ class DoubleMetalSparseLinearFunction(autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_wp, grad_bp):
-        w_indices, w_values, b_indices, b_values, weight, bias = ctx.saved_tensors
+        w_indices, b_indices, weight, bias = ctx.saved_tensors
         grad_wp = grad_wp.contiguous()
         grad_bp = grad_bp.contiguous()
 
         weight_grad = _cpp.sparse_linear_double_backward(
-            w_indices, w_values, b_indices, b_values,
+            w_indices, b_indices,
             grad_wp, grad_bp, weight.size(0),
             _get_shader("sparse_linear.metal"),
             _get_shader("sparse_linear_backward_cas.metal"),
@@ -178,13 +174,13 @@ class DoubleMetalSparseLinearFunction(autograd.Function):
         bias_grad = _cpp.bias_grad_sum(
             grad_wp, grad_bp, _get_shader("l0_mixing.metal"),
         )
-        return None, None, None, None, weight_grad, bias_grad
+        return None, None, weight_grad, bias_grad
 
 
-def metal_double_sparse_linear(w_indices, w_values, b_indices, b_values, weight, bias):
+def metal_double_sparse_linear(w_indices, b_indices, weight, bias):
     """Double-perspective sparse linear with shared weight_grad in backward."""
     return DoubleMetalSparseLinearFunction.apply(
-        w_indices, w_values, b_indices, b_values, weight, bias
+        w_indices, b_indices, weight, bias
     )
 
 
@@ -196,42 +192,42 @@ class FusedDoubleForwardL0Function(autograd.Function):
     step from avoiding the redundant alloc + element-wise addition)."""
 
     @staticmethod
-    def forward(ctx, w_idx, w_val, b_idx, b_val, weight, bias, us, them, L1, psqt):
+    def forward(ctx, w_idx, b_idx, weight, bias, us, them, L1, psqt):
         l0, wpsqt, bpsqt, wp, bp = _cpp.sparse_linear_double_forward_l0(
-            w_idx, w_val, b_idx, b_val, weight, bias,
+            w_idx, b_idx, weight, bias,
             us, them, L1, psqt,
             _get_shader("sparse_linear.metal"),
             _get_shader("sparse_linear_backward_cas.metal"),
             _get_shader("sparse_linear_backward_native.metal"),
             _get_shader("l0_mixing.metal"),
         )
-        ctx.save_for_backward(w_idx, w_val, b_idx, b_val, us, wp, bp)
+        ctx.save_for_backward(w_idx, b_idx, us, wp, bp)
         ctx.num_inputs = weight.size(0)
         return l0, wpsqt, bpsqt
 
     @staticmethod
     def backward(ctx, grad_l0, grad_wpsqt, grad_bpsqt):
-        w_idx, w_val, b_idx, b_val, us, wp, bp = ctx.saved_tensors
+        w_idx, b_idx, us, wp, bp = ctx.saved_tensors
         them = 1.0 - us
 
         weight_grad, bias_grad = _cpp.fused_backward(
             grad_l0.contiguous(), grad_wpsqt.contiguous(), grad_bpsqt.contiguous(),
             wp, bp, us, them,
-            w_idx, w_val, b_idx, b_val,
+            w_idx, b_idx,
             ctx.num_inputs,
             _get_shader("sparse_linear.metal"),
             _get_shader("sparse_linear_backward_cas.metal"),
             _get_shader("sparse_linear_backward_native.metal"),
             _get_shader("l0_mixing.metal"),
         )
-        return None, None, None, None, weight_grad, bias_grad, None, None, None, None
+        return None, None, weight_grad, bias_grad, None, None, None, None
 
 
-def metal_fused_double_forward_l0(w_idx, w_val, b_idx, b_val, weight, bias,
+def metal_fused_double_forward_l0(w_idx, b_idx, weight, bias,
                                    us, them, L1, psqt):
     """Fused double sparse_linear + L0 mixing — single autograd node."""
     return FusedDoubleForwardL0Function.apply(
-        w_idx, w_val, b_idx, b_val, weight, bias, us, them, L1, psqt
+        w_idx, b_idx, weight, bias, us, them, L1, psqt
     )
 
 
@@ -244,11 +240,11 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
     to the component parameters in the backward pass."""
 
     @staticmethod
-    def forward(ctx, w_idx, w_val, b_idx, b_val,
+    def forward(ctx, w_idx, b_idx,
                 weight_a, weight_b, virtual_w, bias,
                 us, them, L1, psqt, vw_period):
         l0, wpsqt, bpsqt, wp, bp = _cpp.sparse_linear_composed_double_forward_l0(
-            w_idx, w_val, b_idx, b_val,
+            w_idx, b_idx,
             weight_a, weight_b, virtual_w, bias,
             vw_period, us, them, L1, psqt,
             _get_shader("sparse_linear.metal"),
@@ -256,7 +252,7 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
             _get_shader("sparse_linear_backward_native.metal"),
             _get_shader("l0_mixing.metal"),
         )
-        ctx.save_for_backward(w_idx, w_val, b_idx, b_val, us, wp, bp)
+        ctx.save_for_backward(w_idx, b_idx, us, wp, bp)
         ctx.num_inputs = weight_a.size(0) + weight_b.size(0)
         ctx.boundary = weight_a.size(0)
         ctx.vw_period = vw_period
@@ -264,13 +260,13 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_l0, grad_wpsqt, grad_bpsqt):
-        w_idx, w_val, b_idx, b_val, us, wp, bp = ctx.saved_tensors
+        w_idx, b_idx, us, wp, bp = ctx.saved_tensors
         them = 1.0 - us
 
         weight_grad, bias_grad = _cpp.fused_backward(
             grad_l0.contiguous(), grad_wpsqt.contiguous(), grad_bpsqt.contiguous(),
             wp, bp, us, them,
-            w_idx, w_val, b_idx, b_val,
+            w_idx, b_idx,
             ctx.num_inputs,
             _get_shader("sparse_linear.metal"),
             _get_shader("sparse_linear_backward_cas.metal"),
@@ -284,18 +280,18 @@ class FusedComposedDoubleForwardL0Function(autograd.Function):
         grad_weight_b = weight_grad[bnd:]
         grad_virtual_w = grad_weight_b.view(-1, vw_p, weight_grad.size(1)).sum(0)
 
-        return (None, None, None, None,
+        return (None, None,
                 grad_weight_a, grad_weight_b, grad_virtual_w, bias_grad,
                 None, None, None, None, None)
 
 
 def metal_fused_composed_double_forward_l0(
-        w_idx, w_val, b_idx, b_val,
+        w_idx, b_idx,
         weight_a, weight_b, virtual_w, bias,
         us, them, L1, psqt, vw_period):
     """Composed fused double sparse_linear + L0 mixing — no merged weight."""
     return FusedComposedDoubleForwardL0Function.apply(
-        w_idx, w_val, b_idx, b_val,
+        w_idx, b_idx,
         weight_a, weight_b, virtual_w, bias,
         us, them, L1, psqt, vw_period,
     )

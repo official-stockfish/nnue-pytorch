@@ -46,20 +46,16 @@ class ComposedFeatureTransformer(nn.Module):
         with torch.no_grad():
             self.bias.uniform_(-sigma, sigma)
 
-    def forward(
-        self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
-    ):
+    def forward(self, feature_indices_0, feature_indices_1):
         merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
         return (
             sparse_linear(
                 feature_indices_0,
-                feature_values_0,
                 merged,
                 self.bias,
             ),
             sparse_linear(
                 feature_indices_1,
-                feature_values_1,
                 merged,
                 self.bias,
             ),

@@ -20,8 +20,6 @@ class SparseBatch(ctypes.Structure):
         ("max_active_features", ctypes.c_int),
         ("white", ctypes.POINTER(ctypes.c_int)),
         ("black", ctypes.POINTER(ctypes.c_int)),
-        ("white_values", ctypes.POINTER(ctypes.c_float)),
-        ("black_values", ctypes.POINTER(ctypes.c_float)),
         ("psqt_indices", ctypes.POINTER(ctypes.c_int)),
         ("layer_stack_indices", ctypes.POINTER(ctypes.c_int)),
     ]
@@ -35,26 +33,12 @@ class SparseBatch(ctypes.Structure):
             if dtype_cast is not None:
                 t = dtype_cast(t)
             if use_pin:
-                # CUDA path: clone into pinned memory for async DMA.
                 t = t.clone().pin_memory()
                 return t.to(device=device, non_blocking=True)
             if is_device_transfer:
-                # MPS / other device: .to() already copies the data, so
-                # .clone() would be a redundant CPU-side memcpy.
                 return t.to(device=device)
-            # CPU-only: must clone to decouple from C-owned buffer.
             return t.clone()
 
-        white_values = _prepare(
-            np.ctypeslib.as_array(
-                self.white_values, shape=(self.size, self.max_active_features)
-            )
-        )
-        black_values = _prepare(
-            np.ctypeslib.as_array(
-                self.black_values, shape=(self.size, self.max_active_features)
-            )
-        )
         white_indices = _prepare(
             np.ctypeslib.as_array(
                 self.white, shape=(self.size, self.max_active_features)
@@ -87,9 +71,7 @@ class SparseBatch(ctypes.Structure):
             us,
             them,
             white_indices,
-            white_values,
             black_indices,
-            black_values,
             outcome,
             score,
             psqt_indices,
