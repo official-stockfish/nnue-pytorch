@@ -138,7 +138,6 @@ class FusedNNUETransformerFunction(autograd.Function):
 
         batch_size = w_indices.shape[0]
         max_active_indices = w_indices.shape[1]
-        output_size = weight.shape[1]
 
         L1 = ctx.L1
         num_psqt_buckets = ctx.num_psqt_buckets

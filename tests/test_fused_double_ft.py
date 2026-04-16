@@ -170,7 +170,7 @@ def bench_fused_double_ft():
         print(f"{label:<18}: {pos_per_sec:,.0f} pos/s")
 
     # Comparative analysis
-    print(f"\n--- Summary ---")
+    print("\n--- Summary ---")
     if "UNFUSED_COMPILE" in scores:
         print(f"Compiler efficiency (Unfused): {scores['UNFUSED_COMPILE']/scores['UNFUSED_EAGER']:.2f}x")
     print(f"Hand-Fused vs Compiled-Unfused: {scores['FUSED_EAGER']/scores['UNFUSED_COMPILE']:.2f}x")

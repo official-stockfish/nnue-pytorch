@@ -1,4 +1,3 @@
-import math
 import torch
 import cupy as cp
 

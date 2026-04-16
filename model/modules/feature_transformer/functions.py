@@ -186,7 +186,6 @@ class SparseLinearFunction(autograd.Function):
         grad_output = grad_output.contiguous()
         feature_indices, feature_values, weight, bias = ctx.saved_tensors
 
-        device = feature_indices.device
         batch_size = feature_indices.shape[0]
         max_active_indices = feature_indices.shape[1]
         output_size = weight.shape[1]
