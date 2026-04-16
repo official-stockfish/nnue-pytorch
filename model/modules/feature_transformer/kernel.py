@@ -65,21 +65,21 @@ void sparse_input_linear_forward(
         )
     return _sparse_input_linear_forward_kernel_cache[key]
 
-_sparse_input_linear_backward_hybrid_cache = dict()
+_sparse_input_linear_backward_cache = dict()
 
 @torch.compiler.disable(recursive=False)
-def make_sparse_input_linear_backward_kernel_hybrid(max_active_indices: int, output_size: int):
+def make_sparse_input_linear_backward_kernel(max_active_indices: int, output_size: int):
     threads_per_block_y = min(256, (output_size + 31) // 32 * 32)
     key = (max_active_indices, output_size)
 
-    if key not in _sparse_input_linear_backward_hybrid_cache:
+    if key not in _sparse_input_linear_backward_cache:
         kernel = cp.RawKernel(
             r"""
 typedef unsigned int uint32_t;
 typedef int int32_t;
 
 extern "C" __global__
-void sparse_input_linear_backward_hybrid(
+void sparse_input_linear_backward(
     const int32_t* const input_indices,
     const float* const input_values,
           float* const weight_grad,
@@ -130,9 +130,9 @@ void sparse_input_linear_backward_hybrid(
                 max_active_indices=max_active_indices,
                 output_size=output_size,
             ),
-            "sparse_input_linear_backward_hybrid",
+            "sparse_input_linear_backward",
         )
         kernel.compile()
-        _sparse_input_linear_backward_hybrid_cache[key] = (kernel, threads_per_block_y)
+        _sparse_input_linear_backward_cache[key] = (kernel, threads_per_block_y)
 
-    return _sparse_input_linear_backward_hybrid_cache[key]
+    return _sparse_input_linear_backward_cache[key]

@@ -4,7 +4,7 @@ from torch import autograd
 
 from .kernel import (
     make_sparse_input_linear_forward_kernel,
-    make_sparse_input_linear_backward_kernel_hybrid,
+    make_sparse_input_linear_backward_kernel,
 )
 
 
@@ -197,7 +197,7 @@ class SparseLinearFunction(autograd.Function):
         if not needs_weight_grad and not needs_bias_grad:
             return None, None, None, None
 
-        kernel, threads_per_block_y = make_sparse_input_linear_backward_kernel_hybrid(
+        kernel, threads_per_block_y = make_sparse_input_linear_backward_kernel(
             max_active_features, output_size
         )
 
