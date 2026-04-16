@@ -96,6 +96,8 @@ class FusedNNUETransformerFunction(autograd.Function):
         out_bpsqt = torch.empty(batch_size, num_psqt_buckets, dtype=torch.float32, device=weight.device)
 
         kernel, num_threads = make_fused_nnue_forward_kernel(max_active_indices, L1, num_psqt_buckets)
+        us_tensor_c = us_tensor.contiguous()
+        them_tensor_c = them_tensor.contiguous()
 
         kernel(
             grid=(batch_size,),
@@ -107,8 +109,8 @@ class FusedNNUETransformerFunction(autograd.Function):
                 b_values.data_ptr(),
                 weight.data_ptr(),
                 bias.data_ptr(),
-                us_tensor.contiguous().data_ptr(),
-                them_tensor.contiguous().data_ptr(),
+                us_tensor.data_ptr(),
+                them_tensor.data_ptr(),
                 out_l0.data_ptr(),
                 out_wpsqt.data_ptr(),
                 out_bpsqt.data_ptr(),
@@ -149,38 +151,42 @@ class FusedNNUETransformerFunction(autograd.Function):
 
         weight_grad_ptr = weight_grad.data_ptr() if weight_grad is not None else 0
         bias_grad_ptr = bias_grad.data_ptr() if bias_grad is not None else 0
+        us_tensor_c = us_tensor.contiguous()
+        them_tensor_c = them_tensor.contiguous()
 
-        kernel_args = (
+        kernel_args = [
+                weight_grad_ptr,
+                bias_grad_ptr,
                 w_indices.data_ptr(),
                 w_values.data_ptr(),
                 b_indices.data_ptr(),
                 b_values.data_ptr(),
                 weight.data_ptr(),
                 bias.data_ptr(),
-                us_tensor.contiguous().data_ptr(),
-                them_tensor.contiguous().data_ptr(),
+                us_tensor.data_ptr(),
+                them_tensor.data_ptr(),
                 grad_out_l0.contiguous().data_ptr(),
                 grad_out_wpsqt.contiguous().data_ptr(),
                 grad_out_bpsqt.contiguous().data_ptr(),
-                weight_grad.data_ptr() if weight_grad is not None else 0,
-                bias_grad.data_ptr() if bias_grad is not None else 0,
                 ft_max_val,
                 batch_size,
                 128, # save default value for chunk_size
-        )
+        ]
 
+        logical_y_threads = (L1 // 2) + num_psqt_buckets
         chunk_size = _get_optimal_chunk_size(
-            batch_size, max_active_indices, output_size, kernel, threads_per_block_y,
+            batch_size, max_active_indices, logical_y_threads, kernel, threads_per_block_y,
             kernel_args, weight_grad, bias_grad, _autotune_chunk_cache
         )
+        kernel_args[-1] = chunk_size
 
         grid_x = math.ceil(batch_size / chunk_size)
-        grid_y = math.ceil((L1 // 2 + num_psqt_buckets) / threads_per_block_y)
+        grid_y = math.ceil(logical_y_threads / threads_per_block_y)
 
         kernel(
             grid=(grid_x, grid_y),
             block=(threads_per_block_y,),
-            args=kernel_args,
+            args=tuple(kernel_args),
         )
 
         return (

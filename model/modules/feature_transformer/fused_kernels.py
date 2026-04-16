@@ -150,6 +150,8 @@ typedef int int32_t;
 
 extern "C" __global__
 void fused_nnue_backward(
+          float* const weight_grad,
+          float* const bias_grad,
     const int32_t* const w_indices,
     const float* const w_values,
     const int32_t* const b_indices,
@@ -161,8 +163,6 @@ void fused_nnue_backward(
     const float* const grad_out_l0,
     const float* const grad_out_wpsqt,
     const float* const grad_out_bpsqt,
-          float* const weight_grad,
-          float* const bias_grad,
     const float          ft_max_val,
     const uint32_t       batch_size,
     const uint32_t       batch_chunk_size

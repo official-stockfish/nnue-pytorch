@@ -79,10 +79,10 @@ typedef int int32_t;
 
 extern "C" __global__
 void sparse_input_linear_backward(
-    const int32_t* const input_indices,
-    const float* const input_values,
           float* const weight_grad,
           float* const bias_grad,
+    const int32_t* const input_indices,
+    const float* const input_values,
     const float* const output_grad,
     const uint32_t batch_size,
     const uint32_t batch_chunk_size
