@@ -1,4 +1,4 @@
-from .functions import SparseLinearFunction
+from .functions import sparse_linear_op, set_use_custom_sparse_kernel
 from .module import (
     BaseFeatureTransformer,
     DoubleFeatureTransformer,
@@ -6,7 +6,8 @@ from .module import (
 )
 
 __all__ = [
-    "SparseLinearFunction",
+    "sparse_linear_op",
+    "set_use_custom_sparse_kernel",
     "BaseFeatureTransformer",
     "DoubleFeatureTransformer",
     "FeatureTransformer",

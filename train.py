@@ -375,6 +375,7 @@ def main():
             print("Set torch num_threads to {} threads.".format(actual_threads))
         else:
             print("Using default torch num_threads setting.")
+        print(f"Custom sparse linear is {"enabled" if args.use_custom_sparse_kernel else "disabled"}.")
         print("", flush=True)
 
     checkpoint_callback = ModelCheckpoint(
@@ -426,6 +427,8 @@ def main():
 
     if actual_threads > 0:
         t_set_num_threads(actual_threads)
+
+    M.set_use_custom_sparse_kernel(args.use_custom_sparse_kernel)
 
     if args.resume_from_checkpoint:
         trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)

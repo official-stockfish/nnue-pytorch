@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.modules import DoubleFeatureTransformer
 from model.modules.feature_transformer.functions import (
-    SparseLinearFunction,
+    sparse_linear_op,
 )
 
 
@@ -61,10 +61,10 @@ def test():
     output01 = SparseLinearFunctionEmulate(
         indices1.clone(), values1.clone(), weight0, bias0
     )
-    output10 = SparseLinearFunction.apply(
+    output10 = sparse_linear_op(
         indices0.clone().cuda(), values0.clone().cuda(), weight1.cuda(), bias1.cuda()
     )
-    output11 = SparseLinearFunction.apply(
+    output11 = sparse_linear_op(
         indices1.clone().cuda(), values1.clone().cuda(), weight1.cuda(), bias1.cuda()
     )
 

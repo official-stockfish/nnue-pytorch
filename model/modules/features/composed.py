@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from ..feature_transformer import SparseLinearFunction
+from ..feature_transformer import sparse_linear_op
 from .input_feature import InputFeature
 
 
@@ -51,13 +51,13 @@ class ComposedFeatureTransformer(nn.Module):
     ):
         merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
         return (
-            SparseLinearFunction.apply(
+            sparse_linear_op(
                 feature_indices_0,
                 feature_values_0,
                 merged,
                 self.bias,
             ),
-            SparseLinearFunction.apply(
+            sparse_linear_op(
                 feature_indices_1,
                 feature_values_1,
                 merged,
