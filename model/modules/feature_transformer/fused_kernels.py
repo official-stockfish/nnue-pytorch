@@ -1,10 +1,5 @@
 import cupy as cp
 import torch
-import math
-
-import cupy as cp
-import torch
-
 
 _fused_nnue_forward_cache = dict()
 

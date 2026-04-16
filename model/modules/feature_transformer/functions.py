@@ -47,7 +47,7 @@ _autotune_chunk_cache = dict()
 
 def _get_optimal_chunk_size(
     batch_size: int,
-    max_active_features: int,
+    max_active_indices: int,
     output_size: int,
     kernel,
     threads_per_block_y: int,
@@ -57,7 +57,7 @@ def _get_optimal_chunk_size(
     bias_grad: torch.Tensor,
     grad_output: torch.Tensor
 ) -> int:
-    key = (batch_size, max_active_features, output_size)
+    key = (batch_size, max_active_indices, output_size)
     if key in _autotune_chunk_cache:
         return _autotune_chunk_cache[key]
 
@@ -91,8 +91,10 @@ def _get_optimal_chunk_size(
 
         # Warmup
         for _ in range(warmup_runs):
-            if weight_grad is not None: weight_grad.zero_()
-            if bias_grad is not None: bias_grad.zero_()
+            if weight_grad is not None:
+                weight_grad.zero_()
+            if bias_grad is not None:
+                bias_grad.zero_()
             kernel(grid=grid, block=block, args=args)
 
         torch.cuda.synchronize()
@@ -100,8 +102,10 @@ def _get_optimal_chunk_size(
 
         # Benchmark
         for _ in range(eval_runs):
-            if weight_grad is not None: weight_grad.zero_()
-            if bias_grad is not None: bias_grad.zero_()
+            if weight_grad is not None:
+                weight_grad.zero_()
+            if bias_grad is not None:
+                bias_grad.zero_()
             kernel(grid=grid, block=block, args=args)
 
         end_event.record()
@@ -113,8 +117,10 @@ def _get_optimal_chunk_size(
             best_chunk = chunk
 
     # Clean tensors for the actual execution
-    if weight_grad is not None: weight_grad.zero_()
-    if bias_grad is not None: bias_grad.zero_()
+    if weight_grad is not None:
+        weight_grad.zero_()
+    if bias_grad is not None:
+        bias_grad.zero_()
 
     _autotune_chunk_cache[key] = best_chunk
     return best_chunk
@@ -153,14 +159,14 @@ class SparseLinearFunction(autograd.Function):
 
         device = feature_indices.device
         batch_size = feature_indices.shape[0]
-        max_active_features = feature_indices.shape[1]
+        max_active_indices = feature_indices.shape[1]
         output_size = weight.shape[1]
 
         output = torch.empty(
             batch_size, output_size, dtype=torch.float32, device=device
         )
 
-        kernel = make_sparse_input_linear_forward_kernel(max_active_features, output_size)
+        kernel = make_sparse_input_linear_forward_kernel(max_active_indices, output_size)
         kernel(
             grid=(batch_size,),
             args=(
@@ -184,7 +190,7 @@ class SparseLinearFunction(autograd.Function):
 
         device = feature_indices.device
         batch_size = feature_indices.shape[0]
-        max_active_features = feature_indices.shape[1]
+        max_active_indices = feature_indices.shape[1]
         output_size = weight.shape[1]
 
         # Bug fixed: Only allocate requested gradients
@@ -198,11 +204,11 @@ class SparseLinearFunction(autograd.Function):
             return None, None, None, None
 
         kernel, threads_per_block_y = make_sparse_input_linear_backward_kernel(
-            max_active_features, output_size
+            max_active_indices, output_size
         )
 
         chunk_size = _get_optimal_chunk_size(
-            batch_size, max_active_features, output_size, kernel, threads_per_block_y,
+            batch_size, max_active_indices, output_size, kernel, threads_per_block_y,
             feature_indices, feature_values, weight_grad, bias_grad, grad_output
         )
 

@@ -82,7 +82,7 @@ def test_fused_consistency():
     all_passed = True
     for name, diff in results:
         status = "PASSED" if diff < MAX_ERROR else "FAILED"
-        if status == "FAILED": all_passed = False
+        all_passed = status != "FAILED"
         print(f"{name:<15} | {diff.item():<20.2e} | {status}")
 
     if all_passed:
@@ -124,37 +124,56 @@ def bench_fused_double_ft():
 
     scores = {}
 
-    for mode in [False, True]:
+    # Format: (mode_bool, use_compile, label)
+    test_configs = [
+        (False, False, "UNFUSED_EAGER"),
+        (False, True,  "UNFUSED_COMPILE"),
+        (True,  False, "FUSED_EAGER"),
+        (True,  True,  "FUSED_COMPILE"),
+    ]
+
+    for mode, use_compile, label in test_configs:
         set_use_fused_double_ft(mode)
-        mode_str = "FUSED" if mode else "UNFUSED"
 
-        # Warmup (triggering JIT/Cupy compilation)
-        for _ in range(10):
-            o1, o2, o3 = fused_double_ft_op(w_idx, w_val, b_idx, b_val, weight, bias, us, them, FT_MAX_VAL, L1, EXTRA)
-            (o1.sum() + o2.sum() + o3.sum()).backward()
-            weight.grad.zero_(); bias.grad.zero_()
+        def train_step(w_idx, w_val, b_idx, b_val, weight, bias, us, them):
+            o1, o2, o3 = fused_double_ft_op(
+                w_idx, w_val, b_idx, b_val, weight, bias, us, them,
+                FT_MAX_VAL, L1, EXTRA
+            )
+            loss = (o1.sum() + o2.sum() + o3.sum())
+            loss.backward()
+            return loss
 
-        # Benchmark using CUDA Events for precision
+        exec_fn = torch.compile(train_step) if use_compile else train_step
+
+        # Warmup
+        for _ in range(15):
+            exec_fn(w_idx, w_val, b_idx, b_val, weight, bias, us, them)
+            weight.grad.zero_()
+            bias.grad.zero_()
+
+        torch.cuda.synchronize()
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
 
         start_event.record()
         for _ in range(ITERS):
-            o1, o2, o3 = fused_double_ft_op(w_idx, w_val, b_idx, b_val, weight, bias, us, them, FT_MAX_VAL, L1, EXTRA)
-            loss = (o1.sum() + o2.sum() + o3.sum())
-            loss.backward()
-            weight.grad.zero_(); bias.grad.zero_()
+            exec_fn(w_idx, w_val, b_idx, b_val, weight, bias, us, them)
+            weight.grad.zero_()
+            bias.grad.zero_()
         end_event.record()
 
         torch.cuda.synchronize()
         time_ms = start_event.elapsed_time(end_event)
-
         pos_per_sec = (ITERS * BATCH_SIZE) / (time_ms / 1000.0)
-        scores[mode_str] = pos_per_sec
-        print(f"{mode_str:<8}: {pos_per_sec:,.0f} pos/s")
+        scores[label] = pos_per_sec
+        print(f"{label:<18}: {pos_per_sec:,.0f} pos/s")
 
-    speedup = scores["FUSED"] / scores["UNFUSED"]
-    print(f"\nOptimization Result: {speedup:.2f}x Speedup")
+    # Comparative analysis
+    print(f"\n--- Summary ---")
+    if "UNFUSED_COMPILE" in scores:
+        print(f"Compiler efficiency (Unfused): {scores['UNFUSED_COMPILE']/scores['UNFUSED_EAGER']:.2f}x")
+    print(f"Hand-Fused vs Compiled-Unfused: {scores['FUSED_EAGER']/scores['UNFUSED_COMPILE']:.2f}x")
 
 
 if __name__ == "__main__":

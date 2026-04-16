@@ -11,7 +11,7 @@ from .fused_kernels import (
 
 from .functions import (
     sparse_linear_op,
-    get_optimal_chunk_size,
+    _get_optimal_chunk_size,
 )
 
 _USE_FUSED_DOUBLE_FT = True
@@ -135,6 +135,8 @@ class FusedNNUETransformerFunction(autograd.Function):
 
         batch_size = w_indices.shape[0]
         max_active_indices = w_indices.shape[1]
+        output_size = weight.shape[1]
+
         L1 = ctx.L1
         num_psqt_buckets = ctx.num_psqt_buckets
         ft_max_val = ctx.ft_max_val
@@ -144,10 +146,8 @@ class FusedNNUETransformerFunction(autograd.Function):
 
         kernel, threads_per_block_y = make_fused_nnue_backward_kernel(max_active_indices, L1, num_psqt_buckets)
 
-        chunk_size = _get_optimal_chunk_size(
-            batch_size, max_active_features, output_size, kernel, threads_per_block_y,
-            feature_indices, feature_values, weight_grad, bias_grad, grad_output
-        )
+        # static chunk size for now..
+        chunk_size = 128
 
         grid_x = math.ceil(batch_size / chunk_size)
         grid_y = math.ceil((L1 // 2 + num_psqt_buckets) / threads_per_block_y)

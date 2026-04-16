@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from typing import Callable
 
 from ..feature_transformer import fused_double_ft_op
 from .input_feature import InputFeature
@@ -12,7 +13,7 @@ class ComposedFeatureTransformer(nn.Module):
     bias and delegates everything else to the underlying features.
     """
 
-    def __init__(self, L1, num_psqt_buckets, feature_classes: list[type]):
+    def __init__(self, L1, num_psqt_buckets, feature_classes: list[Callable[..., InputFeature]]):
         super().__init__()
 
         self.L1 = L1

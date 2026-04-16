@@ -1,7 +1,6 @@
 import math
 import torch
 import cupy as cp
-from torch import autograd
 
 def _kernel_with_threads(kernel, threads):
     def f(grid, args):

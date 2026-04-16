@@ -8,7 +8,7 @@ def set_smart_precision():
         print(f"Device capability {major}.{minor} detected.")
         if major >= 8:
             # Benefits from Tensor Cores; speedup justifies precision drop
-            print(f"Using set_float32_matmul_precision('high').")
+            print("Using set_float32_matmul_precision('high').")
             torch.set_float32_matmul_precision('high')
         else:
             # Older GPU: Keep 'highest' to avoid precision loss without gain
