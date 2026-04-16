@@ -59,6 +59,7 @@ def fused_double_ft_op(
 
     return out_l0, wpsqt, bpsqt
 
+_autotune_chunk_cache = dict()
 
 class FusedNNUETransformerFunction(autograd.Function):
     @staticmethod
@@ -146,16 +147,10 @@ class FusedNNUETransformerFunction(autograd.Function):
 
         kernel, threads_per_block_y = make_fused_nnue_backward_kernel(max_active_indices, L1, num_psqt_buckets)
 
-        # static chunk size for now..
-        chunk_size = 128
+        weight_grad_ptr = weight_grad.data_ptr() if weight_grad is not None else 0
+        bias_grad_ptr = bias_grad.data_ptr() if bias_grad is not None else 0
 
-        grid_x = math.ceil(batch_size / chunk_size)
-        grid_y = math.ceil((L1 // 2 + num_psqt_buckets) / threads_per_block_y)
-
-        kernel(
-            grid=(grid_x, grid_y),
-            block=(threads_per_block_y,),
-            args=(
+        kernel_args = (
                 w_indices.data_ptr(),
                 w_values.data_ptr(),
                 b_indices.data_ptr(),
@@ -171,8 +166,21 @@ class FusedNNUETransformerFunction(autograd.Function):
                 bias_grad.data_ptr() if bias_grad is not None else 0,
                 ft_max_val,
                 batch_size,
-                chunk_size
-            ),
+                128, # save default value for chunk_size
+        )
+
+        chunk_size = _get_optimal_chunk_size(
+            batch_size, max_active_indices, output_size, kernel, threads_per_block_y,
+            kernel_args, weight_grad, bias_grad, _autotune_chunk_cache
+        )
+
+        grid_x = math.ceil(batch_size / chunk_size)
+        grid_y = math.ceil((L1 // 2 + num_psqt_buckets) / threads_per_block_y)
+
+        kernel(
+            grid=(grid_x, grid_y),
+            block=(threads_per_block_y,),
+            args=kernel_args,
         )
 
         return (

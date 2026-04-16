@@ -43,38 +43,31 @@ def sparse_linear_op(feature_indices, feature_values, weight, bias):
     return torch.matmul(dense_input, weight) + bias
 
 
-_autotune_chunk_cache = dict()
-
 def _get_optimal_chunk_size(
     batch_size: int,
     max_active_indices: int,
     output_size: int,
     kernel,
     threads_per_block_y: int,
-    feature_indices: torch.Tensor,
-    feature_values: torch.Tensor,
-    weight_grad: torch.Tensor,
-    bias_grad: torch.Tensor,
-    grad_output: torch.Tensor
+    kernel_args: tuple,
+    weight_grad,
+    bias_grad,
+    autotune_chunk_cache,
 ) -> int:
     key = (batch_size, max_active_indices, output_size)
-    if key in _autotune_chunk_cache:
-        return _autotune_chunk_cache[key]
+    if key in autotune_chunk_cache:
+        return autotune_chunk_cache[key]
 
     # Candidate chunk sizes to search
     candidates = [32, 64, 128, 256, 512, 1024]
     best_time = float('inf')
     best_chunk = 128
+    # convert to mutable
+    kernel_args = list(kernel_args)
 
     # Prevent benchmarking overhead from initial CUDA context switches
     warmup_runs = 3
     eval_runs = 5
-
-    ptr_indices = feature_indices.data_ptr()
-    ptr_values = feature_values.data_ptr()
-    ptr_w_grad = weight_grad.data_ptr() if weight_grad is not None else 0
-    ptr_b_grad = bias_grad.data_ptr() if bias_grad is not None else 0
-    ptr_out_grad = grad_output.data_ptr()
 
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
@@ -87,7 +80,8 @@ def _get_optimal_chunk_size(
         grid_y = math.ceil(output_size / threads_per_block_y)
         grid = (grid_x, grid_y)
         block = (threads_per_block_y,)
-        args = (ptr_indices, ptr_values, ptr_w_grad, ptr_b_grad, ptr_out_grad, batch_size, chunk)
+        kernel_args[-1] = chunk
+        args = tuple(kernel_args)
 
         # Warmup
         for _ in range(warmup_runs):
@@ -124,6 +118,8 @@ def _get_optimal_chunk_size(
 
     _autotune_chunk_cache[key] = best_chunk
     return best_chunk
+
+_autotune_chunk_cache = dict()
 
 class SparseLinearFunction(autograd.Function):
     @staticmethod
@@ -207,9 +203,22 @@ class SparseLinearFunction(autograd.Function):
             max_active_indices, output_size
         )
 
+        weight_grad_ptr = weight_grad.data_ptr() if weight_grad is not None else 0
+        bias_grad_ptr = bias_grad.data_ptr() if bias_grad is not None else 0
+
+        kernel_args = (
+                feature_indices.data_ptr(),
+                feature_values.data_ptr(),
+                weight_grad_ptr,
+                bias_grad_ptr,
+                grad_output.data_ptr(),
+                batch_size,
+                128, # save default value for chunk_size
+        )
+
         chunk_size = _get_optimal_chunk_size(
             batch_size, max_active_indices, output_size, kernel, threads_per_block_y,
-            feature_indices, feature_values, weight_grad, bias_grad, grad_output
+            kernel_args, weight_grad, bias_grad, _autotune_chunk_cache
         )
 
         grid_x = math.ceil(batch_size / chunk_size)
@@ -218,15 +227,7 @@ class SparseLinearFunction(autograd.Function):
         kernel(
             grid=(grid_x, grid_y),
             block=(threads_per_block_y,),
-            args=(
-                feature_indices.data_ptr(),
-                feature_values.data_ptr(),
-                weight_grad.data_ptr() if weight_grad is not None else 0,
-                bias_grad.data_ptr() if bias_grad is not None else 0,
-                grad_output.data_ptr(),
-                batch_size,
-                chunk_size
-            ),
+            args=kernel_args,
         )
 
         return None, None, weight_grad, bias_grad
