@@ -1,5 +1,6 @@
 from .feature_transformer import (
     set_use_custom_sparse_kernel,
+    set_use_fused_double_ft,
     BaseFeatureTransformer,
     DoubleFeatureTransformer,
     FeatureTransformer,
@@ -20,6 +21,7 @@ from .layer_stacks import LayerStacks
 
 __all__ = [
     "set_use_custom_sparse_kernel",
+    "set_use_fused_double_ft",
     "BaseFeatureTransformer",
     "DoubleFeatureTransformer",
     "FeatureTransformer",

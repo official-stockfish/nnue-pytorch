@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from ..feature_transformer import sparse_linear_op
+from ..feature_transformer import fused_double_ft_op
 from .input_feature import InputFeature
 
 
@@ -50,23 +50,20 @@ class ComposedFeatureTransformer(nn.Module):
         with torch.no_grad():
             self.bias.uniform_(-sigma, sigma)
 
-    def forward(
-        self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
-    ):
-        merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
-        return (
-            sparse_linear_op(
-                feature_indices_0,
-                feature_values_0,
-                merged,
-                self.bias,
-            ),
-            sparse_linear_op(
-                feature_indices_1,
-                feature_values_1,
-                merged,
-                self.bias,
-            ),
+    def forward(self, w_indices, w_values, b_indices, b_values, us, them, ft_max_val):
+        merged_weight = torch.cat([f.merged_weight() for f in self.features], dim=0)
+        return fused_double_ft_op(
+            w_indices,
+            w_values,
+            b_indices,
+            b_values,
+            merged_weight,
+            self.bias,
+            us,
+            them,
+            ft_max_val,
+            self.L1,
+            self.num_psqt_buckets
         )
 
     @torch.no_grad()
