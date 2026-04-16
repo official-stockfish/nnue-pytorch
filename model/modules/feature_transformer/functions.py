@@ -14,20 +14,23 @@ def set_use_custom_sparse_kernel(use_custom: bool):
     global _USE_CUSTOM_SPARSE_KERNEL
     _USE_CUSTOM_SPARSE_KERNEL = use_custom
 
+
 def sparse_linear_op(feature_indices, feature_values, weight, bias):
-    """
-    Wrapper to conditionally route to the custom CUDA kernel or standard dense PyTorch ops.
-    """
     if _USE_CUSTOM_SPARSE_KERNEL:
         return SparseLinearFunction.apply(feature_indices, feature_values, weight, bias)
 
     batch_size = feature_indices.shape[0]
     num_inputs = weight.shape[0]
 
-    valid_mask = feature_indices != -1
+    minus_one = torch.tensor(-1, dtype=feature_indices.dtype, device=feature_indices.device)
+    valid_mask = feature_indices != minus_one
 
-    safe_indices = torch.where(valid_mask, feature_indices, 0).to(torch.int64)
-    safe_values = torch.where(valid_mask, feature_values, 0.0)
+    safe_indices = feature_indices.clone()
+    safe_indices.masked_fill_(~valid_mask, 0)
+    safe_indices = safe_indices.to(torch.int64)
+
+    safe_values = feature_values.clone()
+    safe_values.masked_fill_(~valid_mask, 0.0)
 
     dense_input = torch.zeros(
         (batch_size, num_inputs),
@@ -35,14 +38,8 @@ def sparse_linear_op(feature_indices, feature_values, weight, bias):
         device=weight.device
     )
 
-    # Scatter values into the dense tensor.
-    # scatter_ is slightly faster than scatter_add_
-    # in case of duplicates in row
-    # scatter_add_ has to be used instead
-    dense_input.scatter_(1, safe_indices, safe_values)
+    dense_input.scatter_add_(1, safe_indices, safe_values)
 
-    # Weight shape is (NUM_INPUTS, output_size),
-    # so we use matmul instead of nn.functional.linear
     return torch.matmul(dense_input, weight) + bias
 
 

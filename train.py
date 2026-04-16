@@ -16,6 +16,7 @@ import model as M
 import tyro
 
 from config import TrainingConfig
+from ddp_utils import set_smart_precision
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -256,6 +257,8 @@ def is_master_process():
 def main():
     args = tyro.cli(TrainingConfig)
     actual_threads, actual_workers = args.threads, args.num_workers
+
+    set_smart_precision()
 
     for dataset in args.datasets:
         if not os.path.exists(dataset):
