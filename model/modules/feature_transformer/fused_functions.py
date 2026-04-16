@@ -11,6 +11,7 @@ from .fused_kernels import (
 
 from .functions import (
     sparse_linear_op,
+    get_optimal_chunk_size,
 )
 
 _USE_FUSED_DOUBLE_FT = True
@@ -143,9 +144,10 @@ class FusedNNUETransformerFunction(autograd.Function):
 
         kernel, threads_per_block_y = make_fused_nnue_backward_kernel(max_active_indices, L1, num_psqt_buckets)
 
-        # A static chunk size of 128 is a safe default for modern hardware,
-        # potentially integrate autotune
-        chunk_size = 128
+        chunk_size = _get_optimal_chunk_size(
+            batch_size, max_active_features, output_size, kernel, threads_per_block_y,
+            feature_indices, feature_values, weight_grad, bias_grad, grad_output
+        )
 
         grid_x = math.ceil(batch_size / chunk_size)
         grid_y = math.ceil((L1 // 2 + num_psqt_buckets) / threads_per_block_y)
