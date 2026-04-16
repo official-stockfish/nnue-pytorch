@@ -93,6 +93,11 @@ def _get_optimal_chunk_size(
         for _ in range(warmup_runs):
             kernel(grid=grid, block=block, args=tuple(kernel_args))
 
+        if tmp_w_grad is not None:
+            tmp_w_grad.zero_()
+        if tmp_b_grad is not None:
+            tmp_b_grad.zero_()
+
         torch.cuda.synchronize()
         start_event.record()
 

@@ -109,8 +109,8 @@ class FusedNNUETransformerFunction(autograd.Function):
                 b_values.data_ptr(),
                 weight.data_ptr(),
                 bias.data_ptr(),
-                us_tensor.data_ptr(),
-                them_tensor.data_ptr(),
+                us_tensor_c.data_ptr(),
+                them_tensor_c.data_ptr(),
                 out_l0.data_ptr(),
                 out_wpsqt.data_ptr(),
                 out_bpsqt.data_ptr(),
@@ -153,6 +153,9 @@ class FusedNNUETransformerFunction(autograd.Function):
         bias_grad_ptr = bias_grad.data_ptr() if bias_grad is not None else 0
         us_tensor_c = us_tensor.contiguous()
         them_tensor_c = them_tensor.contiguous()
+        grad_out_l0_c = grad_out_l0.contiguous()
+        grad_out_wpsqt_c = grad_out_wpsqt.contiguous()
+        grad_out_bpsqt_c = grad_out_bpsqt.contiguous()
 
         kernel_args = [
                 weight_grad_ptr,
@@ -163,11 +166,11 @@ class FusedNNUETransformerFunction(autograd.Function):
                 b_values.data_ptr(),
                 weight.data_ptr(),
                 bias.data_ptr(),
-                us_tensor.data_ptr(),
-                them_tensor.data_ptr(),
-                grad_out_l0.contiguous().data_ptr(),
-                grad_out_wpsqt.contiguous().data_ptr(),
-                grad_out_bpsqt.contiguous().data_ptr(),
+                us_tensor_c.data_ptr(),
+                them_tensor_c.data_ptr(),
+                grad_out_l0_c.data_ptr(),
+                grad_out_wpsqt_c.data_ptr(),
+                grad_out_bpsqt_c.data_ptr(),
                 ft_max_val,
                 batch_size,
                 128, # save default value for chunk_size
