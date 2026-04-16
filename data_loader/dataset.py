@@ -246,6 +246,7 @@ class FixedNumBatchesDataset(Dataset):
 
         self._prefetch_queue = queue.Queue(maxsize=queue_size_limit)
         self._prefetch_thread = None
+        self._prefetch_device = None
         self._stop_prefetching = threading.Event()
         self._prefetch_started = False
         self._lock = threading.Lock()
@@ -297,6 +298,9 @@ class FixedNumBatchesDataset(Dataset):
     def _start_prefetching(self):
         with self._lock:
             if not self._prefetch_started:
+                # Resolve the concrete CUDA device on the consumer thread after the
+                # training process has selected its rank-local device.
+                self._prefetch_device = self._resolve_prefetch_device()
                 self.iter = iter(self.dataset)
                 self._prefetch_thread = threading.Thread(
                     target=self._prefetch_worker, daemon=True
@@ -318,7 +322,7 @@ class FixedNumBatchesDataset(Dataset):
             elif isinstance(item, Exception):
                 raise item
             elif isinstance(item, _CudaPrefetchedItem):
-                prefetch_device = self._resolve_prefetch_device()
+                prefetch_device = self._prefetch_device
                 current_stream = torch.cuda.current_stream(device=prefetch_device)
                 current_stream.wait_event(item.ready_event)
                 _recursive_record_stream(item.item, current_stream)
