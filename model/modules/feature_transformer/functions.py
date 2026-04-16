@@ -1,11 +1,87 @@
+import math
 import torch
 from torch import autograd
 
 from .kernel import (
     make_sparse_input_linear_forward_kernel,
-    make_sparse_input_linear_backward_kernel,
+    make_sparse_input_linear_backward_kernel_hybrid,
 )
 
+_autotune_chunk_cache = dict()
+
+def _get_optimal_chunk_size(
+    batch_size: int,
+    max_active_features: int,
+    output_size: int,
+    kernel,
+    threads_per_block_y: int,
+    feature_indices: torch.Tensor,
+    feature_values: torch.Tensor,
+    weight_grad: torch.Tensor,
+    bias_grad: torch.Tensor,
+    grad_output: torch.Tensor
+) -> int:
+    key = (batch_size, max_active_features, output_size)
+    if key in _autotune_chunk_cache:
+        return _autotune_chunk_cache[key]
+
+    # Candidate chunk sizes to search
+    candidates = [32, 64, 128, 256, 512, 1024]
+    best_time = float('inf')
+    best_chunk = 128
+
+    # Prevent benchmarking overhead from initial CUDA context switches
+    warmup_runs = 3
+    eval_runs = 5
+
+    ptr_indices = feature_indices.data_ptr()
+    ptr_values = feature_values.data_ptr()
+    ptr_w_grad = weight_grad.data_ptr() if weight_grad is not None else 0
+    ptr_b_grad = bias_grad.data_ptr() if bias_grad is not None else 0
+    ptr_out_grad = grad_output.data_ptr()
+
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+
+    for chunk in candidates:
+        if chunk > batch_size and chunk != candidates[0]:
+            continue # Skip unnecessarily large chunks if batch is small
+
+        grid_x = math.ceil(batch_size / chunk)
+        grid_y = math.ceil(output_size / threads_per_block_y)
+        grid = (grid_x, grid_y)
+        block = (threads_per_block_y,)
+        args = (ptr_indices, ptr_values, ptr_w_grad, ptr_b_grad, ptr_out_grad, batch_size, chunk)
+
+        # Warmup
+        for _ in range(warmup_runs):
+            if weight_grad is not None: weight_grad.zero_()
+            if bias_grad is not None: bias_grad.zero_()
+            kernel(grid=grid, block=block, args=args)
+
+        torch.cuda.synchronize()
+        start_event.record()
+
+        # Benchmark
+        for _ in range(eval_runs):
+            if weight_grad is not None: weight_grad.zero_()
+            if bias_grad is not None: bias_grad.zero_()
+            kernel(grid=grid, block=block, args=args)
+
+        end_event.record()
+        torch.cuda.synchronize()
+
+        time_ms = start_event.elapsed_time(end_event) / eval_runs
+        if time_ms < best_time:
+            best_time = time_ms
+            best_chunk = chunk
+
+    # Clean tensors for the actual execution
+    if weight_grad is not None: weight_grad.zero_()
+    if bias_grad is not None: bias_grad.zero_()
+
+    _autotune_chunk_cache[key] = best_chunk
+    return best_chunk
 
 class SparseLinearFunction(autograd.Function):
     @staticmethod
@@ -45,16 +121,10 @@ class SparseLinearFunction(autograd.Function):
         output_size = weight.shape[1]
 
         output = torch.empty(
-            batch_size,
-            output_size,
-            dtype=torch.float32,
-            device=device,
-            requires_grad=True,
+            batch_size, output_size, dtype=torch.float32, device=device
         )
 
-        kernel = make_sparse_input_linear_forward_kernel(
-            max_active_features, output_size
-        )
+        kernel = make_sparse_input_linear_forward_kernel(max_active_features, output_size)
         kernel(
             grid=(batch_size,),
             args=(
@@ -74,7 +144,6 @@ class SparseLinearFunction(autograd.Function):
         assert not ctx.needs_input_grad[1]
 
         grad_output = grad_output.contiguous()
-
         feature_indices, feature_values, weight, bias = ctx.saved_tensors
 
         device = feature_indices.device
@@ -82,22 +151,39 @@ class SparseLinearFunction(autograd.Function):
         max_active_features = feature_indices.shape[1]
         output_size = weight.shape[1]
 
-        weight_grad = torch.zeros(
-            weight.shape[0], weight.shape[1], dtype=torch.float32, device=device
-        )
-        bias_grad = torch.zeros(output_size, dtype=torch.float32, device=device)
+        # Bug fixed: Only allocate requested gradients
+        needs_weight_grad = ctx.needs_input_grad[2]
+        needs_bias_grad = ctx.needs_input_grad[3]
 
-        kernel = make_sparse_input_linear_backward_kernel(
+        weight_grad = torch.zeros_like(weight) if needs_weight_grad else None
+        bias_grad = torch.zeros_like(bias) if needs_bias_grad else None
+
+        if not needs_weight_grad and not needs_bias_grad:
+            return None, None, None, None
+
+        kernel, threads_per_block_y = make_sparse_input_linear_backward_kernel_hybrid(
             max_active_features, output_size
         )
+
+        chunk_size = _get_optimal_chunk_size(
+            batch_size, max_active_features, output_size, kernel, threads_per_block_y,
+            feature_indices, feature_values, weight_grad, bias_grad, grad_output
+        )
+
+        grid_x = math.ceil(batch_size / chunk_size)
+        grid_y = math.ceil(output_size / threads_per_block_y)
+
         kernel(
-            grid=(batch_size,),
+            grid=(grid_x, grid_y),
+            block=(threads_per_block_y,),
             args=(
                 feature_indices.data_ptr(),
                 feature_values.data_ptr(),
-                weight_grad.data_ptr(),
-                bias_grad.data_ptr(),
+                weight_grad.data_ptr() if weight_grad is not None else 0,
+                bias_grad.data_ptr() if bias_grad is not None else 0,
                 grad_output.data_ptr(),
+                batch_size,
+                chunk_size
             ),
         )
 
