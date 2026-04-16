@@ -138,16 +138,15 @@ void fused_nnue_forward(
     return _fused_nnue_forward_cache[key]
 
 
-
 _fused_nnue_backward_cache = dict()
 
 @torch.compiler.disable(recursive=False)
-def make_fused_nnue_backward_kernel(max_active_indices: int, L1: int, num_psqt_buckets: int):
+def make_fused_nnue_backward_kernel(max_active_indices: int, L1: int, extra: int):
     H = L1 // 2
-    total_output_cols = H + num_psqt_buckets
+    total_output_cols = H + extra
     threads_per_block_y = min(256, (total_output_cols + 31) // 32 * 32)
 
-    key = (max_active_indices, L1, num_psqt_buckets)
+    key = (max_active_indices, L1, extra)
     if key not in _fused_nnue_backward_cache:
         kernel = cp.RawKernel(
             r"""
@@ -161,6 +160,7 @@ void fused_nnue_backward(
     const int32_t* const b_indices,
     const float* const b_values,
     const float* const weight,
+    const float* const bias,
     const float* const us_tensor,
     const float* const them_tensor,
     const float* const grad_out_l0,
@@ -178,12 +178,12 @@ void fused_nnue_backward(
 
     if (col >= {total_output_cols}) return;
 
-    const uint32_t OUT_SIZE = {L1} + {num_psqt_buckets};
+    const uint32_t OUT_SIZE = {L1} + {extra};
     const uint32_t batch_start = batch_chunk_idx * batch_chunk_size;
     const uint32_t batch_end = min(batch_start + batch_chunk_size, batch_size);
 
     float local_bias_acc_0 = 0.0f;
-    float local_bias_acc_1 = 0.0f; // Only used if col < H
+    float local_bias_acc_1 = 0.0f;
 
     for (uint32_t b = batch_start; b < batch_end; ++b)
     {{
@@ -194,8 +194,13 @@ void fused_nnue_backward(
 
         if (col < {H})
         {{
-            // --- 1. Recompute Forward State ---
-            float w0 = 0.0f, w1 = 0.0f, b0 = 0.0f, b1 = 0.0f;
+            // --- 1. Recompute Forward State WITH BIAS ---
+            const float b_val_static = bias[col];
+            const float b_val_h_static = bias[col + {H}];
+
+            // Initialize accumulators with bias to ensure l0 is mathematically identical to forward pass
+            float w0 = b_val_static, w1 = b_val_h_static;
+            float b0 = b_val_static, b1 = b_val_h_static;
 
             for (uint32_t k = 0; k < {max_active_indices}; ++k) {{
                 const int32_t idx = w_idx_row[k];
@@ -247,7 +252,6 @@ void fused_nnue_backward(
             float g_b1 = them * g_l0_1 + us * g_l0_3;
 
             // --- 5. Accumulate into registers and VRAM ---
-            // Bias gradients are shared across perspective
             local_bias_acc_0 += (g_w0 + g_b0);
             local_bias_acc_1 += (g_w1 + g_b1);
 
@@ -271,7 +275,7 @@ void fused_nnue_backward(
         {{
             // --- PSQT Path Gradients ---
             const uint32_t psqt_col = {L1} + (col - {H});
-            const uint32_t out_psqt_idx = b * {num_psqt_buckets} + (col - {H});
+            const uint32_t out_psqt_idx = b * {extra} + (col - {H});
 
             const float g_w = grad_out_wpsqt[out_psqt_idx];
             const float g_b = grad_out_bpsqt[out_psqt_idx];
@@ -296,20 +300,19 @@ void fused_nnue_backward(
         }}
     }}
 
-    // Write bias gradients at the very end to minimize global atomics
     if (col < {H}) {{
-        if (local_bias_acc_0 != 0.0f) atomicAdd(&bias_grad[col], local_bias_acc_0);
-        if (local_bias_acc_1 != 0.0f) atomicAdd(&bias_grad[col + {H}], local_bias_acc_1);
+        if (local_bias_acc_0 != 0.0f && bias_grad != nullptr) atomicAdd(&bias_grad[col], local_bias_acc_0);
+        if (local_bias_acc_1 != 0.0f && bias_grad != nullptr) atomicAdd(&bias_grad[col + {H}], local_bias_acc_1);
     }} else {{
         const uint32_t psqt_col = {L1} + (col - {H});
-        if (local_bias_acc_0 != 0.0f) atomicAdd(&bias_grad[psqt_col], local_bias_acc_0);
+        if (local_bias_acc_0 != 0.0f && bias_grad != nullptr) atomicAdd(&bias_grad[psqt_col], local_bias_acc_0);
     }}
 }}
 """.format(
                 max_active_indices=max_active_indices,
                 L1=L1,
                 H=H,
-                num_psqt_buckets=num_psqt_buckets,
+                extra=extra,
                 total_output_cols=total_output_cols
             ),
             "fused_nnue_backward",

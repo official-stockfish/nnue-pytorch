@@ -1,5 +1,7 @@
 import torch
 import math
+import numpy as np
+
 from torch import autograd
 
 from .fused_kernels import (
@@ -73,10 +75,11 @@ class FusedNNUETransformerFunction(autograd.Function):
         L1: int,
         num_psqt_buckets: int
     ):
+        # kernel needs 32 bit float
+        ft_max_val = np.float32(ft_max_val)
         # Save tensors needed for rematerialization during the backward pass.
-        # Bias is explicitly omitted because the backward pass only needs weights to recompute l0.
         ctx.save_for_backward(
-            w_indices, w_values, b_indices, b_values, weight, us_tensor, them_tensor
+            w_indices, w_values, b_indices, b_values, weight, bias, us_tensor, them_tensor
         )
         ctx.ft_max_val = ft_max_val
         ctx.L1 = L1
@@ -107,7 +110,7 @@ class FusedNNUETransformerFunction(autograd.Function):
                 out_l0.data_ptr(),
                 out_wpsqt.data_ptr(),
                 out_bpsqt.data_ptr(),
-                float(ft_max_val) # Pass natively as float
+                ft_max_val
             ),
         )
 
@@ -116,7 +119,7 @@ class FusedNNUETransformerFunction(autograd.Function):
     @staticmethod
     def backward(ctx, grad_out_l0, grad_out_wpsqt, grad_out_bpsqt):
         (
-            w_indices, w_values, b_indices, b_values, weight, us_tensor, them_tensor
+            w_indices, w_values, b_indices, b_values, weight, bias, us_tensor, them_tensor
         ) = ctx.saved_tensors
 
         # Determine which inputs actually need gradients.
@@ -156,6 +159,7 @@ class FusedNNUETransformerFunction(autograd.Function):
                 b_indices.data_ptr(),
                 b_values.data_ptr(),
                 weight.data_ptr(),
+                bias.data_ptr(),
                 us_tensor.contiguous().data_ptr(),
                 them_tensor.contiguous().data_ptr(),
                 grad_out_l0.contiguous().data_ptr(),
@@ -163,7 +167,7 @@ class FusedNNUETransformerFunction(autograd.Function):
                 grad_out_bpsqt.contiguous().data_ptr(),
                 weight_grad.data_ptr() if weight_grad is not None else 0,
                 bias_grad.data_ptr() if bias_grad is not None else 0,
-                float(ft_max_val),
+                ft_max_val,
                 batch_size,
                 chunk_size
             ),
