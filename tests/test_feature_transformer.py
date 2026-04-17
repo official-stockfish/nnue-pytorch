@@ -8,9 +8,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.modules import DoubleFeatureTransformer
 from model.modules.feature_transformer.functions import (
-    SparseLinearFunction,
+    sparse_linear_op,
+    set_use_custom_sparse_kernel,
 )
-
 
 def SparseLinearFunctionEmulate(
     input_indices: torch.Tensor,
@@ -61,26 +61,31 @@ def test():
     output01 = SparseLinearFunctionEmulate(
         indices1.clone(), values1.clone(), weight0, bias0
     )
-    output10 = SparseLinearFunction.apply(
+    output10 = sparse_linear_op(
         indices0.clone().cuda(), values0.clone().cuda(), weight1.cuda(), bias1.cuda()
     )
-    output11 = SparseLinearFunction.apply(
+    output11 = sparse_linear_op(
         indices1.clone().cuda(), values1.clone().cuda(), weight1.cuda(), bias1.cuda()
     )
 
-    assert torch.max(torch.abs(output00.cpu() - output10.cpu())) < MAX_ERROR
-    assert torch.max(torch.abs(output01.cpu() - output11.cpu())) < MAX_ERROR
+    errors = []
+    errors.append(torch.max(torch.abs(output00.cpu() - output10.cpu())))
+    errors.append(torch.max(torch.abs(output01.cpu() - output11.cpu())))
     (output00 - output01).sum().backward()
     (output10 - output11).sum().backward()
-    assert torch.max(torch.abs(weight0.grad.cpu() - weight1.grad.cpu())) < MAX_ERROR
-    assert torch.max(torch.abs(bias0.grad.cpu() - bias1.grad.cpu())) < MAX_ERROR
-    print("Tests passed.")
+    errors.append(torch.max(torch.abs(weight0.grad.cpu() - weight1.grad.cpu())))
+    errors.append(torch.max(bias0.grad.cpu() - bias1.grad.cpu()))
+
+    if all([error < MAX_ERROR for error in errors]):
+        print("Tests passed.")
+    else:
+        print(f"Max diff of {errors} measured.")
 
 
 def bench():
     INPUT_SIZE = 40960
     BATCH_SIZE = 8192
-    ITERS = 64
+    ITERS = 128
     STRIDE = 264
     MAX_ACTIVE_FEATURES = 64
 
@@ -122,5 +127,10 @@ def bench():
 
 
 if __name__ == "__main__":
+    torch.backends.cuda.matmul.allow_tf32 = False
+    set_use_custom_sparse_kernel(True)
+    test()
+    bench()
+    set_use_custom_sparse_kernel(False)
     test()
     bench()

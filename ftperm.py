@@ -560,19 +560,15 @@ def forward_ft(
     psqt_indices: torch.Tensor,
     layer_stack_indices: torch.Tensor,
 ) -> torch.Tensor:
-    wp, bp = model.input(white_indices, white_values, black_indices, black_values)
-    w, _ = torch.split(wp, model.L1, dim=1)
-    b, _ = torch.split(bp, model.L1, dim=1)
-    l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-    l0_ = torch.clamp(l0_, 0.0, model.quantization.ft_quantized_one)
+    ft_div_factor = 512.0
 
-    l0_s = torch.split(l0_, model.L1 // 2, dim=1)
-    l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
-    # We multiply by 255/512 because in the quantized network 1.0 is represented by 255
-    # and we want to scale to 1.0=127, but a shift is faster than a division (in inference)
-    l0_ = torch.cat(l0_s1, dim=1) * (1 / 512)
-
-    return l0_.round()
+    l0_s1, _, _ = model.input(
+        white_indices, white_values, black_indices, black_values,
+        us, them, ft_div_factor
+    )
+    l0_ = l0_s1 / ft_div_factor
+    # inference does bitshift, which corresponds to floor
+    return l0_.floor()
 
 
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor:

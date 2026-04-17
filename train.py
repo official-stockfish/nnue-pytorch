@@ -16,6 +16,7 @@ import model as M
 import tyro
 
 from config import TrainingConfig
+from ddp_utils import set_smart_precision
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -257,6 +258,8 @@ def main():
     args = tyro.cli(TrainingConfig)
     actual_threads, actual_workers = args.threads, args.num_workers
 
+    set_smart_precision()
+
     for dataset in args.datasets:
         if not os.path.exists(dataset):
             raise Exception("{0} does not exist".format(dataset))
@@ -375,6 +378,9 @@ def main():
             print("Set torch num_threads to {} threads.".format(actual_threads))
         else:
             print("Using default torch num_threads setting.")
+        print(f"Custom sparse linear kernel is {"enabled" if args.use_custom_sparse_kernel else "disabled"}.")
+        print(f"Custom fused double ft is {"enabled" if args.use_fused_double_ft else "disabled"}.")
+
         print("", flush=True)
 
     checkpoint_callback = ModelCheckpoint(
@@ -426,6 +432,9 @@ def main():
 
     if actual_threads > 0:
         t_set_num_threads(actual_threads)
+
+    M.set_use_custom_sparse_kernel(args.use_custom_sparse_kernel)
+    M.set_use_fused_double_ft(args.use_fused_double_ft)
 
     if args.resume_from_checkpoint:
         trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)

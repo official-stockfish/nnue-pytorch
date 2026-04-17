@@ -50,6 +50,12 @@ class TrainingConfig:
     threads: int = -1
     """Number of torch threads to use. Default automatic (cores)."""
 
+    use_custom_sparse_kernel: bool = True
+    """Use custom sparse linear kernel."""
+
+    use_fused_double_ft: bool = False
+    """Use custom sparse linear kernel."""
+
     compile_backend: Literal["inductor", "cudagraphs"] = "inductor"
     """Which backend to use for torch.compile. inductor works well with larger nets, cudagraphs with smaller nets."""
 

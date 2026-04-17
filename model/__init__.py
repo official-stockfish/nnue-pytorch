@@ -5,6 +5,8 @@ from .optimizers import OptimizerConfig, Ranger21Wrapper, ScheduleFreeWrapper
 from .lightning_module import NNUE
 from .model import NNUEModel
 from .modules import (
+    set_use_custom_sparse_kernel,
+    set_use_fused_double_ft,
     add_feature_args,
     combine_input_features,
     get_feature_cls,
@@ -21,6 +23,8 @@ from .utils import (
 
 
 __all__ = [
+    "set_use_custom_sparse_kernel",
+    "set_use_fused_double_ft",
     "WeightClippingCallback",
     "ModelConfig",
     "LossParams",

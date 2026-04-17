@@ -1,7 +1,8 @@
 import torch
 from torch import nn
+from typing import Callable
 
-from ..feature_transformer import SparseLinearFunction
+from ..feature_transformer import fused_double_ft_op
 from .input_feature import InputFeature
 
 
@@ -12,11 +13,15 @@ class ComposedFeatureTransformer(nn.Module):
     bias and delegates everything else to the underlying features.
     """
 
-    def __init__(self, features: list[InputFeature]):
+    def __init__(self, L1, num_psqt_buckets, feature_classes: list[Callable[..., InputFeature]]):
         super().__init__()
 
+        self.L1 = L1
+        self.num_psqt_buckets = num_psqt_buckets
+        self.num_outputs = self.L1 + self.num_psqt_buckets
+
+        features = [fc(self.num_outputs) for fc in feature_classes]
         self.features = nn.ModuleList(features)
-        self.num_outputs = features[0].num_outputs
 
         self.bias = nn.Parameter(torch.empty(self.num_outputs, dtype=torch.float32))
 
@@ -46,23 +51,20 @@ class ComposedFeatureTransformer(nn.Module):
         with torch.no_grad():
             self.bias.uniform_(-sigma, sigma)
 
-    def forward(
-        self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
-    ):
-        merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
-        return (
-            SparseLinearFunction.apply(
-                feature_indices_0,
-                feature_values_0,
-                merged,
-                self.bias,
-            ),
-            SparseLinearFunction.apply(
-                feature_indices_1,
-                feature_values_1,
-                merged,
-                self.bias,
-            ),
+    def forward(self, w_indices, w_values, b_indices, b_values, us, them, ft_max_val):
+        merged_weight = torch.cat([f.merged_weight() for f in self.features], dim=0)
+        return fused_double_ft_op(
+            w_indices,
+            w_values,
+            b_indices,
+            b_values,
+            merged_weight,
+            self.bias,
+            us,
+            them,
+            ft_max_val,
+            self.L1,
+            self.num_psqt_buckets
         )
 
     @torch.no_grad()
@@ -71,13 +73,12 @@ class ComposedFeatureTransformer(nn.Module):
             f.coalesce()
 
     @torch.no_grad()
-    def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None:
+    def init_weights(self, nnue2score: float) -> None:
         for f in self.features:
-            f.init_weights(num_psqt_buckets, nnue2score)
+            f.init_weights(self.num_psqt_buckets, nnue2score)
 
-        L1 = self.num_outputs - num_psqt_buckets
-        for i in range(num_psqt_buckets):
-            self.bias[L1 + i] = 0.0
+        for i in range(self.num_psqt_buckets):
+            self.bias[self.L1 + i] = 0.0
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:
@@ -99,8 +100,7 @@ class ComposedFeatureTransformer(nn.Module):
 def combine_input_features(*feature_classes: type):
     """Return a factory that creates a ComposedFeatureTransformer."""
 
-    def factory(num_outputs: int) -> ComposedFeatureTransformer:
-        features = [fc(num_outputs) for fc in feature_classes]
-        return ComposedFeatureTransformer(features)
+    def factory(L1, num_psqt_buckets) -> ComposedFeatureTransformer:
+        return ComposedFeatureTransformer(L1, num_psqt_buckets, feature_classes)
 
     return factory
