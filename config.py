@@ -27,7 +27,7 @@ class TrainingConfig:
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
 
     gpus: Optional[str] = None
-    """List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (Use device 0 only)."""
+    """List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Only used when accelerator="cuda"."""
 
     pin_memory: bool = True
     """Whether to use pin memory in the data pipeline. Should generally be left on unless you encounter issues with too much RAM usage."""

@@ -9,7 +9,7 @@ try:
         make_sparse_input_linear_backward_kernel,
     )
     _HAS_CUPY_KERNELS = True
-except ImportError:
+except (ImportError, OSError, RuntimeError):
     pass
 
 
