@@ -299,6 +299,12 @@ def main():
         else:
             accelerator = "cpu"
 
+    if args.compile_backend == "cudagraphs" and accelerator != "cuda":
+        raise ValueError(
+            f"--compile-backend=cudagraphs requires accelerator='cuda', "
+            f"got accelerator='{accelerator}'. Use --compile-backend=inductor instead."
+        )
+
     # temporarily default to using only device 0 if user didn't specify --gpus
     # doing this so that batch size is consistent since if we rely on "auto" behavior
     # we don't know at this point in the code what the world size is.
@@ -333,10 +339,13 @@ def main():
         devices = 1
         n_devices = 1
     if global_batch_size_requested % n_devices != 0:
-        raise ValueError(
-            f"--batch-size {global_batch_size_requested} must be divisible by number of gpus ({n_devices}). "
-            f"Got --gpus={args.gpus or '0'}"
+        msg = (
+            f"--batch-size {global_batch_size_requested} must be divisible by "
+            f"number of devices ({n_devices}) for accelerator='{accelerator}'."
         )
+        if accelerator == "cuda":
+            msg += f" Got --gpus={args.gpus or '0'}."
+        raise ValueError(msg)
     per_gpu_batch_size = global_batch_size_requested // n_devices
     feature_name = args.nnue_lightning_config.features
 
