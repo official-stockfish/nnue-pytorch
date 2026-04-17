@@ -2,6 +2,33 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+def apply_stacked_linear(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    count: int,
+    in_features: int,
+    out_features: int,
+) -> torch.Tensor:
+    """
+    Applies the stacked linear transformation for both shared (2D) and independent (3D) inputs.
+    """
+    if x.dim() == 2:
+        # 1. First layer case: Shared input (B, in_features)
+        stacked_output = F.linear(x, weight, bias)
+        return stacked_output.view(-1, count, out_features)
+
+    elif x.dim() == 3:
+        # 2. Subsequent layers case: Independent inputs per expert (B, count, in_features)
+        w = weight.view(count, out_features, in_features)
+        b = bias.view(count, out_features)
+
+        # This applies each expert's weights strictly to its own data.
+        return torch.einsum('bci,coi->bco', x, w) + b
+
+    else:
+        raise ValueError("apply_stacked_linear expects 2D or 3D input")
+
 
 class StackedLinear(nn.Module):
     def __init__(self, in_features: int, out_features: int, count: int):
@@ -22,27 +49,15 @@ class StackedLinear(nn.Module):
         self.linear.weight.copy_(init_weight.repeat(self.count, 1))
         self.linear.bias.copy_(init_bias.repeat(self.count))
 
-    def forward(self, x: torch.Tensor, ls_indices: torch.Tensor) -> torch.Tensor:
-        stacked_output = self.linear(x)
-
-        return self.select_output(stacked_output, ls_indices)
-
-    def select_output(
-        self, stacked_output: torch.Tensor, ls_indices: torch.Tensor
-    ) -> torch.Tensor:
-        reshaped_output = stacked_output.reshape(-1, self.out_features)
-
-        idx_offset = torch.arange(
-            0,
-            ls_indices.shape[0] * self.count,
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return apply_stacked_linear(
+            x,
+            self.linear.weight,
+            self.linear.bias,
             self.count,
-            device=stacked_output.device,
+            self.in_features,
+            self.out_features,
         )
-        indices = ls_indices.flatten() + idx_offset
-
-        selected_output = reshaped_output[indices]
-
-        return selected_output
 
     @torch.no_grad()
     def at_index(self, index: int) -> nn.Linear:
@@ -67,15 +82,20 @@ class FactorizedStackedLinear(StackedLinear):
             self.factorized_linear.weight.zero_()
             self.factorized_linear.bias.zero_()
 
-    def forward(self, x: torch.Tensor, ls_indices: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         merged_weight = self.linear.weight + self.factorized_linear.weight.repeat(
             self.count, 1
         )
         merged_bias = self.linear.bias + self.factorized_linear.bias.repeat(self.count)
 
-        stacked_output = F.linear(x, merged_weight, merged_bias)
-
-        return self.select_output(stacked_output, ls_indices)
+        return apply_stacked_linear(
+            x,
+            merged_weight,
+            merged_bias,
+            self.count,
+            self.in_features,
+            self.out_features,
+        )
 
     @torch.no_grad()
     def at_index(self, index: int) -> nn.Linear:

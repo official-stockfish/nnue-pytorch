@@ -4,6 +4,7 @@ from typing import Annotated
 import tyro
 from tyro.conf import OmitArgPrefixes
 
+from .quantize import QuantizationConfig
 from .optimizers import OptimizerConfig
 from .modules import FeatureConfig, LayerStacksConfig
 
@@ -33,6 +34,14 @@ class ModelConfig(LayerStacksConfig):
         config.L2 = args.L2
         return config
 
+    gumbel_tau: float = 0.2
+    """Argument for router gumbel softmax."""
+
+    num_router_features_per_side: int = 16
+    """How many features per side from ft are used for router."""
+    # Not ommiting prefix on purpose.
+    quantize_config: QuantizationConfig = field(default_factory=QuantizationConfig)
+
 
 # parameters needed for the definition of the loss
 @dataclass(kw_only=True)
@@ -57,6 +66,8 @@ class LossParams:
     """weight boost parameter 1 (default=0.0)"""
     w2: float = 0.5
     """weight boost parameter 2 (default=0.5)"""
+    moe_loss_weight: float = 0.001
+    """weight of the MoE load balancing loss (default=0.001)"""
     lambda_: Annotated[float, tyro.conf.arg(name="lambda")] = 1.0
     """1.0=train on evaluations, 0.0=train on game results, interpolates between (default=1.0)."""
 

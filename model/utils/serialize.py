@@ -11,11 +11,12 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
-from ..quantize import QuantizationConfig
 
 
-def ascii_hist(name, x, bins=6):
-    N, X = np.histogram(x, bins=bins)
+def ascii_hist(name, x, bins=7):
+    start, end = x.min(), x.max()
+    edges = np.linspace(start, end + 1, bins + 1).astype(int)
+    N, X = np.histogram(x, bins=edges)
     width = 50
     nmax = N.max()
 
@@ -25,6 +26,37 @@ def ascii_hist(name, x, bins=6):
         xi = "{0: <8.4g}".format(xi).ljust(10)
         print("{0}| {1}".format(xi, bar))
 
+def get_histogram_callback(hist_title: str, verbose: bool):
+    if not verbose:
+        return None
+
+    def histogram_callback(
+        hist_subtitle: str,
+        values: torch.Tensor,
+        num_clipped: torch.Tensor,
+    ):
+        total_elements = values.numel()
+        hist_desc = [hist_title, hist_subtitle]
+        hist_desc = " ".join(filter(None, hist_desc))
+
+        if total_elements == 0:
+            print(f"Layer '{hist_desc}' is empty.")
+            return
+
+        num_clipped = int(num_clipped.sum().item())
+        min_value = values.min().item()
+        num_argmin = int((values == min_value).sum().item())
+        max_value = values.max().item()
+        num_argmax = int((values == max_value).sum().item())
+
+        ascii_hist(f"{hist_desc}: ", values.numpy())
+        print(
+            f"Layer has {num_clipped}/{total_elements} clipped weights after rounding.\n"
+            f"Minimum absval in layer is {min_value}, occurring {num_argmin} times.\n"
+            f"Maximum absval in layer is {max_value}, occurring {num_argmax} times."
+        )
+
+    return histogram_callback
 
 @njit
 def encode_leb_128_array(arr: npt.NDArray) -> list:
@@ -59,7 +91,7 @@ def decode_leb_128_array(arr: bytes, n: int) -> npt.NDArray:
 
 
 # hardcoded for now
-VERSION = 0x7AF32F20
+VERSION = 0x6A448AFA
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
 
 
@@ -73,21 +105,36 @@ class NNUEWriter:
         model: NNUEModel,
         description: str | None = None,
         ft_compression: str = "none",
+        verbose: bool = True,
     ):
         if description is None:
             description = DEFAULT_DESCRIPTION
 
         self.buf = bytearray()
+        self.verbose = verbose
+
+        # it is the safest to call clip weights before exporting
+        # some weights might be clipped to smaller values than dtype.max
+        # (threat weights in particular)
+        # This does change the model weights in place,
+        # since it is supposed to be called after every training step anyway, this is fine
+        model.clip_weights()
+        model.clip_input_weights()
 
         fc_hash = self.fc_hash(model)
         self.write_header(model, fc_hash, description)
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model, ft_compression)
-        for l1, l2, output in model.layer_stacks.get_coalesced_layer_stacks():
+
+        router_hash = self.router_hash(model)
+        self.int32(router_hash)
+        self.write_router(model, model.router)
+
+        for bucket, (l1, l2, output) in enumerate(model.layer_stacks.get_coalesced_layer_stacks()):
             self.int32(fc_hash)  # FC layers hash
-            self.write_fc_layer(model, l1)
-            self.write_fc_layer(model, l2)
-            self.write_fc_layer(model, output, is_output=True)
+            self.write_fc_layer(model, l1, 0, f"bucket {bucket} l1")
+            self.write_fc_layer(model, l2, 1, f"bucket {bucket} l2")
+            self.write_fc_layer(model, output, 2, f"bucket {bucket} output")
 
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
@@ -111,6 +158,20 @@ class NNUEWriter:
                 layer_hash = (layer_hash + 0x538D24C7) & 0xFFFFFFFF
             prev_hash = layer_hash
         return layer_hash
+
+    @staticmethod
+    def router_hash(model: NNUEModel) -> int:
+        # Router hash
+        prev_hash = 0x538DC7E4
+        router_hash = 0x538DC7E4
+        router_hash += model.num_router_features_per_side * 2
+        router_hash ^= prev_hash >> 1
+        router_hash ^= (prev_hash << 31) & 0xFFFFFFFF
+
+        router_hash += model.num_ls_buckets
+        router_hash ^= prev_hash >> 1
+        router_hash ^= (prev_hash << 31) & 0xFFFFFFFF
+        return router_hash
 
     def write_header(self, model: NNUEModel, fc_hash: int, description: str) -> None:
         self.int32(VERSION)  # version
@@ -143,55 +204,70 @@ class NNUEWriter:
         weight = export_weight[:, : model.L1]
         psqt_weight = export_weight[:, model.L1 :]
 
-        def histogram_callback(
-            bias: torch.Tensor, weight: torch.Tensor, psqt_weight: torch.Tensor
-        ):
-            ascii_hist("ft bias:", bias.numpy())
-            ascii_hist("ft weight:", weight.numpy())
-            ascii_hist("ft psqt weight:", psqt_weight.numpy())
-
-        bias, weight, psqt_weight = model.quantization.quantize_feature_transformer(
-            bias, weight, psqt_weight, histogram_callback
+        # biases are exported as i16s
+        biases, _, _ = model.quantization.quantize_feature_transformer(
+            bias, None, None, torch.int16, get_histogram_callback("", self.verbose)
         )
 
+        self.write_tensor(biases.flatten().numpy(), ft_compression)
+
         # Weights stored as [num_features][outputs]
-        self.write_tensor(bias.flatten().numpy(), ft_compression)
         offset = 0
         for f in layer.features:
             n = f.NUM_REAL_FEATURES
-            segment = weight[offset : offset + n]
-            if f.EXPORT_WEIGHT_DTYPE == torch.int8:
-                self.write_tensor(segment.to(torch.int8).flatten().numpy())
-            else:
-                self.write_tensor(segment.flatten().numpy(), ft_compression)
-            offset += n
-        self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
+            f_export_dtype = f.EXPORT_WEIGHT_DTYPE
 
-    def write_fc_layer(
-        self, model: NNUEModel, layer: nn.Linear, is_output=False
+            ft_histogram_callback = get_histogram_callback(f.FEATURE_NAME, self.verbose)
+            segment_weight = weight[offset : offset + n]
+            segment_psqt_weight = psqt_weight[offset : offset + n]
+            _, segment_weight, segment_psqt_weight = model.quantization.quantize_feature_transformer(
+                None, segment_weight, segment_psqt_weight, f_export_dtype, ft_histogram_callback
+            )
+            # threat weights are expected to always be uncompressed -- should be changed in the future
+            segment_compression = ft_compression if not f_export_dtype == torch.int8 else "none"
+            offset += n
+
+            self.write_tensor(segment_weight.flatten().numpy(), segment_compression)
+            self.write_tensor(segment_psqt_weight.flatten().numpy(), ft_compression)
+
+    def write_router(
+        self,
+        model: NNUEModel,
+        layer: nn.Linear,
     ) -> None:
         # FC layers are stored as int8 weights, and int32 biases
         bias = layer.bias.data
         weight = layer.weight.data
 
-        def histogram_callback(
-            bias: torch.Tensor,
-            weight: torch.Tensor,
-            clipped: torch.Tensor,
-            total_elements: int,
-            clipped_max: torch.Tensor,
-            kMaxWeight: float,
-        ):
-            ascii_hist("fc bias:", bias.numpy())
-            print(
-                "layer has {}/{} clipped weights. Exceeding by {} the maximum {}.".format(
-                    clipped, total_elements, clipped_max, kMaxWeight
-                )
-            )
-            ascii_hist("fc weight:", weight.numpy())
+        bias, weight = model.quantization.quantize_router(
+            bias, weight, get_histogram_callback("", self.verbose)
+        )
+
+        # FC inputs are padded to 32 elements by spec.
+        num_input = weight.shape[1]
+        if num_input % 32 != 0:
+            num_input += 32 - (num_input % 32)
+            new_w = torch.zeros(weight.shape[0], num_input, dtype=torch.int8)
+            new_w[:, : weight.shape[1]] = weight
+            weight = new_w
+
+        self.buf.extend(bias.flatten().numpy().tobytes())
+        # Weights stored as [outputs][inputs], so we can flatten
+        self.buf.extend(weight.flatten().numpy().tobytes())
+
+    def write_fc_layer(
+        self,
+        model: NNUEModel,
+        layer: nn.Linear,
+        layer_idx: int,
+        desc: str,
+    ) -> None:
+        # FC layers are stored as int8 weights, and int32 biases
+        bias = layer.bias.data
+        weight = layer.weight.data
 
         bias, weight = model.quantization.quantize_fc_layer(
-            bias, weight, is_output, histogram_callback
+            bias, weight, layer_idx, get_histogram_callback(desc, self.verbose)
         )
 
         # FC inputs are padded to 32 elements by spec.
@@ -216,19 +292,22 @@ class NNUEReader:
         f: BinaryIO,
         feature_name: str,
         config: ModelConfig,
-        quantize_config: QuantizationConfig,
     ):
         self.f = f
         self.feature_name = feature_name
-        self.model = NNUEModel(feature_name, config, quantize_config)
+        self.model = NNUEModel(feature_name, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
+        router_hash = NNUEWriter.router_hash(self.model)
 
         self.read_header(self.model.feature_hash, fc_hash)
         self.read_int32(
             self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
+
+        self.read_int32(router_hash)
+        self.read_router(self.model.router.weight, self.model.router.bias)
 
         layers = [
             self.model.layer_stacks.l1,
@@ -251,7 +330,7 @@ class NNUEReader:
                 self.read_fc_layer(
                     l_w_slices[layer_idx][b],
                     l_b_slices[layer_idx][b],
-                    is_output=(layer_idx == len(layers) - 1),
+                    layer_idx,
                 )
 
     def read_header(self, feature_hash: int, fc_hash: int) -> None:
@@ -302,20 +381,22 @@ class NNUEReader:
             raise Exception("Invalid compression method.")
 
     def read_feature_transformer(self, layer, num_psqt_buckets: int) -> None:
-        num_export_features = layer.NUM_REAL_FEATURES
         num_outputs = layer.num_outputs
         L1 = num_outputs - num_psqt_buckets
 
         bias = self.tensor(np.int16, [L1])
         segments = []
+        segments_psqt = []
 
         for feature in layer.features:
             dtype = np.int8 if feature.EXPORT_WEIGHT_DTYPE == torch.int8 else np.int16
             s = self.tensor(dtype, [feature.NUM_REAL_FEATURES, L1])
+            s_psqt = self.tensor(np.int32, [feature.NUM_REAL_FEATURES, num_psqt_buckets])
             segments.append(s)
+            segments_psqt.append(s_psqt)
 
         weight = torch.cat(segments, dim=0)
-        psqt_weight = self.tensor(np.int32, [num_export_features, num_psqt_buckets])
+        psqt_weight = torch.cat(segments_psqt, dim=0)
 
         bias, weight, psqt_weight = (
             self.model.quantization.dequantize_feature_transformer(
@@ -328,11 +409,34 @@ class NNUEReader:
         layer.load_export_weights(export_weight)
         layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
 
+    def read_router(
+        self,
+        layer_weight_t: torch.Tensor,
+        layer_bias_t: torch.Tensor,
+    ) -> None:
+        # router inputs are padded to 32 elements by spec.
+        non_padded_shape = layer_weight_t.shape
+        padded_shape = (non_padded_shape[0], ((non_padded_shape[1] + 31) // 32) * 32)
+
+        bias = self.tensor(np.int32, layer_bias_t.shape)
+        weight = self.tensor(np.int8, padded_shape)
+
+        bias, weight = self.model.quantization.dequantize_router(
+            bias, weight
+        )
+
+        layer_bias = bias
+        # Strip padding.
+        layer_weight = weight[: non_padded_shape[0], : non_padded_shape[1]]
+
+        layer_weight_t.data.copy_(layer_weight)
+        layer_bias_t.data.copy_(layer_bias)
+
     def read_fc_layer(
         self,
         layer_weight_t: torch.Tensor,
         layer_bias_t: torch.Tensor,
-        is_output: bool = False,
+        layer_idx: int,
     ) -> None:
         # FC inputs are padded to 32 elements by spec.
         non_padded_shape = layer_weight_t.shape
@@ -342,7 +446,7 @@ class NNUEReader:
         weight = self.tensor(np.int8, padded_shape)
 
         bias, weight = self.model.quantization.dequantize_fc_layer(
-            bias, weight, is_output
+            bias, weight, layer_idx
         )
 
         layer_bias = bias
