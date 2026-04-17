@@ -2,6 +2,7 @@ import os
 import sys
 import time
 
+import pytest
 import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,12 +29,14 @@ def SparseLinearFunctionEmulate(
         for j in range(max_active_indices):
             feature = input_indices[i, j]
             value = input_values[i, j]
+            if feature < 0:
+                continue
             inputs[i, feature] += value
 
     return torch.mm(inputs, weight) + bias
 
 
-def test():
+def _run_test(device: torch.device):
     BATCH_SIZE = 16
     INPUT_SIZE = 10
     MAX_ACTIVE_FEATURES = 32
@@ -62,10 +65,16 @@ def test():
         indices1.clone(), values1.clone(), weight0, bias0
     )
     output10 = SparseLinearFunction.apply(
-        indices0.clone().cuda(), values0.clone().cuda(), weight1.cuda(), bias1.cuda()
+        indices0.clone().to(device),
+        values0.clone().to(device),
+        weight1.to(device),
+        bias1.to(device),
     )
     output11 = SparseLinearFunction.apply(
-        indices1.clone().cuda(), values1.clone().cuda(), weight1.cuda(), bias1.cuda()
+        indices1.clone().to(device),
+        values1.clone().to(device),
+        weight1.to(device),
+        bias1.to(device),
     )
 
     assert torch.max(torch.abs(output00.cpu() - output10.cpu())) < MAX_ERROR
@@ -74,7 +83,66 @@ def test():
     (output10 - output11).sum().backward()
     assert torch.max(torch.abs(weight0.grad.cpu() - weight1.grad.cpu())) < MAX_ERROR
     assert torch.max(torch.abs(bias0.grad.cpu() - bias1.grad.cpu())) < MAX_ERROR
-    print("Tests passed.")
+    print(f"Test passed on {device}.")
+
+
+def _run_padding_test(device: torch.device):
+    """Negative entries in feature_indices must be treated as padding."""
+    BATCH_SIZE = 8
+    INPUT_SIZE = 10
+    N_ACTIVE = 5
+    N_PADDING = 3
+    STRIDE = 64
+    MAX_ERROR = 1e-4
+
+    torch.manual_seed(42)
+    weight = torch.rand(INPUT_SIZE, STRIDE, dtype=torch.float32, device=device)
+    bias = torch.rand(STRIDE, dtype=torch.float32, device=device)
+
+    active_indices = (torch.rand(BATCH_SIZE, N_ACTIVE) * INPUT_SIZE).to(
+        dtype=torch.int32, device=device
+    )
+    active_values = torch.rand(
+        BATCH_SIZE, N_ACTIVE, dtype=torch.float32, device=device
+    )
+    padding_indices = torch.full(
+        (BATCH_SIZE, N_PADDING), -1, dtype=torch.int32, device=device
+    )
+    # Non-zero values in padding slots must not affect the output.
+    padding_values = torch.rand(
+        BATCH_SIZE, N_PADDING, dtype=torch.float32, device=device
+    )
+
+    out_unpadded = SparseLinearFunction.apply(
+        active_indices, active_values, weight, bias
+    )
+    indices_padded = torch.cat([active_indices, padding_indices], dim=1)
+    values_padded = torch.cat([active_values, padding_values], dim=1)
+    out_padded = SparseLinearFunction.apply(
+        indices_padded, values_padded, weight, bias
+    )
+
+    assert torch.max(torch.abs(out_unpadded - out_padded)) < MAX_ERROR
+    print(f"Padding test passed on {device}.")
+
+
+def test_cpu():
+    _run_test(torch.device("cpu"))
+    _run_padding_test(torch.device("cpu"))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_cuda():
+    _run_test(torch.device("cuda"))
+    _run_padding_test(torch.device("cuda"))
+
+
+@pytest.mark.skipif(
+    not torch.backends.mps.is_available(), reason="MPS not available"
+)
+def test_mps():
+    _run_test(torch.device("mps"))
+    _run_padding_test(torch.device("mps"))
 
 
 def bench():
@@ -122,5 +190,13 @@ def bench():
 
 
 if __name__ == "__main__":
-    test()
-    bench()
+    _run_test(torch.device("cpu"))
+    _run_padding_test(torch.device("cpu"))
+    if torch.cuda.is_available():
+        _run_test(torch.device("cuda"))
+        _run_padding_test(torch.device("cuda"))
+    if torch.backends.mps.is_available():
+        _run_test(torch.device("mps"))
+        _run_padding_test(torch.device("mps"))
+    if torch.cuda.is_available():
+        bench()
