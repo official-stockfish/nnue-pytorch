@@ -10,7 +10,6 @@ from model import (
     NNUE,
     NNUEReader,
     ModelConfig,
-    QuantizationConfig,
 )
 
 
@@ -18,10 +17,9 @@ def read_model(
     nnue_path,
     feature_name: str,
     config: ModelConfig,
-    quantize_config: QuantizationConfig,
 ):
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_name, config, quantize_config)
+        reader = NNUEReader(f, feature_name, config)
         return reader.model
 
 
@@ -193,14 +191,12 @@ def main():
             args.checkpoint,
             feature_name=feature_name,
             config=ModelConfig.get_model_config(args),
-            quantize_config=QuantizationConfig(),
         )
     else:
         model = read_model(
             args.net,
             feature_name,
             ModelConfig.get_model_config(args),
-            QuantizationConfig(),
         )
     model.to(args.device)
     model.eval()
