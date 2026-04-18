@@ -270,7 +270,7 @@ class FixedNumBatchesDataset(Dataset):
     def _prefetch_worker(self):
         try:
             prefetch_stream = None
-            prefetch_device = self._resolve_prefetch_device()
+            prefetch_device = self._prefetch_device
             if prefetch_device is not None:
                 torch.cuda.set_device(prefetch_device)
                 prefetch_stream = torch.cuda.Stream(device=prefetch_device)
