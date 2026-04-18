@@ -37,7 +37,7 @@ def make_fen_batch_provider(data_path, batch_size):
     )
 
 
-def eval_model_batch(model, batch: data_loader.SparseBatchPtr):
+def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
     (
         us,
         them,
@@ -49,7 +49,7 @@ def eval_model_batch(model, batch: data_loader.SparseBatchPtr):
         score,
         psqt_indices,
         layer_stack_indices,
-    ) = batch.contents.get_tensors("cuda")
+    ) = batch.contents.get_tensors(device)
 
     evals = [
         v.item()
@@ -172,6 +172,13 @@ def main():
     parser.add_argument(
         "--count", type=int, default=100, help="number of datapoints to process"
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        choices=["cpu", "cuda", "mps"],
+        help="Device for the NNUE model",
+    )
 
     ModelConfig.add_model_args(parser)
 
@@ -195,6 +202,7 @@ def main():
             ModelConfig.get_model_config(args),
             QuantizationConfig(),
         )
+    model.to(args.device)
     model.eval()
     input_feature_name = model.model.input_feature_name
     fen_batch_provider = make_fen_batch_provider(args.data, batch_size)
@@ -210,7 +218,7 @@ def main():
         b = data_loader.get_sparse_batch_from_fens(
             input_feature_name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
-        model_evals += eval_model_batch(model, b)
+        model_evals += eval_model_batch(model, b, args.device)
         data_loader.destroy_sparse_batch(b)
 
         engine_evals += eval_engine_batch(args.engine, args.net, fens)
