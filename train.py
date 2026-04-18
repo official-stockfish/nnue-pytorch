@@ -289,14 +289,41 @@ def main():
     )
 
     global_batch_size_requested = args.batch_size
+
+    accelerator = args.accelerator
+    if accelerator == "auto":
+        if torch.cuda.is_available():
+            accelerator = "cuda"
+        elif torch.backends.mps.is_available():
+            accelerator = "mps"
+        else:
+            accelerator = "cpu"
+
+    if args.compile_backend == "cudagraphs" and accelerator != "cuda":
+        raise ValueError(
+            f"--compile-backend=cudagraphs requires accelerator='cuda', "
+            f"got accelerator='{accelerator}'. Use --compile-backend=inductor instead."
+        )
+
     # temporarily default to using only device 0 if user didn't specify --gpus
     # doing this so that batch size is consistent since if we rely on "auto" behavior
     # we don't know at this point in the code what the world size is.
     # TODO: refactor initialization so that we can support default behavior of "auto" with proper batch sizing
-    if args.gpus:
-        try:
-            devices = [int(x) for x in args.gpus.rstrip(",").split(",") if x]
-        except ValueError:
+    if accelerator == "cuda":
+        if args.gpus:
+            try:
+                devices = [int(x) for x in args.gpus.rstrip(",").split(",") if x]
+            except ValueError:
+                print(
+                    f"Invalid --gpus argument: '{args.gpus}'. "
+                    "Expected a comma separated list of ints, e.g. 0,1",
+                    file=sys.stderr,
+                )
+                return
+        else:
+            devices = [0]
+        n_devices = len(devices)
+        if n_devices == 0:
             print(
                 f"Invalid --gpus argument: '{args.gpus}'. "
                 "Expected a comma separated list of ints, e.g. 0,1",
@@ -304,20 +331,21 @@ def main():
             )
             return
     else:
-        devices = [0]
-    n_devices = len(devices)
-    if n_devices == 0:
-        print(
-            f"Invalid --gpus argument: '{args.gpus}'. "
-            "Expected a comma separated list of ints, e.g. 0,1",
-            file=sys.stderr,
-        )
-        return
+        if args.gpus:
+            print(
+                f"Warning: --gpus is ignored for accelerator='{accelerator}'",
+                file=sys.stderr,
+            )
+        devices = 1
+        n_devices = 1
     if global_batch_size_requested % n_devices != 0:
-        raise ValueError(
-            f"--batch-size {global_batch_size_requested} must be divisible by number of gpus ({n_devices}). "
-            f"Got --gpus={args.gpus or '0'}"
+        msg = (
+            f"--batch-size {global_batch_size_requested} must be divisible by "
+            f"number of devices ({n_devices}) for accelerator='{accelerator}'."
         )
+        if accelerator == "cuda":
+            msg += f" Got --gpus={args.gpus or '0'}."
+        raise ValueError(msg)
     per_gpu_batch_size = global_batch_size_requested // n_devices
     feature_name = args.nnue_lightning_config.features
 
@@ -407,8 +435,8 @@ def main():
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
-        accelerator="cuda",
-        strategy="ddp" if len(devices) > 1 else "auto",
+        accelerator=accelerator,
+        strategy="ddp" if n_devices > 1 else "auto",
         devices=devices,
         logger=loggers,
         callbacks=[
