@@ -204,7 +204,10 @@ def main():
         )
     model.to(args.device)
     model.eval()
-    input_feature_name = model.model.input_feature_name
+    # --checkpoint - returns a Lightning NNUE wrapping a NNUEModel
+    # --net - returns the NNUEModel directly
+    inner_model = model.model if isinstance(model, NNUE) else model
+    input_feature_name = inner_model.input_feature_name
     fen_batch_provider = make_fen_batch_provider(args.data, batch_size)
 
     model_evals = []
