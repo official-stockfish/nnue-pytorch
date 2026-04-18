@@ -42,6 +42,7 @@ class TimeLimitAfterCheckpoint(Callback):
                 f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
             )
 
+
 class SimpleLineLogger(Callback):
     def __init__(
         self,
@@ -84,7 +85,7 @@ class SimpleLineLogger(Callback):
     def on_train_epoch_start(self, trainer, pl_module):
         if trainer.global_rank == 0:
             self.train_start_time = time.time()
-            print("-"*60)
+            print("-" * 60)
 
     @torch.compiler.disable
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
@@ -94,13 +95,18 @@ class SimpleLineLogger(Callback):
         current_step = batch_idx + 1
         total_batches = trainer.num_training_batches
 
-        if current_step % self._get_refresh_rate(trainer) == 0 or current_step == total_batches:
+        if (
+            current_step % self._get_refresh_rate(trainer) == 0
+            or current_step == total_batches
+        ):
             now = time.time()
             elapsed_total = now - self.train_start_time
             rate = current_step / elapsed_total if elapsed_total > 0 else 0
 
             remaining = (total_batches - current_step) / rate if rate > 0 else 0
-            loss_val = trainer.callback_metrics.get(self.train_metric_step, float('nan'))
+            loss_val = trainer.callback_metrics.get(
+                self.train_metric_step, float("nan")
+            )
 
             print(
                 f"Epoch {trainer.current_epoch:>2} (Train): "
@@ -122,11 +128,11 @@ class SimpleLineLogger(Callback):
             return
 
         pl_module._log_epoch_end(self.train_metric_epoch)
-        train_loss = trainer.callback_metrics.get(self.train_metric_epoch, float('nan'))
+        train_loss = trainer.callback_metrics.get(self.train_metric_epoch, float("nan"))
         print(
             f"Epoch {trainer.current_epoch:>2} (Train): "
             f"[{self.train_metric_epoch}={train_loss:.5f}]",
-            flush=True
+            flush=True,
         )
 
     # ==========================================
@@ -138,7 +144,9 @@ class SimpleLineLogger(Callback):
             self.val_start_time = time.time()
 
     @torch.compiler.disable
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+    def on_validation_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+    ):
         if trainer.global_rank != 0 or trainer.sanity_checking:
             return
 
@@ -149,7 +157,10 @@ class SimpleLineLogger(Callback):
         else:
             total_batches = sum(val_batches)
 
-        if current_step % self._get_refresh_rate(trainer) == 0 or current_step == total_batches:
+        if (
+            current_step % self._get_refresh_rate(trainer) == 0
+            or current_step == total_batches
+        ):
             now = time.time()
             elapsed_total = now - self.val_start_time
 
@@ -171,11 +182,11 @@ class SimpleLineLogger(Callback):
             return
 
         pl_module._log_epoch_end(self.val_metric)
-        val_loss = trainer.callback_metrics.get(self.val_metric, float('nan'))
+        val_loss = trainer.callback_metrics.get(self.val_metric, float("nan"))
         print(
             f"Epoch {trainer.current_epoch:>2} (Val): "
             f"[{self.val_metric}={val_loss:.5f}]",
-            flush=True
+            flush=True,
         )
 
 
@@ -190,6 +201,7 @@ def make_data_loaders(
     val_size,
     pin_memory,
     queue_size_limit,
+    prefetch_device=None,
 ):
     # Epoch and validation sizes are arbitrary
     features_name = feature_name
@@ -208,6 +220,7 @@ def make_data_loaders(
             (epoch_size + batch_size - 1) // batch_size,
             pin_memory=pin_memory,
             queue_size_limit=queue_size_limit,
+            device=prefetch_device,
         ),
         batch_size=None,
         batch_sampler=None,
@@ -222,6 +235,7 @@ def make_data_loaders(
                 (val_size + batch_size - 1) // batch_size,
                 pin_memory=pin_memory,
                 queue_size_limit=queue_size_limit,
+                device=prefetch_device,
             ),
             batch_size=None,
             batch_sampler=None,
@@ -240,6 +254,7 @@ def make_data_loaders(
                 (val_size + batch_size - 1) // batch_size,
                 pin_memory=pin_memory,
                 queue_size_limit=queue_size_limit,
+                device=prefetch_device,
             ),
             batch_size=None,
             batch_sampler=None,
@@ -429,6 +444,7 @@ def main():
         args.validation_size,
         pin_memory=args.pin_memory,
         queue_size_limit=args.data_loader_queue_size,
+        prefetch_device=torch.device("cuda"),
     )
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
