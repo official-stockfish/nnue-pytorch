@@ -3,14 +3,10 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-import torch
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data_loader.dataset import (
     FixedNumBatchesDataset,
-    _CudaPrefetchedItem,
-    _recursive_to_device,
 )
 from data_loader.stream import _get_ddp_rank_and_world_size
 
