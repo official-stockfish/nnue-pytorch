@@ -1,27 +1,55 @@
-import argparse
 import subprocess
 import re
+import tyro
 
 import chess
 
 import data_loader
-from model import (
-    add_feature_args,
-    NNUE,
-    NNUEReader,
-    ModelConfig,
-    QuantizationConfig,
-)
+import model as M
+
+from dataclasses import dataclass
+from typing import Optional, Literal
+from tyro.conf import OmitArgPrefixes
+
+
+@dataclass(frozen=True)
+class CrossCheckConfig:
+    # Flags and Options
+    engine: str
+    """Path to the engine binary to use for evaluation."""
+
+    data: str
+    """Path to the .bin or .binpack dataset to use for evaluation."""
+
+    net: str
+    """Path to the .nnue net to evaluate."""
+
+    checkpoint: Optional[str] = None
+    """Optional checkpoint (used instead of nnue for local eval)."""
+
+    device: Literal["cuda", "mps", "cpu"] = "cuda"
+    """Device for the NNUE model."""
+
+    net_type: Literal["big", "small"] = "big"
+    """Which net to evaluate: 'big' uses EvalFile, 'small' uses EvalFileSmall"""
+
+    count: int = 2**10
+    """Number of positions to process."""
+
+
+@dataclass(frozen=True)
+class CliConfig:
+    cross_check_config: OmitArgPrefixes[CrossCheckConfig]
+    nnue_lightning_config: OmitArgPrefixes[M.NNUELightningConfig]
 
 
 def read_model(
     nnue_path,
-    feature_name: str,
-    config: ModelConfig,
-    quantize_config: QuantizationConfig,
+    config: M.NNUELightningConfig,
+    quantize_config: M.QuantizationConfig,
 ):
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_name, config, quantize_config)
+        reader = M.NNUEReader(f, config.features, config.model_config, quantize_config)
         return reader.model
 
 
@@ -62,8 +90,7 @@ def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
             black_values,
             psqt_indices,
             layer_stack_indices,
-        )
-        * 600.0
+        ) * model.quantization.nnue2score
     ]
     return evals
 
@@ -88,7 +115,9 @@ def compute_basic_eval_stats(evals):
 def compute_correlation(engine_evals, model_evals):
     if len(engine_evals) != len(model_evals):
         raise Exception(
-            "number of engine evals doesn't match the number of model evals"
+            "number of engine evals doesn't match the number of model evals. Got {} engine evals and {} model evals.".format(
+                len(engine_evals), len(model_evals)
+            )
         )
 
     min_engine_eval, max_engine_eval, avg_engine_eval, avg_abs_engine_eval = (
@@ -152,6 +181,12 @@ def eval_engine_batch(engine_path, net_path, fens, net_type="big"):
     out = engine.communicate(input=query)[0]
     pattern = re_nnue_eval_big if net_type == "big" else re_nnue_eval_small
     evals = re.findall(pattern, out)
+    if len(evals) != len(fens):
+        raise Exception(
+            "number of evals returned by the engine doesn't match the number of fens. Got {} evals and {} fens. Output was:\n{}".format(
+                len(evals), len(fens), out
+            )
+        )
     return [int(v) for v in evals]
 
 
@@ -166,78 +201,53 @@ def filter_fens(fens):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--net", type=str, help="path to a .nnue net")
-    parser.add_argument("--engine", type=str, help="path to stockfish")
-    parser.add_argument("--data", type=str, help="path to a .bin or .binpack dataset")
-    parser.add_argument(
-        "--checkpoint",
-        type=str,
-        help="Optional checkpoint (used instead of nnue for local eval)",
-    )
-    parser.add_argument(
-        "--count", type=int, default=100, help="number of datapoints to process"
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cuda",
-        choices=["cpu", "cuda", "mps"],
-        help="Device for the NNUE model",
-    )
-    parser.add_argument(
-        "--net-type",
-        type=str,
-        default="big",
-        choices=["big", "small"],
-        help="Which net to evaluate: 'big' uses EvalFile, 'small' uses EvalFileSmall",
-    )
+    args = tyro.cli(CliConfig)
 
-    ModelConfig.add_model_args(parser)
+    cross_check_config = args.cross_check_config
+    nnue_lightning_config = args.nnue_lightning_config
 
-    add_feature_args(parser)
-    args = parser.parse_args()
+    batch_size = 1024
 
-    batch_size = 1000
-
-    feature_name = args.features
-    if args.checkpoint:
-        model = NNUE.load_from_checkpoint(
-            args.checkpoint,
-            feature_name=feature_name,
-            config=ModelConfig.get_model_config(args),
-            quantize_config=QuantizationConfig(),
+    if cross_check_config.checkpoint:
+        model = M.NNUE.load_from_checkpoint(
+            cross_check_config.checkpoint,
+            config=nnue_lightning_config,
+            quantize_config=M.QuantizationConfig(),
         )
     else:
         model = read_model(
-            args.net,
-            feature_name,
-            ModelConfig.get_model_config(args),
-            QuantizationConfig(),
+            cross_check_config.net,
+            config=nnue_lightning_config,
+            quantize_config=M.QuantizationConfig(),
         )
-    model.to(args.device)
+    model.to(cross_check_config.device)
     model.eval()
     # --checkpoint - returns a Lightning NNUE wrapping a NNUEModel
     # --net - returns the NNUEModel directly
-    inner_model = model.model if isinstance(model, NNUE) else model
+    inner_model = model.model if isinstance(model, M.NNUE) else model
     input_feature_name = inner_model.input_feature_name
-    fen_batch_provider = make_fen_batch_provider(args.data, batch_size)
+    fen_batch_provider = make_fen_batch_provider(cross_check_config.data, batch_size)
 
     model_evals = []
     engine_evals = []
 
     done = 0
     print("Processed {} positions.".format(done))
-    while done < args.count:
+    while done < cross_check_config.count:
         fens = filter_fens(next(fen_batch_provider))
 
         b = data_loader.get_sparse_batch_from_fens(
             input_feature_name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
-        model_evals += eval_model_batch(model, b, args.device)
+        model_evals += eval_model_batch(inner_model, b, cross_check_config.device)
         data_loader.destroy_sparse_batch(b)
 
-        engine_evals += eval_engine_batch(args.engine, args.net, fens, args.net_type)
+        engine_evals += eval_engine_batch(
+            cross_check_config.engine,
+            cross_check_config.net,
+            fens,
+            cross_check_config.net_type
+        )
 
         done += len(fens)
         print("Processed {} positions.".format(done))
