@@ -65,13 +65,12 @@ def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
         )
         * 600.0
     ]
-    for i in range(len(evals)):
-        if them[i] > 0.5:
-            evals[i] = -evals[i]
     return evals
 
 
-re_nnue_eval = re.compile(r"NNUE evaluation:?\s*?([-+]?\d*?\.\d*)")
+re_nnue_eval = re.compile(
+    r"\(Big net\) NNUE evaluation\s+([-+]?\d+)\s+\(side to move, internal units\)"
+)
 
 
 def compute_basic_eval_stats(evals):
@@ -132,6 +131,8 @@ def compute_correlation(engine_evals, model_evals):
 
 
 def eval_engine_batch(engine_path, net_path, fens):
+    if not fens:
+        return []
     engine = subprocess.Popen(
         [engine_path],
         stdin=subprocess.PIPE,
@@ -146,7 +147,7 @@ def eval_engine_batch(engine_path, net_path, fens):
     query = "\n".join(parts)
     out = engine.communicate(input=query)[0]
     evals = re.findall(re_nnue_eval, out)
-    return [int(float(v) * 208) for v in evals]
+    return [int(v) for v in evals]
 
 
 def filter_fens(fens):
