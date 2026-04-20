@@ -68,8 +68,11 @@ def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
     return evals
 
 
-re_nnue_eval = re.compile(
+re_nnue_eval_big = re.compile(
     r"\(Big net\) NNUE evaluation\s+([-+]?\d+)\s+\(side to move, internal units\)"
+)
+re_nnue_eval_small = re.compile(
+    r"\(Small net\) NNUE evaluation\s+([-+]?\d+)\s+\(side to move, internal units\)"
 )
 
 
@@ -130,7 +133,7 @@ def compute_correlation(engine_evals, model_evals):
     print("Max difference: {}".format(max_diff))
 
 
-def eval_engine_batch(engine_path, net_path, fens):
+def eval_engine_batch(engine_path, net_path, fens, net_type="big"):
     if not fens:
         return []
     engine = subprocess.Popen(
@@ -139,14 +142,16 @@ def eval_engine_batch(engine_path, net_path, fens):
         stdout=subprocess.PIPE,
         universal_newlines=True,
     )
-    parts = ["uci", "setoption name EvalFile value {}".format(net_path)]
+    option_name = "EvalFile" if net_type == "big" else "EvalFileSmall"
+    parts = ["uci", "setoption name {} value {}".format(option_name, net_path)]
     for fen in fens:
         parts.append("position fen {}".format(fen))
         parts.append("eval")
     parts.append("quit")
     query = "\n".join(parts)
     out = engine.communicate(input=query)[0]
-    evals = re.findall(re_nnue_eval, out)
+    pattern = re_nnue_eval_big if net_type == "big" else re_nnue_eval_small
+    evals = re.findall(pattern, out)
     return [int(v) for v in evals]
 
 
@@ -179,6 +184,13 @@ def main():
         default="cuda",
         choices=["cpu", "cuda", "mps"],
         help="Device for the NNUE model",
+    )
+    parser.add_argument(
+        "--net-type",
+        type=str,
+        default="big",
+        choices=["big", "small"],
+        help="Which net to evaluate: 'big' uses EvalFile, 'small' uses EvalFileSmall",
     )
 
     ModelConfig.add_model_args(parser)
@@ -225,7 +237,7 @@ def main():
         model_evals += eval_model_batch(model, b, args.device)
         data_loader.destroy_sparse_batch(b)
 
-        engine_evals += eval_engine_batch(args.engine, args.net, fens)
+        engine_evals += eval_engine_batch(args.engine, args.net, fens, args.net_type)
 
         done += len(fens)
         print("Processed {} positions.".format(done))
