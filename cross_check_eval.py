@@ -7,8 +7,8 @@ import chess
 import data_loader
 import model as M
 
-from dataclasses import dataclass, field
-from typing import Optional, Literal, Annotated
+from dataclasses import dataclass
+from typing import Optional, Literal
 from tyro.conf import OmitArgPrefixes
 
 
