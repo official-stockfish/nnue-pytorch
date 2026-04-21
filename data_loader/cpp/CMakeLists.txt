@@ -182,8 +182,11 @@ if(UPPER_BUILD_TYPE STREQUAL "PGO_GENERATE")
     -fprofile-generate=${PGO_PROFILE_DATA_DIR})
 
 elseif(UPPER_BUILD_TYPE MATCHES "^PGO_USE$")
-  target_compile_options(training_data_loader PRIVATE
-    -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
-  target_link_options(training_data_loader PRIVATE
-    -fprofile-use=${PGO_PROFILE_DATA_DIR} -fprofile-correction)
+  set(PGO_USE_FLAGS -fprofile-use=${PGO_PROFILE_DATA_DIR})
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    list(APPEND PGO_USE_FLAGS -fprofile-correction)
+  endif()
+
+  target_compile_options(training_data_loader PRIVATE ${PGO_USE_FLAGS})
+  target_link_options(training_data_loader PRIVATE ${PGO_USE_FLAGS})
 endif()
