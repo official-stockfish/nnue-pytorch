@@ -195,7 +195,7 @@ def compute_correlation(engine_evals, model_evals, fens):
     print(f"{'CROSS-CHECK EVALUATION SUMMARY':^{W}}")
     print("=" * W)
     print(
-        f"{'Metric':<30} | {'Score (Internal Units)':>38} | {'Q (Win Probability)':>38}"
+        f"{'Metric':<30} | {'Score (Internal Units)':>38} | {'Q (Expected Score)':>38}"
     )
     print("-" * W)
 
