@@ -59,6 +59,24 @@ class NNUE(L.LightningModule):
             }
         )
 
+        # register jitter buffer
+        self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
+
+    def on_save_checkpoint(self, checkpoint):
+        checkpoint["jitter_buffer_value"] = self.jitter_buffer
+
+
+    def on_load_checkpoint(self, checkpoint):
+        trainer = self.__dict__.get("_trainer", None)
+        is_resuming = (
+            trainer is not None and
+            getattr(trainer, "ckpt_path", None) is not None
+        )
+
+        if is_resuming:
+            if "jitter_buffer_value" in checkpoint:
+                self.jitter_buffer.copy_(checkpoint["jitter_buffer_value"])
+
     # --- setup optimizers and training hooks ---
     def configure_optimizers(self):
         if self.max_epoch is None:
@@ -244,7 +262,9 @@ class NNUE(L.LightningModule):
         actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
             self.current_epoch / self.max_epoch
         )
-        batch_jitter = qf.new_empty(()).normal_(0, 1) * p.jitter_lambda_batch
+
+        self.jitter_buffer.mul_(p.jitter_decay_lambda_batch).add_(p.jitter_lambda_batch * torch.randn_like(self.jitter_buffer))
+        batch_jitter = self.jitter_buffer.expand_as(qf)
         sample_jitter = qf.new_empty(qf.shape).normal_(0, 1) * p.jitter_lambda_sample
         actual_lambda = actual_lambda + batch_jitter + sample_jitter
         actual_lambda = actual_lambda.clamp(0.0, 1.0)

@@ -53,6 +53,8 @@ class LossParams:
     """std of normal distributed per sample jitter to add to lambda (default=0.0, no jitter)."""
     jitter_lambda_batch: float = 0.0
     """std of normal distributed per batch jitter to add to lambda (default=0.0, no jitter)."""
+    jitter_decay_lambda_batch: float = 0.0
+    """decay of batch jitter (0.0 means full decay -> independent jitter per batch. 1.0 = no decay, not recommended)."""
     pow_exp: float = 2.5
     """exponent of the power law used for the mean error (default=2.5)"""
     qp_asymmetry: float = 0.0
