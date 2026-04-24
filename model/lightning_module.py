@@ -277,7 +277,7 @@ class NNUE(L.LightningModule):
             layer_stack_indices,
         ) = batch
 
-        scorenet, ft_activation = (
+        scorenet = (
             self.model(
                 us,
                 them,
@@ -290,6 +290,8 @@ class NNUE(L.LightningModule):
                 return_activations=self.use_ft_activation_loss,
             )
         )
+        if self.use_ft_activation_loss:
+            scorenet, ft_activation = scorenet
         scorenet = scorenet * self.model.quantization.nnue2score
 
         loss_params = self.config.loss_params
@@ -307,6 +309,8 @@ class NNUE(L.LightningModule):
         fit_loss = sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
         if self.use_ft_activation_loss:
             reg_loss = ft_act_loss(ft_activation, loss_params.ft_activation_l1, loss_params.ft_activation_l2)
+        else:
+            reg_loss = torch.zeros_like(fit_loss)
         loss = fit_loss + reg_loss
 
         self.loss_metrics[f"{loss_type}_epoch"].update(fit_loss)
