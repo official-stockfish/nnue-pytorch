@@ -44,45 +44,18 @@ def sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
     return loss
 
 
-class FtActivationLoss:
-    def __init__(self, activation_probe, l1_weight, l2_weight, group_size=4):
-        self.activation_probe = activation_probe
-        self.captured_activation_data = {}
-        self.hook_handle = None
-        self.l1_weight = l1_weight
-        self.l2_weight = l2_weight
-        self.group_size = group_size
+def ft_act_loss(activation_data, l1_weight, l2_weight, group_size):
+    original_shape = activation_data.shape
+    if original_shape[-1] % group_size != 0:
+        raise ValueError(f"Feature dimension {original_shape[-1]} not divisible by group_size {group_size}")
 
-    def register(self):
-        # Prevent duplicate hooks if called multiple times
-        if self.hook_handle is None:
-            self.hook_handle = self.activation_probe.register_forward_hook(self._capture_activation_hook)
+    grouped_data = activation_data.view(*original_shape[:-1], -1, group_size)
+    group_max = torch.max(grouped_data, dim=-1).values
 
-    def _capture_activation_hook(self, module, input, output):
-        self.captured_activation_data["activation_data"] = output
+    loss_l1 = torch.mean(nn.functional.relu(group_max + 0.1))
+    loss_l2 = torch.mean(activation_data**2)
 
-    def get_captured_data(self):
-        if "activation_data" not in self.captured_activation_data:
-            raise RuntimeError("No activation data found. Ensure the forward pass ran and the data wasn't already popped.")
-        return self.captured_activation_data.pop("activation_data")
-
-    def cleanup(self):
-        if self.hook_handle is not None:
-            self.hook_handle.remove()
-            self.hook_handle = None
-
-    def get_loss(self, activation_data):
-        original_shape = activation_data.shape
-        if original_shape[-1] % self.group_size != 0:
-            raise ValueError(f"Feature dimension {original_shape[-1]} not divisible by group_size {self.group_size}")
-
-        grouped_data = activation_data.view(*original_shape[:-1], -1, self.group_size)
-        group_max = torch.max(grouped_data, dim=-1).values
-
-        loss_l1 = torch.mean(nn.functional.relu(group_max + 0.1))
-        loss_l2 = torch.mean(activation_data**2)
-
-        return (self.l1_weight * loss_l1) + (self.l2_weight * loss_l2)
+    return (l1_weight * loss_l1) + (l2_weight * loss_l2)
 
 
 class NNUE(L.LightningModule):
@@ -130,20 +103,9 @@ class NNUE(L.LightningModule):
         #regularization loss
         l1_w = config.loss_params.ft_activation_l1
         l2_w = config.loss_params.ft_activation_l2
-        self.act_loss_handler = FtActivationLoss(self.model.ft_activation_probe, l1_w, l2_w)
 
         # register jitter buffer
         self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
-
-    def setup(self, stage: str):
-        # Called at the beginning of fit, validate, test, and predict.
-        # Ensures the hook is active for the current stage.
-        self.act_loss_handler.register()
-
-    def teardown(self, stage: str):
-        # Called at the end of fit, validate, test, and predict.
-        # Cleans up the hook so it doesn't linger in memory between stages.
-        self.act_loss_handler.cleanup()
 
     # --- setup optimizers and training hooks ---
     def configure_optimizers(self):
@@ -314,7 +276,7 @@ class NNUE(L.LightningModule):
             layer_stack_indices,
         ) = batch
 
-        scorenet = (
+        scorenet, l0_preact = (
             self.model(
                 us,
                 them,
@@ -324,9 +286,10 @@ class NNUE(L.LightningModule):
                 black_values,
                 psqt_indices,
                 layer_stack_indices,
+                return_activations=True,
             )
-            * self.model.quantization.nnue2score
         )
+        scorenet = scorenet * self.model.quantization.nnue2score
 
         loss_params = self.config.loss_params
 
@@ -341,8 +304,7 @@ class NNUE(L.LightningModule):
         actual_lambda = actual_lambda.clamp(0.0, 1.0)
 
         fit_loss = sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
-        activation_data = self.act_loss_handler.get_captured_data()
-        reg_loss = self.act_loss_handler.get_loss(activation_data)
+        reg_loss = ft_act_loss(l0_preact, loss_params.l1_weight, loss_params.l2_weight, loss_params.group_size)
         loss = fit_loss + reg_loss
 
         self.loss_metrics[f"{loss_type}_epoch"].update(fit_loss)
