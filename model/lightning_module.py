@@ -103,6 +103,7 @@ class NNUE(L.LightningModule):
         #regularization loss
         l1_w = config.loss_params.ft_activation_l1
         l2_w = config.loss_params.ft_activation_l2
+        self.use_ft_activation_loss = l1_w > 0 or l2_w > 0
 
         # register jitter buffer
         self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
@@ -276,7 +277,7 @@ class NNUE(L.LightningModule):
             layer_stack_indices,
         ) = batch
 
-        scorenet, l0_preact = (
+        scorenet, ft_activation = (
             self.model(
                 us,
                 them,
@@ -286,7 +287,7 @@ class NNUE(L.LightningModule):
                 black_values,
                 psqt_indices,
                 layer_stack_indices,
-                return_activations=True,
+                return_activations=self.use_ft_activation_loss,
             )
         )
         scorenet = scorenet * self.model.quantization.nnue2score
@@ -304,7 +305,8 @@ class NNUE(L.LightningModule):
         actual_lambda = actual_lambda.clamp(0.0, 1.0)
 
         fit_loss = sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
-        reg_loss = ft_act_loss(l0_preact, loss_params.ft_activation_l1, loss_params.ft_activation_l2)
+        if self.use_ft_activation_loss:
+            reg_loss = ft_act_loss(ft_activation, loss_params.ft_activation_l1, loss_params.ft_activation_l2)
         loss = fit_loss + reg_loss
 
         self.loss_metrics[f"{loss_type}_epoch"].update(fit_loss)
