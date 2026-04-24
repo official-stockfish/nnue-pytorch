@@ -145,21 +145,6 @@ class NNUE(L.LightningModule):
         # Cleans up the hook so it doesn't linger in memory between stages.
         self.act_loss_handler.cleanup()
 
-
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint["jitter_buffer_value"] = self.jitter_buffer
-
-    def on_load_checkpoint(self, checkpoint):
-        trainer = self.__dict__.get("_trainer", None)
-        is_resuming = (
-            trainer is not None and
-            getattr(trainer, "ckpt_path", None) is not None
-        )
-
-        if is_resuming:
-            if "jitter_buffer_value" in checkpoint:
-                self.jitter_buffer.copy_(checkpoint["jitter_buffer_value"])
-
     # --- setup optimizers and training hooks ---
     def configure_optimizers(self):
         if self.max_epoch is None:
@@ -231,6 +216,9 @@ class NNUE(L.LightningModule):
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
 
+    def on_train_start(self):
+        self.model.train()
+
     def on_train_epoch_start(self):
         self.optimizer_wrapper.on_train_epoch_start(self)
 
@@ -252,6 +240,17 @@ class NNUE(L.LightningModule):
 
     def on_save_checkpoint(self, checkpoint):
         self.optimizer_wrapper.on_save_checkpoint(self, checkpoint)
+        checkpoint["jitter_buffer_value"] = self.jitter_buffer
+
+    def on_load_checkpoint(self, checkpoint):
+        trainer = self.__dict__.get("_trainer", None)
+        is_resuming = (
+            trainer is not None and
+            getattr(trainer, "ckpt_path", None) is not None
+        )
+        if is_resuming:
+            if "jitter_buffer_value" in checkpoint:
+                self.jitter_buffer.copy_(checkpoint["jitter_buffer_value"])
 
     def on_train_batch_start(self, batch, batch_idx):
         self.optimizer_wrapper.on_train_batch_start(self, batch, batch_idx)
