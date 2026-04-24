@@ -44,7 +44,7 @@ def sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
     return loss
 
 
-def ft_act_loss(activation_data, l1_weight, l2_weight, group_size):
+def ft_act_loss(activation_data, l1_weight, l2_weight, group_size=4):
     original_shape = activation_data.shape
     if original_shape[-1] % group_size != 0:
         raise ValueError(f"Feature dimension {original_shape[-1]} not divisible by group_size {group_size}")
@@ -304,7 +304,7 @@ class NNUE(L.LightningModule):
         actual_lambda = actual_lambda.clamp(0.0, 1.0)
 
         fit_loss = sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
-        reg_loss = ft_act_loss(l0_preact, loss_params.l1_weight, loss_params.l2_weight, loss_params.group_size)
+        reg_loss = ft_act_loss(l0_preact, loss_params.ft_activation_l1, loss_params.ft_activation_l2)
         loss = fit_loss + reg_loss
 
         self.loss_metrics[f"{loss_type}_epoch"].update(fit_loss)
