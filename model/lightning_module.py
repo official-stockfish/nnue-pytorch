@@ -17,6 +17,74 @@ def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
     ]
 
 
+def sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
+    # convert the network and search scores to an estimate match result
+    # based on the win_rate_model, with scalings and offsets optimized
+    q = (scorenet - loss_params.in_offset) / loss_params.in_scaling
+    qm = (-scorenet - loss_params.in_offset) / loss_params.in_scaling
+    qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
+
+    s = (score - loss_params.out_offset) / loss_params.out_scaling
+    sm = (-score - loss_params.out_offset) / loss_params.out_scaling
+    pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
+
+    # blend that eval based score with the actual game outcome
+    t = outcome
+
+    pt = pf * actual_lambda + t * (1.0 - actual_lambda)
+
+    # use a MSE-like loss function
+    loss = torch.pow(torch.abs(pt - qf), loss_params.pow_exp)
+    if loss_params.qp_asymmetry != 0.0:
+        loss = loss * ((qf > pt) * loss_params.qp_asymmetry + 1)
+
+    weights = 1 + (2.0**loss_params.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), loss_params.w2)
+    loss = (loss * weights).sum() / weights.sum()
+
+    return loss
+
+
+class FtActivationLoss:
+    def __init__(self, activation_probe, l1_weight, l2_weight, group_size=4):
+        self.activation_probe = activation_probe
+        self.captured_activation_data = {}
+        self.hook_handle = None
+        self.l1_weight = l1_weight
+        self.l2_weight = l2_weight
+        self.group_size = group_size
+
+    def register(self):
+        # Prevent duplicate hooks if called multiple times
+        if self.hook_handle is None:
+            self.hook_handle = self.activation_probe.register_forward_hook(self._capture_activation_hook)
+
+    def _capture_activation_hook(self, module, input, output):
+        self.captured_activation_data["activation_data"] = output
+
+    def get_captured_data(self):
+        if "activation_data" not in self.captured_activation_data:
+            raise RuntimeError("No activation data found. Ensure the forward pass ran and the data wasn't already popped.")
+        return self.captured_activation_data.pop("activation_data")
+
+    def cleanup(self):
+        if self.hook_handle is not None:
+            self.hook_handle.remove()
+            self.hook_handle = None
+
+    def get_loss(self, activation_data):
+        original_shape = activation_data.shape
+        if original_shape[-1] % self.group_size != 0:
+            raise ValueError(f"Feature dimension {original_shape[-1]} not divisible by group_size {self.group_size}")
+
+        grouped_data = activation_data.view(*original_shape[:-1], -1, self.group_size)
+        group_max = torch.max(grouped_data, dim=-1).values
+
+        loss_l1 = torch.mean(nn.functional.relu(group_max + 0.1))
+        loss_l2 = torch.mean(activation_data**2)
+
+        return (self.l1_weight * loss_l1) + (self.l2_weight * loss_l2)
+
+
 class NNUE(L.LightningModule):
     """
     lambda_ = 0.0 - purely based on game results
@@ -59,12 +127,27 @@ class NNUE(L.LightningModule):
             }
         )
 
+        #regularization loss
+        l1_w = config.loss_params.ft_activation_l1
+        l2_w = config.loss_params.ft_activation_l2
+        self.act_loss_handler = FtActivationLoss(self.model.ft_activation_probe, l1_w, l2_w)
+
         # register jitter buffer
         self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
 
+    def setup(self, stage: str):
+        # Called at the beginning of fit, validate, test, and predict.
+        # Ensures the hook is active for the current stage.
+        self.act_loss_handler.register()
+
+    def teardown(self, stage: str):
+        # Called at the end of fit, validate, test, and predict.
+        # Cleans up the hook so it doesn't linger in memory between stages.
+        self.act_loss_handler.cleanup()
+
+
     def on_save_checkpoint(self, checkpoint):
         checkpoint["jitter_buffer_value"] = self.jitter_buffer
-
 
     def on_load_checkpoint(self, checkpoint):
         trainer = self.__dict__.get("_trainer", None)
@@ -246,42 +329,27 @@ class NNUE(L.LightningModule):
             * self.model.quantization.nnue2score
         )
 
-        p = self.config.loss_params
-        # convert the network and search scores to an estimate match result
-        # based on the win_rate_model, with scalings and offsets optimized
-        q = (scorenet - p.in_offset) / p.in_scaling
-        qm = (-scorenet - p.in_offset) / p.in_scaling
-        qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
+        loss_params = self.config.loss_params
 
-        s = (score - p.out_offset) / p.out_scaling
-        sm = (-score - p.out_offset) / p.out_scaling
-        pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
-
-        # blend that eval based score with the actual game outcome
-        t = outcome
-        actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
+        actual_lambda = loss_params.start_lambda + (loss_params.end_lambda - loss_params.start_lambda) * (
             self.current_epoch / self.max_epoch
         )
 
-        self.jitter_buffer.mul_(p.jitter_decay_lambda_batch).add_(p.jitter_lambda_batch * torch.randn_like(self.jitter_buffer))
-        batch_jitter = self.jitter_buffer.expand_as(qf)
-        sample_jitter = qf.new_empty(qf.shape).normal_(0, 1) * p.jitter_lambda_sample
+        self.jitter_buffer.mul_(loss_params.jitter_decay_lambda_batch).add_(loss_params.jitter_lambda_batch * torch.randn_like(self.jitter_buffer))
+        batch_jitter = self.jitter_buffer.expand_as(scorenet)
+        sample_jitter = scorenet.new_empty(scorenet.shape).normal_(0, 1) * loss_params.jitter_lambda_sample
         actual_lambda = actual_lambda + batch_jitter + sample_jitter
         actual_lambda = actual_lambda.clamp(0.0, 1.0)
-        pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
-        # use a MSE-like loss function
-        loss = torch.pow(torch.abs(pt - qf), p.pow_exp)
-        if p.qp_asymmetry != 0.0:
-            loss = loss * ((qf > pt) * p.qp_asymmetry + 1)
+        fit_loss = sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
+        activation_data = self.act_loss_handler.get_captured_data()
+        reg_loss = self.act_loss_handler.get_loss(activation_data)
+        loss = fit_loss + reg_loss
 
-        weights = 1 + (2.0**p.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), p.w2)
-        loss = (loss * weights).sum() / weights.sum()
-
-        self.loss_metrics[f"{loss_type}_epoch"].update(loss)
+        self.loss_metrics[f"{loss_type}_epoch"].update(fit_loss)
         self.log(
             loss_type,
-            loss,
+            fit_loss,
             prog_bar=False,
             sync_dist=False,
             on_epoch=False,

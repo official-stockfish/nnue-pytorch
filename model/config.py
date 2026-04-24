@@ -59,6 +59,10 @@ class LossParams:
     """exponent of the power law used for the mean error (default=2.5)"""
     qp_asymmetry: float = 0.0
     """Adjust loss if q (prediction) > p (reference) (default=0.0)"""
+    ft_activation_l1: float = 5e-4
+    """L1 weight for feature transformer activation regularization (default=0.0)"""
+    ft_activation_l2: float = 1e-3
+    """L2 weight for feature transformer activation regularization (default=0.0)"""
     w1: float = 0.0
     """weight boost parameter 1 (default=0.0)"""
     w2: float = 0.5
