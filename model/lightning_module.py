@@ -217,7 +217,7 @@ class NNUE(L.LightningModule):
         return self.optimizer_wrapper.configure_optimizers(train_params)
 
     def on_train_start(self):
-        self.model.train()
+        self.train()
 
     def on_train_epoch_start(self):
         self.optimizer_wrapper.on_train_epoch_start(self)
