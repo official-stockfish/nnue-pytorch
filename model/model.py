@@ -36,6 +36,8 @@ class NNUEModel(nn.Module):
 
         self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
 
+        self.ft_activation_probe = nn.Identity()
+
     @torch.no_grad()
     def clip_weights(self):
         """
@@ -83,6 +85,7 @@ class NNUEModel(nn.Module):
         w, wpsqt = torch.split(wp, self.L1, dim=1)
         b, bpsqt = torch.split(bp, self.L1, dim=1)
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
+        l0_ = self.ft_activation_probe(l0_)
         l0_ = torch.clamp(l0_, 0.0, 1.0)
 
         l0_s = torch.split(l0_, self.L1 // 2, dim=1)
