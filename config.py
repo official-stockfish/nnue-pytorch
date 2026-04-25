@@ -27,7 +27,7 @@ class TrainingConfig:
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
 
     gpus: Optional[str] = None
-    """List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (Use device 0 only)."""
+    """List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Only used when accelerator="cuda"."""
 
     pin_memory: bool = True
     """Whether to use pin memory in the data pipeline. Should generally be left on unless you encounter issues with too much RAM usage."""
@@ -49,6 +49,9 @@ class TrainingConfig:
 
     threads: int = -1
     """Number of torch threads to use. Default automatic (cores)."""
+
+    accelerator: Literal["auto", "cuda", "mps", "cpu"] = "auto"
+    """Hardware accelerator. 'auto' picks cuda > mps > cpu in order of availability."""
 
     compile_backend: Literal["inductor", "cudagraphs"] = "inductor"
     """Which backend to use for torch.compile. inductor works well with larger nets, cudagraphs with smaller nets."""

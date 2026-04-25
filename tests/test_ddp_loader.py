@@ -5,7 +5,9 @@ from unittest.mock import MagicMock, patch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data_loader.dataset import FixedNumBatchesDataset
+from data_loader.dataset import (
+    FixedNumBatchesDataset,
+)
 from data_loader.stream import _get_ddp_rank_and_world_size
 
 
