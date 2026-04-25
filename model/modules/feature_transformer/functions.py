@@ -23,22 +23,14 @@ def _torch_sparse_linear(feature_indices, feature_values, weight, bias):
     batch_size, max_active = feature_indices.shape
     mask = feature_indices >= 0
 
-    # MPS does not currently implement embedding_bag
     if feature_indices.device.type == "mps":
-        num_inputs = weight.shape[0]
-        dense_inputs = torch.zeros(
-            batch_size,
-            num_inputs,
-            dtype=weight.dtype,
-            device=feature_indices.device,
-        )
-        row_indices = torch.arange(batch_size, device=feature_indices.device).view(-1, 1)
-        row_indices = row_indices.expand_as(feature_indices)
-        valid_rows = row_indices[mask]
-        valid_cols = feature_indices[mask].long()
-        valid_values = feature_values[mask].to(weight.dtype)
-        dense_inputs.index_put_((valid_rows, valid_cols), valid_values, accumulate=True)
-        return dense_inputs.mm(weight) + bias
+        safe_indices = feature_indices.clamp(min=0).long().reshape(-1)
+        per_sample_weights = (feature_values * mask).to(weight.dtype).reshape(-1, 1)
+        gathered_weight = F.embedding(safe_indices, weight)
+        output = (gathered_weight * per_sample_weights).reshape(
+            batch_size, max_active, weight.shape[1]
+        ).sum(dim=1)
+        return output + bias
 
     safe_indices = feature_indices.clamp(min=0).long().reshape(-1)
     per_sample_weights = (feature_values * mask).reshape(-1)
