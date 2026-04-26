@@ -22,6 +22,16 @@ def _torch_sparse_linear(feature_indices, feature_values, weight, bias):
     """
     batch_size, max_active = feature_indices.shape
     mask = feature_indices >= 0
+
+    if feature_indices.device.type == "mps":
+        safe_indices = feature_indices.clamp(min=0).long().reshape(-1)
+        per_sample_weights = (feature_values * mask).to(weight.dtype).reshape(-1, 1)
+        gathered_weight = F.embedding(safe_indices, weight)
+        output = (gathered_weight * per_sample_weights).reshape(
+            batch_size, max_active, weight.shape[1]
+        ).sum(dim=1)
+        return output + bias
+
     safe_indices = feature_indices.clamp(min=0).long().reshape(-1)
     per_sample_weights = (feature_values * mask).reshape(-1)
     offsets = torch.arange(
