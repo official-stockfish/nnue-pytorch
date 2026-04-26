@@ -34,7 +34,7 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --
 import copy
 from dataclasses import dataclass, field
 import time
-from typing import Callable, Generator, TypeAlias, Annotated, Union, Literal
+from typing import Callable, Generator, TypeAlias, Annotated, Union, Literal, TypeVar, Optional
 
 import tyro
 
