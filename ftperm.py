@@ -163,7 +163,7 @@ def resolve_device(use_cupy: bool, device: Union[int, Literal["cpu", "mps"]]) ->
     return d
 
 
-def batched(arr: Union[npt.NDArray, torch.Tensor], batch_size: int):
+def batched(arr: Union[npt.NDArray, torch.Tensor], batch_size: int) -> Generator[npt.NDArray, None, None]:
     """
     Utility generator that yields chunks of array `arr` of size `batch_size`
     Expects arr to be a numpy-like array or torch Tensor
