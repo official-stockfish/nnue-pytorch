@@ -1,4 +1,4 @@
-# !/bin/bash
+#!/bin/bash
 # Note: This script only sets up the MPS environment for pytorch.
 # It does not install system-wide packages like cmake or python-dev
 # which are required for data-loader compilation
