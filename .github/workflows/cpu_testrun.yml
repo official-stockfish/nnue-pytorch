@@ -16,10 +16,12 @@ jobs:
       - name: Build Docker Image (CPU)
         run: docker build -t nnue-pytorch:cpu -f Dockerfile.CPU .
 
-      - name: Run monolithic training pipeline
+      - name: Perform Test Run of entire Training Pipeline (CPU)
         run: |
           docker run --rm \
             --user $(id -u):$(id -g) \
+            -e USER=github-runner \
+            -e TORCHINDUCTOR_CACHE_DIR=/workspace/nnue-pytorch/.cache/torch \
             -v ${{ github.workspace }}:/workspace/nnue-pytorch \
             -v ${{ github.workspace }}:/data \
             -w /workspace/nnue-pytorch \

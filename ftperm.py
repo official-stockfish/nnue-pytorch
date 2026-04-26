@@ -211,7 +211,7 @@ def get_swapped_zero_positive_count(
 
     # Marks an element if all other elements in a block are zero.
     rest_zero_indicator = (
-        (num_zeros - actmat_chunked == ZERO_BLOCK_SIZE - 1)
+        (num_zeros - actmat_chunked.int() == ZERO_BLOCK_SIZE - 1)
         .reshape(shape)
         .to(torch.float64)
     )
