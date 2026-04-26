@@ -43,7 +43,6 @@ from tyro.conf import (
 )
 
 import chess
-import cupy as cp
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -575,7 +574,8 @@ def forward_ft(
     return l0_.round()
 
 
-def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor:
+def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, use_cupy: bool) -> torch.Tensor:
+    device = "cuda" if use_cupy else "cpu"
     with torch.no_grad():
         (
             us,
@@ -588,7 +588,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor
             score,
             psqt_indices,
             layer_stack_indices,
-        ) = batch.contents.get_tensors("cuda")
+        ) = batch.contents.get_tensors(device)
         res = forward_ft(
             model,
             us,
@@ -634,13 +634,14 @@ def ft_permute(model: NNUEModel, ft_perm_path: str) -> None:
     ft_permute_impl(model, permutation)
 
 
-def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bool_]:
+def gather_impl(model: NNUEModel, dataset: str, count: int, use_cupy: bool) -> npt.NDArray[np.bool_]:
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
-    BATCH_SIZE = 1000
+    BATCH_SIZE = 1024
 
     quantized_model = copy.deepcopy(model)
     quantize_ft(quantized_model)
-    quantized_model.cuda()
+    if use_cupy:
+        quantized_model.cuda()
 
     fen_batch_provider = make_fen_batch_provider(dataset, BATCH_SIZE)
 
@@ -658,7 +659,7 @@ def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bo
             [1] * len(fens),
             [0] * len(fens),
         )
-        actmat = eval_ft(quantized_model, b).cpu()
+        actmat = eval_ft(quantized_model, b, use_cupy).cpu()
         actmat = actmat <= ZERO_POINT
         actmats.append(actmat.numpy())
         data_loader.destroy_sparse_batch(b)
@@ -690,7 +691,7 @@ def command_gather(args: FeaturePermutationConfig) -> None:
 
     model.eval()
 
-    actmat = gather_impl(model, args.subcommand.data, args.subcommand.count)
+    actmat = gather_impl(model, args.subcommand.data, args.subcommand.count, args.use_cupy)
 
     with open(args.subcommand.out, "wb") as file:  # was: args.out
         np.save(file, actmat)
@@ -750,8 +751,11 @@ def ft_optimize(
     perm_save_path: str | None = None,
     use_cupy: bool = True,
 ) -> None:
+    if use_cupy:
+        import cupy as cp
+
     print("Gathering activation data...")
-    actmat = gather_impl(model, dataset_path, count)
+    actmat = gather_impl(model, dataset_path, count, use_cupy)
     if actmat_save_path is not None:
         with open(actmat_save_path, "wb") as file:
             np.save(file, actmat)
@@ -771,6 +775,7 @@ def ft_optimize(
 
 def set_cupy_device(device: int) -> None:
     if device is not None:
+        import cupy as cp
         cp.cuda.runtime.setDevice(device)
 
 
