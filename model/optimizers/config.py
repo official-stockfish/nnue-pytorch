@@ -8,7 +8,7 @@ from .schedulefree_wrapper import ScheduleFreeConfig, ScheduleFreeWrapper
 @dataclass(kw_only=True)
 class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
     optimizer_name: Literal["schedulefree", "ranger21", "rangerlite"] = "ranger21"
-    """Which optimizer to use. """
+    """Which optimizer to use. Note that ranger21 is a specific configuration of rangerlite emulating ranger21 behaviour with legacy_mode=True."""
 
     ft_weight_decay: float = 0.0
     """Weight decay to apply to the feature transformer parameters."""

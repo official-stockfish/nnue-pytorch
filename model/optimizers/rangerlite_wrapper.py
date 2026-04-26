@@ -91,10 +91,6 @@ class RangerLiteWrapper:
             )
             scheduler = {"scheduler": one_cycle_scheduler, "interval": "step"}
 
-        print(
-            f"[RangerLiteSetup] gamma={self.gamma} pnm_momentum={self.pnm_momentum}."
-        )
-
         return [self.optimizer], [scheduler]
 
     def on_train_batch_start(self, pl_module: L.LightningModule, batch, batch_idx):

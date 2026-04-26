@@ -487,13 +487,20 @@ def main():
         swa_state_dict = swa_callback.swa_model.module.state_dict() if trainer.is_global_zero else None
         swa_state_dict = trainer.strategy.broadcast(swa_state_dict, src=0)
 
+        # Use train mode for lightning module but eval mode for model,
+        # prevents backup params from bloating ckpt.
+        # Note that resume from checkpoint after swa averaging has started.
         nnue.train()
+        nnue.model.eval()
         nnue.model.load_state_dict(swa_state_dict)
-        nnue.eval()
-        nnue.model.load_state_dict(swa_state_dict)
+
         # NOTE: If BN is used, it has to be updated here. Be careful when using DDP.
         swa_savepath = os.path.join(logdir, "lightning_logs", f"version_{tb_logger.version}", "checkpoints", "last_swa.ckpt")
         trainer.save_checkpoint(swa_savepath)
+
+        # Prevent optimizer from overwriting swa weights with e.g. lookahead weights (leaky abstraction).
+        nnue.eval()
+        nnue.model.load_state_dict(swa_state_dict)
 
         if trainer.is_global_zero:
             print(f"SWA model saved to {swa_savepath}")

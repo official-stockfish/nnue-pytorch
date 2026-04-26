@@ -25,22 +25,20 @@ class ScheduleFreeWrapper:
         self.warmup_steps = config.warmup_steps
         self.needs_train_flip = False
 
-        self.optimzier = None
+        self.optimizer = None
 
     def configure_optimizers(self, train_params):
         if _schedulefree_import_error:
             raise ImportError("The required schedulefree library is not installed. ")
-        print(
-            f"[SchedulefreeSetup] warmup_steps={self.warmup_steps}."
-        )
-        self.optimzier = schedulefree.AdamWScheduleFree(
+
+        self.optimizer = schedulefree.AdamWScheduleFree(
             train_params,
             lr=self.lr,
             betas=(0.9, 0.999),
             eps=1.0e-7,
             warmup_steps=self.warmup_steps,
         )
-        return self.optimzier
+        return self.optimizer
 
     def on_train_epoch_start(self, pl_module: L.LightningModule):
         self.optimizer.train()

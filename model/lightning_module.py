@@ -230,7 +230,7 @@ class NNUE(L.LightningModule):
 
     # --- train / eval switch ---
     def train(self, mode: bool = True):
-        super().train(mode)
+        retval = super().train(mode)
 
         if hasattr(self, '_trainer') and self._trainer and self.trainer.optimizers:
             for opt in self.trainer.optimizers:
@@ -240,6 +240,8 @@ class NNUE(L.LightningModule):
                 else:
                     if hasattr(opt, 'eval') and callable(opt.eval):
                         opt.eval()
+
+        return retval
 
 
     def eval(self):

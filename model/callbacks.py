@@ -41,6 +41,8 @@ class ExplicitSWACallback(L.Callback):
     def state_dict(self):
         # Prevent Lightning from saving the SWA callback's internal state
         # in the regular epoch checkpoints, avoiding redundant memory bloat.
+        # Note that this prevents resuming SWA state from checkpoints,
+        # but that's an acceptable tradeoff for now.
         return {}
 
     def load_state_dict(self, state_dict):
