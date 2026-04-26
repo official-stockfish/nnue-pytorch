@@ -622,8 +622,8 @@ FenBatch* FenBatchStream::next() {
 }
 
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
-    if (!config.filtered && !config.random_fen_skipping && !config.wld_filtered &&
-        !config.early_fen_skipping && config.soft_early_fen_skipping <= 0) {
+    if (!config.filtered && !config.wld_filtered && config.random_fen_skipping <= 0 &&
+        config.early_fen_skipping <= 0 && config.soft_early_fen_skipping <= 0) {
         return nullptr;
     }
 
