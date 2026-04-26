@@ -1,14 +1,14 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from .ranger21_wrapper import Ranger21Config, Ranger21Wrapper
+from .rangerlite_wrapper import RangerLiteConfig, RangerLiteWrapper
 from .schedulefree_wrapper import ScheduleFreeConfig, ScheduleFreeWrapper
 
 
 @dataclass(kw_only=True)
-class OptimizerConfig(Ranger21Config, ScheduleFreeConfig):
-    optimizer_name: Literal["schedulefree", "ranger21"] = "ranger21"
-    """Which optimizer to use. """
+class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
+    optimizer_name: Literal["schedulefree", "ranger21", "rangerlite"] = "ranger21"
+    """Which optimizer to use. Note that ranger21 is a specific configuration of rangerlite emulating ranger21 behaviour with legacy_mode=True."""
 
     ft_weight_decay: float = 0.0
     """Weight decay to apply to the feature transformer parameters."""
@@ -24,14 +24,16 @@ class OptimizerConfig(Ranger21Config, ScheduleFreeConfig):
         if optimizer_name == "schedulefree":
             wrapper = ScheduleFreeWrapper(self)
         elif optimizer_name == "ranger21":
-            wrapper = Ranger21Wrapper(self, max_epoch, num_batches_per_epoch)
+            wrapper = RangerLiteWrapper(self, legacy_mode=True)
+        elif optimizer_name == "rangerlite":
+            wrapper = RangerLiteWrapper(self, legacy_mode=False)
         else:
             raise ValueError(
-                f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree' or 'ranger21'."
+                f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21' or 'rangerlite'."
             )
 
+        info_str = f"[OptimizerConfig] Using {optimizer_name} optimizer with lr: {self.lr}"
         if self.dense_weight_decay > 0.0 or self.ft_weight_decay > 0.0:
-            print(
-                f"Using weight decay - ft_weight_decay: {self.ft_weight_decay}, dense_weight_decay: {self.dense_weight_decay}"
-            )
+            info_str += f" and ft_weight_decay: {self.ft_weight_decay}, dense_weight_decay: {self.dense_weight_decay}"
+        print(info_str + ".")
         return wrapper

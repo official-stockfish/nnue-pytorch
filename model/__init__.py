@@ -1,6 +1,6 @@
-from .callbacks import WeightClippingCallback
+from .callbacks import WeightClippingCallback, ExplicitSWACallback
 from .config import ModelConfig, LossParams, NNUELightningConfig
-from .optimizers import OptimizerConfig, Ranger21Wrapper, ScheduleFreeWrapper
+from .optimizers import OptimizerConfig, RangerLiteWrapper, ScheduleFreeWrapper
 
 from .lightning_module import NNUE
 from .model import NNUEModel
@@ -22,6 +22,7 @@ from .utils import (
 
 __all__ = [
     "WeightClippingCallback",
+    "ExplicitSWACallback",
     "ModelConfig",
     "LossParams",
     "add_feature_args",
@@ -30,7 +31,7 @@ __all__ = [
     "get_available_features",
     "NNUE",
     "NNUEModel",
-    "Ranger21Wrapper",
+    "RangerLiteWrapper",
     "ScheduleFreeWrapper",
     "load_model",
     "NNUEReader",

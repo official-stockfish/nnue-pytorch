@@ -36,6 +36,8 @@ class NNUEModel(nn.Module):
 
         self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
 
+        self.ft_activation_probe = nn.Identity()
+
     @torch.no_grad()
     def clip_weights(self):
         """
@@ -78,11 +80,13 @@ class NNUEModel(nn.Module):
         black_values: torch.Tensor,
         psqt_indices: torch.Tensor,
         layer_stack_indices: torch.Tensor,
+        return_activations: bool = False,
     ):
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
         w, wpsqt = torch.split(wp, self.L1, dim=1)
         b, bpsqt = torch.split(bp, self.L1, dim=1)
-        l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
+        l0_preact = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
+        l0_ = self.ft_activation_probe(l0_preact)
         l0_ = torch.clamp(l0_, 0.0, 1.0)
 
         l0_s = torch.split(l0_, self.L1 // 2, dim=1)
@@ -99,4 +103,6 @@ class NNUEModel(nn.Module):
         # which does both the averaging and sign flip for black to move)
         x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
+        if return_activations:
+            return x, l0_preact
         return x

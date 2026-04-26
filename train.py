@@ -432,7 +432,7 @@ def main():
             print("Disabling torch.compile for accelerator='mps'.")
     else:
         # Since we compile the entire lightning module we have quite a few graph breaks
-        torch._dynamo.config.cache_size_limit = 32
+        torch._dynamo.config.cache_size_limit = 64
         nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
@@ -453,6 +453,18 @@ def main():
     )
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
+    trainer_callbacks = [
+            checkpoint_callback,
+            SimpleLineLogger(refresh_rate=refresh_rate),
+            TimeLimitAfterCheckpoint(args.max_time),
+            M.WeightClippingCallback(),
+        ]
+    if 0 <= args.swa_start_epoch < args.max_epochs:
+        swa_callback = M.ExplicitSWACallback(args.swa_start_epoch)
+        trainer_callbacks.append(
+            swa_callback
+        )
+
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
@@ -460,12 +472,7 @@ def main():
         strategy="ddp" if n_devices > 1 else "auto",
         devices=devices,
         logger=loggers,
-        callbacks=[
-            checkpoint_callback,
-            SimpleLineLogger(refresh_rate=refresh_rate),
-            TimeLimitAfterCheckpoint(args.max_time),
-            M.WeightClippingCallback(),
-        ],
+        callbacks=trainer_callbacks,
         log_every_n_steps=refresh_rate,
         enable_progress_bar=False,
         enable_checkpointing=True,
@@ -480,6 +487,34 @@ def main():
         trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)
     else:
         trainer.fit(nnue, train, val)
+
+    if 0 <= args.swa_start_epoch < args.max_epochs:
+        swa_state_dict = swa_callback.swa_model.module.state_dict() if trainer.is_global_zero else None
+        swa_state_dict = trainer.strategy.broadcast(swa_state_dict, src=0)
+
+        # Use train mode for lightning module but eval mode for model,
+        # prevents backup params from bloating ckpt.
+        # Note that resume from checkpoint after swa averaging has started.
+        nnue.train()
+        nnue.model.eval()
+        nnue.model.load_state_dict(swa_state_dict)
+
+        # NOTE: If BN is used, it has to be updated here. Be careful when using DDP.
+        swa_savepath = os.path.join(logdir, "lightning_logs", f"version_{tb_logger.version}", "checkpoints", "last_swa.ckpt")
+        trainer.save_checkpoint(swa_savepath)
+
+        # Prevent optimizer from overwriting swa weights with e.g. lookahead weights (leaky abstraction).
+        nnue.eval()
+        nnue.model.load_state_dict(swa_state_dict)
+
+        if trainer.is_global_zero:
+            print(f"SWA model saved to {swa_savepath}")
+
+        if val is not None:
+            trainer.validate(nnue, val)
+        else:
+            trainer.validate(nnue, train)
+
 
     if trainer.is_global_zero:
         with open(os.path.join(logdir, "training_finished"), "w"):

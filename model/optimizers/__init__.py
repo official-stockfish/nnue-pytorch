@@ -1,6 +1,6 @@
 from .config import OptimizerConfig
-from .ranger21_wrapper import Ranger21Wrapper
+from .rangerlite_wrapper import RangerLiteWrapper
 from .schedulefree_wrapper import ScheduleFreeWrapper
 
 
-__all__ = ["OptimizerConfig", "Ranger21Wrapper", "ScheduleFreeWrapper"]
+__all__ = ["OptimizerConfig", "RangerLiteWrapper", "ScheduleFreeWrapper"]

@@ -34,7 +34,7 @@ class QuantizationManager:
         self.max_hidden_weight = config.hidden_quantized_one / self.weight_scale_hidden
         # Threat weights are quantized to int8 after scaling by ft_quantized_one
         _i8 = torch.iinfo(torch.int8)
-        self.min_threat_weight = _i8.min / config.ft_quantized_one  # -128/255
+        self.min_threat_weight = -_i8.max / config.ft_quantized_one  # -127/255
         self.max_threat_weight = _i8.max / config.ft_quantized_one  # 127/255
         self.max_out_weight = (
             config.hidden_quantized_one * self.hidden_quantized_one
