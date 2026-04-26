@@ -43,6 +43,6 @@ jobs:
             \
             python -u serialize.py /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.pt /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue --no-cupy --features=Full_Threats+HalfKAv2_hm^ --l1=1024 && \
             \
-            python -u serialize.py /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue --no-cupy --ft_optimize_data=/data/fishpack32.binpack --features=Full_Threats+HalfKAv2_hm^ --l1=1024 --ft_optimize --ft_optimize_count=1000 --ft_compression=leb128 && \
+            python -u serialize.py /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue --no-cupy --ft_optimize_data=./.pgo/small.binpack --features=Full_Threats+HalfKAv2_hm^ --l1=1024 --ft_optimize --ft_optimize_count=1000 --ft_compression=leb128 && \
             \
             python -u serialize.py /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue --no-cupy --features=Full_Threats+HalfKAv2_hm^ --l1=1024 --ft_compression=leb128 --out-sha"
