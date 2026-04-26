@@ -623,13 +623,16 @@ FenBatch* FenBatchStream::next() {
 
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
     if (!config.filtered && !config.wld_filtered && config.random_fen_skipping <= 0 &&
-        config.early_fen_skipping <= 0 && config.soft_early_fen_skipping <= 0) {
+        config.early_fen_skipping < 0 && config.soft_early_fen_skipping <= 0) {
         return nullptr;
     }
 
-    const double skip_prob = double(config.random_fen_skipping) / (config.random_fen_skipping + 1);
-    const uint64_t random_skip_threshold = config.random_fen_skipping ?
-                                           static_cast<uint64_t>(skip_prob * static_cast<double>(~0ULL)) : 0;
+    double skip_prob = 0.0;
+    uint64_t random_skip_threshold = 0;
+    if (config.random_fen_skipping > 0) {
+        skip_prob = double(config.random_fen_skipping) / (config.random_fen_skipping + 1);
+        random_skip_threshold = static_cast<uint64_t>(skip_prob * static_cast<double>(~0ULL));
+    }
 
     // --- Precompute 5-Point Spline PC LUT ---
     std::array<double, 33> target_pc_weights_lut{};
@@ -674,7 +677,10 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
         target_pc_weights_lut[i] = desired_piece_count_weights(i);
         target_pc_weights_total += target_pc_weights_lut[i];
     }
-    if (target_pc_weights_total <= 0.0) target_pc_weights_total = 1.0;
+    if (target_pc_weights_total <= 0.0) {
+        std::fill(target_pc_weights_lut.begin(), target_pc_weights_lut.end(), 1.0);
+        target_pc_weights_total = static_cast<double>(target_pc_weights_lut.size());
+    }
 
     // --- Precompute Soft Early Ply Filter LUT ---
     std::vector<double> early_ply_accept_prob;
@@ -707,7 +713,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
         };
 
         for (size_t i = 0; i < lut_size; ++i) {
-            early_ply_accept_prob[i] = interpolate_ply(static_cast<double>(i));
+            early_ply_accept_prob[i] = std::clamp(interpolate_ply(static_cast<double>(i)), 0.0, 1.0);
         }
     }
 
