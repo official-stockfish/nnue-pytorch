@@ -163,7 +163,8 @@ def resolve_device(use_cupy: bool, device: Union[int, Literal["cpu", "mps"]]) ->
     return d
 
 
-def batched(arr: Union[npt.NDArray, torch.Tensor], batch_size: int) -> Generator[npt.NDArray, None, None]:
+T = TypeVar("T", npt.NDArray, torch.Tensor)
+def batched(arr: T, batch_size: int) -> Generator[T, None, None]:
     """
     Utility generator that yields chunks of array `arr` of size `batch_size`
     Expects arr to be a numpy-like array or torch Tensor
@@ -232,7 +233,7 @@ def get_swapped_zero_increase(
     swapped_zero_count = 0
 
     # Process in batches since the arrays are too large
-    BATCH_SIZE = 10000
+    BATCH_SIZE = 8192
     for actmat_batch in batched(actmat, BATCH_SIZE):
         swapped_zero_count += get_swapped_zero_positive_count(actmat_batch)
 
@@ -744,7 +745,7 @@ def ft_optimize(
     ft_permute_impl(model, perm)
 
 
-def set_cupy_device(device: int) -> None:
+def set_cupy_device(device: Optional[int]=None) -> None:
     # kept for legacy reasons.
     global _DEVICE_OVERRIDE
     _DEVICE_OVERRIDE = device

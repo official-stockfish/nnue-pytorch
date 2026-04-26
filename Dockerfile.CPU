@@ -5,7 +5,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Python 3.12 and required dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
     python3.12 \
+    python3.12-dev \
     python3.12-venv \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
@@ -22,15 +25,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
     torchvision \
     torchaudio \
     --index-url https://download.pytorch.org/whl/cpu
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    python3.12 \
-    python3.12-dev \
-    python3.12-venv \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/nnue-pytorch
 

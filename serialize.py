@@ -137,10 +137,6 @@ def main():
                 "Invalid number of positions to optimize FT with. (--ft_optimize_count)"
             )
 
-        if serialize_config.use_cupy:
-            if serialize_config.device is not None:
-                ftperm.set_cupy_device()
-
         if not args.source.endswith(".nnue"):
             nnue.model.input.coalesce()
             nnue.model.layer_stacks.coalesce_layer_stacks_inplace()
