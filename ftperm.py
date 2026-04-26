@@ -34,7 +34,7 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --
 import copy
 from dataclasses import dataclass, field
 import time
-from typing import Callable, Generator, TypeAlias, Annotated, Union
+from typing import Callable, Generator, TypeAlias, Annotated, Union, Literal
 
 import tyro
 
@@ -43,7 +43,6 @@ from tyro.conf import (
 )
 
 import chess
-import cupy as cp
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -68,7 +67,7 @@ Algorithm by Daniel Monroe. Github @Ergodice.
 
 ZERO_BLOCK_SIZE = 4
 VERBOSE = False
-
+_DEVICE_OVERRIDE = None
 
 @dataclass
 class GatherConfig:
@@ -138,11 +137,11 @@ class FeaturePermutationConfig:
     ]
     use_cupy: Annotated[bool, tyro.conf.arg(name="cupy")] = True
     """
-    Cupy uses significant amounts of VRAM. Set to False to use numpy instead, which will be slower.
+    Set to False to use CPU instead of GPU. Kept for legacy CLI compatibility.
     """
-    device: int = 0
+    device: Union[int, Literal["cpu", "mps"]] = 0
     """
-    Device to use for cupy
+    Device to use. Can be integer (e.g. 0 for cuda:0), "mps", or "cpu"
     """
 
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
@@ -152,10 +151,22 @@ class FeaturePermutationConfig:
     )
 
 
-def batched(arr: npt.NDArray, batch_size: int) -> Generator[npt.NDArray, None, None]:
+def resolve_device(use_cupy: bool, device: Union[int, Literal["cpu", "mps"]]) -> str:
+    if not use_cupy:
+        return "cpu"
+    if _DEVICE_OVERRIDE is not None:
+        d = str(_DEVICE_OVERRIDE)
+    else:
+        d = str(device)
+    if d.isdigit():
+        return f"cuda:{d}"
+    return d
+
+
+def batched(arr: Union[npt.NDArray, torch.Tensor], batch_size: int) -> Generator[npt.NDArray, None, None]:
     """
     Utility generator that yields chunks of array `arr` of size `batch_size`
-    Expects arr to be a numpy-like array
+    Expects arr to be a numpy-like array or torch Tensor
     """
     n_samples = arr.shape[0]
     idx = 0
@@ -184,108 +195,68 @@ def apply_rotate_right(perm: npt.NDArray, indices: tuple[int, ...]) -> None:
 
 
 def get_swapped_zero_positive_count(
-    actmat_flat: npt.NDArray[np.bool_], use_cupy: bool = True
-) -> int:
-    if use_cupy:
-        actmat_flat = cp.asarray(actmat_flat, dtype=cp.int8)
-
+    actmat_flat: torch.Tensor
+) -> torch.Tensor:
     shape = actmat_flat.shape
     # Group into blocks that are processed at once during inference
     # actmat is a boolean matrix of shape (N, L1 // 2) with "True" meaning 0
     actmat_chunked = actmat_flat.reshape(
-        (actmat_flat.shape[0], actmat_flat.shape[1] // ZERO_BLOCK_SIZE, ZERO_BLOCK_SIZE)
+        (shape[0], shape[1] // ZERO_BLOCK_SIZE, ZERO_BLOCK_SIZE)
     )
 
-    if use_cupy:
-        # Calculate number of zeros in each block
-        num_zeros = cp.sum(actmat_chunked, axis=2, keepdims=True)
-        # Broadcast back to the same shape as actmat_chunked so it's easier to work with
-        num_zeros = cp.tile(num_zeros, (1, 1, ZERO_BLOCK_SIZE))
+    # Calculate number of zeros in each block
+    num_zeros = torch.sum(actmat_chunked, dim=2, keepdim=True)
+    # Broadcast back to the same shape as actmat_chunked so it's easier to work with
+    num_zeros = num_zeros.tile((1, 1, ZERO_BLOCK_SIZE))
 
-        # Marks an element if all other elements in a block are zero.
-        #
-        # Example:
-        #                                   b  i   k      b  i   k      b  i   k
-        # slice                            [0, 13, :]    [0, 14, :]    [0, 15, :]
-        # num_zeros           = [... [... [3, 3, 3, 3], [1, 1, 1, 1], [4, 4, 4, 4] ...] ...]
-        # actmat_chunked      = [... [... [1, 1, 0, 1], [0, 0, 1, 0], [1, 1, 1, 1] ...] ...]
-        # rest_zero_indicator = [... [... [0, 0, 1, 0], [0, 0, 0, 0], [1, 1, 1, 1] ...] ...]
-        #
-        rest_zero_indicator = (
-            (num_zeros - actmat_chunked == ZERO_BLOCK_SIZE - 1)
-            .reshape(shape)
-            .astype(cp.int8)
-        )
+    # Marks an element if all other elements in a block are zero.
+    rest_zero_indicator = (
+        (num_zeros - actmat_chunked.int() == ZERO_BLOCK_SIZE - 1)
+        .reshape(shape)
+        .to(torch.float64)
+    )
 
-        # Sum all possible pairs of elements in a single sample of actmat_flat and rest_zero_indicator.
-        # Aggregate sum over the whole batch.
-        # This tells us how much "good" a swap of i-th and j-th slices would do. It doesn't consider
-        # how much "bad" it would do though, that will be accounted for later, for performance reasons.
-        swapped_zero_count = cp.einsum(
-            "bi,bj->ij", actmat_flat, rest_zero_indicator, dtype=int
-        )
-
-    else:
-        # Same operation but with numpy
-        num_zeros = np.sum(actmat_chunked, axis=2, keepdims=True)
-        num_zeros = np.tile(num_zeros, (1, 1, ZERO_BLOCK_SIZE))
-
-        rest_zero_indicator = (
-            (num_zeros - actmat_chunked == ZERO_BLOCK_SIZE - 1)
-            .reshape(shape)
-            .astype(int)
-        )
-
-        swapped_zero_count = np.einsum("bi,bj->ij", actmat_flat, rest_zero_indicator)
+    # Sum all possible pairs of elements in a single sample of actmat_flat and rest_zero_indicator.
+    # Aggregate sum over the whole batch.
+    swapped_zero_count = torch.einsum(
+        "bi,bj->ij", actmat_flat.to(torch.float64), rest_zero_indicator
+    )
 
     return swapped_zero_count
 
 
 def get_swapped_zero_increase(
-    actmat: npt.NDArray[np.bool_], use_cupy: bool = True
-) -> npt.NDArray[np.int_]:
+    actmat: torch.Tensor
+) -> torch.Tensor:
     n_neurons = actmat.shape[1]
     swapped_zero_count = 0
 
     # Process in batches since the arrays are too large
-    # TODO: Find a good batch size. Try lowest as possible as VRAM is an issue on low end devices.
     BATCH_SIZE = 10000
     for actmat_batch in batched(actmat, BATCH_SIZE):
-        swapped_zero_count += get_swapped_zero_positive_count(
-            actmat_batch, use_cupy=use_cupy
-        )
+        swapped_zero_count += get_swapped_zero_positive_count(actmat_batch)
 
     # (L1/2) x (L1/2)
-    if use_cupy:
-        # Subtract from each i-th slice the positive value of the current i-th placement.
-        # This is the place where we account for how much "bad" it would do.
-        # It is done here because we process earlier in batches, but this operation is distributive,
-        # so it needs to only be done once at the end.
-        swapped_zero_increase = swapped_zero_count - cp.reshape(
-            cp.diag(swapped_zero_count), (1, n_neurons)
-        )
-        swapped_zero_increase = cp.asnumpy(swapped_zero_increase)
-
-    else:
-        swapped_zero_increase = swapped_zero_count - np.reshape(
-            np.diag(swapped_zero_count), (1, n_neurons)
-        )
+    # Subtract from each i-th slice the positive value of the current i-th placement.
+    swapped_zero_increase = swapped_zero_count - torch.reshape(
+        torch.diag(swapped_zero_count), (1, n_neurons)
+    )
 
     return swapped_zero_increase
 
 
 def get_score_change(
-    actmat: npt.NDArray[np.bool_], use_cupy: bool = True
-) -> npt.NDArray[np.int_]:
+    actmat: torch.Tensor
+) -> torch.Tensor:
     # actmat is a boolean matrix of shape (N, L1) with "True" meaning 0
 
     n_neurons = actmat.shape[1]
 
-    score_change = get_swapped_zero_increase(actmat, use_cupy)
+    score_change = get_swapped_zero_increase(actmat)
 
     # Kill off swaps between neurons in the same block
-    blocks = np.arange(n_neurons).reshape((n_neurons, 1)) // ZERO_BLOCK_SIZE
-    same_block_killer = 1 - (blocks == blocks.T).astype(int)
+    blocks = torch.arange(n_neurons, device=actmat.device).reshape((n_neurons, 1)) // ZERO_BLOCK_SIZE
+    same_block_killer = 1 - (blocks == blocks.T).to(torch.int)
     score_change = score_change * same_block_killer
     return score_change
 
@@ -296,10 +267,10 @@ class SwapResult:
     score_change: float
 
 
-SwapFunction: TypeAlias = Callable[[npt.NDArray[np.bool_], bool], SwapResult]
+SwapFunction: TypeAlias = Callable[[torch.Tensor], SwapResult]
 
 
-def make_swaps_2(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapResult:
+def make_swaps_2(actmat: torch.Tensor) -> SwapResult:
     """
     Returns a series of independent 2-swap operations that collectively improve the objective function.
     """
@@ -312,11 +283,11 @@ def make_swaps_2(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapRe
     n_samples = actmat.shape[0]
 
     # Compute the score change of swapping i-th and j-th neurons
-    score_change = get_score_change(actmat, use_cupy=use_cupy)
+    score_change = get_score_change(actmat)
     # Sum score_change[i, j] + score_change[j, i] to get the cumulative impact of the swap.
     score_change = score_change + score_change.T
 
-    def all_indices_in_same_block(i: np.int_) -> list[int]:
+    def all_indices_in_same_block(i: int) -> list[int]:
         """Returns a list of indices of all neurons in the same block as the i-th neuron."""
         # Floor to the start of the block.
         base = i // ZERO_BLOCK_SIZE * ZERO_BLOCK_SIZE
@@ -325,11 +296,11 @@ def make_swaps_2(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapRe
     swaps = []
     total_score_change = 0
     while True:
-        swap = np.argmax(score_change)
+        swap = torch.argmax(score_change).item()
         # argmax returns a flat index, so we need to recompute the position.
         i, j = swap // n_neurons, swap % n_neurons
 
-        improvement = score_change[i, j]
+        improvement = score_change[i, j].item()
         if improvement == 0:
             break
 
@@ -357,7 +328,7 @@ def make_swaps_2(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapRe
     return SwapResult(swaps, total_improvement)
 
 
-def make_swaps_3(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapResult:
+def make_swaps_3(actmat: torch.Tensor) -> SwapResult:
     """
     Returns a series of independent left-rotates operations that collectively improve the objective function.
     """
@@ -370,7 +341,7 @@ def make_swaps_3(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapRe
     n_samples = actmat.shape[0]
     n_blocks = n_neurons // ZERO_BLOCK_SIZE
 
-    score_changes = get_score_change(actmat, use_cupy=use_cupy)
+    score_changes = get_score_change(actmat)
 
     # For each neuron i, j, k we sum score_change[i, j] + score_change[j, k] + score_change[k, i]
     # This is the cumulative impact of the right-rotation.
@@ -384,18 +355,12 @@ def make_swaps_3(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapRe
     cycles = []
     total_score_change = 0
 
-    if use_cupy:
-        # We don't want to have to go through an enormous array so compress it to represent blocks rather than neurons
-        # Cupy doesn't support a list of axes so we go one by one.
-        max_values = cp.amax(
-            cp.reshape(score_changes, compressed_shape), axis=5, keepdims=False
-        )
-        max_values = cp.amax(max_values, axis=3, keepdims=False)
-        max_values = cp.amax(max_values, axis=1, keepdims=False)
-    else:
-        max_values = np.amax(
-            np.reshape(score_changes, compressed_shape), axis=(5, 3, 1), keepdims=False
-        )
+    # We don't want to have to go through an enormous array so compress it to represent blocks rather than neurons
+    max_values = torch.amax(
+        torch.reshape(score_changes, compressed_shape), dim=5, keepdim=False
+    )
+    max_values = torch.amax(max_values, dim=3, keepdim=False)
+    max_values = torch.amax(max_values, dim=1, keepdim=False)
 
     # Kill rotates that would only affect less than 3 different blocks.
     # We must do this, because the rest of the algorithm relies on it for correctness.
@@ -406,8 +371,8 @@ def make_swaps_3(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapRe
         max_values[:, block, block] = 0
 
     while True:
-        best_blocks = max_values.argmax()
-        improvement_blocks = max_values.flatten()[best_blocks]
+        best_blocks = torch.argmax(max_values).item()
+        improvement_blocks = max_values.flatten()[best_blocks].item()
         if improvement_blocks == 0:
             break
 
@@ -422,8 +387,8 @@ def make_swaps_3(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapRe
         local_score_changes = score_changes[
             i : i + ZERO_BLOCK_SIZE, j : j + ZERO_BLOCK_SIZE, k : k + ZERO_BLOCK_SIZE
         ]
-        best_neurons = local_score_changes.argmax()
-        improvement_neurons = local_score_changes.flatten()[best_neurons]
+        best_neurons = torch.argmax(local_score_changes).item()
+        improvement_neurons = local_score_changes.flatten()[best_neurons].item()
         assert improvement_blocks == improvement_neurons
         i1, j1, k1 = np.unravel_index(
             best_neurons, (ZERO_BLOCK_SIZE, ZERO_BLOCK_SIZE, ZERO_BLOCK_SIZE)
@@ -450,12 +415,16 @@ def make_swaps_3(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapRe
 
 
 def find_perm_impl(
-    actmat: npt.NDArray[np.bool_], use_cupy: bool, L1: int
+    actmat: Union[npt.NDArray[np.bool_], torch.Tensor], device_str: str, L1: int
 ) -> npt.NDArray[np.int_]:
-    actmat = np.reshape(actmat, (actmat.shape[0] * 2, actmat.shape[1] // 2))
-    if use_cupy:
-        actmat = cp.asarray(actmat, dtype=cp.int8)
-    actmat_orig = actmat.copy()
+    if isinstance(actmat, np.ndarray):
+        actmat = np.reshape(actmat, (actmat.shape[0] * 2, actmat.shape[1] // 2))
+        actmat = torch.from_numpy(actmat).to(device_str)
+    else:
+        actmat = actmat.reshape((actmat.shape[0] * 2, actmat.shape[1] // 2))
+        actmat = actmat.to(device_str)
+
+    actmat_orig = actmat.clone()
 
     total_score_change = 0
     perm = np.arange(L1 // 2)
@@ -478,7 +447,7 @@ def find_perm_impl(
 
         # Calculate a set of independent right rotates (so swaps for 2 element case)
         # that when applied improve the objective function
-        swap_result = swap_fn(actmat, use_cupy)
+        swap_result = swap_fn(actmat)
         for cycle in swap_result.swaps:
             # Update the current best permutation with the newly found adjustments.
             apply_rotate_right(perm, cycle)
@@ -575,7 +544,7 @@ def forward_ft(
     return l0_.round()
 
 
-def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor:
+def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
     with torch.no_grad():
         (
             us,
@@ -588,7 +557,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor
             score,
             psqt_indices,
             layer_stack_indices,
-        ) = batch.contents.get_tensors("cuda")
+        ) = batch.contents.get_tensors(device_str)
         res = forward_ft(
             model,
             us,
@@ -634,13 +603,14 @@ def ft_permute(model: NNUEModel, ft_perm_path: str) -> None:
     ft_permute_impl(model, permutation)
 
 
-def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bool_]:
+def gather_impl(model: NNUEModel, dataset: str, count: int, device_str: str) -> npt.NDArray[np.bool_]:
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
-    BATCH_SIZE = 1000
+    BATCH_SIZE = 1024
 
     quantized_model = copy.deepcopy(model)
     quantize_ft(quantized_model)
-    quantized_model.cuda()
+    if device_str != "cpu":
+        quantized_model.to(device_str)
 
     fen_batch_provider = make_fen_batch_provider(dataset, BATCH_SIZE)
 
@@ -658,7 +628,7 @@ def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bo
             [1] * len(fens),
             [0] * len(fens),
         )
-        actmat = eval_ft(quantized_model, b).cpu()
+        actmat = eval_ft(quantized_model, b, device_str).cpu()
         actmat = actmat <= ZERO_POINT
         actmats.append(actmat.numpy())
         data_loader.destroy_sparse_batch(b)
@@ -690,7 +660,8 @@ def command_gather(args: FeaturePermutationConfig) -> None:
 
     model.eval()
 
-    actmat = gather_impl(model, args.subcommand.data, args.subcommand.count)
+    device_str = resolve_device(args.use_cupy, args.device)
+    actmat = gather_impl(model, args.subcommand.data, args.subcommand.count, device_str)
 
     with open(args.subcommand.out, "wb") as file:  # was: args.out
         np.save(file, actmat)
@@ -735,7 +706,8 @@ def command_find_perm(args: FeaturePermutationConfig) -> None:
     with open(args.subcommand.data, "rb") as file:
         actmat = np.load(file)
 
-    perm = find_perm_impl(actmat, args.use_cupy, args.model_config.L1)
+    device_str = resolve_device(args.use_cupy, args.device)
+    perm = find_perm_impl(actmat, device_str, args.model_config.L1)
 
     # perm = np.random.permutation([i for i in range(L1)])
     with open(args.subcommand.out, "wb") as file:
@@ -749,15 +721,18 @@ def ft_optimize(
     actmat_save_path: str | None = None,
     perm_save_path: str | None = None,
     use_cupy: bool = True,
+    device: Union[int, Literal["cpu", "mps"]] = 0,
 ) -> None:
+    device_str = resolve_device(use_cupy, device)
+
     print("Gathering activation data...")
-    actmat = gather_impl(model, dataset_path, count)
+    actmat = gather_impl(model, dataset_path, count, device_str)
     if actmat_save_path is not None:
         with open(actmat_save_path, "wb") as file:
             np.save(file, actmat)
 
     print("Finding permutation...")
-    perm = find_perm_impl(actmat, use_cupy, model.L1)
+    perm = find_perm_impl(actmat, device_str, model.L1)
     if perm_save_path is not None:
         with open(perm_save_path, "wb") as file:
             np.save(file, perm)
@@ -770,15 +745,12 @@ def ft_optimize(
 
 
 def set_cupy_device(device: int) -> None:
-    if device is not None:
-        cp.cuda.runtime.setDevice(device)
-
+    # kept for legacy reasons.
+    global _DEVICE_OVERRIDE
+    _DEVICE_OVERRIDE = device
 
 def main() -> None:
     cfg = tyro.cli(FeaturePermutationConfig)
-
-    if cfg.use_cupy:
-        set_cupy_device(cfg.device)
 
     match cfg.subcommand:
         case GatherConfig():

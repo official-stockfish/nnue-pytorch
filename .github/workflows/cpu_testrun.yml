@@ -1,0 +1,48 @@
+name: cpu-testrun
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  build-and-bench:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image (CPU)
+        run: docker build -t nnue-pytorch:cpu -f Dockerfile.CPU .
+
+      - name: Perform Test Run of entire Training Pipeline (CPU)
+        run: |
+          docker run --rm \
+            --user $(id -u):$(id -g) \
+            -e USER=github-runner \
+            -e TORCHINDUCTOR_CACHE_DIR=/workspace/nnue-pytorch/.cache/torch \
+            -v ${{ github.workspace }}:/workspace/nnue-pytorch \
+            -v ${{ github.workspace }}:/data \
+            -w /workspace/nnue-pytorch \
+            --ipc=host \
+            --ulimit memlock=-1 \
+            --ulimit stack=67108864 \
+            nnue-pytorch:cpu bash -c "\
+            rm -rf /data/scratch/training/runs/testing/ && \
+            \
+            python train.py ./.pgo/small.binpack --batch-size 4048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 20000 --max_epochs=2 --default_root_dir /data/scratch/training/runs/testing --accelerator=cpu && \
+            \
+            python -u serialize.py /data/scratch/training/runs/testing/lightning_logs/version_0/checkpoints/last.ckpt /data/scratch/training/runs/testing/lightning_logs/version_0/checkpoints/last.pt --no-cupy --features=Full_Threats+HalfKAv2_hm^ --l1=1024 && \
+            \
+            python train.py ./.pgo/small.binpack --batch-size 4048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 20000 --max_epochs=2 --default_root_dir /data/scratch/training/runs/testing --accelerator=cpu --resume-from-model=/data/scratch/training/runs/testing/lightning_logs/version_0/checkpoints/last.pt --validation-size=10000 && \
+            \
+            python train.py ./.pgo/small.binpack --batch-size 4048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 20000 --max_epochs=4 --default_root_dir /data/scratch/training/runs/testing --accelerator=cpu --resume-from-checkpoint=/data/scratch/training/runs/testing/lightning_logs/version_1/checkpoints/last.ckpt --validation-size=10000 && \
+            \
+            python -u serialize.py /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.ckpt /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.pt --no-cupy --features=Full_Threats+HalfKAv2_hm^ --l1=1024 && \
+            \
+            python -u serialize.py /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.pt /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue --no-cupy --features=Full_Threats+HalfKAv2_hm^ --l1=1024 && \
+            \
+            python -u serialize.py /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue --no-cupy --ft_optimize_data=./.pgo/small.binpack --features=Full_Threats+HalfKAv2_hm^ --l1=1024 --ft_optimize --ft_optimize_count=1000 --ft_compression=leb128 && \
+            \
+            python -u serialize.py /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue /data/scratch/training/runs/testing/lightning_logs/version_2/checkpoints/last.nnue --no-cupy --features=Full_Threats+HalfKAv2_hm^ --l1=1024 --ft_compression=leb128 --out-sha"

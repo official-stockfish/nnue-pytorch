@@ -5,10 +5,11 @@ set -e
 IMAGE_BASE_NAME="nnue-pytorch"
 
 echo "Please select the target GPU brand to build for:"
-select brand in "NVIDIA" "AMD"; do
+select brand in "NVIDIA" "AMD" "CPU"; do
   case $brand in
     NVIDIA ) GPU_TYPE="nvidia"; break;;
     AMD )    GPU_TYPE="amd"; break;;
+    CPU )    GPU_TYPE="none"; break;;
   esac
 done
 
@@ -22,6 +23,11 @@ elif [ "$GPU_TYPE" == "amd" ]; then
   IMAGE_TAG="${IMAGE_BASE_NAME}:amd"
   GPU_FLAGS="--device /dev/kfd --device /dev/dri"
   echo "Selected AMD build."
+elif [ "$GPU_TYPE" == "none" ]; then
+  DOCKERFILE="Dockerfile.CPU"
+  IMAGE_TAG="${IMAGE_BASE_NAME}:cpu"
+  GPU_FLAGS=""
+  echo "Selected cpu build."
 fi
 
 echo "Building image $IMAGE_TAG from $DOCKERFILE"

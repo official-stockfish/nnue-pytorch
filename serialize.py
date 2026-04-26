@@ -139,7 +139,7 @@ def main():
 
         if serialize_config.use_cupy:
             if serialize_config.device is not None:
-                ftperm.set_cupy_device(serialize_config.device)
+                ftperm.set_cupy_device()
 
         if not args.source.endswith(".nnue"):
             nnue.model.input.coalesce()
@@ -150,6 +150,7 @@ def main():
             serialize_config.ft_optimize_data,
             serialize_config.ft_optimize_count,
             use_cupy=serialize_config.use_cupy,
+            device=serialize_config.device,
         )
 
     if args.target.endswith(".ckpt"):
