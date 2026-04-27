@@ -32,7 +32,7 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --
 """
 
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import time
 from typing import Callable, Generator, TypeAlias, Annotated, Union, Literal, TypeVar, Optional
 
@@ -502,6 +502,14 @@ def make_sparse_batch_provider(
         loader_config = data_loader.DataloaderSkipConfig(
                 random_fen_skipping=10,
                 filtered=True, # filtering checks
+        )
+    # overwrite defaults
+    elif loader_config.random_fen_skipping == 0 or not loader_config.filtered:
+        random_fen_skipping = loader_config.random_fen_skipping if loader_config.random_fen_skipping != 0 else 10
+        loader_config = replace(
+            loader_config,
+            random_fen_skipping=random_fen_skipping,
+            filtered=True,
         )
     return data_loader.SparseBatchProvider(
         feature_set=feature_set_name,
