@@ -215,6 +215,14 @@ def get_swapped_zero_positive_count(
     num_zeros = num_zeros.tile((1, 1, ZERO_BLOCK_SIZE))
 
     # Marks an element if all other elements in a block are zero.
+    #
+    # Example:
+    #                                   b  i   k      b  i   k      b  i   k
+    # slice                            [0, 13, :]    [0, 14, :]    [0, 15, :]
+    # num_zeros           = [... [... [3, 3, 3, 3], [1, 1, 1, 1], [4, 4, 4, 4] ...] ...]
+    # actmat_chunked      = [... [... [1, 1, 0, 1], [0, 0, 1, 0], [1, 1, 1, 1] ...] ...]
+    # rest_zero_indicator = [... [... [0, 0, 1, 0], [0, 0, 0, 0], [1, 1, 1, 1] ...] ...]
+    #
     rest_zero_indicator = (
         (num_zeros - actmat_chunked.int() == ZERO_BLOCK_SIZE - 1)
         .reshape(shape)
@@ -223,6 +231,8 @@ def get_swapped_zero_positive_count(
 
     # Sum all possible pairs of elements in a single sample of actmat_flat and rest_zero_indicator.
     # Aggregate sum over the whole batch.
+    # This tells us how much "good" a swap of i-th and j-th slices would do. It doesn't consider
+    # how much "bad" it would do though, that will be accounted for later, for performance reasons.
     swapped_zero_count = torch.einsum(
         "bi,bj->ij", actmat_flat.to(torch.float64), rest_zero_indicator
     )
@@ -243,6 +253,9 @@ def get_swapped_zero_increase(
 
     # (L1/2) x (L1/2)
     # Subtract from each i-th slice the positive value of the current i-th placement.
+    # This is the place where we account for how much "bad" it would do.
+    # It is done here because we process earlier in batches, but this operation is distributive,
+    # so it needs to only be done once at the end.
     swapped_zero_increase = swapped_zero_count - torch.reshape(
         torch.diag(swapped_zero_count), (1, n_neurons)
     )
