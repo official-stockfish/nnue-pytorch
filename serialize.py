@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Optional, Literal, Annotated
 from tyro.conf import OmitArgPrefixes, Positional
 
+from data_loader import DataloaderSkipConfig
+
 import model as M
 
 
@@ -44,6 +46,13 @@ class SerializeConfig:
 
     device: int = 0
     """Device to use for cupy"""
+
+    loader_num_workers: int = 4
+    """Number of workers to use for data loading during FT optimization."""
+
+    dataloader_config: OmitArgPrefixes[DataloaderSkipConfig] = field(
+        default_factory=DataloaderSkipConfig
+    )
 
 
 @dataclass(frozen=True)
@@ -147,6 +156,8 @@ def main():
             serialize_config.ft_optimize_count,
             use_cupy=serialize_config.use_cupy,
             device=serialize_config.device,
+            loader_num_workers=serialize_config.loader_num_workers,
+            loader_config=serialize_config.dataloader_config,
         )
 
     if args.target.endswith(".ckpt"):

@@ -6,9 +6,9 @@ Example use:
 
 1. Generate the activation matrix for some sample dataset.
 
-python ftperm.py gather --data=data\fishpack32.binpack --net=networks\nn-5af11540bbfe.nnue --count=1000000 --features=HalfKAv2_hm --out ftact1m.npy
+python ftperm.py gather --data=data\fishpack32.binpack --net=networks\nn-5af11540bbfe.nnue --count=1000000 --features=HalfKAv2_hm^ --out ftact1m.npy
 
-python ftperm.py gather --data=noob_master_leaf_static_d12_85M_0.binpack --net=nn-5af11540bbfe.nnue --count=10000 --features=HalfKAv2_hm --out ftact1m.npy
+python ftperm.py gather --data=noob_master_leaf_static_d12_85M_0.binpack --net=nn-5af11540bbfe.nnue --count=10000 --features=HalfKAv2_hm^ --out ftact1m.npy
 
 2. Find a permutation
 
@@ -91,6 +91,15 @@ class GatherConfig:
     """
     number of datapoints to process
     """
+    loader_num_workers: int = 4
+    """Number of workers to use for data loading during gathering FT activations."""
+
+    loader_config: OmitArgPrefixes[data_loader.DataloaderSkipConfig] = field(
+        default_factory=data_loader.DataloaderSkipConfig
+    )
+    feature_config: OmitArgPrefixes[FeatureConfig] = field(
+        default_factory=FeatureConfig
+    )
 
 
 @dataclass
@@ -145,10 +154,6 @@ class FeaturePermutationConfig:
     """
 
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
-
-    feature_config: OmitArgPrefixes[FeatureConfig] = field(
-        default_factory=FeatureConfig
-    )
 
 
 def resolve_device(use_cupy: bool, device: Union[int, Literal["cpu", "mps"]]) -> str:
@@ -487,28 +492,26 @@ def read_model(
         return reader.model
 
 
-def make_fen_batch_provider(
-    data_path: str, batch_size: int
-) -> data_loader.FenBatchProvider:
-    return data_loader.FenBatchProvider(
-        data_path,
-        True,
-        4,  # some speedup and avoids StopIteration from fetch_next_fen_batch.
-        batch_size,
-        data_loader.DataloaderSkipConfig(
-            random_fen_skipping=10,
-        ),
+def make_sparse_batch_provider(
+    data_path: str,
+    batch_size: int,
+    feature_set_name: str,
+    loader_num_workers: int = 4,
+    loader_config: Optional[data_loader.DataloaderSkipConfig] = None
+) -> data_loader.SparseBatchProvider:
+    if loader_config is None:
+        loader_config = data_loader.DataloaderSkipConfig(
+                random_fen_skipping=10,
+                filtered=True, # filtering checks
+        )
+    return data_loader.SparseBatchProvider(
+        feature_set=feature_set_name,
+        filenames=[data_path],
+        cyclic=True,
+        num_workers=loader_num_workers,  # some speedup and avoids StopIteration from fetch_next_fen_batch.
+        batch_size=batch_size,
+        config=loader_config,
     )
-
-
-def filter_fens(fens: list[str]) -> list[str]:
-    # We don't want fens where a king is in check, as these cannot be evaluated by the engine.
-    filtered_fens = []
-    for fen in fens:
-        board = chess.Board(fen=fen)
-        if not board.is_check():
-            filtered_fens.append(fen)
-    return filtered_fens
 
 
 def quantize_ft(model: NNUEModel) -> None:
@@ -547,6 +550,9 @@ def forward_ft(
 
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
     with torch.no_grad():
+        batch = tuple(
+            batch_part.to(device=device_str) for batch_part in batch
+        )
         (
             us,
             them,
@@ -558,7 +564,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
             score,
             psqt_indices,
             layer_stack_indices,
-        ) = batch.contents.get_tensors(device_str)
+        ) = batch
         res = forward_ft(
             model,
             us,
@@ -604,7 +610,14 @@ def ft_permute(model: NNUEModel, ft_perm_path: str) -> None:
     ft_permute_impl(model, permutation)
 
 
-def gather_impl(model: NNUEModel, dataset: str, count: int, device_str: str) -> npt.NDArray[np.bool_]:
+def gather_impl(
+        model: NNUEModel,
+        dataset: str,
+        count: int,
+        device_str: str,
+        loader_workers: int = 4,
+        loader_config: Optional[data_loader.DataloaderSkipConfig] = None
+    ) -> npt.NDArray[np.bool_]:
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
     BATCH_SIZE = 1024
 
@@ -613,28 +626,28 @@ def gather_impl(model: NNUEModel, dataset: str, count: int, device_str: str) -> 
     if device_str != "cpu":
         quantized_model.to(device_str)
 
-    fen_batch_provider = make_fen_batch_provider(dataset, BATCH_SIZE)
+    sparse_batch_provider = make_sparse_batch_provider(
+        dataset,
+        BATCH_SIZE,
+        quantized_model.input_feature_name,
+        loader_num_workers=loader_workers,
+        loader_config=loader_config
+    )
 
     actmats = []
 
     done = 0
     print("Processed {} positions.".format(done))
     while done < count:
-        fens = filter_fens(next(fen_batch_provider))
+        # checks are already filtered by sparse_batch_provider.
+        s_batch = next(sparse_batch_provider)
 
-        b = data_loader.get_sparse_batch_from_fens(
-            quantized_model.input_feature_name,
-            fens,
-            [0] * len(fens),
-            [1] * len(fens),
-            [0] * len(fens),
-        )
-        actmat = eval_ft(quantized_model, b, device_str).cpu()
+        actmat = eval_ft(quantized_model, s_batch, device_str).cpu()
         actmat = actmat <= ZERO_POINT
-        actmats.append(actmat.numpy())
-        data_loader.destroy_sparse_batch(b)
+        actmat = actmat.numpy()
+        actmats.append(actmat)
 
-        done += len(fens)
+        done += len(actmat)
         print("Processed {} positions.".format(done))
 
     return np.concatenate(actmats, axis=0)
@@ -645,7 +658,7 @@ def command_gather(args: FeaturePermutationConfig) -> None:
     if args.subcommand.checkpoint:
         nnue = NNUE.load_from_checkpoint(
             args.subcommand.checkpoint,
-            feature_name=args.feature_config.features,
+            feature_name=args.subcommand.feature_config.features,
             config=args.model_config,
             quantize_config=QuantizationConfig(),
         )
@@ -654,7 +667,7 @@ def command_gather(args: FeaturePermutationConfig) -> None:
         assert args.subcommand.net is not None
         model = read_model(
             args.subcommand.net,
-            args.feature_config.features,
+            args.subcommand.feature_config.features,
             args.model_config,
             QuantizationConfig(),
         )
@@ -662,7 +675,14 @@ def command_gather(args: FeaturePermutationConfig) -> None:
     model.eval()
 
     device_str = resolve_device(args.use_cupy, args.device)
-    actmat = gather_impl(model, args.subcommand.data, args.subcommand.count, device_str)
+    actmat = gather_impl(
+        model,
+        args.subcommand.data,
+        args.subcommand.count,
+        device_str,
+        args.subcommand.loader_num_workers,
+        args.subcommand.loader_config
+    )
 
     with open(args.subcommand.out, "wb") as file:  # was: args.out
         np.save(file, actmat)
@@ -723,11 +743,13 @@ def ft_optimize(
     perm_save_path: str | None = None,
     use_cupy: bool = True,
     device: Union[int, Literal["cpu", "mps"]] = 0,
+    loader_num_workers: int = 4,
+    loader_config: Optional[data_loader.DataloaderSkipConfig] = None,
 ) -> None:
     device_str = resolve_device(use_cupy, device)
 
     print("Gathering activation data...")
-    actmat = gather_impl(model, dataset_path, count, device_str)
+    actmat = gather_impl(model, dataset_path, count, device_str, loader_num_workers, loader_config)
     if actmat_save_path is not None:
         with open(actmat_save_path, "wb") as file:
             np.save(file, actmat)
