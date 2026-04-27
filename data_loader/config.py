@@ -11,7 +11,7 @@ class DataloaderSkipConfig:
     """Skip a random fraction of positions. 0 = disabled."""
     early_fen_skipping: int = -1
     """Skip positions from the start of the game. -1 = disabled."""
-    soft_early_fen_skipping: int = 30
+    soft_early_fen_skipping: int = 20
     """Apply soft probability filter up to this ply. <= 0 = disabled."""
     simple_eval_skipping: int = -1
     """Skip positions based on simple eval. -1 = disabled."""
@@ -31,17 +31,17 @@ class DataloaderSkipConfig:
     """Ply soft filter control point x1."""
     ply_y1: float = 0.1
     """Ply soft filter control point y1."""
-    ply_x2: float = 18.0
+    ply_x2: float = 6.0
     """Ply soft filter control point x2."""
     ply_y2: float = 0.15
     """Ply soft filter control point y2."""
-    ply_x3: float = 22.0
+    ply_x3: float = 10.0
     """Ply soft filter control point x3."""
     ply_y3: float = 0.25
     """Ply soft filter control point y3."""
-    ply_x4: float = 26.0
+    ply_x4: float = 18.0
     """Ply soft filter control point x4."""
-    ply_y4: float = 0.5
+    ply_y4: float = 0.75
     """Ply soft filter control point y4."""
 
 
