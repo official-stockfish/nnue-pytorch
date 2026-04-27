@@ -42,7 +42,6 @@ from tyro.conf import (
     OmitArgPrefixes,
 )
 
-import chess
 import numpy as np
 import numpy.typing as npt
 import torch
