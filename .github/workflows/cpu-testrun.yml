@@ -12,9 +12,11 @@ jobs:
       - name: Perform Test Run of entire Training Pipeline (CPU)
         run: |
           ./run_docker.sh CPU ${{ github.workspace }} --non-interactive --exec \
-            env TORCHINDUCTOR_CACHE_DIR=/tmp/torch_cache python tests/test_training_pipeline_run.py -y --device cpu --test-dir /data/logs/training/runs/unittests_train_pipeline_cpu
+            env USER=github_runner HOME=/tmp MPLCONFIGDIR=/tmp/matplotlib \
+            python tests/test_training_pipeline_run.py -y --device cpu --test-dir /data/logs/training/runs/unittests_train_pipeline_cpu
 
       - name: Perform Cross-Check Evaluation (CPU)
         run: |
           ./run_docker.sh CPU ${{ github.workspace }} --skip-setup --non-interactive --exec \
-            env TORCHINDUCTOR_CACHE_DIR=/tmp/torch_cache python cross_check_eval.py --net /data/logs/training/runs/unittests_train_pipeline_cpu/lightning_logs/version_2/checkpoints/last.nnue --data .pgo/small.binpack --engine /data/tmp/stockfish --build_engine_from_sha='' --device='cpu'
+            env USER=github_runner HOME=/tmp MPLCONFIGDIR=/tmp/matplotlib \
+            python cross_check_eval.py --net /data/logs/training/runs/unittests_train_pipeline_cpu/lightning_logs/version_2/checkpoints/last.nnue --data .pgo/small.binpack --engine /data/tmp/stockfish --build_engine_from_sha='' --device='cpu'
