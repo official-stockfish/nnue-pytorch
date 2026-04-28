@@ -16,5 +16,4 @@ RUN ROCM_HOME=/opt/rocm CUPY_INSTALL_USE_HIP=1 pip install --no-cache-dir cupy
 
 RUN chmod +x setup_script.sh
 
-ENTRYPOINT [ "/workspace/nnue-pytorch/setup_script.sh" ]
 CMD ["/bin/bash"]

@@ -57,4 +57,9 @@ docker run -it \
   --ipc=host \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
-  $IMAGE_TAG
+  $IMAGE_TAG \
+  bash -c " \
+    echo 'Running setup script inside container...'; \
+    /workspace/nnue-pytorch/setup_script.sh; \
+    echo 'Setup complete. You can now run your commands inside the container.'; \
+    exec bash"
