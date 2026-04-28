@@ -17,7 +17,7 @@ jobs:
     if: github.ref == 'refs/heads/master' || github.base_ref == 'master'
     outputs:
       run_secondaries: ${{ steps.check_status.outputs.run_status }}
-      run_data_loader_test_paths: ${{ steps.filter.outputs.data_loader_paths }} # Changed to underscores
+      run_data_loader_test_paths: ${{ steps.filter.outputs.data_loader_paths }}
       force_all: ${{ steps.check_status.outputs.force_all }}
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
         id: filter
         with:
           filters: |
-            data_loader_paths: # Changed to underscores
+            data_loader_paths:
               - 'data_loader/**'
               - 'compile_data_loader.sh'
 

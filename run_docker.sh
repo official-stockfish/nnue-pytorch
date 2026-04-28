@@ -105,8 +105,14 @@ else
     USER_FLAG="--user $(id -u):$(id -g)"
 fi
 
+if [ "$INTERACTIVE" = "true" ]; then
+  INTERACTIVE_FLAGS="-it"
+else
+  INTERACTIVE_FLAGS=""
+fi
+
 echo "Creating new container 'nnue-container'..."
-docker run -it \
+docker run $INTERACTIVE_FLAGS \
   $GPU_FLAGS \
   $USER_FLAG \
   -v "$(pwd)":/workspace/nnue-pytorch \
