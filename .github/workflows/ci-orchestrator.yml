@@ -1,0 +1,71 @@
+name: CI Orchestrator
+on:
+  push:
+    branches: ['**'] # Triggers on pushes to any branch
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: ['**']
+
+jobs:
+  # Always call lint
+  call-ruff-pr:
+    uses: ./.github/workflows/ruff-pr.yml
+
+  # Evaluate conditions for other jobs
+  evaluate-execution:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.base_ref == 'master'
+    outputs:
+      run_secondaries: ${{ steps.check_status.outputs.run_status }}
+      run_sec1_paths: ${{ steps.filter.outputs.sec1_paths }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # Replaces workflow-level path filtering to avoid blocking the lint job
+      - name: Evaluate Path Restrictions
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            data-loader-paths:
+              - 'data_loader/**'
+              - 'compile_data_loader.sh'
+
+      - name: Determine Draft and Force Status
+        id: check_status
+        run: |
+          EVENT_NAME="${{ github.event_name }}"
+          IS_DRAFT="false"
+          COMMIT_MSG=""
+
+          # Handle payload differences between PRs and Pushes
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            IS_DRAFT="${{ github.event.pull_request.draft }}"
+            COMMIT_MSG=$(git log -1 --pretty=%B)
+          elif [ "$EVENT_NAME" = "push" ]; then
+            # Pushes are inherently not drafts. Extract message directly from context.
+            COMMIT_MSG="${{ github.event.head_commit.message }}"
+          fi
+
+          if [[ "$IS_DRAFT" == "false" || "$COMMIT_MSG" == *"[force ci]"* ]]; then
+            echo "run_status=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_status=false" >> $GITHUB_OUTPUT
+          fi
+
+  call-secondary-1:
+    needs: [call-ruff-pr, evaluate-execution]
+    # Runs only if master/draft conditions are met AND data-loader paths are affected
+    if: >
+      needs.evaluate-execution.outputs.run_secondaries == 'true' &&
+      needs.evaluate-execution.outputs.run_sec1_paths == 'true'
+    uses: ./.github/workflows/data-loader-test.yml
+
+  # 4. CALL SECONDARY 2 (Unrestricted Paths)
+  call-secondary-2:
+    needs: [call-ruff-pr, evaluate-execution]
+    # Runs if master/draft conditions are met
+    if: needs.evaluate-execution.outputs.run_secondaries == 'true'
+    uses: ./.github/workflows/cpu-testrun.yml
