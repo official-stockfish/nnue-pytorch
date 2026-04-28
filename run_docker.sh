@@ -134,11 +134,19 @@ docker run $INTERACTIVE_FLAGS \
 
     if [ $# -gt 0 ]; then
       echo "Executing command: $@"
-      "$@" || echo "Command exited with status $?"
+      "$@"
+      RESULT=$?
+
+      if [ $RESULT -ne 0 ]; then
+        echo "Command failed with status $RESULT"
+      fi
     fi
 
     if [ "$INTERACTIVE" = "true" ]; then
       echo "Entering interactive shell..."
       exec bash
+    else
+      echo "Exiting container with exit code ${RESULT:-0}."
+      exit ${RESULT:-0}
     fi
   ' -- "$SKIP_SETUP" "$INTERACTIVE" "${EXEC_ARGS[@]}"
