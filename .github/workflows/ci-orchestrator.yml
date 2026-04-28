@@ -7,7 +7,7 @@ on:
     branches: ['**']
 
 jobs:
-  # Always call lint
+  # Always call ruff job first
   call-ruff-pr:
     uses: ./.github/workflows/ruff-pr.yml
 
@@ -55,7 +55,7 @@ jobs:
             echo "run_status=false" >> $GITHUB_OUTPUT
           fi
 
-  call-secondary-1:
+  call-data-loader-test:
     needs: [call-ruff-pr, evaluate-execution]
     # Runs only if master/draft conditions are met AND data-loader paths are affected
     if: >
@@ -63,8 +63,7 @@ jobs:
       needs.evaluate-execution.outputs.run_sec1_paths == 'true'
     uses: ./.github/workflows/data-loader-test.yml
 
-  # 4. CALL SECONDARY 2 (Unrestricted Paths)
-  call-secondary-2:
+  call-cpu-testrun:
     needs: [call-ruff-pr, evaluate-execution]
     # Runs if master/draft conditions are met
     if: needs.evaluate-execution.outputs.run_secondaries == 'true'
