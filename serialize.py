@@ -4,7 +4,7 @@ import torch
 import tyro
 
 from dataclasses import dataclass, field
-from typing import Optional, Literal, Annotated
+from typing import Optional, Literal, Annotated, Union
 from tyro.conf import OmitArgPrefixes, Positional
 
 from data_loader import DataloaderSkipConfig
@@ -44,8 +44,8 @@ class SerializeConfig:
     """Disable CUPY usage if not enough GPU memory is available.
     This will use numpy instead, which is slower."""
 
-    device: int = 0
-    """Device to use for cupy"""
+    device: Union[int, Literal["cpu", "mps"]] = 0
+    """Device to use for ft_optimize acceleration."""
 
     loader_num_workers: int = 4
     """Number of workers to use for data loading during FT optimization."""
