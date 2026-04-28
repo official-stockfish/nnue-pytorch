@@ -30,3 +30,18 @@ jobs:
             --ulimit stack=67108864 \
             nnue-pytorch:cpu bash -c " \
             python tests/test_training_pipeline_run.py -y --device cpu --test-dir /data/logs/training/runs/unittests_train_pipeline_cpu"
+
+      - name: Perform Cross-Check Evaluation (CPU)
+        run: |
+          docker run --rm \
+            --user $(id -u):$(id -g) \
+            -e USER=github-runner \
+            -e TORCHINDUCTOR_CACHE_DIR=/workspace/nnue-pytorch/.cache/torch \
+            -v ${{ github.workspace }}:/workspace/nnue-pytorch \
+            -v ${{ github.workspace }}:/data \
+            -w /workspace/nnue-pytorch \
+            --ipc=host \
+            --ulimit memlock=-1 \
+            --ulimit stack=67108864 \
+            nnue-pytorch:cpu bash -c " \
+            python cross_check_eval.py --net /data/logs/training/runs/unittests_train_pipeline_cpu/lightning_logs/version_2/checkpoints/last.nnue --data .pgo/small.binpack --engine /data/tmp/stockfish --build_engine_from_sha="""
