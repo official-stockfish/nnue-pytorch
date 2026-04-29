@@ -7,7 +7,7 @@ import shlex
 
 def run_command(cmd_string):
     """Executes a shell command string and halts execution if it fails."""
-    print(f"Running: {cmd_string}\n")
+    print(f"[TEST_TRAINING_PIPELINE] Run Command: {cmd_string}\n")
     args = shlex.split(cmd_string)
     try:
         subprocess.run(args, check=True)
@@ -66,13 +66,13 @@ def main():
 
     # --- 4. Define Pipeline Commands ---
     pipeline = [
-        f"python train.py ./.pgo/small.binpack --batch-size 4048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 20000 --max_epochs=2 --default_root_dir {test_dir_str} {train_device_arg} {train_workers_arg}",
+        f"python -u train.py ./.pgo/small.binpack --batch-size 1024 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 10000 --max_epochs=2 --default_root_dir {test_dir_str} {train_device_arg} {train_workers_arg}",
 
         f"python -u serialize.py {test_dir_str}/lightning_logs/version_0/checkpoints/last.ckpt {test_dir_str}/lightning_logs/version_0/checkpoints/last.pt --features=Full_Threats+HalfKAv2_hm^ --l1=1024 {serialize_device_arg} {serialize_workers_arg}",
 
-        f"python train.py ./.pgo/small.binpack --batch-size 4048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 20000 --max_epochs=2 --default_root_dir {test_dir_str} --resume-from-model={test_dir_str}/lightning_logs/version_0/checkpoints/last.pt --validation-size=10000 {train_device_arg} {train_workers_arg}",
+        f"python -u train.py ./.pgo/small.binpack --batch-size 2048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 10000 --max_epochs=2 --default_root_dir {test_dir_str} --resume-from-model={test_dir_str}/lightning_logs/version_0/checkpoints/last.pt --validation-size=5000 {train_device_arg} {train_workers_arg}",
 
-        f"python train.py ./.pgo/small.binpack --batch-size 4048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 20000 --max_epochs=4 --default_root_dir {test_dir_str} --resume-from-checkpoint={test_dir_str}/lightning_logs/version_1/checkpoints/last.ckpt --validation-size=10000 {train_device_arg} {train_workers_arg}",
+        f"python -u train.py ./.pgo/small.binpack --batch-size 2048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 10000 --max_epochs=4 --default_root_dir {test_dir_str} --resume-from-checkpoint={test_dir_str}/lightning_logs/version_1/checkpoints/last.ckpt --validation-size=5000 {train_device_arg} {train_workers_arg}",
 
         f"python -u serialize.py {test_dir_str}/lightning_logs/version_2/checkpoints/last.ckpt {test_dir_str}/lightning_logs/version_2/checkpoints/last.pt --features=Full_Threats+HalfKAv2_hm^ --l1=1024 {serialize_device_arg} {serialize_workers_arg}",
 

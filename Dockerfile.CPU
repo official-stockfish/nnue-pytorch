@@ -1,10 +1,25 @@
-FROM python:3.12-bookworm
+FROM ubuntu:24.04
 
+# Suppress interactive tzdata/apt prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install Python 3.12 and required dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     cmake \
+    git \
+    gosu \
+    curl \
+    python3.12 \
+    python3.12-dev \
+    python3.12-venv \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Create and activate virtual environment to comply with PEP 668 on Ubuntu 24.04
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3.12 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
@@ -15,10 +30,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 WORKDIR /workspace/nnue-pytorch
 
-COPY requirements.txt setup_script.sh ./
-
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN chmod +x setup_script.sh
+COPY docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
+RUN chmod +x /usr/local/bin/docker_entrypoint.sh
 
+# Set the entrypoint to handle UID mapping before executing the main command
+ENTRYPOINT ["/usr/local/bin/docker_entrypoint.sh"]
 CMD ["/bin/bash"]

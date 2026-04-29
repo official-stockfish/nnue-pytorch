@@ -96,14 +96,22 @@ fi
 
 echo "Using data path: $DATA_PATH"
 
-# Checking if docker is in rootless mode.
+# 5. Handle user mapping and container home directory setup
+CONTAINER_HOME="$(pwd)/.container_home"
+mkdir -p "$CONTAINER_HOME"
+
 if docker info 2>/dev/null | grep -iq "rootless"; then
-    echo "Rootless mode detected."
-    USER_FLAG="--user 0:0"
+    echo "Rootless mode detected. Mapping container HOME to /root."
+    HOST_UID=0
+    HOST_GID=0
+    INTERNAL_HOME="/root"
 else
-    echo "Standard mode detected."
-    USER_FLAG="--user $(id -u):$(id -g)"
+    echo "Standard mode detected. Mapping container HOME to /home/nnue_user."
+    HOST_UID=$(id -u)
+    HOST_GID=$(id -g)
+    INTERNAL_HOME="/home/nnue_user"
 fi
+
 
 if [ "$INTERACTIVE" = "true" ]; then
   INTERACTIVE_FLAGS="-it"
@@ -112,9 +120,14 @@ else
 fi
 
 echo "Creating new container 'nnue-container'..."
+# Note: running as root without `--user` as entrypoint script will handle
+# user switching based on the mode (rootless vs standard).
 docker run $INTERACTIVE_FLAGS \
   $GPU_FLAGS \
-  $USER_FLAG \
+  -e HOST_UID=$HOST_UID \
+  -e HOST_GID=$HOST_GID \
+  -e INTERNAL_HOME="$INTERNAL_HOME" \
+  -v "$CONTAINER_HOME":"$INTERNAL_HOME" \
   -v "$(pwd)":/workspace/nnue-pytorch \
   -v "$DATA_PATH":/data \
   --ipc=host \
