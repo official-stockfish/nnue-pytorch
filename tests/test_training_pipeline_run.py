@@ -7,7 +7,7 @@ import shlex
 
 def run_command(cmd_string):
     """Executes a shell command string and halts execution if it fails."""
-    print(f"[TEST_TRAINING_PIPELINE] Run Command: {cmd_string}\n")
+    print(f"[TEST_TRAINING_PIPELINE_RUN] Run Command: {cmd_string}\n")
     args = shlex.split(cmd_string)
     try:
         subprocess.run(args, check=True)

@@ -140,26 +140,26 @@ docker run $INTERACTIVE_FLAGS \
     shift 2
 
     if [ "$SKIP_SETUP" != "true" ]; then
-      echo "Running setup script inside container..."
+      echo "[RUN_DOCKER] Running setup script inside container..."
       /workspace/nnue-pytorch/setup_script.sh
-      echo "Setup complete."
+      echo "[RUN_DOCKER] Setup complete."
     fi
 
     if [ $# -gt 0 ]; then
-      echo "Executing command: $@"
+      echo "[RUN_DOCKER] Executing command: $@"
       "$@"
       RESULT=$?
 
       if [ $RESULT -ne 0 ]; then
-        echo "Command failed with status $RESULT"
+        echo "[RUN_DOCKER] Command failed with status $RESULT"
       fi
     fi
 
     if [ "$INTERACTIVE" = "true" ]; then
-      echo "Entering interactive shell..."
+      echo "[RUN_DOCKER] Entering interactive shell..."
       exec bash
     else
-      echo "Exiting container with exit code ${RESULT:-0}."
+      echo "[RUN_DOCKER] Exiting container with exit code ${RESULT:-0}."
       exit ${RESULT:-0}
     fi
   ' -- "$SKIP_SETUP" "$INTERACTIVE" "${EXEC_ARGS[@]}"
