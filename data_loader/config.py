@@ -12,13 +12,13 @@ class DataloaderSkipConfig:
     early_fen_skipping: int = -1
     """Skip positions from the start of the game. -1 = disabled."""
     soft_early_fen_skipping: int = 20
-    """Apply soft probability filter up to this ply. <= 0 = disabled."""
+    """Apply soft probability filter up to this ply. <= 0 = disabled. When active parameters `ply_*` control the skip probability for early positions (linear interpolation)."""
     simple_eval_skipping: int = -1
     """Skip positions based on simple eval. -1 = disabled."""
     param_index: int = 0
     """Indexing for parameter scans."""
     pc_y0: float = 0.0
-    """Piece count spline y0 parameter (x=0)."""
+    """Piece count spline y0 parameter (x=0). Parameters `pc_y*` control the desired relative frequency of positions with certain piececounts x. Uses spline interpolation inbetween."""
     pc_y1: float = 0.4
     """Piece count spline y1 parameter (x=8)."""
     pc_y2: float = 1.0
