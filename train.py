@@ -286,23 +286,6 @@ def main():
     if len(args.validation_datasets) > 0:
         val_datasets = args.validation_datasets
 
-    loss_params = args.nnue_lightning_config.loss_params
-    if (loss_params.start_lambda is not None) != (loss_params.end_lambda is not None):
-        raise Exception(
-            "Either both or none of start_lambda and end_lambda must be specified."
-        )
-
-    loss_params.start_lambda = (
-        loss_params.start_lambda
-        if loss_params.start_lambda is not None
-        else loss_params.lambda_
-    )
-    loss_params.end_lambda = (
-        loss_params.end_lambda
-        if loss_params.end_lambda is not None
-        else loss_params.lambda_
-    )
-
     global_batch_size_requested = args.batch_size
 
     accelerator = args.accelerator
@@ -404,7 +387,7 @@ def main():
             f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}"
         )
         print("Loss parameters:")
-        print(loss_params)
+        print(args.nnue_lightning_config.loss_params)
         print("Feature set: {}".format(feature_name))
         print("Num inputs: {}".format(nnue.model.input.NUM_INPUTS))
 

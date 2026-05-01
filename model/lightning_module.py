@@ -1,5 +1,7 @@
 import lightning as L
 import torch
+import math
+
 from torch import Tensor, nn
 from torchmetrics import MeanMetric, MetricCollection
 
@@ -302,8 +304,16 @@ class NNUE(L.LightningModule):
             self.current_epoch / self.max_epoch
         )
 
-        self.jitter_buffer.mul_(loss_params.jitter_decay_lambda_batch).add_(loss_params.jitter_lambda_batch * torch.randn_like(self.jitter_buffer))
-        batch_jitter = self.jitter_buffer.expand_as(scorenet)
+        if self.training:
+            # Normalizing jitter_lambda_batch so that combined with decay,
+            # the effective jitter magnitude remains consistent across different decay rates.
+            jitter_lambda_batch = loss_params.jitter_lambda_batch * math.sqrt(1 - loss_params.jitter_decay_lambda_batch ** 2)
+            batch_jitter_delta = jitter_lambda_batch * torch.randn_like(self.jitter_buffer)
+            self.jitter_buffer.mul_(loss_params.jitter_decay_lambda_batch).add_(batch_jitter_delta)
+            batch_jitter = self.jitter_buffer.expand_as(scorenet)
+        else:
+            # During evaluating, we effectively use decay = 0.0.
+            batch_jitter = loss_params.jitter_lambda_batch * torch.randn_like(scorenet)
         sample_jitter = scorenet.new_empty(scorenet.shape).normal_(0, 1) * loss_params.jitter_lambda_sample
         actual_lambda = actual_lambda + batch_jitter + sample_jitter
         actual_lambda = actual_lambda.clamp(0.0, 1.0)
