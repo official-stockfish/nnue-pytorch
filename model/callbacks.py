@@ -47,3 +47,10 @@ class ExplicitSWACallback(L.Callback):
 
     def load_state_dict(self, state_dict):
         pass
+
+    def on_load_checkpoint(self, trainer, pl_module, checkpoint):
+        if trainer.current_epoch > self.swa_start_epoch:
+            raise RuntimeError(
+                f"Cannot resume training after SWA has started. "
+                f"Current epoch {trainer.current_epoch} > SWA start epoch {self.swa_start_epoch}"
+            )
