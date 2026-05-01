@@ -226,15 +226,16 @@ def get_swapped_zero_positive_count(
     rest_zero_indicator = (
         (num_zeros - actmat_chunked.int() == ZERO_BLOCK_SIZE - 1)
         .reshape(shape)
-        .to(torch.float64)
     )
 
     # Sum all possible pairs of elements in a single sample of actmat_flat and rest_zero_indicator.
     # Aggregate sum over the whole batch.
     # This tells us how much "good" a swap of i-th and j-th slices would do. It doesn't consider
     # how much "bad" it would do though, that will be accounted for later, for performance reasons.
-    swapped_zero_count = torch.einsum(
-        "bi,bj->ij", actmat_flat.to(torch.float64), rest_zero_indicator
+    # Note: float32 has full precision up to a batch size of around 16M, more than enough for current cases.
+    # int32 would offer full precision up to batch sizes of 2B instead.
+    swapped_zero_count = (
+        actmat_flat.to(torch.float32).T @ rest_zero_indicator.to(torch.float32)
     )
 
     return swapped_zero_count
