@@ -426,9 +426,14 @@ def main():
         save_top_k=-1,
     )
 
-    # Since we compile the entire lightning module we have quite a few graph breaks
-    torch._dynamo.config.cache_size_limit = 32
-    nnue = torch.compile(nnue, backend=args.compile_backend)
+    if accelerator == "mps":
+        # On MPS, torch.compile is currently unstable
+        if is_master_process():
+            print("Disabling torch.compile for accelerator='mps'.")
+    else:
+        # Since we compile the entire lightning module we have quite a few graph breaks
+        torch._dynamo.config.cache_size_limit = 32
+        nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
     os.environ["SLURM_JOB_NAME"] = "bash"
@@ -442,9 +447,9 @@ def main():
         args.dataloader_config,
         args.epoch_size,
         args.validation_size,
-        pin_memory=args.pin_memory,
+        pin_memory=args.pin_memory and accelerator == "cuda",
         queue_size_limit=args.data_loader_queue_size,
-        prefetch_device=torch.device("cuda"),
+        prefetch_device=torch.device("cuda") if accelerator == "cuda" else None,
     )
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
