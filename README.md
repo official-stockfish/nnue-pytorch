@@ -4,7 +4,7 @@
 
 ### Docker
 
-Use Docker with the PyTorch container. This eliminates the need for local Python environment setup and C++ compilation. An alternative is Conda or Micromamba if Docker is not available (e.g. for Apple Sillicon).
+Use Docker with the PyTorch container. This eliminates the need for local Python environment setup and C++ compilation. An alternative is Conda or Micromamba if Docker is not available (e.g. for Apple Silicon).
 
 #### Prerequisites
 
@@ -17,7 +17,7 @@ For NVIDIA Users:
 - Up-to-date NVIDIA driver
 - NVIDIA Container Toolkit
 
-For Apple Sillicon Users (MPS):
+For Apple Silicon Users (MPS):
 - Does not work with Docker. See below for recommended setup.
 
 For CPU only (for testing purposes):
@@ -59,7 +59,7 @@ _Building the container will take it's time and disk space (~30-60GB)_
 - Afterwards run:
     ```
     pip install --no-cache-dir -r requirements.txt
-    ./setup_script.h
+    ./setup_script.sh
     ```
 
 ## Network training and management

@@ -41,8 +41,8 @@ class SerializeConfig:
     """Number of positions to use for FT optimization."""
 
     use_cupy: Annotated[bool, tyro.conf.arg(name="cupy")] = True
-    """Disable CUPY usage if not enough GPU memory is available.
-    This will use numpy instead, which is slower."""
+    """Whether to run FT optimization on the resolved torch device.
+    Disable this to force FT optimization to run on the CPU instead."""
 
     device: Union[int, Literal["cpu", "mps"]] = 0
     """Device to use for ft_optimize acceleration."""

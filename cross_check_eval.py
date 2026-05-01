@@ -13,7 +13,7 @@ import data_loader
 import model as M
 
 from dataclasses import dataclass
-from typing import Optional, Literal
+from typing import Optional, Literal, Annotated
 from tyro.conf import OmitArgPrefixes
 
 COMPATIBLE_ENGINE_OWNER = "official-stockfish"
@@ -31,8 +31,9 @@ class CrossCheckConfig:
     net: str
     """Path to the .nnue net to evaluate."""
 
-    build_engine_from_sha: Optional[str] = None
-    f"""If given clones and builds engine from github repository `owner/sha` at location given by `--engine`. Pass empty string: ({COMPATIBLE_ENGINE_OWNER}/{COMPATIBLE_ENGINE_SHA})."""
+    build_engine_from_sha: Annotated[Optional[str], tyro.conf.arg(
+        help=f"""If given clones and builds engine from github repository `owner/sha` at location given by `--engine`. Pass empty string for default values: ({COMPATIBLE_ENGINE_OWNER}/{COMPATIBLE_ENGINE_SHA})."""
+    )] = None
 
     checkpoint: Optional[str] = None
     """Optional checkpoint (used instead of nnue for local eval)."""
@@ -62,7 +63,17 @@ def clone_and_build_engine(engine_dest_path: str, repo_info: str, force_build: b
         owner = COMPATIBLE_ENGINE_OWNER
         sha = COMPATIBLE_ENGINE_SHA
     else:
-        owner, sha = repo_info.split("/")
+        parts = repo_info.split("/", 1)
+        if (
+            len(parts) != 2
+            or not parts[0]
+            or not parts[1]
+            or "/" in parts[1]
+        ):
+            raise ValueError(
+                f"Invalid repo_info {repo_info!r}. Expected format: 'owner/sha'."
+            )
+        owner, sha = parts
 
     engine_dir = os.path.dirname(os.path.abspath(engine_dest_path))
     if engine_dir:
