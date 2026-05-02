@@ -1,4 +1,10 @@
-.git/
-.container_home/
-env/
-logs/
+# Currently, dockerfiles only need two files for the build context.
+# This ignore-file saves times for the transfer to the daemon.
+# When changing the dockerfiles to include more files, this file may need adjustments.
+
+# 1. Ignore everything in the build context
+*
+
+# 2. Explicitly allow only the required files
+!requirements.txt
+!docker_entrypoint.sh
