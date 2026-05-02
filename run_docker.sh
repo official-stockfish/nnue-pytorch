@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Script that build and runs docker container for chosen accelerator.
+# ./run_docker.sh <ACCELERATOR: NVIDIA/AMD/CPU> <data_path_to_be_mounted> [<flags: skip-setup/non-interactive>] [--exec <command_to_run_inside_container>]
+
 set -e
 
 IMAGE_BASE_NAME="nnue-pytorch"
@@ -10,39 +13,51 @@ SKIP_SETUP="false"
 INTERACTIVE="true"
 EXEC_ARGS=()
 
-# 1. Parse up to two positional arguments for interactive replacements
-if [[ $# -gt 0 && ! "$1" =~ ^-- ]]; then
-  GPU_INPUT=$(echo "$1" | tr '[:lower:]' '[:upper:]')
-  shift
-fi
-
-if [[ $# -gt 0 && ! "$1" =~ ^-- ]]; then
-  DATA_PATH="$1"
-  shift
-fi
-
-# 2. Parse optional flags
+# 2. Parse arguments
 while [[ $# -gt 0 ]]; do
-  case $1 in
-    --skip-setup)
-      SKIP_SETUP="true"
-      shift
-      ;;
-    --non-interactive)
-      INTERACTIVE="false"
-      shift
-      ;;
-    --exec)
-      shift
-      EXEC_ARGS=("$@")
-      # Consume all remaining arguments as the execution command
-      break
-      ;;
-    *)
-      echo "Unknown argument: $1"
+  if [[ $# -gt 0 && ! "$1" =~ ^-- ]]; then
+    if [ -n "$GPU_INPUT" ] && [ -n "$DATA_PATH" ]; then
+      echo "Error: Too many positional arguments. Expected GPU brand and data path only."
       exit 1
-      ;;
-  esac
+    fi
+    if [ -z "$GPU_INPUT" ]; then
+      GPU_INPUT=$(echo "$1" | tr '[:lower:]' '[:upper:]')
+    elif [ -z "$DATA_PATH" ]; then
+      DATA_PATH="$1"
+    fi
+    shift
+  else
+    case $1 in
+      --skip-setup)
+        SKIP_SETUP="true"
+        shift
+        ;;
+      --non-interactive)
+        INTERACTIVE="false"
+        shift
+        ;;
+      --exec)
+        shift
+        EXEC_ARGS=("$@")
+        # Consume all remaining arguments as the execution command
+        break
+        ;;
+      --help)
+        echo "Usage: $0 [GPU_BRAND] [DATA_PATH] [--skip-setup] [--non-interactive] [--exec <command>]"
+        echo "  GPU_BRAND: NVIDIA, AMD, or CPU (optional, will prompt if not provided)."
+        echo "  DATA_PATH: Path to data directory to mount (optional, will prompt if not provided)."
+        echo "  --skip-setup: Skip running the setup script inside the container."
+        echo "  --non-interactive: Run the container in non-interactive mode (no shell). Does not prevent prompts for GPU and data path if not provided."
+        echo "  --exec <command>: Command to execute inside the container instead of starting a shell."
+        echo "  Note: --exec must be used at the end and does not imply --non-interactive, but typically used together."
+        exit 0
+        ;;
+      *)
+        echo "Unknown argument: $1. Use --help for usage information."
+        exit 1
+        ;;
+    esac
+  fi
 done
 
 # 3. Handle GPU selection
@@ -141,7 +156,10 @@ docker run $INTERACTIVE_FLAGS \
 
     if [ "$SKIP_SETUP" != "true" ]; then
       echo "[RUN_DOCKER] Running setup script inside container..."
-      /workspace/nnue-pytorch/setup_script.sh
+      if ! bash -e /workspace/nnue-pytorch/setup_script.sh; then
+        echo "[RUN_DOCKER] Setup failed."
+        exit 1
+      fi
       echo "[RUN_DOCKER] Setup complete."
     fi
 

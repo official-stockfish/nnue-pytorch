@@ -63,7 +63,8 @@ if [ "$(id -u)" -eq 0 ] && [ "$TARGET_UID" -ne 0 ]; then
     fi
 
     # Fix ownership of the mount point if it was created by a different root process
-    chown "$TARGET_UID:$TARGET_GID" "$HOME"
+    # so files from a previous UID/GID mapping remain accessible.
+    chown -R -h "$TARGET_UID:$TARGET_GID" "$HOME"
 
     # Drop privileges and execute the command
     exec gosu nnue_user "$@"
