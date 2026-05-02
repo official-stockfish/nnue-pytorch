@@ -7,7 +7,11 @@ from dataclasses import dataclass, field
 from typing import Optional, Literal, Annotated, Union
 from tyro.conf import OmitArgPrefixes, Positional
 
-from data_loader import DataloaderSkipConfig
+try:
+    from data_loader.config import DataloaderSkipConfig
+except ImportError as e:
+    print(f"Error importing DataloaderSkipConfig: {e}")
+    DataloaderSkipConfig = None
 
 import model as M
 
@@ -51,7 +55,7 @@ class SerializeConfig:
     """Number of workers to use for data loading during FT optimization."""
 
     dataloader_config: OmitArgPrefixes[DataloaderSkipConfig] = field(
-        default_factory=DataloaderSkipConfig
+        default_factory=DataloaderSkipConfig if DataloaderSkipConfig is not None else lambda: None
     )
 
 

@@ -519,12 +519,15 @@ def make_sparse_batch_provider(
         )
     # overwrite defaults
     elif loader_config.random_fen_skipping == 0 or not loader_config.filtered:
+        print("[ft_perm.py] WARNING: Overwriting dataloader config to ensure some level of fen skipping and filtering, which are important for performance and correctness of ft perm finding.")
+        print("[ft_perm.py]   Before overwrites: {}".format(loader_config))
         random_fen_skipping = loader_config.random_fen_skipping if loader_config.random_fen_skipping != 0 else 10
         loader_config = replace(
             loader_config,
             random_fen_skipping=random_fen_skipping,
             filtered=True,
         )
+        print("[ft_perm.py]   After overwrites:  {}".format(loader_config))
     return data_loader.SparseBatchProvider(
         feature_set=feature_set_name,
         filenames=[data_path],
@@ -566,7 +569,8 @@ def forward_ft(
     # and we want to scale to 1.0=127, but a shift is faster than a division (in inference)
     l0_ = torch.cat(l0_s1, dim=1) * (1 / 512)
 
-    return l0_.round()
+    # Inference uses bitshift which is equvialent to rounding down (floor).
+    return l0_.floor()
 
 
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
@@ -644,8 +648,7 @@ def gather_impl(
 
     quantized_model = copy.deepcopy(model)
     quantize_ft(quantized_model)
-    if device_str != "cpu":
-        quantized_model.to(device_str)
+    quantized_model.to(device_str)
 
     sparse_batch_provider = make_sparse_batch_provider(
         dataset,
@@ -680,8 +683,12 @@ def command_gather(args: FeaturePermutationConfig) -> None:
         nnue = NNUE.load_from_checkpoint(
             args.subcommand.checkpoint,
             feature_name=args.subcommand.feature_config.features,
-            config=args.model_config,
+            config=M.NNUELightningConfig(
+                features=args.subcommand.feature_config,
+                model_config=args.model_config,
+            ),
             quantize_config=QuantizationConfig(),
+            map_location=torch.device("cpu"),
         )
         model = nnue.model
     else:
