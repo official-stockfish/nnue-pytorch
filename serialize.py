@@ -4,8 +4,10 @@ import torch
 import tyro
 
 from dataclasses import dataclass, field
-from typing import Optional, Literal, Annotated
+from typing import Optional, Literal, Annotated, Union
 from tyro.conf import OmitArgPrefixes, Positional
+
+from data_loader import DataloaderSkipConfig
 
 import model as M
 
@@ -39,11 +41,18 @@ class SerializeConfig:
     """Number of positions to use for FT optimization."""
 
     use_cupy: Annotated[bool, tyro.conf.arg(name="cupy")] = True
-    """Disable CUPY usage if not enough GPU memory is available.
-    This will use numpy instead, which is slower."""
+    """Whether to run FT optimization on the resolved torch device.
+    Disable this to force FT optimization to run on the CPU instead."""
 
-    device: int = 0
-    """Device to use for cupy"""
+    device: Union[int, Literal["cpu", "mps"]] = 0
+    """Device to use for ft_optimize acceleration."""
+
+    loader_num_workers: int = 4
+    """Number of workers to use for data loading during FT optimization."""
+
+    dataloader_config: OmitArgPrefixes[DataloaderSkipConfig] = field(
+        default_factory=DataloaderSkipConfig
+    )
 
 
 @dataclass(frozen=True)
@@ -137,10 +146,6 @@ def main():
                 "Invalid number of positions to optimize FT with. (--ft_optimize_count)"
             )
 
-        if serialize_config.use_cupy:
-            if serialize_config.device is not None:
-                ftperm.set_cupy_device(serialize_config.device)
-
         if not args.source.endswith(".nnue"):
             nnue.model.input.coalesce()
             nnue.model.layer_stacks.coalesce_layer_stacks_inplace()
@@ -150,6 +155,9 @@ def main():
             serialize_config.ft_optimize_data,
             serialize_config.ft_optimize_count,
             use_cupy=serialize_config.use_cupy,
+            device=serialize_config.device,
+            loader_num_workers=serialize_config.loader_num_workers,
+            loader_config=serialize_config.dataloader_config,
         )
 
     if args.target.endswith(".ckpt"):
