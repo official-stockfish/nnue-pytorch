@@ -46,15 +46,26 @@ struct CliConfig {
 
 const CliConfig default_cli_config = {
     .skip_config = {
-        .filtered             = true,
-        .random_fen_skipping  = 10,
-        .wld_filtered         = true,
-        .early_fen_skipping   = 10,
-        .simple_eval_skipping = 0,
-        .param_index          = 0,
-        .pc_y1                = 0.6893201149773951,
-        .pc_y2                = 2.9285769485515805,
-        .pc_y3                = 1.4386005301749225
+        .filtered                = true,
+        .random_fen_skipping     = 10,
+        .wld_filtered            = true,
+        .early_fen_skipping      = 20,
+        .soft_early_fen_skipping = 30,
+        .simple_eval_skipping    = 0,
+        .param_index             = 0,
+        .pc_y0                   = 0.1,
+        .pc_y1                   = 0.5,
+        .pc_y2                   = 1.0,
+        .pc_y3                   = 1.0,
+        .pc_y4                   = 0.75,
+        .ply_x1                  = 0.0,
+        .ply_y1                  = 0.1,
+        .ply_x2                  = 18.0,
+        .ply_y2                  = 0.15,
+        .ply_x3                  = 22.0,
+        .ply_y3                  = 0.25,
+        .ply_x4                  = 26.0,
+        .ply_y4                  = 0.5,
     },
     .ddp_config = {.rank = 0, .world_size = 1},
     .batch_size = 65536,
@@ -102,7 +113,9 @@ bool parse_ini(const fs::path& filepath, std::map<std::string, std::string>& con
 CliConfig build_config_from_map(const std::map<std::string, std::string>& m) {
     const std::vector<std::string> required_keys = {
         "filtered", "random_fen_skipping", "wld_filtered", "early_fen_skipping",
-        "simple_eval_skipping", "param_index", "pc_y1", "pc_y2", "pc_y3",
+        "soft_early_fen_skipping", "simple_eval_skipping", "param_index",
+        "pc_y0", "pc_y1", "pc_y2", "pc_y3", "pc_y4",
+        "ply_x1", "ply_y1", "ply_x2", "ply_y2", "ply_x3", "ply_y3", "ply_x4", "ply_y4",
         "ddp_config.rank", "ddp_config.world_size", "batch_size", "cyclic"
     };
 
@@ -124,11 +137,22 @@ CliConfig build_config_from_map(const std::map<std::string, std::string>& m) {
             .random_fen_skipping  = std::stoi(m.at("random_fen_skipping")),
             .wld_filtered         = parse_bool(m.at("wld_filtered")),
             .early_fen_skipping   = std::stoi(m.at("early_fen_skipping")),
+            .soft_early_fen_skipping = std::stoi(m.at("soft_early_fen_skipping")),
             .simple_eval_skipping = std::stoi(m.at("simple_eval_skipping")),
             .param_index          = std::stoi(m.at("param_index")),
+            .pc_y0                = std::stod(m.at("pc_y0")),
             .pc_y1                = std::stod(m.at("pc_y1")),
             .pc_y2                = std::stod(m.at("pc_y2")),
-            .pc_y3                = std::stod(m.at("pc_y3"))
+            .pc_y3                = std::stod(m.at("pc_y3")),
+            .pc_y4                = std::stod(m.at("pc_y4")),
+            .ply_x1               = std::stod(m.at("ply_x1")),
+            .ply_y1               = std::stod(m.at("ply_y1")),
+            .ply_x2               = std::stod(m.at("ply_x2")),
+            .ply_y2               = std::stod(m.at("ply_y2")),
+            .ply_x3               = std::stod(m.at("ply_x3")),
+            .ply_y3               = std::stod(m.at("ply_y3")),
+            .ply_x4               = std::stod(m.at("ply_x4")),
+            .ply_y4               = std::stod(m.at("ply_y4")),
         },
         .ddp_config = {
             .rank       = std::stoi(m.at("ddp_config.rank")),
