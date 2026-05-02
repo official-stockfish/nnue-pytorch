@@ -1,0 +1,4 @@
+.git/
+.container_home/
+env/
+logs/
