@@ -4,51 +4,162 @@ set -e
 
 IMAGE_BASE_NAME="nnue-pytorch"
 
-echo "Please select the target GPU brand to build for:"
-select brand in "NVIDIA" "AMD"; do
-  case $brand in
-    NVIDIA ) GPU_TYPE="nvidia"; break;;
-    AMD )    GPU_TYPE="amd"; break;;
+GPU_INPUT=""
+DATA_PATH=""
+SKIP_SETUP="false"
+INTERACTIVE="true"
+EXEC_ARGS=()
+
+# 1. Parse up to two positional arguments for interactive replacements
+if [[ $# -gt 0 && ! "$1" =~ ^-- ]]; then
+  GPU_INPUT=$(echo "$1" | tr '[:lower:]' '[:upper:]')
+  shift
+fi
+
+if [[ $# -gt 0 && ! "$1" =~ ^-- ]]; then
+  DATA_PATH="$1"
+  shift
+fi
+
+# 2. Parse optional flags
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --skip-setup)
+      SKIP_SETUP="true"
+      shift
+      ;;
+    --non-interactive)
+      INTERACTIVE="false"
+      shift
+      ;;
+    --exec)
+      shift
+      EXEC_ARGS=("$@")
+      # Consume all remaining arguments as the execution command
+      break
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      exit 1
+      ;;
   esac
 done
 
-if [ "$GPU_TYPE" == "nvidia" ]; then
-  DOCKERFILE="Dockerfile.NVIDIA"
-  IMAGE_TAG="${IMAGE_BASE_NAME}:nvidia"
-  GPU_FLAGS="--gpus all"
-  echo "Selected NVIDIA build."
-elif [ "$GPU_TYPE" == "amd" ]; then
-  DOCKERFILE="Dockerfile.AMD"
-  IMAGE_TAG="${IMAGE_BASE_NAME}:amd"
-  GPU_FLAGS="--device /dev/kfd --device /dev/dri"
-  echo "Selected AMD build."
+# 3. Handle GPU selection
+if [ -z "$GPU_INPUT" ]; then
+  echo "Please select the target GPU brand to build for:"
+  select brand in "NVIDIA" "AMD" "CPU"; do
+    case $brand in
+      NVIDIA ) GPU_INPUT="NVIDIA"; break;;
+      AMD )    GPU_INPUT="AMD"; break;;
+      CPU )    GPU_INPUT="CPU"; break;;
+    esac
+  done
 fi
+
+case "$GPU_INPUT" in
+  NVIDIA )
+    GPU_TYPE="nvidia"
+    DOCKERFILE="Dockerfile.NVIDIA"
+    IMAGE_TAG="${IMAGE_BASE_NAME}:nvidia"
+    GPU_FLAGS="--gpus all"
+    echo "Selected NVIDIA build."
+    ;;
+  AMD )
+    GPU_TYPE="amd"
+    DOCKERFILE="Dockerfile.AMD"
+    IMAGE_TAG="${IMAGE_BASE_NAME}:amd"
+    GPU_FLAGS="--device /dev/kfd --device /dev/dri"
+    echo "Selected AMD build."
+    ;;
+  CPU )
+    GPU_TYPE="none"
+    DOCKERFILE="Dockerfile.CPU"
+    IMAGE_TAG="${IMAGE_BASE_NAME}:cpu"
+    GPU_FLAGS=""
+    echo "Selected CPU build."
+    ;;
+  * )
+    echo "Invalid GPU brand: $GPU_INPUT. Must be NVIDIA, AMD, or CPU."
+    exit 1
+    ;;
+esac
 
 echo "Building image $IMAGE_TAG from $DOCKERFILE"
 docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" .
 
-echo "Enter the path to your data directory to mount into the container: "
-read DATA_PATH
+# 4. Handle Data Path selection
+if [ -z "$DATA_PATH" ]; then
+  echo "Enter the path to your data directory to mount into the container: "
+  read -r DATA_PATH
+fi
 
-DATA_PATH=${DATA_PATH}
 echo "Using data path: $DATA_PATH"
 
-# Checking if docker is in rootless mode.
+# 5. Handle user mapping and container home directory setup
+CONTAINER_HOME="$(pwd)/.container_home"
+mkdir -p "$CONTAINER_HOME"
+
 if docker info 2>/dev/null | grep -iq "rootless"; then
-    echo "Rootless mode detected."
-    USER_FLAG="--user 0:0"
+    echo "Rootless mode detected. Mapping container HOME to /root."
+    HOST_UID=0
+    HOST_GID=0
+    INTERNAL_HOME="/root"
 else
-    echo "Standard mode detected."
-    USER_FLAG="--user $(id -u):$(id -g)"
+    echo "Standard mode detected. Mapping container HOME to /home/nnue_user."
+    HOST_UID=$(id -u)
+    HOST_GID=$(id -g)
+    INTERNAL_HOME="/home/nnue_user"
+fi
+
+
+if [ "$INTERACTIVE" = "true" ]; then
+  INTERACTIVE_FLAGS="-it"
+else
+  INTERACTIVE_FLAGS=""
 fi
 
 echo "Creating new container 'nnue-container'..."
-docker run -it \
+# Note: running as root without `--user` as entrypoint script will handle
+# user switching based on the mode (rootless vs standard).
+docker run $INTERACTIVE_FLAGS \
   $GPU_FLAGS \
-  $USER_FLAG \
+  -e HOST_UID=$HOST_UID \
+  -e HOST_GID=$HOST_GID \
+  -e INTERNAL_HOME="$INTERNAL_HOME" \
+  -v "$CONTAINER_HOME":"$INTERNAL_HOME" \
   -v "$(pwd)":/workspace/nnue-pytorch \
   -v "$DATA_PATH":/data \
   --ipc=host \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
-  $IMAGE_TAG
+  $IMAGE_TAG \
+  bash -c '
+    SKIP_SETUP=$1
+    INTERACTIVE=$2
+    shift 2
+
+    if [ "$SKIP_SETUP" != "true" ]; then
+      echo "[RUN_DOCKER] Running setup script inside container..."
+      /workspace/nnue-pytorch/setup_script.sh
+      echo "[RUN_DOCKER] Setup complete."
+    fi
+
+    if [ $# -gt 0 ]; then
+      echo "[RUN_DOCKER] Executing command: $@"
+      "$@"
+      RESULT=$?
+
+      if [ $RESULT -ne 0 ]; then
+        echo "[RUN_DOCKER] Command failed with status $RESULT"
+      fi
+    fi
+
+    if [ "$INTERACTIVE" = "true" ]; then
+      echo "[RUN_DOCKER] Entering interactive shell..."
+      exec bash
+    else
+      echo "[RUN_DOCKER] Exiting container with exit code ${RESULT:-0}."
+      exit ${RESULT:-0}
+    fi
+  ' -- "$SKIP_SETUP" "$INTERACTIVE" "${EXEC_ARGS[@]}"
