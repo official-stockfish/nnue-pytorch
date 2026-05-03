@@ -24,7 +24,7 @@ class TrainingConfig:
     """Number of positions in validation epoch (<= 0 disables vaildation)."""
 
     validation_frequency: int = 1
-    """Number of epochs between validation (<= 0 disables vaildation)."""
+    """Number of epochs between validation (has to be >= 1)."""
 
     default_root_dir: Optional[str] = None
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
