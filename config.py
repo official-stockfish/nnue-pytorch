@@ -23,7 +23,7 @@ class TrainingConfig:
     validation_size: int = 0
     """Number of positions in validation epoch (<= 0 disables vaildation)."""
 
-    validation_frequency: int = 1
+    check_val_every_n_epoch: int = 1
     """Number of epochs between validation (has to be >= 1)."""
 
     default_root_dir: Optional[str] = None

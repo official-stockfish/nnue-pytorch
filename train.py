@@ -461,7 +461,7 @@ def main():
         enable_checkpointing=True,
         benchmark=True,
         num_sanity_val_steps=0 if val is None else 2,
-        check_val_every_n_epoch=args.validation_frequency,
+        check_val_every_n_epoch=args.check_val_every_n_epoch,
     )
 
     if actual_threads > 0:
