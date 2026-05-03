@@ -34,7 +34,7 @@ cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DPGO_INPUT="$PGO_INPUT" \
   -DLIB_COPY_DIR="$ROOT_DIR"
 
-echo "Building shared library (training_data_loader) with instrumented targets..."
+echo "Building instrumented default targets..."
 cmake --build "$BUILD_DIR" -j
 
 echo "Running bench to generate profile data..."
@@ -59,7 +59,7 @@ cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DCMAKE_INSTALL_PREFIX="./" \
   -DLIB_COPY_DIR="$ROOT_DIR"
 
-echo "Building shared library (training_data_loader) with profile data..."
+echo "Building default targets with profile data..."
 cmake --build "$BUILD_DIR" -j
 
 echo "PGO build complete."

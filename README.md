@@ -4,7 +4,8 @@
 
 ### Docker
 
-Use Docker with the PyTorch container. This eliminates the need for local Python environment setup and C++ compilation. An alternative is Conda or Micromamba if Docker is not available (e.g. for Apple Silicon).
+Use Docker with the PyTorch container. This eliminates the need for local Python environment setup and C++ compilation. An alternative is Conda or Micromamba if Docker is not available, or if you want native Apple Silicon MPS acceleration.
+While Docker is available on Apple for CPU-Only testing, it does not support native MPS acceleration.
 
 #### Prerequisites
 
@@ -18,7 +19,8 @@ For NVIDIA Users:
 - NVIDIA Container Toolkit
 
 For Apple Silicon Users (MPS):
-- Does not work with Docker. See below for recommended setup.
+- Native MPS acceleration does not work with Docker.
+- See below for recommended setup or test with CPU only.
 
 For CPU only (for testing purposes):
 - Docker
@@ -35,7 +37,7 @@ Use the provided script to build and start the container:
 ./run_docker.sh
 ```
 
-You'll be prompted to select the target GPU vendor and the path to your data directory, which will be mounted into the container. Once inside the container, you can run training commands directly.
+You'll be prompted to select the target GPU vendor (or CPU only for testing) and the path to your data directory, which will be mounted into the container. Once inside the container, you can run training commands directly. Also supports non-interactive workflows if all necessary arguments are given through the CLI.
 
 _Building the container will take it's time and disk space (~30-60GB)_
 

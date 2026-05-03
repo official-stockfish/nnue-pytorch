@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# Script that build and runs docker container for chosen accelerator.
-# ./run_docker.sh <ACCELERATOR: NVIDIA/AMD/CPU> <data_path_to_be_mounted> [<flags: skip-setup/non-interactive>] [--exec <command_to_run_inside_container>]
-
+# Script that builds and runs a Docker container for the chosen accelerator.
+# Usage: ./run_docker.sh <ACCELERATOR: NVIDIA/AMD/CPU> <data_path_to_be_mounted> [--skip-setup] [--non-interactive] [--exec <command_to_run_inside_container> ...]
 set -e
 
 IMAGE_BASE_NAME="nnue-pytorch"
@@ -47,7 +46,7 @@ while [[ $# -gt 0 ]]; do
         echo "  GPU_BRAND: NVIDIA, AMD, or CPU (optional, will prompt if not provided)."
         echo "  DATA_PATH: Path to data directory to mount (optional, will prompt if not provided)."
         echo "  --skip-setup: Skip running the setup script inside the container."
-        echo "  --non-interactive: Run the container in non-interactive mode (no shell). Does not prevent prompts for GPU and data path if not provided."
+        echo "  --non-interactive: Run the container in non-interactive mode (no shell). For fully non-interactive workflows, GPU_BRAND and DATA_PATH are required."
         echo "  --exec <command>: Command to execute inside the container instead of starting a shell."
         echo "  Note: --exec must be used at the end and does not imply --non-interactive, but typically used together."
         exit 0
@@ -134,7 +133,7 @@ else
   INTERACTIVE_FLAGS=""
 fi
 
-echo "Creating new container 'nnue-container'..."
+echo "Creating new container..."
 # Note: running as root without `--user` as entrypoint script will handle
 # user switching based on the mode (rootless vs standard).
 docker run $INTERACTIVE_FLAGS \

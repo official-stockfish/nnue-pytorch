@@ -58,17 +58,31 @@ if [ "$(id -u)" -eq 0 ] && [ "$TARGET_UID" -ne 0 ]; then
             usermod -u "$TARGET_UID" -g "$TARGET_GID" -d "$HOME" -s /bin/bash nnue_user
         else
             # Neither the UID nor the name exists
-            useradd -u "$TARGET_UID" -g nnue_group -d "$HOME" -s /bin/bash nnue_user
+            useradd -m -u "$TARGET_UID" -g nnue_group -d "$HOME" -s /bin/bash nnue_user
         fi
     fi
 
     # Fix ownership of the mount point if it was created by a different root process
     # so files from a previous UID/GID mapping remain accessible.
-    chown -R -h "$TARGET_UID:$TARGET_GID" "$HOME"
+    mkdir -p "$HOME"
+    CURRENT_HOME_UID=$(stat -c '%u' "$HOME")
+    CURRENT_HOME_GID=$(stat -c '%g' "$HOME")
+    if [ "$CURRENT_HOME_UID" -ne "$TARGET_UID" ] || [ "$CURRENT_HOME_GID" -ne "$TARGET_GID" ]; then
+        echo "[DOCKER_ENTRYPOINT] Adjusting ownership of $HOME from $CURRENT_HOME_UID:$CURRENT_HOME_GID to $TARGET_UID:$TARGET_GID"
+        chown -R -h "$TARGET_UID:$TARGET_GID" "$HOME"
+    fi
 
     # Drop privileges and execute the command
     exec gosu nnue_user "$@"
 fi
 
 # Fallback for manual 'docker run -u' overrides
+# When running as an arbitrary UID, the default HOME may point to nnue_user's
+# home even though that account/directory was never created in this branch.
+# Ensure HOME is usable for tools that need config/cache directories.
+if [ ! -d "$HOME" ] || [ ! -w "$HOME" ]; then
+    FALLBACK_HOME="/tmp/home-$(id -u)"
+    mkdir -p "$FALLBACK_HOME"
+    export HOME="$FALLBACK_HOME"
+fi
 exec "$@"
