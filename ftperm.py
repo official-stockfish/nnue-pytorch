@@ -88,7 +88,7 @@ class GatherConfig:
     """
     count: int = 1000
     """
-    number of datapoints to process
+    number of datapoints to process (lower bound, actual count will be a multi of batch_size=1024)
     """
     loader_num_workers: int = 4
     """Number of workers to use for data loading during gathering FT activations."""
@@ -569,7 +569,7 @@ def forward_ft(
     # and we want to scale to 1.0=127, but a shift is faster than a division (in inference)
     l0_ = torch.cat(l0_s1, dim=1) * (1 / 512)
 
-    # Inference uses bitshift which is equvialent to rounding down (floor).
+    # Inference uses bitshift which is equivalent to rounding down (floor).
     return l0_.floor()
 
 
@@ -684,7 +684,6 @@ def command_gather(args: FeaturePermutationConfig) -> None:
             args.subcommand.checkpoint,
             feature_name=args.subcommand.feature_config.features,
             config=M.NNUELightningConfig(
-                features=args.subcommand.feature_config,
                 model_config=args.model_config,
             ),
             quantize_config=QuantizationConfig(),

@@ -33,7 +33,7 @@ def main():
         is_int = False
 
     if is_int:
-        train_device_arg = f"--gpus={args.device},"
+        train_device_arg = f"--accelerator=cuda --gpus={args.device},"
     else:
         train_device_arg = f"--accelerator={args.device}"
 
