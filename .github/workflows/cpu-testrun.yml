@@ -1,0 +1,20 @@
+name: cpu-testrun
+
+on: [workflow_call]
+
+jobs:
+  build-and-bench:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Perform Test Run of entire Training Pipeline (CPU)
+        run: |
+          ./run_docker.sh CPU ${{ github.workspace }} --non-interactive --exec \
+            python -u tests/test_training_pipeline_run.py -y --device cpu --test-dir /data/logs/training/runs/unittests_train_pipeline_cpu
+
+      - name: Perform Cross-Check Evaluation (CPU)
+        run: |
+          ./run_docker.sh CPU ${{ github.workspace }} --skip-setup --non-interactive --exec \
+            python -u cross_check_eval.py --net /data/logs/training/runs/unittests_train_pipeline_cpu/lightning_logs/version_2/checkpoints/last.nnue --data .pgo/small.binpack --engine /data/tmp/stockfish --build_engine_from_sha='' --device='cpu'

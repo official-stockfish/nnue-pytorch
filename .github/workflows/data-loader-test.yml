@@ -1,10 +1,6 @@
 name: training-data-loader
 
-on:
-  push:
-    branches: ["master"]
-  pull_request:
-    branches: ["master"]
+on: [workflow_call]
 
 jobs:
   build-and-bench:

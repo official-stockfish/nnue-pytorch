@@ -1,7 +1,6 @@
 name: Ruff Lint
 
-on:
-  pull_request:
+on: [workflow_call]
 
 jobs:
   ruff:

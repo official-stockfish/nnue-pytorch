@@ -1,0 +1,89 @@
+name: CI Orchestrator
+on:
+  push:
+    branches: ['**'] # Triggers on pushes to any branch
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: ['**']
+
+jobs:
+  # Always call ruff job first
+  call-ruff-pr:
+    uses: ./.github/workflows/ruff-pr.yml
+
+  # Evaluate conditions for other jobs
+  evaluate-execution:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.base_ref == 'master'
+    outputs:
+      run_secondaries: ${{ steps.check_status.outputs.run_status }}
+      run_data_loader_test_paths: ${{ steps.filter.outputs.data_loader_paths }}
+      force_all: ${{ steps.check_status.outputs.force_all }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Evaluate Path Restrictions
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            data_loader_paths:
+              - 'data_loader/**'
+              - 'compile_data_loader.sh'
+
+      - name: Determine Execution State
+        id: check_status
+        run: |
+          EVENT_NAME="${{ github.event_name }}"
+          EVENT_ACTION="${{ github.event.action }}"
+          IS_DRAFT="false"
+          COMMIT_MSG=""
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            IS_DRAFT="${{ github.event.pull_request.draft }}"
+            COMMIT_MSG=$(git log -1 --pretty=%B)
+          elif [ "$EVENT_NAME" = "push" ]; then
+            COMMIT_MSG="${{ github.event.head_commit.message }}"
+          fi
+
+          # 1. Force Override (Ready for Review or [force ci])
+          if [[ "$EVENT_ACTION" == "ready_for_review" || "$COMMIT_MSG" == *"[force ci]"* ]]; then
+            echo "run_status=true" >> $GITHUB_OUTPUT
+            echo "force_all=true" >> $GITHUB_OUTPUT
+
+          # 2. Custom Skip Directive ([wip])
+          elif [[ "$COMMIT_MSG" == *"[wip]"* ]]; then
+            echo "run_status=false" >> $GITHUB_OUTPUT
+            echo "force_all=false" >> $GITHUB_OUTPUT
+
+          # 3. Standard Non-Draft Execution
+          elif [[ "$IS_DRAFT" == "false" ]]; then
+            echo "run_status=true" >> $GITHUB_OUTPUT
+            echo "force_all=false" >> $GITHUB_OUTPUT
+
+          # 4. Standard Draft Execution
+          else
+            echo "run_status=false" >> $GITHUB_OUTPUT
+            echo "force_all=false" >> $GITHUB_OUTPUT
+          fi
+
+  call-data-loader-test:
+    needs: [call-ruff-pr, evaluate-execution]
+    # Runs only if master/draft conditions are met AND data-loader paths are affected
+    if: >
+      needs.evaluate-execution.outputs.force_all == 'true' ||
+      (
+        needs.evaluate-execution.outputs.run_secondaries == 'true' &&
+        needs.evaluate-execution.outputs.run_data_loader_test_paths == 'true'
+      )
+    uses: ./.github/workflows/data-loader-test.yml
+
+  call-cpu-testrun:
+    needs: [call-ruff-pr, evaluate-execution]
+    # Runs if master/draft conditions are met
+    if: >
+      needs.evaluate-execution.outputs.force_all == 'true' ||
+      needs.evaluate-execution.outputs.run_secondaries == 'true'
+    uses: ./.github/workflows/cpu-testrun.yml

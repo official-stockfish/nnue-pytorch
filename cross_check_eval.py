@@ -1,6 +1,9 @@
 import subprocess
 import re
 import math
+import os
+import shutil
+import sys
 
 import tyro
 
@@ -10,9 +13,11 @@ import data_loader
 import model as M
 
 from dataclasses import dataclass
-from typing import Optional, Literal
+from typing import Optional, Literal, Annotated
 from tyro.conf import OmitArgPrefixes
 
+COMPATIBLE_ENGINE_OWNER = "official-stockfish"
+COMPATIBLE_ENGINE_SHA = "1a882efc7fc22b3b16893a406e6060916022fcc4"
 
 @dataclass(frozen=True)
 class CrossCheckConfig:
@@ -26,6 +31,10 @@ class CrossCheckConfig:
     net: str
     """Path to the .nnue net to evaluate."""
 
+    build_engine_from_sha: Annotated[Optional[str], tyro.conf.arg(
+        help=f"""If given clones and builds engine from github repository `owner/sha` at location given by `--engine`. Pass empty string for default values: ({COMPATIBLE_ENGINE_OWNER}/{COMPATIBLE_ENGINE_SHA})."""
+    )] = None
+
     checkpoint: Optional[str] = None
     """Optional checkpoint (used instead of nnue for local eval)."""
 
@@ -38,11 +47,84 @@ class CrossCheckConfig:
     count: int = 2**10
     """Number of positions to process."""
 
+    force_build: bool = False
+    """If True, bypasses the confirmation prompt and overwrites existing build directories/binaries."""
+
 
 @dataclass(frozen=True)
 class CliConfig:
     cross_check_config: OmitArgPrefixes[CrossCheckConfig]
     nnue_lightning_config: OmitArgPrefixes[M.NNUELightningConfig]
+
+
+
+def clone_and_build_engine(engine_dest_path: str, repo_info: str, force_build: bool):
+    if repo_info == "":
+        owner = COMPATIBLE_ENGINE_OWNER
+        sha = COMPATIBLE_ENGINE_SHA
+    else:
+        parts = repo_info.split("/", 1)
+        if (
+            len(parts) != 2
+            or not parts[0]
+            or not parts[1]
+            or "/" in parts[1]
+        ):
+            raise ValueError(
+                f"Invalid repo_info {repo_info!r}. Expected format: 'owner/sha'."
+            )
+        owner, sha = parts
+
+    engine_dir = os.path.dirname(os.path.abspath(engine_dest_path))
+    if engine_dir:
+        os.makedirs(engine_dir, exist_ok=True)
+
+    tmp_dir = os.path.join(engine_dir, "tmp_stockfish_build")
+
+    # Check existence and handle prompts / CI overrides
+    paths_to_check = [p for p in (tmp_dir, engine_dest_path) if os.path.exists(p)]
+    if paths_to_check:
+        if force_build:
+            print(f"--force-build is set. Overwriting existing paths: {', '.join(paths_to_check)}")
+        else:
+            print(f"Warning: The following paths already exist: {', '.join(paths_to_check)}")
+            if not sys.stdin.isatty():
+                print("Non-interactive environment detected. Defaulting to 'no'. Skipping build.")
+                return
+            try:
+                ans = input("Do you want to overwrite them? (y/[n]): ")
+                if ans.strip().lower() != 'y':
+                    print("Skipping build. Proceeding with existing files.")
+                    return
+            except EOFError:
+                print("EOFError: No standard input available. Defaulting to 'no'. Skipping build.")
+                return
+
+        # Clean up tmp_dir if we are proceeding with overwrite
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
+
+    repo_url = f"https://github.com/{owner}/Stockfish.git"
+
+    print(f"Cloning {repo_url} into {tmp_dir}...")
+    subprocess.run(["git", "clone", repo_url, tmp_dir], check=True)
+
+    print(f"Checking out {sha}...")
+    subprocess.run(["git", "checkout", sha], cwd=tmp_dir, check=True)
+
+    print("Building engine (using ARCH=native)...")
+    src_dir = os.path.join(tmp_dir, "src")
+    subprocess.run(["make", "-j", "build", "ARCH=native"], cwd=src_dir, check=True)
+
+    binary_name = "stockfish.exe" if os.name == "nt" else "stockfish"
+    built_binary = os.path.join(src_dir, binary_name)
+
+    if not os.path.exists(built_binary):
+        raise RuntimeError("Build completed but binary was not found.")
+
+    print(f"Moving binary to {engine_dest_path}...")
+    shutil.copy(built_binary, engine_dest_path)
+    shutil.rmtree(tmp_dir)
 
 
 def read_model(
@@ -294,6 +376,13 @@ def main():
 
     cross_check_config = args.cross_check_config
     nnue_lightning_config = args.nnue_lightning_config
+
+    if cross_check_config.build_engine_from_sha is not None:
+        clone_and_build_engine(
+            cross_check_config.engine,
+            cross_check_config.build_engine_from_sha,
+            cross_check_config.force_build
+        )
 
     batch_size = 1024
 
