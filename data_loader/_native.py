@@ -212,9 +212,7 @@ class CDataLoaderAPI:
 type SparseBatchPtr = ctypes._Pointer[SparseBatch]
 type FenBatchPtr = ctypes._Pointer[FenBatch]
 
-
 try:
     c_lib = CDataLoaderAPI()
 except FileNotFoundError as e:
-    print(e)
-    exit(1)
+    raise ImportError(f"Failed to initialize CDataLoaderAPI: {e}.")
