@@ -21,7 +21,10 @@ class TrainingConfig:
     """Validation data to use for validation instead of the training data."""
 
     validation_size: int = 0
-    """Number of positions per validation step."""
+    """Number of positions in validation epoch (<= 0 disables vaildation)."""
+
+    validation_frequency: int = 1
+    """Number of epochs between validation (<= 0 disables vaildation)."""
 
     default_root_dir: Optional[str] = None
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
