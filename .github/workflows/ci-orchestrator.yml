@@ -43,7 +43,7 @@ jobs:
 
           if [ "$EVENT_NAME" = "pull_request" ]; then
             IS_DRAFT="${{ github.event.pull_request.draft }}"
-            COMMIT_MSG=$(git log -1 --pretty=%B)
+            COMMIT_MSG=$(git log -1 --pretty=%B ${{ github.event.pull_request.head.sha }})
           elif [ "$EVENT_NAME" = "push" ]; then
             COMMIT_MSG="${{ github.event.head_commit.message }}"
           fi
