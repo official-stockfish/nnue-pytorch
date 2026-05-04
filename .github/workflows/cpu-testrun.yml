@@ -14,7 +14,7 @@ jobs:
           ./run_docker.sh CPU ${{ github.workspace }} --non-interactive --exec \
             python -u tests/test_training_pipeline_run.py -y --device cpu --test-dir /data/logs/training/runs/unittests_train_pipeline_cpu
 
-      - name: Checkout matetrack repo
+      - name: Checkout Compatible Stockfish Repository
         uses: actions/checkout@v4
         with:
           repository: official_stockfish/Stockfish
