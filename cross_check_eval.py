@@ -41,9 +41,6 @@ class CrossCheckConfig:
     device: Literal["cuda", "mps", "cpu"] = "cuda"
     """Device for the NNUE model."""
 
-    net_type: Literal["big", "small"] = "big"
-    """Which net to evaluate: 'big' uses EvalFile, 'small' uses EvalFileSmall"""
-
     count: int = 2**10
     """Number of positions to process."""
 
@@ -180,11 +177,8 @@ def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
     return evals
 
 
-re_nnue_eval_big = re.compile(
-    r"\(Big net\) NNUE evaluation\s+([-+]?\d+)\s+\(side to move, internal units\)"
-)
-re_nnue_eval_small = re.compile(
-    r"\(Small net\) NNUE evaluation\s+([-+]?\d+)\s+\(side to move, internal units\)"
+re_nnue_eval = re.compile(
+    r"NNUE evaluation\s+([-+]?\d+)\s+\(side to move, internal units\)"
 )
 
 
@@ -333,7 +327,7 @@ def compute_correlation(engine_evals, model_evals, fens):
     print("\n" + "=" * W + "\n")
 
 
-def eval_engine_batch(engine_path, net_path, fens, net_type="big"):
+def eval_engine_batch(engine_path, net_path, fens):
     if not fens:
         return []
     engine = subprocess.Popen(
@@ -342,16 +336,14 @@ def eval_engine_batch(engine_path, net_path, fens, net_type="big"):
         stdout=subprocess.PIPE,
         universal_newlines=True,
     )
-    option_name = "EvalFile" if net_type == "big" else "EvalFileSmall"
-    parts = ["uci", "setoption name {} value {}".format(option_name, net_path)]
+    parts = ["uci", "setoption name EvalFile value {}".format(net_path)]
     for fen in fens:
         parts.append("position fen {}".format(fen))
         parts.append("eval")
     parts.append("quit")
     query = "\n".join(parts)
     out = engine.communicate(input=query)[0]
-    pattern = re_nnue_eval_big if net_type == "big" else re_nnue_eval_small
-    evals = re.findall(pattern, out)
+    evals = re.findall(re_nnue_eval, out)
     if len(evals) != len(fens):
         raise Exception(
             "number of evals returned by the engine doesn't match the number of fens. Got {} evals and {} fens. Output was:\n{}".format(
@@ -426,7 +418,6 @@ def main():
             cross_check_config.engine,
             cross_check_config.net,
             fens,
-            cross_check_config.net_type,
         )
 
         done += len(fens)
