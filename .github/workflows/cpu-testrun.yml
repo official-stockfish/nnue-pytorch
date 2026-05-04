@@ -14,7 +14,20 @@ jobs:
           ./run_docker.sh CPU ${{ github.workspace }} --non-interactive --exec \
             python -u tests/test_training_pipeline_run.py -y --device cpu --test-dir /data/logs/training/runs/unittests_train_pipeline_cpu
 
+      - name: Checkout matetrack repo
+        uses: actions/checkout@v4
+        with:
+          repository: official_stockfish/Stockfish
+          path: Stockfish
+          ref: 5095cd16c97e7596f2d2a02eb05ed8e030af991f
+          persist-credentials: false
+
+      - name: Compile Compatible Stockfish
+        run: |
+          cd Stockfish/src
+          make -j build
+
       - name: Perform Cross-Check Evaluation (CPU)
         run: |
           ./run_docker.sh CPU ${{ github.workspace }} --skip-setup --non-interactive --exec \
-            ./.github/helpers/build_engine_and_cross_check_eval.sh
+            python -u cross_check_eval.py --net /data/logs/training/runs/unittests_train_pipeline_cpu/lightning_logs/version_2/checkpoints/last.nnue --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device='cpu'
