@@ -12,7 +12,7 @@ jobs:
       - name: Checkout Compatible Stockfish Repository
         uses: actions/checkout@v4
         with:
-          repository: official_stockfish/Stockfish
+          repository: official-stockfish/Stockfish
           path: Stockfish
           ref: 5095cd16c97e7596f2d2a02eb05ed8e030af991f
           persist-credentials: false
