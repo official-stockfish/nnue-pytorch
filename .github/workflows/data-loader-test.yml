@@ -1,16 +1,13 @@
 name: training-data-loader
 
 on:
-  push:
-    branches: [ master ]
-    paths:
-      - "data_loader/**"
-      - "compile_data_loader.sh"
   pull_request:
-    types: [ opened, synchronize, reopened, ready_for_review ]
-    branches: [ master ]
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [master]
     paths:
       - "data_loader/**"
+      - "setup_script.sh"
+      - "compile_data_loader.bat"
       - "compile_data_loader.sh"
 
 concurrency:
@@ -23,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Compile using cmake
         run: ./compile_data_loader.sh
