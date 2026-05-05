@@ -1,16 +1,24 @@
 name: cpu-testrun
 
-on: [workflow_call]
+on:
+  pull_request:
+    types: [ opened, synchronize, reopened, ready_for_review ]
+    branches: [ master ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-bench:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6 # de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Checkout Compatible Stockfish Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6 # de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: official-stockfish/Stockfish
           path: Stockfish
