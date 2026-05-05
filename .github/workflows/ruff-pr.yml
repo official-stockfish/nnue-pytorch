@@ -3,7 +3,6 @@ name: Ruff Lint
 on:
   pull_request:
     types: [ opened, synchronize, reopened, ready_for_review ]
-    branches: [*]
   push:
     branches: [master]
 
