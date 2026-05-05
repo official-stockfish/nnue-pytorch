@@ -4,15 +4,17 @@ RUN apt-get update && apt-get install -y \
     g++ \
     git \
     curl \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/nnue-pytorch
 
-COPY requirements.txt setup_script.sh ./
-
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN chmod +x setup_script.sh
+COPY docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
+RUN chmod +x /usr/local/bin/docker_entrypoint.sh
 
-ENTRYPOINT [ "/workspace/nnue-pytorch/setup_script.sh" ]
+# Set the entrypoint to handle UID mapping before executing the main command
+ENTRYPOINT ["/usr/local/bin/docker_entrypoint.sh"]
 CMD ["/bin/bash"]

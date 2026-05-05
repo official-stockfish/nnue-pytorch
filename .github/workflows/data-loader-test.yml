@@ -1,17 +1,26 @@
 name: training-data-loader
 
 on:
-  push:
-    branches: ["master"]
   pull_request:
-    branches: ["master"]
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [master]
+    paths:
+      - "data_loader/**"
+      - "setup_script.sh"
+      - "compile_data_loader.bat"
+      - "compile_data_loader.sh"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-bench:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Compile using cmake
         run: ./compile_data_loader.sh
@@ -21,4 +30,3 @@ jobs:
 
       - name: Run cmake compiled report (50 iterations)
         run: ./build/training_data_loader_report -i 50 ./.pgo/small.binpack
-

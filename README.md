@@ -4,7 +4,8 @@
 
 ### Docker
 
-Use Docker with the NVIDIA PyTorch container. This eliminates the need for local Python environment setup and C++ compilation.
+Use Docker with the PyTorch container. This eliminates the need for local Python environment setup and C++ compilation. An alternative is Conda or Micromamba if Docker is not available, or if you want native Apple Silicon MPS acceleration.
+While Docker is available on Apple for CPU-Only testing, it does not support native MPS acceleration.
 
 #### Prerequisites
 
@@ -16,6 +17,13 @@ For NVIDIA Users:
 - Docker
 - Up-to-date NVIDIA driver
 - NVIDIA Container Toolkit
+
+For Apple Silicon Users (MPS):
+- Native MPS acceleration does not work with Docker.
+- See below for recommended setup or test with CPU only.
+
+For CPU only (for testing purposes):
+- Docker
 
 For driver requirements, check [Running ROCm Docker containers (AMD)](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/docker.html) or the [PyTorch container release notes (Nvidia)](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-25-04.html#rel-25-04).
 
@@ -29,9 +37,32 @@ Use the provided script to build and start the container:
 ./run_docker.sh
 ```
 
-You'll be prompted to select the target GPU vendor and the path to your data directory, which will be mounted into the container. Once inside the container, you can run training commands directly.
+You'll be prompted to select the target GPU vendor (or CPU only for testing) and the path to your data directory, which will be mounted into the container. Once inside the container, you can run training commands directly. Also supports non-interactive workflows if all necessary arguments are given through the CLI.
 
 _Building the container will take it's time and disk space (~30-60GB)_
+
+### Setup for Apple Silicon
+- Up-to-date Package manager conda or micromamba is recommended.
+- Create environment and activate (works the same with micromamba):
+    ```
+    conda create -n nnue_pytorch -c pytorch -c conda-forge \
+        python=3.12 \
+        pytorch \
+        torchvision \
+        torchaudio \
+        compilers \
+        llvm-openmp \
+        jpeg \
+        libjpeg-turbo \
+        cmake \
+        make
+    conda activate nnue_pytorch
+    ```
+- Afterwards run:
+    ```
+    pip install --no-cache-dir -r requirements.txt
+    ./setup_script.sh
+    ```
 
 ## Network training and management
 

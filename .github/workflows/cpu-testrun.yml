@@ -1,0 +1,41 @@
+name: cpu-testrun
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-bench:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout Compatible Stockfish Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: official-stockfish/Stockfish
+          path: Stockfish
+          ref: 5095cd16c97e7596f2d2a02eb05ed8e030af991f
+          persist-credentials: false
+
+      - name: Compile Compatible Stockfish
+        run: |
+          cd Stockfish/src
+          make -j build
+
+      - name: Perform Test Run of entire Training Pipeline (CPU)
+        run: |
+          ./run_docker.sh CPU ${{ github.workspace }} --non-interactive --exec \
+            python -u tests/test_training_pipeline_run.py -y --device cpu --test-dir /data/logs/training/runs/unittests_train_pipeline_cpu
+
+      - name: Perform Cross-Check Evaluation (CPU)
+        run: |
+          ./run_docker.sh CPU ${{ github.workspace }} --skip-setup --non-interactive --exec \
+            python -u cross_check_eval.py --net /data/logs/training/runs/unittests_train_pipeline_cpu/lightning_logs/version_2/checkpoints/last.nnue --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device='cpu'

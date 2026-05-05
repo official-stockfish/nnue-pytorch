@@ -1,4 +1,5 @@
 __pycache__/
+.container_home/
 env/
 build/
 build-pgo-generate/
