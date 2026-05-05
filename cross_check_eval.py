@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from typing import Optional, Literal
 from tyro.conf import OmitArgPrefixes
 
-
 @dataclass(frozen=True)
 class CrossCheckConfig:
     # Flags and Options
