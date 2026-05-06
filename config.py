@@ -71,6 +71,9 @@ class TrainingConfig:
     save_last_network: FlagConversionOff[bool] = True
     """Whether to always save the last produced network."""
 
+    save_top_k: int = -1
+    """Number of networks to save as a history"""
+
     epoch_size: int = 100_000_000
     """Number of positions per epoch."""
 

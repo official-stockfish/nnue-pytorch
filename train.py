@@ -423,7 +423,8 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         save_last=args.save_last_network,
         every_n_epochs=args.network_save_period,
-        save_top_k=-1,
+        save_top_k=args.save_top_k,
+        monitor=None,
     )
 
     if accelerator == "mps":
