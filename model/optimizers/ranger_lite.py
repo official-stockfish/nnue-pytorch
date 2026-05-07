@@ -129,7 +129,7 @@ class RangerLite(torch.optim.Optimizer):
                 return loss
             self.param_size = param_size
 
-        variance_normalized = torch.sqrt(variance_ma_sum / self.param_size)
+        variance_normalized = torch.sqrt(variance_ma_sum / self.param_size).clamp_min(self.eps)
 
         # Phase 2: Apply weight decay and update weights
         for group in self.param_groups:
