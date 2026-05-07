@@ -80,7 +80,6 @@ class NNUEModel(nn.Module):
         black_values: torch.Tensor,
         psqt_indices: torch.Tensor,
         layer_stack_indices: torch.Tensor,
-        return_activations: bool = False,
     ):
         wp, bp = self.input(white_indices, white_values, black_indices, black_values)
         w, wpsqt = torch.split(wp, self.L1, dim=1)
@@ -103,6 +102,4 @@ class NNUEModel(nn.Module):
         # which does both the averaging and sign flip for black to move)
         x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
-        if return_activations:
-            return x, l0_preact
         return x

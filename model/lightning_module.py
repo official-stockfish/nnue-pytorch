@@ -46,20 +46,6 @@ def sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
     return loss
 
 
-def ft_act_loss(activation_data, l1_weight, l2_weight, group_size=4):
-    original_shape = activation_data.shape
-    if original_shape[-1] % group_size != 0:
-        raise ValueError(f"Feature dimension {original_shape[-1]} not divisible by group_size {group_size}")
-
-    grouped_data = activation_data.view(*original_shape[:-1], -1, group_size)
-    group_max = torch.max(grouped_data, dim=-1).values
-
-    loss_l1 = torch.mean(nn.functional.relu(group_max + 0.1))
-    loss_l2 = torch.mean(activation_data**2)
-
-    return (l1_weight * loss_l1) + (l2_weight * loss_l2)
-
-
 class NNUE(L.LightningModule):
     """
     lambda_ = 0.0 - purely based on game results
@@ -101,11 +87,6 @@ class NNUE(L.LightningModule):
                 "test_loss_epoch": MeanMetric(),
             }
         )
-
-        #regularization loss
-        l1_w = config.loss_params.ft_activation_l1
-        l2_w = config.loss_params.ft_activation_l2
-        self.use_ft_activation_loss = l1_w > 0 or l2_w > 0
 
         # register jitter buffer
         self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
@@ -291,11 +272,8 @@ class NNUE(L.LightningModule):
                 black_values,
                 psqt_indices,
                 layer_stack_indices,
-                return_activations=self.use_ft_activation_loss,
             )
         )
-        if self.use_ft_activation_loss:
-            scorenet, ft_activation = scorenet
         scorenet = scorenet * self.model.quantization.nnue2score
 
         loss_params = self.config.loss_params
@@ -321,11 +299,8 @@ class NNUE(L.LightningModule):
         actual_lambda = actual_lambda.clamp(0.0, 1.0)
 
         fit_loss = sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
-        if self.use_ft_activation_loss:
-            reg_loss = ft_act_loss(ft_activation, loss_params.ft_activation_l1, loss_params.ft_activation_l2)
-        else:
-            reg_loss = torch.zeros_like(fit_loss)
-        loss = fit_loss + reg_loss
+
+        loss = fit_loss
 
         self.loss_metrics[f"{loss_type}_epoch"].update(fit_loss)
         self.log(
