@@ -276,10 +276,13 @@ class RangerLite(torch.optim.Optimizer):
             for p in group["params"]:
                 state = self.state[p]
                 if "lookahead_params" in state:
-                    # Only backup if we haven't already backed up
-                    if "backup_params" not in state:
-                        state["backup_params"] = torch.clone(p.data)
-                    p.data.copy_(state["lookahead_params"])
+                    if "is_swapped" not in state:
+                        # Only swap if we haven't already swapped.
+                        # Perform pointer swap to avoid unnecessary tensor copies.
+                        tmp_ref = p.data
+                        p.data = state["lookahead_params"]
+                        state["lookahead_params"] = tmp_ref
+                        state["is_swapped"] = True
 
     def restore_for_training(self):
         """Restores fast weights for training. Idempotent."""
@@ -288,6 +291,10 @@ class RangerLite(torch.optim.Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
-                if "backup_params" in state:
-                    p.data.copy_(state["backup_params"])
-                    del state["backup_params"]
+                if "is_swapped" in state:
+                    # Intentionally overwrite lookahead_params with the current
+                    # to preserve any changes made during eval mode (e.g. swa)
+                    tmp_ref = state["lookahead_params"]
+                    state["lookahead_params"] = p.data
+                    p.data = tmp_ref
+                    del state["is_swapped"]

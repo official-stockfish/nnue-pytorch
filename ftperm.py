@@ -405,7 +405,7 @@ def make_swaps_3(actmat: torch.Tensor) -> SwapResult:
         # (we already know there is a gain available)
         local_score_changes = score_changes[
             i : i + ZERO_BLOCK_SIZE, j : j + ZERO_BLOCK_SIZE, k : k + ZERO_BLOCK_SIZE
-        ]
+        ].contiguous()
         best_neurons = torch.argmax(local_score_changes).item()
         improvement_neurons = local_score_changes.flatten()[best_neurons].item()
         assert improvement_blocks == improvement_neurons

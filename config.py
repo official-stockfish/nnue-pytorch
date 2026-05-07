@@ -26,13 +26,6 @@ class TrainingConfig:
     check_val_every_n_epoch: int = 1
     """Number of epochs between validation (has to be >= 1)."""
 
-    def __post_init__(self) -> None:
-        if self.check_val_every_n_epoch < 1:
-            raise ValueError(
-                "check_val_every_n_epoch has to be >= 1, "
-                f"got {self.check_val_every_n_epoch}."
-            )
-
     default_root_dir: Optional[str] = None
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
 
@@ -109,6 +102,11 @@ class TrainingConfig:
         if self.max_epochs <= 0 or self.epoch_size <= 0 or self.batch_size <= 0:
             raise ValueError(
                 "Arguments `max_epochs`, `epoch_size` and `batch_size` must be positive."
+            )
+        if self.check_val_every_n_epoch < 1:
+            raise ValueError(
+                "check_val_every_n_epoch has to be >= 1, "
+                f"got {self.check_val_every_n_epoch}."
             )
 
 

@@ -46,15 +46,26 @@ class ExplicitSWACallback(L.Callback):
         return {}
 
     def load_state_dict(self, state_dict):
+        _ = state_dict # Unused
         pass
 
+    def on_save_checkpoint(self, trainer, pl_module, checkpoint):
+        _ = pl_module  # Unused
+        if trainer.current_epoch > self.swa_start_epoch:
+            # Strip optimizer and lr_scheduler states from the checkpoint to prevent excessive memory usage,
+            # since they are not needed for SWA evaluation and resuming is unsupported.
+            # Thus they would be redundant with the main checkpoint.
+            checkpoint.pop("optimizer_states", None)
+            checkpoint.pop("lr_schedulers", None)
+
     def on_load_checkpoint(self, trainer, pl_module, checkpoint):
+        _, _ = trainer, pl_module  # Unused
         checkpoint_epoch = checkpoint.get("epoch")
         if checkpoint_epoch is None:
             return
 
-        if checkpoint_epoch >= self.swa_start_epoch:
+        if checkpoint_epoch > self.swa_start_epoch:
             raise RuntimeError(
                 f"Cannot resume training after SWA has started. "
-                f"Checkpoint epoch {checkpoint_epoch} >= SWA start epoch {self.swa_start_epoch}"
+                f"Checkpoint epoch {checkpoint_epoch} > SWA start epoch {self.swa_start_epoch}"
             )
