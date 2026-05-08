@@ -40,12 +40,14 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <fstream>
 #include <cstring>
 #include <iostream>
+#include <iomanip>
 #include <set>
 #include <cstdio>
 #include <cassert>
 #include <array>
 #include <limits>
 #include <climits>
+#include <ctime>
 #include <optional>
 #include <thread>
 #include <mutex>
@@ -6859,6 +6861,11 @@ namespace binpack
             return m_sizeBytes;
         }
 
+        [[nodiscard]] std::string path() const
+        {
+            return m_path;
+        }
+
     private:
         std::string m_path;
         std::fstream m_file;
@@ -7928,10 +7935,27 @@ namespace binpack
                             // Atomically retrieve the total count and reset it to 0 without dropping concurrent increments
                             uint64_t count_to_print = m_timeout_count.exchange(0, std::memory_order_relaxed);
 
-                            std::cerr << "[Warning] Dataloader mutex acquisition for file with ID "
-                                    << fileId << " timed out after "
-                                    << kMaxLockWaitTime.count() << "ms. Re-rolling file. "
-                                    << "(" << count_to_print << " timeouts since last warning)\n";
+                            auto        utc_now  = std::chrono::system_clock::now();
+                            std::time_t utc_time = std::chrono::system_clock::to_time_t(utc_now);
+
+                            auto to_utc_tm = [](std::time_t time, std::tm& result)
+                            {
+                                #if defined(_MSC_VER)
+                                gmtime_s(&result, &time);
+                                #else
+                                gmtime_r(&time, &result);
+                                #endif
+                            };
+
+                            std::tm utc_tm{};
+                            to_utc_tm(utc_time, utc_tm);
+
+                            std::cerr << "[" << std::put_time(&utc_tm, "%Y-%m-%d %H:%M:%S UTC") << "] "
+                                      << "[Warning] Dataloader mutex acquisition for file with ID "
+                                      << fileId << " name " << m_inputFiles[fileId].path()
+                                      << " timed out after " << kMaxLockWaitTime.count()
+                                      << "ms. Re-rolling file. "
+                                      << "(" << count_to_print << " timeouts since last warning)\n";
                         }
                     }
                 }
