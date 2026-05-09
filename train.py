@@ -54,7 +54,9 @@ class ConsolidatedCheckpoint(ModelCheckpoint):
         if self.dirpath:
             # Manually trigger a final save to last.ckpt
             path = os.path.join(self.dirpath, "last.ckpt")
-            trainer.save_checkpoint(path)
+            if trainer.is_global_zero:
+                trainer.save_checkpoint(path)
+            trainer.strategy.barrier("consolidated_checkpoint_on_train_end")
 
 
 class SimpleLineLogger(Callback):
