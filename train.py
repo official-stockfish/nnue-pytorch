@@ -43,6 +43,20 @@ class TimeLimitAfterCheckpoint(Callback):
             )
 
 
+class ConsolidatedCheckpoint(ModelCheckpoint):
+    def __init__(self, *args, **kwargs):
+        # We force this to True to decouple from the validation schedule
+        kwargs.setdefault("save_on_train_epoch_end", True)
+        kwargs.setdefault("monitor", None)
+        super().__init__(*args, **kwargs)
+
+    def on_train_end(self, trainer, pl_module):
+        if self.dirpath:
+            # Manually trigger a final save to last.ckpt
+            path = os.path.join(self.dirpath, "last.ckpt")
+            trainer.save_checkpoint(path)
+
+
 class SimpleLineLogger(Callback):
     def __init__(
         self,
@@ -403,11 +417,10 @@ def main():
             print("Using default torch num_threads setting.")
         print("", flush=True)
 
-    checkpoint_callback = ModelCheckpoint(
+    checkpoint_callback = ConsolidatedCheckpoint(
         save_last=args.save_last_network,
         every_n_epochs=args.network_save_period,
         save_top_k=args.save_top_k,
-        monitor=None,
     )
 
     if accelerator == "mps":
