@@ -499,11 +499,13 @@ def main():
         nnue.model.load_state_dict(swa_state_dict)
 
         # NOTE: If BN is used, it has to be updated here. Be careful when using DDP.
-        swa_savepath = os.path.join(logdir, "lightning_logs", f"version_{tb_logger.version}", "checkpoints", "last_swa.ckpt")
+        # Writes to last.ckpt to support pipelines build expecting last.ckpt to be the final checkpoint.
+        # We rename last.ckpt to last.ckpt.original.ckpt to preserve the original for analysis purposes.
+        swa_savepath = os.path.join(logdir, "lightning_logs", f"version_{tb_logger.version}", "checkpoints", "last.ckpt")
+        if os.path.exists(swa_savepath):
+            original_path = swa_savepath.replace("last.ckpt", "last_non_swa.ckpt")
+            os.rename(swa_savepath, original_path)
         trainer.save_checkpoint(swa_savepath)
-
-        # Prevent optimizer from overwriting swa weights with e.g. lookahead weights (leaky abstraction).
-
 
         if trainer.is_global_zero:
             print(f"SWA model saved to {swa_savepath}")
