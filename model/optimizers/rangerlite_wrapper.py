@@ -44,7 +44,6 @@ class RangerLiteWrapper:
         config,
         legacy_mode,
     ):
-        self.lr = config.lr
         self.gamma = config.gamma
         self.pnm_active = config.pnm_active
         self.pnm_momentum = config.pnm_momentum
@@ -80,9 +79,10 @@ class RangerLiteWrapper:
             )
 
         else:
+            LRs = [group["lr"] for group in train_params]
             one_cycle_scheduler = SafeOneCycleLR(
                 self.optimizer,
-                max_lr=self.lr,
+                max_lr=LRs,
                 total_steps=self.cycle_steps,
                 div_factor=self.one_cycle_start_div,
                 final_div_factor=self.one_cycle_final_div,

@@ -19,7 +19,7 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
     lr: float = 8.75e-4
     """Initial learning rate."""
 
-    def get_optimizer_wrapper(self, max_epoch, num_batches_per_epoch):
+    def get_optimizer_wrapper(self):
         optimizer_name = self.optimizer_name.lower().strip()
         if optimizer_name == "schedulefree":
             wrapper = ScheduleFreeWrapper(self)
