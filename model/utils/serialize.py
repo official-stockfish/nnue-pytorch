@@ -11,7 +11,7 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
-from ..quantize import QuantizationConfig
+from ..quantize import QuantizationConfig, safe_convert
 
 
 def ascii_hist(name, x, bins=6):
@@ -78,10 +78,6 @@ class NNUEWriter:
             description = DEFAULT_DESCRIPTION
 
         self.buf = bytearray()
-
-        # No-op in most situations but not exactly safe to omit.
-        model.clip_weights()
-        model.clip_input_weights()
 
         fc_hash = self.fc_hash(model)
         self.write_header(model, fc_hash, description)
@@ -165,7 +161,8 @@ class NNUEWriter:
             n = f.NUM_REAL_FEATURES
             segment = weight[offset : offset + n]
             if f.EXPORT_WEIGHT_DTYPE == torch.int8:
-                self.write_tensor(segment.to(torch.int8).flatten().numpy())
+                segment = safe_convert(segment, torch.int8)
+                self.write_tensor(segment.flatten().numpy())
             else:
                 self.write_tensor(segment.flatten().numpy(), ft_compression)
             offset += n

@@ -14,6 +14,18 @@ class WeightClippingConfig(TypedDict):
     virtual_params: NotRequired[torch.Tensor]
 
 
+def safe_convert(tensor: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    info = torch.iinfo(dtype)
+    t_min = tensor.min().item()
+    t_max = tensor.max().item()
+    if t_min < info.min or t_max > info.max:
+        raise OverflowError(
+            f"values [{t_min}, {t_max}] do not fit in {dtype} "
+            f"range [{info.min}, {info.max}]"
+        )
+    return tensor.to(dtype)
+
+
 @dataclass
 class QuantizationConfig:
     nnue2score: float = 600.0
@@ -69,12 +81,11 @@ class QuantizationManager:
         psqt_weight: torch.Tensor,
         callback: Callable = lambda *args, **kwargs: None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        bias = bias.mul(self.ft_quantized_one).round().to(torch.int16)
-        weight = weight.mul(self.ft_quantized_one).round().to(torch.int16)
-        psqt_weight = (
-            psqt_weight.mul(self.nnue2score * self.weight_scale_out)
-            .round()
-            .to(torch.int32)
+        bias = safe_convert(bias.mul(self.ft_quantized_one).round(), torch.int16)
+        weight = safe_convert(weight.mul(self.ft_quantized_one).round(), torch.int16)
+        psqt_weight = safe_convert(
+            psqt_weight.mul(self.nnue2score * self.weight_scale_out).round(),
+            torch.int32,
         )
 
         callback(bias, weight, psqt_weight)
@@ -110,7 +121,7 @@ class QuantizationManager:
         kBiasScale = kBiasScaleOut if output_layer else kBiasScaleHidden
         kMaxWeight = self.hidden_quantized_one / kWeightScale
 
-        bias = bias.mul(kBiasScale).round().to(torch.int32)
+        bias = safe_convert(bias.mul(kBiasScale).round(), torch.int32)
 
         clipped = torch.count_nonzero(weight.clamp(-kMaxWeight, kMaxWeight) - weight)
         total_elements = torch.numel(weight)
