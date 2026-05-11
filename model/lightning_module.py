@@ -17,6 +17,33 @@ def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
     ]
 
 
+def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
+    # convert the network and search scores to an estimate match result
+    # based on the win_rate_model, with scalings and offsets optimized
+    q = (scorenet - loss_params.in_offset) / loss_params.in_scaling
+    qm = (-scorenet - loss_params.in_offset) / loss_params.in_scaling
+    qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
+
+    s = (score - loss_params.out_offset) / loss_params.out_scaling
+    sm = (-score - loss_params.out_offset) / loss_params.out_scaling
+    pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
+
+    # blend that eval based score with the actual game outcome
+    t = outcome
+
+    pt = pf * actual_lambda + t * (1.0 - actual_lambda)
+
+    # use a MSE-like loss function
+    loss = torch.pow(torch.abs(pt - qf), loss_params.pow_exp)
+    if loss_params.qp_asymmetry != 0.0:
+        loss = loss * ((qf > pt) * loss_params.qp_asymmetry + 1)
+
+    weights = 1 + (2.0**loss_params.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), loss_params.w2)
+    loss = (loss * weights).sum() / weights.sum()
+
+    return loss
+
+
 class NNUE(L.LightningModule):
     """
     lambda_ = 0.0 - purely based on game results
@@ -208,42 +235,25 @@ class NNUE(L.LightningModule):
                 psqt_indices,
                 layer_stack_indices,
             )
-            * self.model.quantization.nnue2score
         )
 
-        p = self.config.loss_params
-        # convert the network and search scores to an estimate match result
-        # based on the win_rate_model, with scalings and offsets optimized
-        q = (scorenet - p.in_offset) / p.in_scaling
-        qm = (-scorenet - p.in_offset) / p.in_scaling
-        qf = 0.5 * (1.0 + q.sigmoid() - qm.sigmoid())
+        scorenet = scorenet * self.model.quantization.nnue2score
 
-        s = (score - p.out_offset) / p.out_scaling
-        sm = (-score - p.out_offset) / p.out_scaling
-        pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
+        loss_params = self.config.loss_params
 
-        # blend that eval based score with the actual game outcome
-        t = outcome
-        actual_lambda = p.start_lambda + (p.end_lambda - p.start_lambda) * (
+        actual_lambda = loss_params.start_lambda + (loss_params.end_lambda - loss_params.start_lambda) * (
             self.current_epoch / self.max_epoch
         )
-        pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 
-        # use a MSE-like loss function
-        loss = torch.pow(torch.abs(pt - qf), p.pow_exp)
-        if p.qp_asymmetry != 0.0:
-            loss = loss * ((qf > pt) * p.qp_asymmetry + 1)
+        sf_loss = calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
 
-        weights = 1 + (2.0**p.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), p.w2)
-        loss = (loss * weights).sum() / weights.sum()
-
-        self.loss_metrics[f"{loss_type}_epoch"].update(loss)
+        self.loss_metrics[f"{loss_type}_epoch"].update(sf_loss)
         self.log(
             loss_type,
-            loss,
+            sf_loss,
             prog_bar=False,
             sync_dist=False,
             on_epoch=False,
             on_step=True,
         )
-        return loss
+        return sf_loss

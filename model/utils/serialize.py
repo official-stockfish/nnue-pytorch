@@ -79,6 +79,10 @@ class NNUEWriter:
 
         self.buf = bytearray()
 
+        # No-op in most situations but not exactly safe to omit.
+        model.clip_weights()
+        model.clip_input_weights()
+
         fc_hash = self.fc_hash(model)
         self.write_header(model, fc_hash, description)
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
