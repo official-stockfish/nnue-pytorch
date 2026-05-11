@@ -41,6 +41,9 @@ class TrainingConfig:
     max_epochs: int = 800
     """Maximum number of epochs to train for."""
 
+    swa_start_epoch: int = -1
+    """Start epoch for swa. Negative number to disable."""
+
     max_time: str = "30:00:00:00"
     """The maximum time to train for. A string in the format DD:HH:MM:SS (Default 30:00:00:00)."""
 

@@ -393,6 +393,7 @@ def main():
             nnue = torch.load(
                 args.resume_from_model, weights_only=False, map_location="cpu"
             )
+            nnue.train()
         except ModuleNotFoundError as e:
             raise RuntimeError(
                 f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
@@ -467,6 +468,18 @@ def main():
     )
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
+    trainer_callbacks = [
+            checkpoint_callback,
+            SimpleLineLogger(refresh_rate=refresh_rate),
+            TimeLimitAfterCheckpoint(args.max_time),
+            M.WeightClippingCallback(),
+        ]
+    if 0 <= args.swa_start_epoch < args.max_epochs:
+        swa_callback = M.ExplicitSWACallback(args.swa_start_epoch)
+        trainer_callbacks.append(
+            swa_callback
+        )
+
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
@@ -474,12 +487,7 @@ def main():
         strategy="ddp" if n_devices > 1 else "auto",
         devices=devices,
         logger=loggers,
-        callbacks=[
-            checkpoint_callback,
-            SimpleLineLogger(refresh_rate=refresh_rate),
-            TimeLimitAfterCheckpoint(args.max_time),
-            M.WeightClippingCallback(),
-        ],
+        callbacks=trainer_callbacks,
         log_every_n_steps=refresh_rate,
         enable_progress_bar=False,
         enable_checkpointing=True,
@@ -495,6 +503,35 @@ def main():
         trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)
     else:
         trainer.fit(nnue, train, val)
+
+    if 0 <= args.swa_start_epoch < args.max_epochs:
+        swa_state_dict = swa_callback.swa_model.module.state_dict() if trainer.is_global_zero else None
+        swa_state_dict = trainer.strategy.broadcast(swa_state_dict, src=0)
+
+        # Optimizer is assumed to perform pointer swaps on train() and eval().
+        # Note that resume from checkpoint after swa averaging has started is not supported.
+        # Overwriting both train and eval weights with swa weights to be safe.
+        nnue.train()
+        nnue.model.load_state_dict(swa_state_dict)
+        nnue.eval()
+        nnue.model.load_state_dict(swa_state_dict)
+
+        # NOTE: If BN is used, it has to be updated here. Be careful when using DDP.
+        # Writes to last.ckpt to support pipelines build expecting last.ckpt to be the final checkpoint.
+        # We rename last.ckpt to last.ckpt.original.ckpt to preserve the original for analysis purposes.
+        swa_savepath = os.path.join(logdir, "lightning_logs", f"version_{tb_logger.version}", "checkpoints", "last.ckpt")
+
+        if trainer.is_global_zero:
+            if os.path.exists(swa_savepath):
+                original_path = swa_savepath.replace("last.ckpt", "last_non_swa.ckpt")
+                os.rename(swa_savepath, original_path)
+            print(f"SWA model saved to {swa_savepath}")
+        trainer.save_checkpoint(swa_savepath)
+
+        if val is not None:
+            trainer.validate(nnue, val)
+        else:
+            trainer.validate(nnue, train)
 
     if trainer.is_global_zero:
         with open(os.path.join(logdir, "training_finished"), "w"):
