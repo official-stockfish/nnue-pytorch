@@ -88,15 +88,11 @@ class NNUE(L.LightningModule):
 
     # --- setup optimizers and training hooks ---
     def configure_optimizers(self):
-        if self.max_epoch is None:
-            print("[NNUE] Required parameter for training not set: max_epoch")
-
         optimizer_config = self.config.optimizer_config
-        self.optimizer_wrapper = optimizer_config.get_optimizer_wrapper(
-            self.max_epoch, self.num_batches_per_epoch
-        )
+        self.optimizer_wrapper = optimizer_config.get_optimizer_wrapper()
 
-        LR = optimizer_config.lr
+        LRs = [optimizer_config.lr] * 10
+
         ft_wd = optimizer_config.ft_weight_decay
         dense_wd = optimizer_config.dense_weight_decay
 
@@ -104,58 +100,74 @@ class NNUE(L.LightningModule):
             # Feature Transformer
             {
                 "params": _get_parameters([self.model.input], get_biases=False),
-                "lr": LR,
+                "lr": LRs[0],
                 "weight_decay": ft_wd,
             },
             {
                 "params": _get_parameters([self.model.input], get_biases=True),
-                "lr": LR,
+                "lr": LRs[1],
                 "weight_decay": 0.0,
             },
             # Dense Layer Stacks
             {
                 "params": [self.model.layer_stacks.l1.factorized_linear.weight],
-                "lr": LR,
+                "lr": LRs[2],
                 "weight_decay": dense_wd,
             },
             {
                 "params": [self.model.layer_stacks.l1.factorized_linear.bias],
-                "lr": LR,
+                "lr": LRs[3],
                 "weight_decay": 0.0,
             },
             {
                 "params": [self.model.layer_stacks.l1.linear.weight],
-                "lr": LR,
+                "lr": LRs[4],
                 "weight_decay": dense_wd,
             },
             {
                 "params": [self.model.layer_stacks.l1.linear.bias],
-                "lr": LR,
+                "lr": LRs[5],
                 "weight_decay": 0.0,
             },
             {
                 "params": [self.model.layer_stacks.l2.linear.weight],
-                "lr": LR,
+                "lr": LRs[6],
                 "weight_decay": dense_wd,
             },
             {
                 "params": [self.model.layer_stacks.l2.linear.bias],
-                "lr": LR,
+                "lr": LRs[7],
                 "weight_decay": 0.0,
             },
             {
                 "params": [self.model.layer_stacks.output.linear.weight],
-                "lr": LR,
+                "lr": LRs[8],
                 "weight_decay": dense_wd,
             },
             {
                 "params": [self.model.layer_stacks.output.linear.bias],
-                "lr": LR,
+                "lr": LRs[9],
                 "weight_decay": 0.0,
             },
         ]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
+
+    # --- train / eval switch ---
+    def train(self, mode: bool = True):
+        retval = super().train(mode)
+
+        if self.optimizer_wrapper is not None:
+            if mode:
+                self.optimizer_wrapper.switch_to_train(True)
+            else:
+                self.optimizer_wrapper.switch_to_eval()
+
+        return retval
+
+
+    def eval(self):
+        return self.train(False)
 
     def on_train_epoch_start(self):
         self.optimizer_wrapper.on_train_epoch_start(self)

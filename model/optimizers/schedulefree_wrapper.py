@@ -19,48 +19,50 @@ class ScheduleFreeConfig:
 class ScheduleFreeWrapper:
     def __init__(
         self,
-        config: ScheduleFreeConfig,
+        config,
     ):
         self.lr = config.lr
         self.warmup_steps = config.warmup_steps
         self.needs_train_flip = False
 
+        self.optimizer = None
+
     def configure_optimizers(self, train_params):
         if _schedulefree_import_error:
             raise ImportError("The required schedulefree library is not installed. ")
-        print(
-            f"Using schedule-free Adam with warmup_steps={self.warmup_steps}, lr={self.lr}."
-        )
-        optimizer = schedulefree.AdamWScheduleFree(
+
+        self.optimizer = schedulefree.AdamWScheduleFree(
             train_params,
             lr=self.lr,
             betas=(0.9, 0.999),
             eps=1.0e-7,
             warmup_steps=self.warmup_steps,
         )
-        return optimizer
+        return self.optimizer
+
+    def switch_to_train(self, force=False):
+        if force or self.needs_train_flip:
+            self.optimizer.train()
+            self.needs_train_flip = False
+
+    def switch_to_eval(self):
+        self.optimizer.eval()
+        self.needs_train_flip = True
 
     def on_train_epoch_start(self, pl_module: L.LightningModule):
-        pl_module.optimizers().optimizer.train()
-        self.needs_train_flip = False
-
-    def on_train_epoch_end(self, pl_module: L.LightningModule):
-        pl_module.optimizers().optimizer.eval()
-        self.needs_train_flip = True
-
-    def on_validation_epoch_start(self, pl_module: L.LightningModule):
-        pl_module.optimizers().optimizer.eval()
-        self.needs_train_flip = True
-
-    def on_test_epoch_start(self, pl_module: L.LightningModule):
-        pl_module.optimizers().optimizer.eval()
-        self.needs_train_flip = True
-
-    def on_save_checkpoint(self, pl_module: L.LightningModule, checkpoint):
-        pl_module.optimizers().optimizer.eval()
-        self.needs_train_flip = True
+        self.switch_to_train(True)
 
     def on_train_batch_start(self, pl_module: L.LightningModule, batch, batch_idx):
-        if self.needs_train_flip:
-            pl_module.optimizers().optimizer.train()
-            self.needs_train_flip = False
+        self.switch_to_train()
+
+    def on_validation_epoch_start(self, pl_module: L.LightningModule):
+        self.switch_to_eval()
+
+    def on_test_epoch_start(self, pl_module: L.LightningModule):
+        self.switch_to_eval()
+
+    def on_train_epoch_end(self, pl_module: L.LightningModule):
+        self.switch_to_eval()
+
+    def on_save_checkpoint(self, pl_module: L.LightningModule, checkpoint):
+        self.switch_to_eval()
