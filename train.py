@@ -502,13 +502,13 @@ def main():
         # Writes to last.ckpt to support pipelines build expecting last.ckpt to be the final checkpoint.
         # We rename last.ckpt to last.ckpt.original.ckpt to preserve the original for analysis purposes.
         swa_savepath = os.path.join(logdir, "lightning_logs", f"version_{tb_logger.version}", "checkpoints", "last.ckpt")
-        if os.path.exists(swa_savepath):
-            original_path = swa_savepath.replace("last.ckpt", "last_non_swa.ckpt")
-            os.rename(swa_savepath, original_path)
-        trainer.save_checkpoint(swa_savepath)
 
         if trainer.is_global_zero:
+            if os.path.exists(swa_savepath):
+                original_path = swa_savepath.replace("last.ckpt", "last_non_swa.ckpt")
+                os.rename(swa_savepath, original_path)
             print(f"SWA model saved to {swa_savepath}")
+        trainer.save_checkpoint(swa_savepath)
 
         if val is not None:
             trainer.validate(nnue, val)
