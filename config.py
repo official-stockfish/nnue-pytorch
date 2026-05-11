@@ -100,6 +100,11 @@ class TrainingConfig:
             raise ValueError(
                 "Arguments `max_epochs`, `epoch_size` and `batch_size` must be positive."
             )
+        if self.check_val_every_n_epoch < 1:
+            raise ValueError(
+                "check_val_every_n_epoch has to be >= 1, "
+                f"got {self.check_val_every_n_epoch}."
+            )
 
 
 if __name__ == "__main__":
