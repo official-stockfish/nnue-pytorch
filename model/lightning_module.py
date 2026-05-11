@@ -130,6 +130,25 @@ class NNUE(L.LightningModule):
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
 
+    # --- train / eval switch ---
+    def train(self, mode: bool = True):
+        retval = super().train(mode)
+
+        if hasattr(self, '_trainer') and self._trainer and self.trainer.optimizers:
+            for opt in self.trainer.optimizers:
+                if mode:
+                    if hasattr(opt, 'train') and callable(opt.train):
+                        opt.train()
+                else:
+                    if hasattr(opt, 'eval') and callable(opt.eval):
+                        opt.eval()
+
+        return retval
+
+
+    def eval(self):
+        return self.train(False)
+
     def on_train_epoch_start(self):
         self.optimizer_wrapper.on_train_epoch_start(self)
 
