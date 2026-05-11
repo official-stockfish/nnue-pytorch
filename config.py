@@ -21,7 +21,10 @@ class TrainingConfig:
     """Validation data to use for validation instead of the training data."""
 
     validation_size: int = 0
-    """Number of positions per validation step."""
+    """Number of positions in validation epoch (<= 0 disables validation)."""
+
+    check_val_every_n_epoch: int = 1
+    """Number of epochs between validation (has to be >= 1)."""
 
     default_root_dir: Optional[str] = None
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
@@ -96,6 +99,11 @@ class TrainingConfig:
         if self.max_epochs <= 0 or self.epoch_size <= 0 or self.batch_size <= 0:
             raise ValueError(
                 "Arguments `max_epochs`, `epoch_size` and `batch_size` must be positive."
+            )
+        if self.check_val_every_n_epoch < 1:
+            raise ValueError(
+                "check_val_every_n_epoch has to be >= 1, "
+                f"got {self.check_val_every_n_epoch}."
             )
 
 
