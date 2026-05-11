@@ -134,14 +134,11 @@ class NNUE(L.LightningModule):
     def train(self, mode: bool = True):
         retval = super().train(mode)
 
-        if hasattr(self, '_trainer') and self._trainer and self.trainer.optimizers:
-            for opt in self.trainer.optimizers:
-                if mode:
-                    if hasattr(opt, 'train') and callable(opt.train):
-                        opt.train()
-                else:
-                    if hasattr(opt, 'eval') and callable(opt.eval):
-                        opt.eval()
+        if self.optimizer_wrapper is not None:
+            if mode:
+                self.optimizer_wrapper.switch_to_train(True)
+            else:
+                self.optimizer_wrapper.switch_to_eval()
 
         return retval
 
