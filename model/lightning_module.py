@@ -1,5 +1,7 @@
 import lightning as L
 import torch
+import math
+
 from torch import Tensor, nn
 from torchmetrics import MeanMetric, MetricCollection
 
@@ -77,6 +79,9 @@ class NNUE(L.LightningModule):
 
         # lazy init so `resume_from_model` with config changes works correctly
         self.optimizer_wrapper = None
+
+        # register jitter buffer
+        self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
 
         self.loss_metrics = MetricCollection(
             {
@@ -190,6 +195,17 @@ class NNUE(L.LightningModule):
 
     def on_save_checkpoint(self, checkpoint):
         self.optimizer_wrapper.on_save_checkpoint(self, checkpoint)
+        checkpoint["jitter_buffer_value"] = self.jitter_buffer
+
+    def on_load_checkpoint(self, checkpoint):
+        trainer = self.__dict__.get("_trainer", None)
+        is_resuming = (
+            trainer is not None and
+            getattr(trainer, "ckpt_path", None) is not None
+        )
+        if is_resuming:
+            if "jitter_buffer_value" in checkpoint:
+                self.jitter_buffer.copy_(checkpoint["jitter_buffer_value"])
 
     def on_train_batch_start(self, batch, batch_idx):
         self.optimizer_wrapper.on_train_batch_start(self, batch, batch_idx)
@@ -256,6 +272,22 @@ class NNUE(L.LightningModule):
         actual_lambda = loss_params.start_lambda + (loss_params.end_lambda - loss_params.start_lambda) * (
             self.current_epoch / self.max_epoch
         )
+
+        if self.training:
+            # Normalizing jitter_lambda_batch so that combined with decay,
+            # the effective jitter magnitude remains consistent across different decay rates.
+            jitter_lambda_batch = loss_params.jitter_lambda_batch * math.sqrt(1 - loss_params.jitter_decay_lambda_batch ** 2)
+            batch_jitter_delta = jitter_lambda_batch * torch.randn_like(self.jitter_buffer)
+            self.jitter_buffer.mul_(loss_params.jitter_decay_lambda_batch).add_(batch_jitter_delta)
+            batch_jitter = self.jitter_buffer.expand_as(scorenet)
+            sample_jitter = torch.randn_like(scorenet) * loss_params.jitter_lambda_sample
+        else:
+            # During evaluation we move allocate all jitter to the sample level for better consistency.
+            batch_jitter = torch.zeros_like(scorenet)
+            sample_jitter = torch.randn_like(scorenet)
+            sample_jitter = sample_jitter * (loss_params.jitter_lambda_sample + loss_params.jitter_lambda_batch)
+        actual_lambda = actual_lambda + batch_jitter + sample_jitter
+        actual_lambda = actual_lambda.clamp(0.0, 1.0)
 
         sf_loss = calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
 
