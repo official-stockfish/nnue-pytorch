@@ -8,6 +8,7 @@ from torchmetrics import MeanMetric, MetricCollection
 from .config import NNUELightningConfig
 from .model import NNUEModel
 from .quantize import QuantizationConfig
+from .lambda_utils import LambdaController
 
 
 def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
@@ -47,11 +48,6 @@ def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
 
 
 class NNUE(L.LightningModule):
-    """
-    lambda_ = 0.0 - purely based on game results
-    0.0 < lambda_ < 1.0 - interpolated score and result
-    lambda_ = 1.0 - purely based on search scores
-    """
 
     def __init__(
         self,
@@ -80,8 +76,8 @@ class NNUE(L.LightningModule):
         # lazy init so `resume_from_model` with config changes works correctly
         self.optimizer_wrapper = None
 
-        # register jitter buffer
-        self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
+        # Initialize the lambda controller
+        self.lambda_scheduler = LambdaController(config.loss_params)
 
         self.loss_metrics = MetricCollection(
             {
@@ -195,21 +191,10 @@ class NNUE(L.LightningModule):
 
     def on_save_checkpoint(self, checkpoint):
         self.optimizer_wrapper.on_save_checkpoint(self, checkpoint)
-        checkpoint["jitter_buffer_value"] = self.jitter_buffer
+        self.lambda_scheduler.on_save_checkpoint(checkpoint)
 
     def on_load_checkpoint(self, checkpoint):
-        trainer = self.__dict__.get("_trainer", None)
-        is_resuming = (
-            trainer is not None and
-            getattr(trainer, "ckpt_path", None) is not None
-        )
-        if is_resuming:
-            if "jitter_buffer_value" in checkpoint:
-                jitter_buffer_value = checkpoint["jitter_buffer_value"].to(
-                    device=self.jitter_buffer.device,
-                    dtype=self.jitter_buffer.dtype,
-                )
-                self.jitter_buffer.copy_(jitter_buffer_value)
+        self.lambda_scheduler.on_load_checkpoint(self, checkpoint)
 
     def on_train_batch_start(self, batch, batch_idx):
         self.optimizer_wrapper.on_train_batch_start(self, batch, batch_idx)
@@ -271,32 +256,12 @@ class NNUE(L.LightningModule):
 
         scorenet = scorenet * self.model.quantization.nnue2score
 
-        loss_params = self.config.loss_params
-
-        actual_lambda = loss_params.start_lambda + (loss_params.end_lambda - loss_params.start_lambda) * (
-            self.current_epoch / self.max_epoch
+        actual_lambda = self.lambda_scheduler(
+            current_epoch=self.current_epoch,
+            max_epoch=self.max_epoch,
+            is_training=self.training,
+            scorenet=scorenet
         )
-
-        if self.training:
-            # Normalizing jitter_lambda_batch so that combined with decay,
-            # the effective jitter magnitude remains consistent across different decay rates.
-            if loss_params.jitter_lambda_batch != 0.0:
-                jitter_lambda_batch = loss_params.jitter_lambda_batch * math.sqrt(1 - loss_params.jitter_decay_lambda_batch ** 2)
-                batch_jitter_delta = jitter_lambda_batch * torch.randn_like(self.jitter_buffer)
-                self.jitter_buffer.mul_(loss_params.jitter_decay_lambda_batch).add_(batch_jitter_delta)
-                actual_lambda = actual_lambda + self.jitter_buffer.expand_as(scorenet)
-            if loss_params.jitter_lambda_sample != 0.0:
-                actual_lambda = actual_lambda + torch.randn_like(scorenet) * loss_params.jitter_lambda_sample
-        else:
-            # During evaluation, we allocate all jitter to the sample level for better consistency.
-            eval_jitter_lambda = loss_params.jitter_lambda_sample + loss_params.jitter_lambda_batch
-            if eval_jitter_lambda != 0.0:
-                actual_lambda = actual_lambda + torch.randn_like(scorenet) * eval_jitter_lambda
-
-        if torch.is_tensor(actual_lambda):
-            actual_lambda = actual_lambda.clamp(0.0, 1.0)
-        else:
-            actual_lambda = max(0.0, min(1.0, actual_lambda))
 
         sf_loss = calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
 
