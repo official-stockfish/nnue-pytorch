@@ -87,16 +87,18 @@ class NNUEModel(nn.Module):
 
         l0_s = torch.split(l0_, self.L1 // 2, dim=1)
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
-        # We multiply by 127/128 because in the quantized network 1.0 is represented by 127
-        # and it's more efficient to divide by 128 instead.
-        l0_ = torch.cat(l0_s1, dim=1) * (127 / 128)
+        l0_ = torch.cat(l0_s1, dim=1)
 
         psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
         wpsqt = wpsqt.gather(1, psqt_indices_unsq)
         bpsqt = bpsqt.gather(1, psqt_indices_unsq)
+
         # The PSQT values are averaged over perspectives. "Their" perspective
         # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
         # which does both the averaging and sign flip for black to move)
-        x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
+        nnue = self.layer_stacks(l0_, layer_stack_indices)
+        psqt = (wpsqt - bpsqt) * (us - 0.5)
+
+        x = nnue + psqt
 
         return x
