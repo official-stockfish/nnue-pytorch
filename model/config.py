@@ -78,7 +78,8 @@ class LossParams:
 
         if self.jitter_decay_lambda_batch < 0.0 or self.jitter_decay_lambda_batch >= 1.0:
             raise ValueError("jitter_decay_lambda_batch must be in the range [0.0, 1.0).")
-
+        if self.jitter_lambda_batch < 0.0 or self.jitter_lambda_sample < 0.0:
+            raise ValueError("jitter_lambda_batch and jitter_lambda_sample must be non-negative.")
 
 @dataclass(kw_only=True)
 class NNUELightningConfig(FeatureConfig):
