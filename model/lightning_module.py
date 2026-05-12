@@ -165,10 +165,13 @@ class NNUE(L.LightningModule):
 
         return retval
 
-
     def eval(self):
         return self.train(False)
 
+    def forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
+
+    # --- lightning hooks ---
     def on_train_epoch_start(self):
         self.optimizer_wrapper.on_train_epoch_start(self)
 
@@ -209,9 +212,6 @@ class NNUE(L.LightningModule):
         )
 
     # --- Training step implementation ---
-
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
 
     def training_step(self, batch, batch_idx):
         return self.step_(batch, batch_idx, "train_loss")

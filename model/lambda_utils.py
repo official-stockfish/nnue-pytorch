@@ -4,6 +4,7 @@ from torch import Tensor, nn
 
 from .config import LossParams
 
+
 class LambdaController(nn.Module):
     """
     lambda_ = 0.0 - purely based on game results
@@ -15,6 +16,7 @@ class LambdaController(nn.Module):
 
         # persistent=False ensures this is NOT saved in the standard model state_dict
         self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
+
 
     def forward(self, loss_params: LossParams, current_epoch: int, max_epoch: int, is_training: bool, scorenet: Tensor) -> Tensor | float:
         lp = loss_params
@@ -39,6 +41,7 @@ class LambdaController(nn.Module):
         if torch.is_tensor(actual_lambda):
             return actual_lambda.clamp(0.0, 1.0)
         return max(0.0, min(1.0, actual_lambda))
+
 
     def on_save_checkpoint(self, checkpoint):
         # Manually save the training-only buffer to the Lightning checkpoint
