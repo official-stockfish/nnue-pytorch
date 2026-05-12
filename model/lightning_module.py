@@ -263,7 +263,9 @@ class NNUE(L.LightningModule):
             scorenet=scorenet
         )
 
-        sf_loss = calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
+        sf_loss = calculate_sf_loss(
+            scorenet, score, outcome, self.config.loss_params, actual_lambda
+        )
 
         self.loss_metrics[f"{loss_type}_epoch"].update(sf_loss)
         self.log(
