@@ -68,7 +68,7 @@ class LossParams:
 
     def __post_init__(self):
         if (self.start_lambda is not None) != (self.end_lambda is not None):
-            raise Exception(
+            raise ValueError(
                 "Either both or none of start_lambda and end_lambda must be specified."
             )
         if self.start_lambda is None:

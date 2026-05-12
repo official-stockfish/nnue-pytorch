@@ -2,23 +2,25 @@ import math
 import torch
 from torch import Tensor, nn
 
+from .config import LossParams
+
 class LambdaController(nn.Module):
     """
     lambda_ = 0.0 - purely based on game results
     0.0 < lambda_ < 1.0 - interpolated score and result
     lambda_ = 1.0 - purely based on search scores
     """
-    def __init__(self, loss_params):
+    def __init__(self):
         super().__init__()
-        self.loss_params = loss_params
 
         # persistent=False ensures this is NOT saved in the standard model state_dict
         self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
 
-    def forward(self, current_epoch: int, max_epoch: int, is_training: bool, scorenet: Tensor) -> Tensor | float:
-        lp = self.loss_params
-
-        actual_lambda = lp.start_lambda + (lp.end_lambda - lp.start_lambda) * (current_epoch / max_epoch)
+    def forward(self, loss_params: LossParams, current_epoch: int, max_epoch: int, is_training: bool, scorenet: Tensor) -> Tensor | float:
+        lp = loss_params
+        start_lambda = lp.start_lambda if lp.start_lambda is not None else lp.lambda_
+        end_lambda = lp.end_lambda if lp.end_lambda is not None else lp.lambda_
+        actual_lambda = start_lambda + (end_lambda - start_lambda) * (current_epoch / max_epoch)
 
         if is_training:
             if lp.jitter_lambda_batch != 0.0:

@@ -76,7 +76,7 @@ class NNUE(L.LightningModule):
         self.optimizer_wrapper = None
 
         # Initialize the lambda controller
-        self.lambda_scheduler = LambdaController(config.loss_params)
+        self.lambda_scheduler = LambdaController()
 
         self.loss_metrics = MetricCollection(
             {
@@ -256,6 +256,7 @@ class NNUE(L.LightningModule):
         scorenet = scorenet * self.model.quantization.nnue2score
 
         actual_lambda = self.lambda_scheduler(
+            loss_params=self.config.loss_params,
             current_epoch=self.current_epoch,
             max_epoch=self.max_epoch,
             is_training=self.training,
