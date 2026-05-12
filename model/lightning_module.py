@@ -1,11 +1,13 @@
 import lightning as L
 import torch
+
 from torch import Tensor, nn
 from torchmetrics import MeanMetric, MetricCollection
 
 from .config import NNUELightningConfig
 from .model import NNUEModel
 from .quantize import QuantizationConfig
+from .lambda_utils import LambdaController
 
 
 def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
@@ -45,11 +47,6 @@ def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
 
 
 class NNUE(L.LightningModule):
-    """
-    lambda_ = 0.0 - purely based on game results
-    0.0 < lambda_ < 1.0 - interpolated score and result
-    lambda_ = 1.0 - purely based on search scores
-    """
 
     def __init__(
         self,
@@ -77,6 +74,9 @@ class NNUE(L.LightningModule):
 
         # lazy init so `resume_from_model` with config changes works correctly
         self.optimizer_wrapper = None
+
+        # Initialize the lambda controller
+        self.lambda_scheduler = LambdaController()
 
         self.loss_metrics = MetricCollection(
             {
@@ -165,10 +165,13 @@ class NNUE(L.LightningModule):
 
         return retval
 
-
     def eval(self):
         return self.train(False)
 
+    def forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
+
+    # --- lightning hooks ---
     def on_train_epoch_start(self):
         self.optimizer_wrapper.on_train_epoch_start(self)
 
@@ -190,6 +193,10 @@ class NNUE(L.LightningModule):
 
     def on_save_checkpoint(self, checkpoint):
         self.optimizer_wrapper.on_save_checkpoint(self, checkpoint)
+        self.lambda_scheduler.on_save_checkpoint(checkpoint)
+
+    def on_load_checkpoint(self, checkpoint):
+        self.lambda_scheduler.on_load_checkpoint(self, checkpoint)
 
     def on_train_batch_start(self, batch, batch_idx):
         self.optimizer_wrapper.on_train_batch_start(self, batch, batch_idx)
@@ -205,9 +212,6 @@ class NNUE(L.LightningModule):
         )
 
     # --- Training step implementation ---
-
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
 
     def training_step(self, batch, batch_idx):
         return self.step_(batch, batch_idx, "train_loss")
@@ -251,13 +255,17 @@ class NNUE(L.LightningModule):
 
         scorenet = scorenet * self.model.quantization.nnue2score
 
-        loss_params = self.config.loss_params
-
-        actual_lambda = loss_params.start_lambda + (loss_params.end_lambda - loss_params.start_lambda) * (
-            self.current_epoch / self.max_epoch
+        actual_lambda = self.lambda_scheduler(
+            loss_params=self.config.loss_params,
+            current_epoch=self.current_epoch,
+            max_epoch=self.max_epoch,
+            is_training=self.training,
+            scorenet=scorenet
         )
 
-        sf_loss = calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda)
+        sf_loss = calculate_sf_loss(
+            scorenet, score, outcome, self.config.loss_params, actual_lambda
+        )
 
         self.loss_metrics[f"{loss_type}_epoch"].update(sf_loss)
         self.log(

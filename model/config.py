@@ -49,6 +49,12 @@ class LossParams:
     """lambda to use at first epoch."""
     end_lambda: float | None = None
     """lambda to use at last epoch."""
+    jitter_lambda_sample: float = 0.0
+    """std of normal distributed per sample jitter to add to lambda (default=0.0, no jitter)."""
+    jitter_lambda_batch: float = 0.0
+    """std of normal distributed per batch jitter to add to lambda (default=0.0, no jitter)."""
+    jitter_decay_lambda_batch: float = 0.0
+    """decay of batch jitter (0.0 means full decay -> independent jitter per batch. 1.0 = no decay, not allowed)."""
     pow_exp: float = 2.5
     """exponent of the power law used for the mean error (default=2.5)"""
     qp_asymmetry: float = 0.0
@@ -60,6 +66,20 @@ class LossParams:
     lambda_: Annotated[float, tyro.conf.arg(name="lambda")] = 1.0
     """1.0=train on evaluations, 0.0=train on game results, interpolates between (default=1.0)."""
 
+    def __post_init__(self):
+        if (self.start_lambda is not None) != (self.end_lambda is not None):
+            raise ValueError(
+                "Either both or none of start_lambda and end_lambda must be specified."
+            )
+        if self.start_lambda is None:
+            self.start_lambda = self.lambda_
+        if self.end_lambda is None:
+            self.end_lambda = self.lambda_
+
+        if self.jitter_decay_lambda_batch < 0.0 or self.jitter_decay_lambda_batch >= 1.0:
+            raise ValueError("jitter_decay_lambda_batch must be in the range [0.0, 1.0).")
+        if self.jitter_lambda_batch < 0.0 or self.jitter_lambda_sample < 0.0:
+            raise ValueError("jitter_lambda_batch and jitter_lambda_sample must be non-negative.")
 
 @dataclass(kw_only=True)
 class NNUELightningConfig(FeatureConfig):
