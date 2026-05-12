@@ -33,7 +33,7 @@ class ExplicitSWACallback(L.Callback):
     def swap_weights(self, pl_module, to_eval):
         if self.swa_model is not None and self.to_eval != to_eval:
             # Swap the model's weights with the SWA weights for evaluation
-            tmp = pl_module.model.state_dict()
+            tmp = pl_module.model.state_dict().clone()
             pl_module.model.load_state_dict(self.swa_model.module.state_dict())
             self.swa_model.module.load_state_dict(tmp)
             self.to_eval = not self.to_eval

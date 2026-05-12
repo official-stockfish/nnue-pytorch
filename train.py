@@ -517,7 +517,7 @@ def main():
     if trainer.is_global_zero:
         last_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last.ckpt")
         swa_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last_swa.ckpt")
-        non_swa_path = swa_savepath.replace("last.ckpt", "last_non_swa.ckpt")
+        non_swa_path =  os.path.join(tb_logger.log_dir, "checkpoints", "last_non_swa.ckpt")
         if os.path.exists(swa_savepath):
             if os.path.exists(last_savepath):
                 print(f"Renaming existing checkpoint at {last_savepath} to {non_swa_path} to preserve original model.")
