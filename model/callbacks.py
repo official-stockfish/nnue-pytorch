@@ -1,5 +1,7 @@
 import lightning as L
 import torch
+import os
+
 from torch.optim.swa_utils import AveragedModel
 
 from .lightning_module import NNUE
@@ -20,10 +22,21 @@ class WeightClippingCallback(L.Callback):
             pl_module.model.clip_input_weights()
 
 class ExplicitSWACallback(L.Callback):
-    def __init__(self, swa_start_epoch: int = 0):
+    def __init__(self, swa_start_epoch: int, save_dir: str):
         super().__init__()
         self.swa_start_epoch = swa_start_epoch
+        self.save_dir = save_dir
+
         self.swa_model = None
+        self.to_eval = False
+
+    def swap_weights(self, pl_module, to_eval):
+        if self.swa_model is not None and self.to_eval != to_eval:
+            # Swap the model's weights with the SWA weights for evaluation
+            tmp = pl_module.model.state_dict()
+            pl_module.model.load_state_dict(self.swa_model.module.state_dict())
+            self.swa_model.module.load_state_dict(tmp)
+            self.to_eval = not self.to_eval
 
     @torch.compiler.disable
     def on_train_start(self, trainer, pl_module):
@@ -51,12 +64,15 @@ class ExplicitSWACallback(L.Callback):
 
     def on_save_checkpoint(self, trainer, pl_module, checkpoint):
         _ = pl_module  # Unused
-        if trainer.current_epoch > self.swa_start_epoch:
+        if trainer.current_epoch >= self.swa_start_epoch:
             # Strip optimizer and lr_scheduler states from the checkpoint to prevent excessive memory usage,
             # since they are not needed for SWA evaluation and resuming is unsupported.
             # Thus they would be redundant with the main checkpoint.
             checkpoint.pop("optimizer_states", None)
             checkpoint.pop("lr_schedulers", None)
+
+            if trainer.is_global_zero:
+                print(f"[ExplicitSWACallback] Stripping optimizer and lr_scheduler states from checkpoint at epoch {trainer.current_epoch} to save memory.")
 
     def on_load_checkpoint(self, trainer, pl_module, checkpoint):
         _, _ = trainer, pl_module  # Unused
@@ -69,3 +85,23 @@ class ExplicitSWACallback(L.Callback):
                 f"Cannot resume training after SWA has started. "
                 f"Checkpoint epoch {checkpoint_epoch} > SWA start epoch {self.swa_start_epoch}"
             )
+
+    def on_train_end(self, trainer, pl_module):
+        if trainer.current_epoch < self.swa_start_epoch:
+            return
+        # Optimizer is assumed to perform pointer swaps on train() and eval(),
+        # to be idempotent and to not overwrite weights on_save_checkpoint.
+        # Note that resume from checkpoint after swa averaging has started is not supported.
+        pl_module.eval()
+        self.swap_weights(pl_module, to_eval=True)
+
+        # NOTE: If BN is used, it has to be updated here. Be careful when using DDP.
+
+        # Writes to last.ckpt to support pipelines build expecting last.ckpt to be the final checkpoint.
+        # We rename last.ckpt to last_non_swa.ckpt to preserve the original for analysis purposes.
+
+        swa_savepath = os.path.join(self.save_dir, "checkpoints", "last_swa.ckpt")
+        trainer.save_checkpoint(swa_savepath)
+        if trainer.is_global_zero:
+            print(f"[ExplicitSWACallback] SWA model saved to {swa_savepath}")
+        self.swap_weights(pl_module, to_eval=False)
