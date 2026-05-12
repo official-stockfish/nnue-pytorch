@@ -1,6 +1,5 @@
 import lightning as L
 import torch
-import math
 
 from torch import Tensor, nn
 from torchmetrics import MeanMetric, MetricCollection
