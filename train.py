@@ -376,6 +376,7 @@ def main():
             nnue = torch.load(
                 args.resume_from_model, weights_only=False, map_location="cpu"
             )
+            nnue.train()
         except ModuleNotFoundError as e:
             raise RuntimeError(
                 f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
@@ -450,6 +451,18 @@ def main():
     )
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
+    trainer_callbacks = [
+            checkpoint_callback,
+            SimpleLineLogger(refresh_rate=refresh_rate),
+            TimeLimitAfterCheckpoint(args.max_time),
+            M.WeightClippingCallback(),
+        ]
+    if 0 <= args.swa_start_epoch < args.max_epochs:
+        swa_callback = M.ExplicitSWACallback(args.swa_start_epoch, tb_logger.log_dir)
+        trainer_callbacks.append(
+            swa_callback
+        )
+
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
@@ -457,12 +470,7 @@ def main():
         strategy="ddp" if n_devices > 1 else "auto",
         devices=devices,
         logger=loggers,
-        callbacks=[
-            checkpoint_callback,
-            SimpleLineLogger(refresh_rate=refresh_rate),
-            TimeLimitAfterCheckpoint(args.max_time),
-            M.WeightClippingCallback(),
-        ],
+        callbacks=trainer_callbacks,
         log_every_n_steps=refresh_rate,
         enable_progress_bar=False,
         enable_checkpointing=True,
@@ -479,7 +487,26 @@ def main():
     else:
         trainer.fit(nnue, train, val)
 
+    if 0 <= args.swa_start_epoch < args.max_epochs:
+        nnue.eval()
+        swa_callback.swap_weights(nnue, to_eval=True)
+        if val is not None:
+            trainer.validate(nnue, val)
+        else:
+            trainer.validate(nnue, train)
+        swa_callback.swap_weights(nnue, to_eval=False)
+
+
     if trainer.is_global_zero:
+        last_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last.ckpt")
+        swa_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last_swa.ckpt")
+        non_swa_path =  os.path.join(tb_logger.log_dir, "checkpoints", "last_non_swa.ckpt")
+        if os.path.exists(swa_savepath):
+            if os.path.exists(last_savepath):
+                print(f"Renaming existing checkpoint at {last_savepath} to {non_swa_path} to preserve original model.")
+                os.rename(last_savepath, non_swa_path)
+            os.rename(swa_savepath, last_savepath)
+
         with open(os.path.join(logdir, "training_finished"), "w"):
             pass
 
