@@ -48,7 +48,7 @@ class QuantizationConfig:
     nnue2score: float = 600.0
     weight_scale_l1: float = 64.0 # TODO 128 is better empirically for this layer
     weight_scale_l2: float = 64.0
-    # weight_scale_out = (self.nnue2score * self.weight_scale_out) / self.hidden_quantized_one
+    # weight_scale_l_out = (self.nnue2score * self.weight_scale_out) / self.hidden_quantized_one
     weight_scale_l_out: float = (600.0 * 16) / 128 # TODO 128 is better empirically for this layer
     weight_scale_out: float = 16.0 # TODO do calculation conversion on inference side
     weight_quantized_max_hidden: float = 127.0 # i8 max
@@ -92,16 +92,24 @@ class QuantizationManager:
     def clip_ft_act(self, preact):
         return torch.clamp(preact, 0.0, self.max_ft_activation)
 
+    def clip_ls_act(self, preact):
+        return torch.clamp(preact, 0, self.max_hidden_activation)
+
     def fake_quantize_ft_act(self, preact):
         act_scale = self.config.ft_quantized_one
         return _fake_quantize(preact, act_scale)
 
-    def clip_ls_act(self, preact):
-        return torch.clamp(preact, 0, self.max_hidden_activation)
-
     def fake_quantize_ls_act(self, preact):
         act_scale = self.config.hidden_quantized_one
         return _fake_quantize(preact, act_scale)
+
+    def fake_quantize_skip_act(self, preact):
+        # (600 * OutputScale) / (127 * (1 << WeightScaleBits))
+        act_scale = 1 / (self.hidden_quantized_one * self.config.weight_scale_l1)
+        tmp_scale = self.nnue2score * self.weight_scale_out * self.hidden_quantized_one
+        out = preact * tmp_scale
+        out = _fake_quantize(preact, act_scale)
+        return out / tmp_scale
 
     def generate_weight_clipping_config(
         self, model: "NNUEModel"

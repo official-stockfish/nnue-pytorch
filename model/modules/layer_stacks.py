@@ -37,8 +37,11 @@ class LayerStacks(nn.Module):
         if fake_quantize_acts:
             l1c_ = self.quantization.fake_quantize_ls_act(l1c_)
         l1x_, l1x_out = l1c_.split(self.L2, dim=1)
+
+        l1_sqr = torch.pow(l1x_, 2.0)
+
         # multiply sqr crelu result by scale correction to match quantized version
-        l1_sqr = torch.pow(l1x_, 2.0) * (self.quantization.sqr_crelu_correction_factor)
+        l1_sqr = l1_sqr * (self.quantization.sqr_crelu_correction_factor)
         if fake_quantize_acts:
             l1_sqr = self.quantization.fake_quantize_ls_act(l1_sqr)
 
@@ -54,6 +57,7 @@ class LayerStacks(nn.Module):
         l3c_ = self.output(l2x_, ls_indices)
         if fake_quantize_acts:
             l3c_ = self.quantization.fake_quantize_ls_act(l3c_)
+            l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
 
         l3x_ = l3c_ + l1x_out
         if fake_quantize_acts:
