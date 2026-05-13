@@ -77,26 +77,10 @@ class QuantizationManager:
         self.min_threat_weight = -_i8.max / config.ft_quantized_one  # -127/256
         self.max_threat_weight = _i8.max / config.ft_quantized_one  # 127/256
 
-        self._l0_correction_factor = config.ft_quantized_one ** 2 / config.inference_l0_division_factor / self.hidden_quantized_one
-        self._sqr_crelu_correction_factor = config.hidden_quantized_one / config.inference_sqr_crelu_division_factor
-        self._max_ft_activation = config.ft_quantized_max / config.ft_quantized_one
-        self._max_hidden_activation = config.hidden_quantized_max / config.hidden_quantized_one
-
-    @property
-    def l0_correction_factor(self):
-        return self._l0_correction_factor
-
-    @property
-    def sqr_crelu_correction_factor(self):
-        return self._sqr_crelu_correction_factor
-
-    @property
-    def max_ft_activation(self):
-        return self._max_ft_activation
-
-    @property
-    def max_hidden_activation(self):
-        return self._max_hidden_activation
+        self.l0_correction_factor = config.ft_quantized_one ** 2 / config.inference_l0_division_factor / self.hidden_quantized_one
+        self.sqr_crelu_correction_factor = config.hidden_quantized_one / config.inference_sqr_crelu_division_factor
+        self.max_ft_activation = config.ft_quantized_max / config.ft_quantized_one
+        self.max_hidden_activation = config.hidden_quantized_max / config.hidden_quantized_one
 
     def clip_ft_act(self, preact):
         return torch.clamp(preact, 0.0, self.max_ft_activation)
