@@ -51,6 +51,8 @@ class QuantizationConfig:
     ft_quantized_max: float = 255.0 # limited to 255 for safe squaring within i16
     hidden_quantized_one: float = 127.0 # TODO 128 is easier and does not require any adjustment factor
     hidden_quantized_max: float = 127.0 # i8 max
+
+    # used to calculate correction factors
     inference_l0_division_factor: float = 512.0
     inference_sqr_crelu_division_factor: float = 128.0
 

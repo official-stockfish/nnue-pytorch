@@ -247,6 +247,7 @@ class NNUE(L.LightningModule):
                 black_values,
                 psqt_indices,
                 layer_stack_indices,
+                self.config.use_fake_quantization,
             )
         )
 
