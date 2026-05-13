@@ -561,7 +561,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
             psqt_indices,
             layer_stack_indices,
         ) = batch_tuple
-        res = model.forward_ft(
+        l0_, wpsqt, bpsqt = model.forward_ft(
             us,
             them,
             white_indices,
@@ -571,7 +571,8 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
             psqt_indices,
             fake_quantize_acts=True,
         )
-        return res
+        _, _ = wpsqt, bpsqt
+        return l0_
 
 
 def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
