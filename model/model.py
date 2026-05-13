@@ -96,6 +96,8 @@ class NNUEModel(nn.Module):
 
         l0_s = torch.split(l0_, self.L1 // 2, dim=1)
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
+        if fake_quantize_acts:
+            l0_s1 = self.quantization.fake_quantize_ft_act(l0_s1)
         # We multiply by a correction factor, so we can use only bitshift and multiplication at inference.
         l0_ = torch.cat(l0_s1, dim=1) * self.quantization.l0_correction_factor
 
