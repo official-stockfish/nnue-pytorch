@@ -21,23 +21,21 @@ class WeightClippingCallback(L.Callback):
     ) -> None:
         _, _ = trainer, batch  # Unused
         assert isinstance(pl_module, NNUE)
-        pl_module.model.clip_weights()
+        pl_module.model.clip_weights(include_input=False)
 
     @torch.no_grad()
     @torch.compiler.disable
     def on_train_epoch_end(self, trainer, pl_module):
         _ = trainer # Unused
         assert isinstance(pl_module, NNUE)
-        pl_module.model.clip_weights()
-        pl_module.model.clip_input_weights()
+        pl_module.model.clip_weights(include_input=True)
 
     @torch.no_grad()
     @torch.compiler.disable
     def on_save_checkpoint(self, trainer, pl_module, checkpoint):
         _, _ = trainer, checkpoint  # Unused
         assert isinstance(pl_module, NNUE)
-        pl_module.model.clip_weights()
-        pl_module.model.clip_input_weights()
+        pl_module.model.clip_weights(include_input=True)
 
 
 class ExplicitSWACallback(L.Callback):

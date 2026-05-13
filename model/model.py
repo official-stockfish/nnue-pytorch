@@ -38,11 +38,14 @@ class NNUEModel(nn.Module):
         self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
 
     @torch.no_grad()
-    def clip_weights(self):
+    def clip_weights(self, include_input: bool):
         """
         Clips the weights of the model based on the min/max values allowed
         by the quantization scheme.
         """
+        if include_input:
+            self.input.clip_weights(self.quantization)
+
         for group in self.weight_clipping:
             for p in group["params"]:
                 if "min_weight" in group or "max_weight" in group:
@@ -65,10 +68,6 @@ class NNUEModel(nn.Module):
                                 - expanded_virtual_layer
                             )
                     p_data_fp32.clamp_(min_weight, max_weight)
-
-
-    def clip_input_weights(self):
-        self.input.clip_weights(self.quantization)
 
 
     def forward_ft(
@@ -104,6 +103,9 @@ class NNUEModel(nn.Module):
 
         if fake_quantize_acts:
             # after Hadamard product act_scale is converted
+            # so it should be `fake_quantize_ls_act`
+            # TODO: Find out why
+            # `fake_quantize_ft_act` leads to a lower cross_eval error....
             l0_ = self.quantization.fake_quantize_ls_act(l0_)
 
         return l0_, wpsqt, bpsqt
