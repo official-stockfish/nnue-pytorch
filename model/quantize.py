@@ -28,7 +28,7 @@ def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
 @dataclass
 class QuantizationConfig:
     nnue2score: float = 600.0
-    weight_scale_l1: float = 128.0 # TODO 128 is better empirically for this layer
+    weight_scale_l1: float = 64.0 # TODO 128 is better empirically for this layer
     weight_scale_l2: float = 64.0
     # weight_scale_out = (self.nnue2score * self.weight_scale_out) / self.hidden_quantized_one
     weight_scale_l_out: float = (600.0 * 16) / 128 # TODO 128 is better empirically for this layer
