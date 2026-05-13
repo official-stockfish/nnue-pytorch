@@ -69,6 +69,46 @@ class NNUEModel(nn.Module):
     def clip_input_weights(self):
         self.input.clip_weights(self.quantization)
 
+    def forward_ft(
+        self,
+        us: torch.Tensor,
+        them: torch.Tensor,
+        white_indices: torch.Tensor,
+        white_values: torch.Tensor,
+        black_indices: torch.Tensor,
+        black_values: torch.Tensor,
+        psqt_indices: torch.Tensor,
+        fake_quantize_acts: bool=False,
+    ) -> torch.Tensor:
+       # NOTE possibly refactor this into own class. Fused kernel would be beneficial for speed.
+        wp, bp = self.input(white_indices, white_values, black_indices, black_values)
+        w, wpsqt = torch.split(wp, self.L1, dim=1)
+        b, bpsqt = torch.split(bp, self.L1, dim=1)
+
+        psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
+        wpsqt = wpsqt.gather(1, psqt_indices_unsq)
+        bpsqt = bpsqt.gather(1, psqt_indices_unsq)
+
+        l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
+        l0_ = torch.clamp(l0_, 0.0, self.quantization.max_ft_activation)
+        if fake_quantize_acts:
+            # Fake quantization with STE
+            # NOTE if we use fake quantization in more spots,
+            # we should refactor this into its own class
+            # Inference uses bitshift which is equivalent to rounding down (floor).
+            act_scale = self.quantization.config.inference_l0_division_factor
+            l0_hard = ((l0_ * act_scale).floor() / act_scale).detach()
+            l0_soft = l0_.detach()
+            l0_ = l0_hard + (l0_ - l0_soft)
+
+        l0_s = torch.split(l0_, self.L1 // 2, dim=1)
+        l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
+        # We multiply by a correction factor, so we can use only bitshift and multiplication at inference.
+        l0_ = torch.cat(l0_s1, dim=1) * self.quantization.l0_correction_factor
+
+        return l0_, wpsqt, bpsqt
+
+
     def forward(
         self,
         us: torch.Tensor,
@@ -79,21 +119,18 @@ class NNUEModel(nn.Module):
         black_values: torch.Tensor,
         psqt_indices: torch.Tensor,
         layer_stack_indices: torch.Tensor,
+        fake_quantize_acts: bool=False,
     ):
-        wp, bp = self.input(white_indices, white_values, black_indices, black_values)
-        w, wpsqt = torch.split(wp, self.L1, dim=1)
-        b, bpsqt = torch.split(bp, self.L1, dim=1)
-        l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-        l0_ = torch.clamp(l0_, 0.0, self.quantization.max_ft_activation)
-
-        l0_s = torch.split(l0_, self.L1 // 2, dim=1)
-        l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
-        # We multiply by a correction factor, so we can use only bitshift and multiplication at inference.
-        l0_ = torch.cat(l0_s1, dim=1) * self.quantization.l0_correction_factor
-
-        psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
-        wpsqt = wpsqt.gather(1, psqt_indices_unsq)
-        bpsqt = bpsqt.gather(1, psqt_indices_unsq)
+        l0_, wpsqt, bpsqt = self.forward_ft(
+            us,
+            them,
+            white_indices,
+            white_values,
+            black_indices,
+            black_values,
+            psqt_indices,
+            fake_quantize_acts,
+        )
         # The PSQT values are averaged over perspectives. "Their" perspective
         # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
         # which does both the averaging and sign flip for black to move)

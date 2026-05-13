@@ -62,7 +62,7 @@ def make_fen_batch_provider(data_path, batch_size):
     )
 
 
-def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
+def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, device: str):
     (
         us,
         them,
@@ -87,6 +87,7 @@ def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
             black_values,
             psqt_indices,
             layer_stack_indices,
+            fake_quantize_acts=True,
         )
         * model.quantization.nnue2score
     ]

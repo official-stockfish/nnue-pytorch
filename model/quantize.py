@@ -44,6 +44,7 @@ class QuantizationConfig:
 
 class QuantizationManager:
     def __init__(self, config: QuantizationConfig):
+        self.config = config
         self.nnue2score = config.nnue2score
         self.weight_scale_hidden = [
             config.weight_scale_l1,

@@ -544,36 +544,9 @@ def quantize_ft(model: NNUEModel) -> None:
     ).round()
 
 
-def forward_ft(
-    model: NNUEModel,
-    us: torch.Tensor,
-    them: torch.Tensor,
-    white_indices: torch.Tensor,
-    white_values: torch.Tensor,
-    black_indices: torch.Tensor,
-    black_values: torch.Tensor,
-    psqt_indices: torch.Tensor,
-    layer_stack_indices: torch.Tensor,
-) -> torch.Tensor:
-    wp, bp = model.input(white_indices, white_values, black_indices, black_values)
-    w, _ = torch.split(wp, model.L1, dim=1)
-    b, _ = torch.split(bp, model.L1, dim=1)
-    l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-    l0_ = torch.clamp(l0_, 0.0, model.quantization.ft_quantized_one)
-
-    l0_s = torch.split(l0_, model.L1 // 2, dim=1)
-    l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
-    # We multiply by 255/512 because in the quantized network 1.0 is represented by 255
-    # and we want to scale to 1.0=127, but a shift is faster than a division (in inference)
-    l0_ = torch.cat(l0_s1, dim=1) * (1 / 512)
-
-    # Inference uses bitshift which is equivalent to rounding down (floor).
-    return l0_.floor()
-
-
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
     with torch.no_grad():
-        batch = tuple(
+        batch_tuple = tuple(
             batch_part.to(device=device_str) for batch_part in batch
         )
         (
@@ -587,9 +560,8 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
             score,
             psqt_indices,
             layer_stack_indices,
-        ) = batch
-        res = forward_ft(
-            model,
+        ) = batch_tuple
+        res = model.forward_ft(
             us,
             them,
             white_indices,
@@ -597,7 +569,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
             black_indices,
             black_values,
             psqt_indices,
-            layer_stack_indices,
+            fake_quantize_acts=True,
         )
         return res
 
