@@ -538,9 +538,8 @@ def make_sparse_batch_provider(
 def quantize_ft(model: NNUEModel) -> None:
     for f in model.input.features:
         f.weight.data = f.weight.data.mul(model.quantization.ft_quantized_one).round()
-    model.input.bias.data = model.input.bias.data.mul(
-        model.quantization.ft_quantized_one
-    ).round()
+        f.weight.data = f.weight.data.div_(model.quantization.ft_quantized_one)
+    model.input.bias.data = model.input.bias.data.mul(model.quantization.ft_quantized_one).round()
     model.input.bias.data.div_(model.quantization.ft_quantized_one)
 
 
