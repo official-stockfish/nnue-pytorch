@@ -609,7 +609,7 @@ def gather_impl(
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
     BATCH_SIZE = 1024
 
-    model = model.to(device_str)
+    model = copy.deepcopy(model).to(device_str)
 
     sparse_batch_provider = make_sparse_batch_provider(
         dataset,
