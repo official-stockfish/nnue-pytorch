@@ -101,7 +101,8 @@ class NNUEModel(nn.Module):
         l0_ = l0_ * self.quantization.l0_correction_factor
 
         if fake_quantize_acts:
-            l0_ = self.quantization.fake_quantize_ft_act(l0_)
+            # after Hadamard product act_scale is converted
+            l0_ = self.quantization.fake_quantize_ls_act(l0_)
 
         return l0_, wpsqt, bpsqt
 
