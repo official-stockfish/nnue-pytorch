@@ -28,22 +28,32 @@ class LayerStacks(nn.Module):
         with torch.no_grad():
             self.output.linear.bias.zero_()
 
-    def forward(self, x: torch.Tensor, ls_indices: torch.Tensor):
+    def forward(
+        self, x: torch.Tensor,
+        ls_indices: torch.Tensor,
+        fake_quantize_acts: bool=False,
+    ):
         l1c_ = self.l1(x, ls_indices)
+        if fake_quantize_acts:
+            l1c_ = self.quantization.fake_quantize_ls_act(l1c_)
         l1x_, l1x_out = l1c_.split(self.L2, dim=1)
         # multiply sqr crelu result by scale correction to match quantized version
-        l1x_ = torch.clamp(
-            torch.cat([torch.pow(l1x_, 2.0) * (self.quantization.sqr_crelu_correction_factor), l1x_], dim=1),
-            0.0,
-            self.quantization.max_hidden_activation,
+        l1x_ = self.quantization.clip_ls_act(
+            torch.cat([torch.pow(l1x_, 2.0) * (self.quantization.sqr_crelu_correction_factor), l1x_], dim=1)
         )
 
         l2c_ = self.l2(l1x_, ls_indices)
-        l2x_ = torch.clamp(l2c_, 0.0, self.quantization.max_hidden_activation)
+        if fake_quantize_acts:
+            l2c_ = self.quantization.fake_quantize_ls_act(l2c_)
+        l2x_ = self.quantization.clip_ls_act(l2c_)
 
         l3c_ = self.output(l2x_, ls_indices)
-        l3x_ = l3c_ + l1x_out
+        if fake_quantize_acts:
+            l3c_ = self.quantization.fake_quantize_ls_act(l3c_)
 
+        l3x_ = l3c_ + l1x_out
+        if fake_quantize_acts:
+            l3x_ = self.quantization.fake_quantize_ls_act(l3x_)
         return l3x_
 
     @torch.no_grad()

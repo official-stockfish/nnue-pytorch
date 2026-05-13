@@ -23,7 +23,20 @@ def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
     clamped_value = rounded_value.clamp(min_val, max_val)
     num_clipped = (rounded_value != clamped_value).sum()
     quantized_value = clamped_value.to(target_dtype)
+
     return quantized_value, num_clipped
+
+def _fake_quantize(value, act_scale):
+    # Fake quantization with STE
+    # Inference uses bitshift which is equivalent to rounding down (floor).
+    # act_scale is in nnue-pytorch is `> 1`, inverted compared to normal literature.
+    # will be slightly inaccurate unless all corrections factors are 1.0.
+    value_hard = ((value * act_scale).floor() / act_scale).detach()
+    value_soft = value.detach()
+    value = value_hard + (value - value_soft)
+
+    return value
+
 
 @dataclass
 class QuantizationConfig:
@@ -84,6 +97,20 @@ class QuantizationManager:
     @property
     def max_hidden_activation(self):
         return self._max_hidden_activation
+
+    def clip_ft_act(self, preact):
+        return torch.clamp(preact, 0.0, self.max_ft_activation)
+
+    def fake_quantize_ft_act(self, preact):
+        act_scale = self.config.ft_quantized_one
+        return _fake_quantize(preact, act_scale)
+
+    def clip_ls_act(self, preact):
+        return torch.clamp(preact, 0, self.max_hidden_activation)
+
+    def fake_quantize_ls_act(self, preact):
+        act_scale = self.config.hidden_quantized_one
+        return _fake_quantize(preact, act_scale)
 
     def generate_weight_clipping_config(
         self, model: "NNUEModel"

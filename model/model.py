@@ -90,16 +90,9 @@ class NNUEModel(nn.Module):
         bpsqt = bpsqt.gather(1, psqt_indices_unsq)
 
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-        l0_ = torch.clamp(l0_, 0.0, self.quantization.max_ft_activation)
         if fake_quantize_acts:
-            # Fake quantization with STE
-            # NOTE if we use fake quantization in more spots,
-            # we should refactor this into its own class
-            # Inference uses bitshift which is equivalent to rounding down (floor).
-            act_scale = self.quantization.config.inference_l0_division_factor
-            l0_hard = ((l0_ * act_scale).floor() / act_scale).detach()
-            l0_soft = l0_.detach()
-            l0_ = l0_hard + (l0_ - l0_soft)
+            l0_ = self.quantization.fake_quantize_ft_act(l0_)
+        l0_ = self.quantization.clip_ft_act(l0_)
 
         l0_s = torch.split(l0_, self.L1 // 2, dim=1)
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
@@ -119,7 +112,7 @@ class NNUEModel(nn.Module):
         black_values: torch.Tensor,
         psqt_indices: torch.Tensor,
         layer_stack_indices: torch.Tensor,
-        fake_quantize_acts: bool=False,
+        fake_quantize_acts: bool=True,
     ):
         l0_, wpsqt, bpsqt = self.forward_ft(
             us,
@@ -134,6 +127,6 @@ class NNUEModel(nn.Module):
         # The PSQT values are averaged over perspectives. "Their" perspective
         # has a negative influence (us-0.5 is 0.5 for white and -0.5 for black,
         # which does both the averaging and sign flip for black to move)
-        x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
+        x = self.layer_stacks(l0_, layer_stack_indices, fake_quantize_acts) + (wpsqt - bpsqt) * (us - 0.5)
 
         return x

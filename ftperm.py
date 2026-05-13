@@ -536,14 +536,6 @@ def make_sparse_batch_provider(
     )
 
 
-def quantize_ft(model: NNUEModel) -> None:
-    for f in model.input.features:
-        f.weight.data = f.weight.data.mul(model.quantization.ft_quantized_one).round()
-    model.input.bias.data = model.input.bias.data.mul(
-        model.quantization.ft_quantized_one
-    ).round()
-
-
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
     with torch.no_grad():
         batch_tuple = tuple(
@@ -617,14 +609,12 @@ def gather_impl(
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
     BATCH_SIZE = 1024
 
-    quantized_model = copy.deepcopy(model)
-    quantize_ft(quantized_model)
-    quantized_model.to(device_str)
+    model = model.to(device_str)
 
     sparse_batch_provider = make_sparse_batch_provider(
         dataset,
         BATCH_SIZE,
-        quantized_model.input_feature_name,
+        model.input_feature_name,
         loader_num_workers=loader_workers,
         loader_config=loader_config
     )
@@ -637,7 +627,7 @@ def gather_impl(
         # checks are already filtered by sparse_batch_provider.
         s_batch = next(sparse_batch_provider)
 
-        actmat = eval_ft(quantized_model, s_batch, device_str).cpu()
+        actmat = eval_ft(model, s_batch, device_str).cpu()
         actmat = actmat <= ZERO_POINT
         actmat = actmat.numpy()
         actmats.append(actmat)
