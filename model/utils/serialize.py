@@ -37,7 +37,6 @@ def get_histogram_callback(hist_title: str, verbose: bool):
     def histogram_callback(
         hist_subtitle: str,
         values: torch.Tensor,
-        num_clipped: torch.Tensor,
     ):
         total_elements = values.numel()
         hist_desc = [hist_title, hist_subtitle]
@@ -47,7 +46,6 @@ def get_histogram_callback(hist_title: str, verbose: bool):
             print(f"Layer '{hist_desc}' is empty.")
             return
 
-        num_clipped = int(num_clipped.sum().item())
         min_value = values.min().item()
         num_argmin = int((values == min_value).sum().item())
         max_value = values.max().item()
@@ -55,7 +53,6 @@ def get_histogram_callback(hist_title: str, verbose: bool):
 
         ascii_hist(f"{hist_desc}: ", values.detach().cpu().numpy())
         print(
-            f"Layer has {num_clipped}/{total_elements} clipped weights after rounding.\n"
             f"Minimum value in layer is {min_value}, occurring {num_argmin} times.\n"
             f"Maximum value in layer is {max_value}, occurring {num_argmax} times."
         )

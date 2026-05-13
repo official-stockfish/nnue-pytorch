@@ -66,8 +66,10 @@ class NNUEModel(nn.Module):
                             )
                     p_data_fp32.clamp_(min_weight, max_weight)
 
+
     def clip_input_weights(self):
         self.input.clip_weights(self.quantization)
+
 
     def forward_ft(
         self,

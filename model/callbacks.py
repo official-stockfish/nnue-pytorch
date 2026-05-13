@@ -9,18 +9,36 @@ from .lightning_module import NNUE
 
 
 class WeightClippingCallback(L.Callback):
-    def on_train_batch_start(
+    @torch.no_grad()
+    @torch.compiler.disable
+    def on_train_batch_end(
         self,
         trainer: L.Trainer,
         pl_module: L.LightningModule,
+        outputs,
         batch,
         batch_idx: int,
     ) -> None:
         _, _ = trainer, batch  # Unused
         assert isinstance(pl_module, NNUE)
         pl_module.model.clip_weights()
-        if batch_idx == 0:
-            pl_module.model.clip_input_weights()
+
+    @torch.no_grad()
+    @torch.compiler.disable
+    def on_train_epoch_end(self, trainer, pl_module):
+        _ = trainer # Unused
+        assert isinstance(pl_module, NNUE)
+        pl_module.model.clip_weights()
+        pl_module.model.clip_input_weights()
+
+    @torch.no_grad()
+    @torch.compiler.disable
+    def on_save_checkpoint(self, trainer, pl_module, checkpoint):
+        _, _ = trainer, checkpoint  # Unused
+        assert isinstance(pl_module, NNUE)
+        pl_module.model.clip_weights()
+        pl_module.model.clip_input_weights()
+
 
 class ExplicitSWACallback(L.Callback):
     def __init__(self, swa_start_epoch: int, save_dir: str):
@@ -39,12 +57,14 @@ class ExplicitSWACallback(L.Callback):
             self.swa_model.module.load_state_dict(tmp)
             self.to_eval = not self.to_eval
 
+    @torch.no_grad()
     @torch.compiler.disable
     def on_train_start(self, trainer, pl_module):
         if not trainer.is_global_zero:
             return
         self.swa_model = AveragedModel(pl_module.model)
 
+    @torch.no_grad()
     @torch.compiler.disable
     def on_train_epoch_end(self, trainer, pl_module):
         if not trainer.is_global_zero or trainer.current_epoch < self.swa_start_epoch:
@@ -53,6 +73,8 @@ class ExplicitSWACallback(L.Callback):
         self.swa_model.update_parameters(pl_module.model)
         pl_module.train()
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def state_dict(self):
         # Prevent Lightning from saving the SWA callback's internal state
         # in the regular epoch checkpoints, avoiding redundant memory bloat.
@@ -60,9 +82,13 @@ class ExplicitSWACallback(L.Callback):
         # but that's an acceptable tradeoff for now.
         return {}
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def load_state_dict(self, state_dict):
         _ = state_dict # Unused
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def on_save_checkpoint(self, trainer, pl_module, checkpoint):
         _ = pl_module  # Unused
         if trainer.current_epoch >= self.swa_start_epoch:
@@ -75,6 +101,8 @@ class ExplicitSWACallback(L.Callback):
             if trainer.is_global_zero:
                 print(f"[ExplicitSWACallback] Stripping optimizer and lr_scheduler states from checkpoint at epoch {trainer.current_epoch} to save memory.")
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def on_load_checkpoint(self, trainer, pl_module, checkpoint):
         _, _ = trainer, pl_module  # Unused
         checkpoint_epoch = checkpoint.get("epoch")
@@ -87,6 +115,8 @@ class ExplicitSWACallback(L.Callback):
                 f"Checkpoint epoch {checkpoint_epoch} > SWA start epoch {self.swa_start_epoch}"
             )
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def on_train_end(self, trainer, pl_module):
         if trainer.current_epoch < self.swa_start_epoch:
             return
