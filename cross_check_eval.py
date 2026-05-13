@@ -44,10 +44,9 @@ class CliConfig:
 def read_model(
     nnue_path,
     config: M.NNUELightningConfig,
-    quantize_config: M.QuantizationConfig,
 ):
     with open(nnue_path, "rb") as f:
-        reader = M.NNUEReader(f, config.features, config.model_config, quantize_config)
+        reader = M.NNUEReader(f, config.features, config.model_config)
         return reader.model
 
 
@@ -292,13 +291,11 @@ def main():
         model = M.NNUE.load_from_checkpoint(
             cross_check_config.checkpoint,
             config=nnue_lightning_config,
-            quantize_config=M.QuantizationConfig(),
         )
     else:
         model = read_model(
             cross_check_config.net,
             config=nnue_lightning_config,
-            quantize_config=M.QuantizationConfig(),
         )
     model.to(cross_check_config.device)
     model.eval()

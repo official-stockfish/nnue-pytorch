@@ -52,7 +52,6 @@ from model import (
     NNUE,
     NNUEModel,
     NNUEReader,
-    QuantizationConfig,
     FeatureConfig,
     ModelConfig,
 )
@@ -498,10 +497,9 @@ def read_model(
     nnue_path: str,
     feature_name: str,
     config: M.ModelConfig,
-    quantize_config: QuantizationConfig,
 ) -> NNUEModel:
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_name, config, quantize_config)
+        reader = NNUEReader(f, feature_name, config)
         return reader.model
 
 
@@ -686,7 +684,6 @@ def command_gather(args: FeaturePermutationConfig) -> None:
             config=M.NNUELightningConfig(
                 model_config=args.model_config,
             ),
-            quantize_config=QuantizationConfig(),
             map_location=torch.device("cpu"),
         )
         model = nnue.model
@@ -696,7 +693,6 @@ def command_gather(args: FeaturePermutationConfig) -> None:
             args.subcommand.net,
             args.subcommand.feature_config.features,
             args.model_config,
-            QuantizationConfig(),
         )
 
     model.eval()
