@@ -6,6 +6,7 @@ import torch
 if TYPE_CHECKING:
     from .model import NNUEModel
 
+FAKE_QUANTIZE_EPS = 1e-5
 
 class WeightClippingConfig(TypedDict):
     params: list[torch.Tensor]
@@ -36,7 +37,7 @@ def _fake_quantize(value, act_scale):
     # Inference uses bitshift which is equivalent to rounding down (floor).
     # act_scale is in nnue-pytorch is `> 1`, inverted compared to normal literature.
     # will be slightly inaccurate unless all corrections factors are 1.0.
-    value_hard = ((value * act_scale).floor() / act_scale).detach()
+    value_hard = ((value * act_scale + FAKE_QUANTIZE_EPS).floor() / act_scale).detach()
     value_soft = value.detach()
     value = value_hard + (value - value_soft)
 
