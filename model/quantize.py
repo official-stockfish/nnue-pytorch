@@ -6,7 +6,7 @@ import torch
 if TYPE_CHECKING:
     from .model import NNUEModel
 
-FAKE_QUANTIZE_EPS = 1e-5
+FAKE_QUANTIZE_EPS = 1e-3
 
 class WeightClippingConfig(TypedDict):
     params: list[torch.Tensor]
