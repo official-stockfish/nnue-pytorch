@@ -6,7 +6,7 @@ import torch
 if TYPE_CHECKING:
     from .model import NNUEModel
 
-FAKE_QUANTIZE_EPS = 1e-3
+FAKE_QUANTIZE_EPS = 1e-5
 
 class WeightClippingConfig(TypedDict):
     params: list[torch.Tensor]
@@ -97,7 +97,7 @@ class QuantizationManager:
         return torch.clamp(preact, 0, self.max_hidden_activation)
 
     def fake_quantize_ft_act(self, preact):
-        act_scale =  self.config.hidden_quantized_one
+        act_scale = self.config.hidden_quantized_one
         return _fake_quantize(preact, act_scale)
 
     def fake_quantize_ls_act(self, preact):
@@ -105,8 +105,23 @@ class QuantizationManager:
         return _fake_quantize(preact, act_scale)
 
     def fake_quantize_skip_act(self, preact):
-        # Correction factor not really working here.
         return preact
+
+    def fake_quantize_output(self, preact: torch.Tensor) -> torch.Tensor:
+        multiplier_int = int(self.config.nnue2score * self.config.weight_scale_out)
+        denominator_int = int(self.config.hidden_quantized_one * self.config.weight_scale_l_out * 2.0)
+
+        fwd_out_int = torch.round(preact * denominator_int).to(torch.int64)
+
+        output_value_int = torch.div(
+            fwd_out_int * multiplier_int,
+            denominator_int,
+            rounding_mode='trunc'
+        )
+
+        quantized_out = output_value_int.to(preact.dtype) / float(multiplier_int)
+
+        return quantized_out.detach() + (preact - preact.detach())
 
     def generate_weight_clipping_config(
         self, model: "NNUEModel"
