@@ -99,6 +99,8 @@ class NNUEModel(nn.Module):
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
         l0_ = torch.cat(l0_s1, dim=1)
 
+        # We multiply by a correction factor, so we can use only bitshift and multiplication at inference.
+        l0_ = l0_ * self.quantization.l0_correction_factor
         if fake_quantize_acts:
             # after Hadamard product act_scale is converted
             # so it should be `fake_quantize_ls_act`
@@ -106,8 +108,6 @@ class NNUEModel(nn.Module):
             # `fake_quantize_ft_act` leads to a lower cross_eval error....
             l0_ = self.quantization.fake_quantize_ls_act(l0_)
 
-        # We multiply by a correction factor, so we can use only bitshift and multiplication at inference.
-        l0_ = l0_ * self.quantization.l0_correction_factor
 
         return l0_, wpsqt, bpsqt
 
