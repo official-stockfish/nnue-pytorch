@@ -198,7 +198,7 @@ class NNUEWriter:
             _, segment_weight, segment_psqt_weight = model.quantization.quantize_feature_transformer(
                 None, segment_weight, segment_psqt_weight, f_export_dtype, ft_histogram_callback
             )
-            # threat weights are expected to always be uncompressed -- should be changed in the future
+            # compression is only useful for types larger than 1 byte
             segment_compression = ft_compression if not f_export_dtype == torch.int8 else "none"
             offset += n
 
