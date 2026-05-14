@@ -92,7 +92,7 @@ def decode_leb_128_array(arr: bytes, n: int) -> npt.NDArray:
 
 
 # hardcoded for now
-VERSION = 0x7AF32F20
+VERSION = 0x6A448AFA
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
 
 
@@ -186,9 +186,6 @@ class NNUEWriter:
 
         self.write_tensor(biases, ft_compression)
 
-        # TODO remove after adjustment
-        psqt_weights_to_write = []
-
         # Weights stored as [num_features][outputs]
         offset = 0
         for f in layer.features:
@@ -205,12 +202,9 @@ class NNUEWriter:
             segment_compression = ft_compression if not f_export_dtype == torch.int8 else "none"
             offset += n
 
-            # TODO Adjust layout on inference side for simplication
             self.write_tensor(segment_weight, segment_compression)
-            psqt_weights_to_write.append(segment_psqt_weight)
-            # self.write_tensor(segment_psqt_weight, ft_compression)
+            self.write_tensor(segment_psqt_weight, ft_compression)
 
-        self.write_tensor(torch.cat(psqt_weights_to_write, dim=0), ft_compression)
 
     def write_fc_layer(
         self,
@@ -339,20 +333,17 @@ class NNUEReader:
 
         bias = self.tensor(np.int16, [L1])
         segments = []
-        # segments_psqt = []
+        segments_psqt = []
 
         for feature in layer.features:
             dtype = np.int8 if feature.EXPORT_WEIGHT_DTYPE == torch.int8 else np.int16
             s = self.tensor(dtype, [feature.NUM_REAL_FEATURES, L1])
             segments.append(s)
-            # TODO simplify layout at inference side
-            # s_psqt = self.tensor(np.int32, [feature.NUM_REAL_FEATURES, num_psqt_buckets])
-            # segments_psqt.append(s_psqt)
+            s_psqt = self.tensor(np.int32, [feature.NUM_REAL_FEATURES, num_psqt_buckets])
+            segments_psqt.append(s_psqt)
 
         weight = torch.cat(segments, dim=0)
-        # TODO simplify layout at inference side
-        # psqt_weight = torch.cat(segments_psqt, dim=0)
-        psqt_weight = self.tensor(np.int32, [layer.NUM_REAL_FEATURES, num_psqt_buckets])
+        psqt_weight = torch.cat(segments_psqt, dim=0)
 
         bias, weight, psqt_weight = (
             self.model.quantization.dequantize_feature_transformer(

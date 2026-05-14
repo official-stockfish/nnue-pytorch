@@ -47,15 +47,15 @@ def _fake_quantize(value, act_scale):
 @dataclass
 class QuantizationConfig:
     nnue2score: float = 600.0
-    weight_scale_l1: float = 64.0 # TODO 128 is better empirically for this layer
+    weight_scale_l1: float = 128
     weight_scale_l2: float = 64.0
     # weight_scale_l_out = (self.nnue2score * self.weight_scale_out) / self.hidden_quantized_one
-    weight_scale_l_out: float = (600.0 * 16) / 127 # TODO 128 is better empirically for this layer
-    weight_scale_out: float = 16.0 # TODO do calculation conversion on inference side
+    weight_scale_l_out: float = 128
+    weight_scale_out: float = 16.0
     weight_quantized_max_hidden: float = 127.0 # i8 max
-    ft_quantized_one: float = 255.0 # TODO 256 is easier and does not require any adjustment factor
+    ft_quantized_one: float = 256.0
     ft_quantized_max: float = 255.0 # limited to 255 for safe squaring within i16
-    hidden_quantized_one: float = 127.0 # TODO 128 is easier and does not require any adjustment factor
+    hidden_quantized_one: float = 128.0
     hidden_quantized_max: float = 127.0 # i8 max
 
     # used to calculate correction factors
@@ -97,9 +97,7 @@ class QuantizationManager:
         return torch.clamp(preact, 0, self.max_hidden_activation)
 
     def fake_quantize_ft_act(self, preact):
-        # TODO theoretically correct value is worse somehow
-        # act_scale = self.config.hidden_quantized_one
-        act_scale =  self.config.ft_quantized_one
+        act_scale =  self.config.hidden_quantized_one
         return _fake_quantize(preact, act_scale)
 
     def fake_quantize_ls_act(self, preact):
@@ -107,7 +105,8 @@ class QuantizationManager:
         return _fake_quantize(preact, act_scale)
 
     def fake_quantize_skip_act(self, preact):
-        return preact # TODO needs inference changes to be effective
+        # Correction factor not really working here.
+        return preact
 
     def generate_weight_clipping_config(
         self, model: "NNUEModel"
