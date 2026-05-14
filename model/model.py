@@ -106,7 +106,7 @@ class NNUEModel(nn.Module):
             # so it should be `fake_quantize_ls_act`
             # TODO: Find out why
             # `fake_quantize_ft_act` leads to a lower cross_eval error....
-            l0_ = self.quantization.fake_quantize_ls_act(l0_)
+            l0_ = self.quantization.fake_quantize_ft_act(l0_)
 
 
         return l0_, wpsqt, bpsqt
