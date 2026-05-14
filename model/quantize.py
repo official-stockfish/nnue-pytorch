@@ -104,12 +104,7 @@ class QuantizationManager:
         return _fake_quantize(preact, act_scale)
 
     def fake_quantize_skip_act(self, preact):
-        # (600 * OutputScale) / (127 * (1 << WeightScaleBits))
-        act_scale = 1 / (self.hidden_quantized_one * self.config.weight_scale_l1)
-        tmp_scale = self.nnue2score * self.weight_scale_out * self.hidden_quantized_one
-        out = preact * tmp_scale
-        out = _fake_quantize(preact, act_scale)
-        return out / tmp_scale
+        return preact # TODO needs inference changes to be effective
 
     def generate_weight_clipping_config(
         self, model: "NNUEModel"
