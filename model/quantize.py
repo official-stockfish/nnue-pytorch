@@ -49,10 +49,10 @@ class QuantizationConfig:
     weight_scale_l1: float = 64.0 # TODO 128 is better empirically for this layer
     weight_scale_l2: float = 64.0
     # weight_scale_l_out = (self.nnue2score * self.weight_scale_out) / self.hidden_quantized_one
-    weight_scale_l_out: float = (600.0 * 16) / 128 # TODO 128 is better empirically for this layer
+    weight_scale_l_out: float = (600.0 * 16) / 127 # TODO 128 is better empirically for this layer
     weight_scale_out: float = 16.0 # TODO do calculation conversion on inference side
     weight_quantized_max_hidden: float = 127.0 # i8 max
-    ft_quantized_one: float = 255.0 # TODO 255 is easier and does not require any adjustment factor
+    ft_quantized_one: float = 255.0 # TODO 256 is easier and does not require any adjustment factor
     ft_quantized_max: float = 255.0 # limited to 255 for safe squaring within i16
     hidden_quantized_one: float = 127.0 # TODO 128 is easier and does not require any adjustment factor
     hidden_quantized_max: float = 127.0 # i8 max
