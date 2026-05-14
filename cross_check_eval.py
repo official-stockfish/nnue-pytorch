@@ -31,7 +31,7 @@ class CrossCheckConfig:
     device: Literal["cuda", "mps", "cpu"] = "cuda"
     """Device for the NNUE model."""
 
-    count: int = 2**10
+    count: int = 8 * 2**10
     """Number of positions to process."""
 
 
@@ -57,7 +57,8 @@ def make_fen_batch_provider(data_path, batch_size):
         1,
         batch_size,
         data_loader.DataloaderSkipConfig(
-            random_fen_skipping=10,
+            random_fen_skipping=5,
+            soft_early_fen_skipping=-1,
         ),
     )
 
