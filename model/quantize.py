@@ -97,7 +97,9 @@ class QuantizationManager:
         return torch.clamp(preact, 0, self.max_hidden_activation)
 
     def fake_quantize_ft_act(self, preact):
-        act_scale = self.config.ft_quantized_one
+        # TODO theoretically correct value is worse somehow
+        # act_scale = self.config.hidden_quantized_one
+        act_scale =  self.config.ft_quantized_one
         return _fake_quantize(preact, act_scale)
 
     def fake_quantize_ls_act(self, preact):
