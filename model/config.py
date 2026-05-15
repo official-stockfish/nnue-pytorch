@@ -4,6 +4,7 @@ from typing import Annotated
 import tyro
 from tyro.conf import OmitArgPrefixes
 
+from .quantize import QuantizationConfig
 from .optimizers import OptimizerConfig
 from .modules import FeatureConfig, LayerStacksConfig
 
@@ -32,6 +33,9 @@ class ModelConfig(LayerStacksConfig):
         config.L1 = args.L1
         config.L2 = args.L2
         return config
+
+    # Not omitting prefix on purpose.
+    quantize_config: QuantizationConfig = field(default_factory=QuantizationConfig)
 
 
 # parameters needed for the definition of the loss
@@ -83,6 +87,9 @@ class LossParams:
 
 @dataclass(kw_only=True)
 class NNUELightningConfig(FeatureConfig):
+    use_fake_quantization: bool = True
+    """Wether to use fake quantization with STE during training."""
+
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
     loss_params: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
     optimizer_config: OmitArgPrefixes[OptimizerConfig] = field(

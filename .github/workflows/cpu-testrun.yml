@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-bench:
+  train-and-cross-check:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:

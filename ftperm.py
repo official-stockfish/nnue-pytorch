@@ -52,7 +52,6 @@ from model import (
     NNUE,
     NNUEModel,
     NNUEReader,
-    QuantizationConfig,
     FeatureConfig,
     ModelConfig,
 )
@@ -498,10 +497,9 @@ def read_model(
     nnue_path: str,
     feature_name: str,
     config: M.ModelConfig,
-    quantize_config: QuantizationConfig,
 ) -> NNUEModel:
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_name, config, quantize_config)
+        reader = NNUEReader(f, feature_name, config)
         return reader.model
 
 
@@ -537,45 +535,17 @@ def make_sparse_batch_provider(
         config=loader_config,
     )
 
-
 def quantize_ft(model: NNUEModel) -> None:
     for f in model.input.features:
         f.weight.data = f.weight.data.mul(model.quantization.ft_quantized_one).round()
-    model.input.bias.data = model.input.bias.data.mul(
-        model.quantization.ft_quantized_one
-    ).round()
-
-
-def forward_ft(
-    model: NNUEModel,
-    us: torch.Tensor,
-    them: torch.Tensor,
-    white_indices: torch.Tensor,
-    white_values: torch.Tensor,
-    black_indices: torch.Tensor,
-    black_values: torch.Tensor,
-    psqt_indices: torch.Tensor,
-    layer_stack_indices: torch.Tensor,
-) -> torch.Tensor:
-    wp, bp = model.input(white_indices, white_values, black_indices, black_values)
-    w, _ = torch.split(wp, model.L1, dim=1)
-    b, _ = torch.split(bp, model.L1, dim=1)
-    l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-    l0_ = torch.clamp(l0_, 0.0, model.quantization.ft_quantized_one)
-
-    l0_s = torch.split(l0_, model.L1 // 2, dim=1)
-    l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
-    # We multiply by 255/512 because in the quantized network 1.0 is represented by 255
-    # and we want to scale to 1.0=127, but a shift is faster than a division (in inference)
-    l0_ = torch.cat(l0_s1, dim=1) * (1 / 512)
-
-    # Inference uses bitshift which is equivalent to rounding down (floor).
-    return l0_.floor()
+        f.weight.data = f.weight.data.div_(model.quantization.ft_quantized_one)
+    model.input.bias.data = model.input.bias.data.mul(model.quantization.ft_quantized_one).round()
+    model.input.bias.data.div_(model.quantization.ft_quantized_one)
 
 
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
     with torch.no_grad():
-        batch = tuple(
+        batch_tuple = tuple(
             batch_part.to(device=device_str) for batch_part in batch
         )
         (
@@ -589,9 +559,8 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
             score,
             psqt_indices,
             layer_stack_indices,
-        ) = batch
-        res = forward_ft(
-            model,
+        ) = batch_tuple
+        l0_, wpsqt, bpsqt = model.forward_ft(
             us,
             them,
             white_indices,
@@ -599,9 +568,10 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
             black_indices,
             black_values,
             psqt_indices,
-            layer_stack_indices,
+            fake_quantize_acts=True,
         )
-        return res
+        _, _ = wpsqt, bpsqt
+        return l0_
 
 
 def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
@@ -646,14 +616,13 @@ def gather_impl(
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
     BATCH_SIZE = 1024
 
-    quantized_model = copy.deepcopy(model)
-    quantize_ft(quantized_model)
-    quantized_model.to(device_str)
+    weight_quantized_model = copy.deepcopy(model).to(device_str)
+    quantize_ft(weight_quantized_model)
 
     sparse_batch_provider = make_sparse_batch_provider(
         dataset,
         BATCH_SIZE,
-        quantized_model.input_feature_name,
+        weight_quantized_model.input_feature_name,
         loader_num_workers=loader_workers,
         loader_config=loader_config
     )
@@ -666,7 +635,7 @@ def gather_impl(
         # checks are already filtered by sparse_batch_provider.
         s_batch = next(sparse_batch_provider)
 
-        actmat = eval_ft(quantized_model, s_batch, device_str).cpu()
+        actmat = eval_ft(weight_quantized_model, s_batch, device_str).cpu()
         actmat = actmat <= ZERO_POINT
         actmat = actmat.numpy()
         actmats.append(actmat)
@@ -686,7 +655,6 @@ def command_gather(args: FeaturePermutationConfig) -> None:
             config=M.NNUELightningConfig(
                 model_config=args.model_config,
             ),
-            quantize_config=QuantizationConfig(),
             map_location=torch.device("cpu"),
         )
         model = nnue.model
@@ -696,7 +664,6 @@ def command_gather(args: FeaturePermutationConfig) -> None:
             args.subcommand.net,
             args.subcommand.feature_config.features,
             args.model_config,
-            QuantizationConfig(),
         )
 
     model.eval()

@@ -88,7 +88,6 @@ def main():
             m,
             feature_name,
             config,
-            M.QuantizationConfig(),
         )
         for m in args.models
     ]

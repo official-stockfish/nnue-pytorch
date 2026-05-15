@@ -44,10 +44,9 @@ class CliConfig:
 def read_model(
     nnue_path,
     config: M.NNUELightningConfig,
-    quantize_config: M.QuantizationConfig,
 ):
     with open(nnue_path, "rb") as f:
-        reader = M.NNUEReader(f, config.features, config.model_config, quantize_config)
+        reader = M.NNUEReader(f, config.features, config.model_config)
         return reader.model
 
 
@@ -63,7 +62,7 @@ def make_fen_batch_provider(data_path, batch_size):
     )
 
 
-def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
+def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, device: str):
     (
         us,
         them,
@@ -88,6 +87,7 @@ def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
             black_values,
             psqt_indices,
             layer_stack_indices,
+            fake_quantize_acts=True,
         )
         * model.quantization.nnue2score
     ]
@@ -292,13 +292,11 @@ def main():
         model = M.NNUE.load_from_checkpoint(
             cross_check_config.checkpoint,
             config=nnue_lightning_config,
-            quantize_config=M.QuantizationConfig(),
         )
     else:
         model = read_model(
             cross_check_config.net,
             config=nnue_lightning_config,
-            quantize_config=M.QuantizationConfig(),
         )
     model.to(cross_check_config.device)
     model.eval()
