@@ -38,7 +38,7 @@ class NNUEModel(nn.Module):
         self.input.init_weights(num_psqt_buckets, self.quantization.nnue2score)
 
     @torch.no_grad()
-    def clip_weights(self, include_input: bool):
+    def clip_weights(self, include_input):
         """
         Clips the weights of the model based on the min/max values allowed
         by the quantization scheme.
@@ -68,6 +68,9 @@ class NNUEModel(nn.Module):
                                 - expanded_virtual_layer
                             )
                     p_data_fp32.clamp_(min_weight, max_weight)
+
+        if include_input:
+            self.input.clip_weights(self.quantization)
 
 
     def forward_ft(
