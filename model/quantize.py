@@ -32,7 +32,7 @@ def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
 
     return quantized_value
 
-def _fake_quantize(value, act_scale):
+def _fake_quantize_acts(value, act_scale):
     # Fake quantization with STE
     # Inference uses bitshift which is equivalent to rounding down (floor).
     # act_scale is in nnue-pytorch is `> 1`, inverted compared to normal literature.
@@ -43,6 +43,16 @@ def _fake_quantize(value, act_scale):
 
     return value
 
+def _fake_quantize_weights(value, weight_scale):
+    # Fake quantization with STE
+    # In contrast to activations,
+    # weights use rounding as they are
+    # quantized during serialization.
+    value_hard = ((value * weight_scale).round() / weight_scale).detach()
+    value_soft = value.detach()
+    value = value_hard + (value - value_soft)
+
+    return value
 
 @dataclass
 class QuantizationConfig:
@@ -90,6 +100,18 @@ class QuantizationManager:
         self.max_ft_activation = config.ft_quantized_max / config.ft_quantized_one
         self.max_hidden_activation = config.hidden_quantized_max / config.hidden_quantized_one
 
+        self.weight_scales_dict = {
+            "ft_weight" : self.ft_quantized_one,
+            "ft_bias" : self.ft_quantized_one,
+            "ft_psqt_weight" : self.nnue2score * self.weight_scale_out,
+            "ls_l1_weight" : self.weight_scale_hidden[0],
+            "ls_l1_bias" : self.weight_scale_hidden[0] * self.hidden_quantized_one,
+            "ls_l2_weight" : self.weight_scale_hidden[1],
+            "ls_l2_bias" : self.weight_scale_hidden[1] * self.hidden_quantized_one,
+            "ls_output_weight" : self.weight_scale_hidden[2],
+            "ls_output_bias" : self.weight_scale_hidden[2] * self.hidden_quantized_one,
+        }
+
     def clip_ft_act(self, preact):
         return torch.clamp(preact, 0.0, self.max_ft_activation)
 
@@ -98,11 +120,11 @@ class QuantizationManager:
 
     def fake_quantize_ft_act(self, preact):
         act_scale = self.config.hidden_quantized_one
-        return _fake_quantize(preact, act_scale)
+        return _fake_quantize_acts(preact, act_scale)
 
     def fake_quantize_ls_act(self, preact):
         act_scale = self.config.hidden_quantized_one
-        return _fake_quantize(preact, act_scale)
+        return _fake_quantize_acts(preact, act_scale)
 
     def fake_quantize_skip_act(self, preact):
         return preact
@@ -122,6 +144,10 @@ class QuantizationManager:
         quantized_out = output_value_int.to(preact.dtype) / float(multiplier_int)
 
         return quantized_out.detach() + (preact - preact.detach())
+
+    def fake_quantize_weights(self, tensor: torch.Tensor, key: str):
+        weight_scale = self.weight_scales_dict[key]
+        return _fake_quantize_weights(tensor, weight_scale)
 
     def generate_weight_clipping_config(
         self, model: "NNUEModel"

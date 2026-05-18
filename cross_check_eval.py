@@ -89,6 +89,7 @@ def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, devi
             psqt_indices,
             layer_stack_indices,
             fake_quantize_acts=True,
+            fake_quantize_weights=True,
         )
         * model.quantization.nnue2score
     ]

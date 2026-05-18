@@ -21,9 +21,9 @@ class LayerStacks(nn.Module):
         # there's a non-linearity and factorization breaks.
         # This is by design. The weights in the further layers should be
         # able to diverge a lot.
-        self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2 + 1, count)
-        self.l2 = StackedLinear(self.L2 * 2, self.L3, count)
-        self.output = StackedLinear(self.L3, 1, count)
+        self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2 + 1, count, quantization, "ls_l1")
+        self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
+        self.output = StackedLinear(self.L3, 1, count, quantization, "ls_output")
 
         with torch.no_grad():
             self.output.linear.bias.zero_()
@@ -32,8 +32,9 @@ class LayerStacks(nn.Module):
         self, x: torch.Tensor,
         ls_indices: torch.Tensor,
         fake_quantize_acts: bool=False,
+        fake_quantize_weights: bool=False,
     ):
-        l1c_ = self.l1(x, ls_indices)
+        l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
         l1x_, l1x_out = l1c_.split(self.L2, dim=1)
 
         l1_sqr = torch.pow(l1x_, 2.0)
@@ -47,12 +48,12 @@ class LayerStacks(nn.Module):
         l1x_ = torch.cat([l1_sqr, l1x_], dim=1)
         l1x_ = self.quantization.clip_ls_act(l1x_)
 
-        l2c_ = self.l2(l1x_, ls_indices)
+        l2c_ = self.l2(l1x_, ls_indices, fake_quantize_weights)
         if fake_quantize_acts:
             l2c_ = self.quantization.fake_quantize_ls_act(l2c_)
         l2x_ = self.quantization.clip_ls_act(l2c_)
 
-        l3c_ = self.output(l2x_, ls_indices)
+        l3c_ = self.output(l2x_, ls_indices, fake_quantize_weights)
         if fake_quantize_acts:
             l3c_ = self.quantization.fake_quantize_ls_act(l3c_)
             l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)

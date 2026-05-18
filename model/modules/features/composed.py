@@ -1,9 +1,12 @@
 import torch
 from torch import nn
 
+from typing import Callable
+
 from ..feature_transformer import SparseLinearFunction
 from .input_feature import InputFeature
 
+from ...quantize import QuantizationManager
 
 class ComposedFeatureTransformer(nn.Module):
     """Thin coordinator that wraps one or more InputFeature modules.
@@ -12,11 +15,15 @@ class ComposedFeatureTransformer(nn.Module):
     bias and delegates everything else to the underlying features.
     """
 
-    def __init__(self, features: list[InputFeature]):
+    def __init__(self, feature_classes: list[Callable[[int], InputFeature]], l1_size: int, num_psqt_buckets:int, quantization: QuantizationManager):
         super().__init__()
 
+        self.l1_size = l1_size
+        self.num_psqt_buckets = num_psqt_buckets
+        self.num_outputs = l1_size + num_psqt_buckets
+
+        features = features = [fc(self.num_outputs) for fc in feature_classes]
         self.features = nn.ModuleList(features)
-        self.num_outputs = features[0].num_outputs
 
         self.bias = nn.Parameter(torch.empty(self.num_outputs, dtype=torch.float32))
 
@@ -29,6 +36,8 @@ class ComposedFeatureTransformer(nn.Module):
         self.INPUT_FEATURE_NAME = "+".join(f.INPUT_FEATURE_NAME for f in features)
 
         self.HASH = self._compute_hash()
+
+        self.quantization = quantization
 
         self._reset_bias()
 
@@ -47,21 +56,31 @@ class ComposedFeatureTransformer(nn.Module):
             self.bias.uniform_(-sigma, sigma)
 
     def forward(
-        self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
+        self,
+        feature_indices_0,
+        feature_values_0,
+        feature_indices_1,
+        feature_values_1,
+        fake_quantize_weights: bool=False,
     ):
         merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
+        bias = self.bias
+        if fake_quantize_weights:
+            merged[:self.l1_size] = self.quantization.fake_quantize_weights(merged[:self.l1_size], "ft_weight")
+            merged[self.l1_size:] = self.quantization.fake_quantize_weights(merged[self.l1_size:], "ft_psqt_weight")
+            bias = self.quantization.fake_quantize_weights(bias, "ft_bias")
         return (
             SparseLinearFunction.apply(
                 feature_indices_0,
                 feature_values_0,
                 merged,
-                self.bias,
+                bias,
             ),
             SparseLinearFunction.apply(
                 feature_indices_1,
                 feature_values_1,
                 merged,
-                self.bias,
+                bias,
             ),
         )
 
@@ -71,9 +90,10 @@ class ComposedFeatureTransformer(nn.Module):
             f.coalesce()
 
     @torch.no_grad()
-    def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None:
+    def init_weights(self) -> None:
+        num_psqt_buckets = self.num_psqt_buckets
         for f in self.features:
-            f.init_weights(num_psqt_buckets, nnue2score)
+            f.init_weights(num_psqt_buckets, self.quantization.nnue2score)
 
         L1 = self.num_outputs - num_psqt_buckets
         for i in range(num_psqt_buckets):
@@ -94,13 +114,3 @@ class ComposedFeatureTransformer(nn.Module):
     def clip_weights(self, quantization) -> None:
         for f in self.features:
             f.clip_weights(quantization)
-
-
-def combine_input_features(*feature_classes: type):
-    """Return a factory that creates a ComposedFeatureTransformer."""
-
-    def factory(num_outputs: int) -> ComposedFeatureTransformer:
-        features = [fc(num_outputs) for fc in feature_classes]
-        return ComposedFeatureTransformer(features)
-
-    return factory

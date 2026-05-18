@@ -569,6 +569,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
             black_values,
             psqt_indices,
             fake_quantize_acts=True,
+            fake_quantize_weights=True,
         )
         _, _ = wpsqt, bpsqt
         return l0_
