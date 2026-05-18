@@ -37,7 +37,7 @@ def _fake_quantize_acts(value, act_scale):
     # Inference uses bitshift which is equivalent to rounding down (floor).
     # act_scale is in nnue-pytorch is `> 1`, inverted compared to normal literature.
     # will be slightly inaccurate unless all corrections factors are 1.0.
-    value_hard = ((value * act_scale + FAKE_QUANTIZE_EPS).floor() / act_scale).detach()
+    value_hard = value.mul(act_scale).add(FAKE_QUANTIZE_EPS).floor().div(act_scale).detach()
     value_soft = value.detach()
     value = value_hard + (value - value_soft)
 
@@ -48,7 +48,7 @@ def _fake_quantize_weights(value, weight_scale):
     # In contrast to activations,
     # weights use rounding as they are
     # quantized during serialization.
-    value_hard = ((value * weight_scale).round() / weight_scale).detach()
+    value_hard = value.mul(weight_scale).round().div(weight_scale).detach()
     value_soft = value.detach()
     value = value_hard + (value - value_soft)
 
@@ -210,9 +210,9 @@ class QuantizationManager:
         weight: Optional[torch.Tensor],
         psqt_weight: Optional[torch.Tensor],
     ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        bias = bias.divide(self.ft_quantized_one) if bias is not None else None
-        weight = weight.divide(self.ft_quantized_one) if weight is not None else None
-        psqt_weight = psqt_weight.divide(self.nnue2score * self.weight_scale_out) if psqt_weight is not None else None
+        bias = bias.divide(self.weight_scales_dict["ft_bias"]) if bias is not None else None
+        weight = weight.divide(self.weight_scales_dict["ft_weight"]) if weight is not None else None
+        psqt_weight = psqt_weight.divide(self.weight_scales_dict["ft_psqt_weight"]) if psqt_weight is not None else None
 
         return bias, weight, psqt_weight
 
