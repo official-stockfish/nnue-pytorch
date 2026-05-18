@@ -1,7 +1,7 @@
 import torch
 
 from .serialize import NNUEReader
-from ..config import ModelConfig
+from ..config import ModelConfig, NNUELightningConfig
 from ..model import NNUEModel
 
 def load_model(
@@ -20,7 +20,9 @@ def load_model(
         model = NNUE.load_from_checkpoint(
             filename,
             feature_name=feature_name,
-            config=config,
+            config=NNUELightningConfig(
+                model_config=config
+            ),
         )
         model.eval()
         return model.model

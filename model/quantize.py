@@ -152,7 +152,7 @@ class QuantizationManager:
         psqt_weight: Optional[torch.Tensor],
         f_weight_export_dtype: torch.dtype = torch.int16,
         callback: Optional[Callable] = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         if bias is not None:
             # only weight can have different dtypes, bias is always int16, psqt_weight is always int32
             bias = bias.mul(self.ft_quantized_one)
@@ -179,10 +179,10 @@ class QuantizationManager:
 
     def dequantize_feature_transformer(
         self,
-        bias: torch.Tensor,
-        weight: torch.Tensor,
-        psqt_weight: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        bias: Optional[torch.Tensor],
+        weight: Optional[torch.Tensor],
+        psqt_weight: Optional[torch.Tensor],
+    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         bias = bias.divide(self.ft_quantized_one) if bias is not None else None
         weight = weight.divide(self.ft_quantized_one) if weight is not None else None
         psqt_weight = psqt_weight.divide(self.nnue2score * self.weight_scale_out) if psqt_weight is not None else None
