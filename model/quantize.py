@@ -24,11 +24,11 @@ def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
     clamped_value = rounded_value.clamp(min_val, max_val)
     num_clipped = (rounded_value != clamped_value).sum()
     quantized_value = clamped_value.to(target_dtype)
-    min = rounded_value.min().item()
     if num_clipped > 0:
+        num_clipped_int = int(num_clipped.item())
         min = rounded_value.min().item()
         max = rounded_value.max().item()
-        raise RuntimeError(f"Found {num_clipped} out of bounds values when converting to target dtype {target_dtype}. Min: {min}, max: {max}.")
+        raise RuntimeError(f"Found {num_clipped_int} out of bounds values when converting to target dtype {target_dtype}. Min: {min}, max: {max}.")
 
     return quantized_value
 

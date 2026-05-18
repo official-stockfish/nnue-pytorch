@@ -95,7 +95,7 @@ class NNUEModel(nn.Module):
 
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
         if fake_quantize_acts:
-            pass # do not fake quantize sum of (quantitized) weights
+            pass # do not fake quantize sum of (quantized) weights
         l0_ = self.quantization.clip_ft_act(l0_)
 
         l0_s = torch.split(l0_, self.L1 // 2, dim=1)

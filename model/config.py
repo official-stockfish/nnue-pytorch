@@ -88,7 +88,7 @@ class LossParams:
 @dataclass(kw_only=True)
 class NNUELightningConfig(FeatureConfig):
     use_fake_quantization: bool = True
-    """Wether to use fake quantization with STE during training."""
+    """Whether to use fake quantization with STE during training."""
 
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
     loss_params: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
