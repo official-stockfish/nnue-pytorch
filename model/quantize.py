@@ -196,7 +196,7 @@ class QuantizationManager:
                 callback("ft_bias", bias)
 
         if psqt_weight is not None:
-            psqt_weight = psqt_weight.mul(self.weight_scales_dict["ft_psqt_bias"])
+            psqt_weight = psqt_weight.mul(self.weight_scales_dict["ft_psqt_weight"])
             psqt_weight = _safe_convert(psqt_weight, torch.int32)
 
             if callback is not None:
