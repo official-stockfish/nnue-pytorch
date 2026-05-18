@@ -1,7 +1,7 @@
 from functools import reduce
 import operator
 import struct
-from typing import BinaryIO, Sequence
+from typing import BinaryIO, Sequence, Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -118,11 +118,12 @@ class NNUEWriter:
         self.write_header(model, fc_hash, description)
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model, ft_compression)
-        for bucket, (l1, l2, output) in enumerate(model.layer_stacks.get_coalesced_layer_stacks()):
+        layer_stacks = model.layer_stacks
+        for bucket, (l1, l2, output) in enumerate(layer_stacks.get_coalesced_layer_stacks()):
             self.int32(fc_hash)  # FC layers hash
-            self.write_fc_layer(model, l1, 0, f"bucket {bucket} l1")
-            self.write_fc_layer(model, l2, 1, f"bucket {bucket} l2")
-            self.write_fc_layer(model, output, 2, f"bucket {bucket} output")
+            self.write_fc_layer(model, l1, layer_stacks.l1.layer_key, f"bucket {bucket} l1")
+            self.write_fc_layer(model, l2, layer_stacks.l2.layer_key, f"bucket {bucket} l2")
+            self.write_fc_layer(model, output, layer_stacks.output.layer_key, f"bucket {bucket} output")
 
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
@@ -210,12 +211,15 @@ class NNUEWriter:
         self,
         model: NNUEModel,
         layer: nn.Linear,
-        layer_key: str,
+        layer_key: Optional[str],
         desc: str,
     ) -> None:
         # FC layers are stored as int8 weights, and int32 biases
         bias = layer.bias.data
         weight = layer.weight.data
+
+        if layer_key is None:
+            raise RuntimeError("layer_key required for quantization.")
 
         bias, weight = model.quantization.quantize_fc_layer(
             bias, weight, layer_key, get_histogram_callback(desc, self.verbose)
