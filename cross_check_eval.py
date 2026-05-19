@@ -244,7 +244,7 @@ def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVAL
             v = d[key] * 100 if is_pct else d[key]
             v_str = f"{v:{fmt}}" + ("%" if is_pct else "")
             print(
-                f"{v_str:>12} | {d['sf']:>10.1f} | {d['py']:>10.2f} | {d['q_sf']:>8.4f} | {d['q_py']:>8.4f} | {d['fen']}"
+                f"{v_str:>12} | {d['sf']:>10.2f} | {d['py']:>10.2f} | {d['q_sf']:>8.4f} | {d['q_py']:>8.4f} | {d['fen']}"
             )
 
     print_top("TOP 5 LARGEST ABSOLUTE ERRORS", "abs_err", "Abs Err", "12.2f")

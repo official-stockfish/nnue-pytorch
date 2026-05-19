@@ -301,7 +301,8 @@ class NNUEReader:
             raise Exception("Unexpected end of file when reading compressed data.")
 
         res = torch.tensor(
-            decode_leb_128_array(d, reduce(operator.mul, shape, 1)), dtype=torch.float32
+            decode_leb_128_array(d, reduce(operator.mul, shape, 1)),
+            dtype=torch.float64
         )
         res = res.reshape(shape)
         return res
@@ -325,7 +326,7 @@ class NNUEReader:
 
         if compression == "none":
             d = np.fromfile(self.f, dtype, reduce(operator.mul, shape, 1))
-            d = torch.from_numpy(d.astype(np.float32))
+            d = torch.from_numpy(d.astype(np.float64))
             d = d.reshape(shape)
             return d
         elif compression == "leb128":
@@ -358,9 +359,12 @@ class NNUEReader:
         )
 
         # Combine weight and psqt_weight into export format, then expand
-        export_weight = torch.cat([weight, psqt_weight], dim=1)
+        export_weight = torch.cat([weight.to(torch.float32), psqt_weight.to(torch.float32)], dim=1)
         layer.load_export_weights(export_weight)
-        layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
+        layer.bias.data = torch.cat([
+            bias.to(torch.float32),
+            torch.zeros(num_psqt_buckets, dtype=torch.float32)
+        ])
 
     def read_fc_layer(
         self,
@@ -379,9 +383,9 @@ class NNUEReader:
             bias, weight, layer_key
         )
 
-        layer_bias = bias
+        layer_bias = bias.to(torch.float32)
         # Strip padding.
-        layer_weight = weight[: non_padded_shape[0], : non_padded_shape[1]]
+        layer_weight = weight[: non_padded_shape[0], : non_padded_shape[1]].to(torch.float32)
 
         layer_weight_t.data.copy_(layer_weight)
         layer_bias_t.data.copy_(layer_bias)
