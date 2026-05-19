@@ -66,8 +66,8 @@ class ComposedFeatureTransformer(nn.Module):
         merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
         bias = self.bias
         if fake_quantize_weights:
-            merged[:self.l1_size] = self.quantization.fake_quantize_weights(merged[:self.l1_size], "ft_weight")
-            merged[self.l1_size:] = self.quantization.fake_quantize_weights(merged[self.l1_size:], "ft_psqt_weight")
+            merged[:, :self.l1_size] = self.quantization.fake_quantize_weights(merged[:, :self.l1_size], "ft_weight")
+            merged[:, self.l1_size:] = self.quantization.fake_quantize_weights(merged[:, self.l1_size:], "ft_psqt_weight")
             bias = self.quantization.fake_quantize_weights(bias, "ft_bias")
             bias[self.l1_size:].zero_()
         return (
