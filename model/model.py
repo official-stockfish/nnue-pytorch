@@ -37,6 +37,7 @@ class NNUEModel(nn.Module):
 
         self.input.init_weights()
 
+
     @torch.no_grad()
     def clip_weights(self, include_input):
         """
@@ -69,13 +70,12 @@ class NNUEModel(nn.Module):
                             )
                     p_data_fp32.clamp_(min_weight, max_weight)
 
-        if include_input:
-            self.input.clip_weights(self.quantization)
 
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
         self.input.zero_virtual_weights()
         self.layer_stacks.zero_virtual_weights()
+
 
     def forward_ft(
         self,

@@ -22,7 +22,7 @@ class ComposedFeatureTransformer(nn.Module):
         self.num_psqt_buckets = num_psqt_buckets
         self.num_outputs = l1_size + num_psqt_buckets
 
-        features = features = [fc(self.num_outputs) for fc in feature_classes]
+        features = [fc(self.num_outputs) for fc in feature_classes]
         self.features = nn.ModuleList(features)
 
         self.bias = nn.Parameter(torch.empty(self.num_outputs, dtype=torch.float32))

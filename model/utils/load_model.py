@@ -19,10 +19,8 @@ def load_model(
 
         model = NNUE.load_from_checkpoint(
             filename,
-            feature_name=feature_name,
-            config=NNUELightningConfig(
-                model_config=config
-            ),
+            config=NNUELightningConfig(model_config=config),
+            map_location=torch.device("cpu"),
         )
         model.eval()
         return model.model
