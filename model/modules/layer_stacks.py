@@ -55,7 +55,6 @@ class LayerStacks(nn.Module):
 
         l3c_ = self.output(l2x_, ls_indices, fake_quantize_weights)
         if fake_quantize_acts:
-            l3c_ = self.quantization.fake_quantize_ls_act(l3c_)
             l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
 
         l3x_ = l3c_ + l1x_out
