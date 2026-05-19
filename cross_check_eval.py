@@ -63,7 +63,7 @@ def make_fen_batch_provider(data_path, batch_size):
     )
 
 
-def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, device: str):
+def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, device: str, fake_quantize: bool):
     (
         us,
         them,
@@ -88,8 +88,8 @@ def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, devi
             black_values,
             psqt_indices,
             layer_stack_indices,
-            fake_quantize_acts=True,
-            fake_quantize_weights=True,
+            fake_quantize_acts=fake_quantize,
+            fake_quantize_weights=fake_quantize,
         )
         * model.quantization.nnue2score
     ]
@@ -137,7 +137,7 @@ def compute_basic_eval_stats(evals):
     return min_val, max_val, avg_val, avg_abs_val
 
 
-def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVALUATION SUMMARY", sf_name="SF", py_name="Py"):
+def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVALUATION SUMMARY", sf_name="Py", py_name="SF"):
     if len(engine_evals) != len(model_evals):
         raise Exception(f"Mismatch: {len(engine_evals)} vs {len(model_evals)}")
 
@@ -323,7 +323,9 @@ def main():
     fen_batch_provider = make_fen_batch_provider(cross_check_config.data, batch_size)
 
     ckpt_evals = []
+    ckpt_quantized_evals = []
     nnue_evals = []
+    nnue_quantized_evals = []
     engine_evals = []
     all_fens = []
 
@@ -337,8 +339,11 @@ def main():
             input_feature_name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
         if ckpt_model:
-            ckpt_evals += eval_model_batch(ckpt_model, b, cross_check_config.device)
-        nnue_evals += eval_model_batch(nnue_model, b, cross_check_config.device)
+            ckpt_evals += eval_model_batch(ckpt_model, b, cross_check_config.device, False)
+            ckpt_quantized_evals += eval_model_batch(ckpt_model, b, cross_check_config.device, True)
+
+        nnue_evals += eval_model_batch(nnue_model, b, cross_check_config.device, False)
+        nnue_quantized_evals += eval_model_batch(nnue_model, b, cross_check_config.device, True)
         data_loader.destroy_sparse_batch(b)
 
         engine_evals += eval_engine_batch(
@@ -351,11 +356,15 @@ def main():
         print("Processed {} positions.".format(done))
 
     if ckpt_model:
-        compute_correlation(nnue_evals, ckpt_evals, all_fens, "CKPT VS NNUE", "NNUE", "CKPT")
-        compute_correlation(engine_evals, nnue_evals, all_fens, "NNUE VS ENGINE", "ENG", "NNUE")
-        compute_correlation(engine_evals, ckpt_evals, all_fens, "CKPT VS ENGINE", "ENG", "CKPT")
+        compute_correlation(ckpt_evals, nnue_evals, all_fens, "CKPT VS NNUE", "CKPT", "NNUE")
+        compute_correlation(ckpt_quantized_evals, nnue_quantized_evals, all_fens, "CKPT (Q) VS NNUE (Q)", "CKPT", "NNUE")
+        compute_correlation(ckpt_evals, engine_evals, all_fens, "CKPT VS SF", "NNUE", "SF")
+        compute_correlation(ckpt_quantized_evals, engine_evals, all_fens, "QUANTIZED CKPT VS SF", "NNUE (Q)", "SF")
+        compute_correlation(nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF")
+        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "CKPT (Q)", "SF")
     else:
-        compute_correlation(engine_evals, nnue_evals, all_fens)
+        compute_correlation(nnue_evals, engine_evals, all_fens, "NNUE VS SF", "CKPT", "SF")
+        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "CKPT (Q)", "SF")
 
 
 if __name__ == "__main__":

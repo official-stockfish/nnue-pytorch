@@ -180,13 +180,6 @@ class QuantizationManager:
         callback: Optional[Callable] = None,
     ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
 
-        if weight is not None:
-            weight = weight.mul(self.weight_scales_dict["ft_weight"])
-            weight = _safe_convert(weight, f_weight_export_dtype)
-
-            if callback is not None:
-                callback("ft_weight", weight)
-
         if bias is not None:
             # only weight can have different dtypes, bias is always int16, psqt_weight is always int32
             bias = bias.mul(self.weight_scales_dict["ft_bias"])
@@ -194,6 +187,13 @@ class QuantizationManager:
 
             if callback is not None:
                 callback("ft_bias", bias)
+
+        if weight is not None:
+            weight = weight.mul(self.weight_scales_dict["ft_weight"])
+            weight = _safe_convert(weight, f_weight_export_dtype)
+
+            if callback is not None:
+                callback("ft_weight", weight)
 
         if psqt_weight is not None:
             psqt_weight = psqt_weight.mul(self.weight_scales_dict["ft_psqt_weight"])
@@ -226,15 +226,12 @@ class QuantizationManager:
         weight_key = f"{layer_key}_weight"
         bias_key = f"{layer_key}_bias"
 
-        kWeightScaleHidden = self.weight_scales_dict[weight_key]
-        kBiasScaleHidden = self.weight_scales_dict[bias_key]
-
-        weight = _safe_convert(weight.mul(kWeightScaleHidden), torch.int8)
-        bias = _safe_convert(bias.mul(kBiasScaleHidden), torch.int32)
+        bias = _safe_convert(bias.mul(self.weight_scales_dict[bias_key]), torch.int32)
+        weight = _safe_convert(weight.mul(self.weight_scales_dict[weight_key]), torch.int8)
 
         if callback is not None:
-            callback(weight_key, weight)
             callback(bias_key, bias)
+            callback(weight_key, weight)
 
         return bias, weight
 
@@ -247,10 +244,7 @@ class QuantizationManager:
         weight_key = f"{layer_key}_weight"
         bias_key = f"{layer_key}_bias"
 
-        kWeightScaleHidden = self.weight_scales_dict[weight_key]
-        kBiasScaleHidden = self.weight_scales_dict[bias_key]
-
-        weight = weight.divide(kWeightScaleHidden)
-        bias = bias.divide(kBiasScaleHidden)
+        bias = bias.divide(self.weight_scales_dict[bias_key])
+        weight = weight.divide(self.weight_scales_dict[weight_key])
 
         return bias, weight

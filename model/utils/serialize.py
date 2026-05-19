@@ -46,16 +46,18 @@ def get_histogram_callback(hist_title: str, verbose: bool):
             print(f"Layer '{hist_desc}' is empty.")
             return
 
+        print("-" * 15)
+
         min_value = values.min().item()
         num_argmin = int((values == min_value).sum().item())
         max_value = values.max().item()
         num_argmax = int((values == max_value).sum().item())
 
         ascii_hist(f"{hist_desc}: ", values.detach().cpu().numpy())
-        print(
-            f"Minimum value in layer is {min_value}, occurring {num_argmin} times.\n"
-            f"Maximum value in layer is {max_value}, occurring {num_argmax} times."
-        )
+        print(f"Number of elements: {total_elements}")
+        print(f"Minimum value in layer is {min_value}, occurring {num_argmin} times.")
+        print(f"Maximum value in layer is {max_value}, occurring {num_argmax} times.")
+        print("-" * 15)
 
     return histogram_callback
 
@@ -121,9 +123,9 @@ class NNUEWriter:
         layer_stacks = model.layer_stacks
         for bucket, (l1, l2, output) in enumerate(layer_stacks.get_coalesced_layer_stacks()):
             self.int32(fc_hash)  # FC layers hash
-            self.write_fc_layer(model, l1, layer_stacks.l1.layer_key, f"bucket {bucket} l1")
-            self.write_fc_layer(model, l2, layer_stacks.l2.layer_key, f"bucket {bucket} l2")
-            self.write_fc_layer(model, output, layer_stacks.output.layer_key, f"bucket {bucket} output")
+            self.write_fc_layer(model, l1, layer_stacks.l1.layer_key, f"bucket {bucket}")
+            self.write_fc_layer(model, l2, layer_stacks.l2.layer_key, f"bucket {bucket}")
+            self.write_fc_layer(model, output, layer_stacks.output.layer_key, f"bucket {bucket}")
 
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
@@ -359,12 +361,12 @@ class NNUEReader:
         )
 
         # Combine weight and psqt_weight into export format, then expand
-        export_weight = torch.cat([weight.to(torch.float32), psqt_weight.to(torch.float32)], dim=1)
-        layer.load_export_weights(export_weight)
         layer.bias.data = torch.cat([
             bias.to(torch.float32),
             torch.zeros(num_psqt_buckets, dtype=torch.float32)
         ])
+        export_weight = torch.cat([weight.to(torch.float32), psqt_weight.to(torch.float32)], dim=1)
+        layer.load_export_weights(export_weight)
 
     def read_fc_layer(
         self,
@@ -387,8 +389,8 @@ class NNUEReader:
         # Strip padding.
         layer_weight = weight[: non_padded_shape[0], : non_padded_shape[1]].to(torch.float32)
 
-        layer_weight_t.data.copy_(layer_weight)
         layer_bias_t.data.copy_(layer_bias)
+        layer_weight_t.data.copy_(layer_weight)
 
     def read_int32(self, expected: int | None = None) -> int:
         v = struct.unpack("<I", self.f.read(4))[0]
