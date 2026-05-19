@@ -137,7 +137,7 @@ def compute_basic_eval_stats(evals):
     return min_val, max_val, avg_val, avg_abs_val
 
 
-def compute_correlation(engine_evals, model_evals, fens):
+def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVALUATION SUMMARY", sf_name="SF", py_name="Py"):
     if len(engine_evals) != len(model_evals):
         raise Exception(f"Mismatch: {len(engine_evals)} vs {len(model_evals)}")
 
@@ -163,7 +163,7 @@ def compute_correlation(engine_evals, model_evals, fens):
                 "sf": e,
                 "py": m,
                 "abs_err": ae,
-                "rel_err": ae / (abs(e) if e != 0 else 1.0),
+                "rel_err": ae / (abs(e) if e != 0 else 0.001),
                 "q_sf": q_sf,
                 "q_py": q_py,
                 "q_err": qe,
@@ -183,11 +183,12 @@ def compute_correlation(engine_evals, model_evals, fens):
     r_squared_q = 1 - (ss_res_q / ss_tot_q) if ss_tot_q != 0 else 0.0
 
     # Summary Stats
-    en_min, en_max, en_avg, en_abs_avg = compute_basic_eval_stats(engine_evals)
+    en_min, en_max, _, en_abs_avg = compute_basic_eval_stats(engine_evals)
+    py_min, py_max, _, py_abs_avg = compute_basic_eval_stats(model_evals)
 
     W = 115
     print("\n" + "=" * W)
-    print(f"{'CROSS-CHECK EVALUATION SUMMARY':^{W}}")
+    print(f"{title:^{W}}")
     print("=" * W)
     print(
         f"{'Metric':<30} | {'Score (Internal Units)':>38} | {'Q (Expected Score)':>38}"
@@ -196,10 +197,18 @@ def compute_correlation(engine_evals, model_evals, fens):
 
     # 1. Values Summary
     print(
-        f"{'Average Absolute Value':<30} | {en_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
+        f"{f'Average Absolute Value ({sf_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
     )
     print(
-        f"{'Min / Max Value':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
+        f"{f'Min / Max Value ({sf_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
+    )
+    print("-" * W)
+
+    print(
+        f"{f'Average Absolute Value ({py_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
+    )
+    print(
+        f"{f'Min / Max Value ({py_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
     )
     print("-" * W)
 
@@ -224,11 +233,11 @@ def compute_correlation(engine_evals, model_evals, fens):
     print("=" * W)
 
     # Detailed Top 5 Offenders
-    def print_top(title, key, col_name, fmt, is_pct=False):
-        print(f"\n>>> {title}")
+    def print_top(title_text, key, col_name, fmt, is_pct=False):
+        print(f"\n>>> {title_text}")
         top = sorted(data, key=lambda x: x[key], reverse=True)[:5]
         print(
-            f"{col_name:>12} | {'SF Score':>10} | {'Py Score':>10} | {'SF Q':>8} | {'Py Q':>8} | {'FEN'}"
+            f"{col_name:>12} | {sf_name + ' Score':>10} | {py_name + ' Score':>10} | {sf_name + ' Q':>8} | {py_name + ' Q':>8} | {'FEN'}"
         )
         print("-" * W)
         for d in top:
@@ -290,25 +299,31 @@ def main():
 
     batch_size = 1024
 
+    ckpt_model = None
     if cross_check_config.checkpoint:
-        model = M.NNUE.load_from_checkpoint(
+        ckpt = M.NNUE.load_from_checkpoint(
             cross_check_config.checkpoint,
             config=nnue_lightning_config,
         )
-    else:
-        model = read_model(
-            cross_check_config.net,
-            config=nnue_lightning_config,
-        )
-    model.to(cross_check_config.device)
-    model.eval()
-    # --checkpoint - returns a Lightning NNUE wrapping a NNUEModel
+        ckpt.to(cross_check_config.device)
+        ckpt.eval()
+        # --checkpoint - returns a Lightning NNUE wrapping a NNUEModel
+        ckpt_model = ckpt.model if isinstance(ckpt, M.NNUE) else ckpt
+
+    nnue = read_model(
+        cross_check_config.net,
+        config=nnue_lightning_config,
+    )
+    nnue.to(cross_check_config.device)
+    nnue.eval()
     # --net - returns the NNUEModel directly
-    inner_model = model.model if isinstance(model, M.NNUE) else model
-    input_feature_name = inner_model.input_feature_name
+    nnue_model = nnue.model if isinstance(nnue, M.NNUE) else nnue
+
+    input_feature_name = nnue_model.input_feature_name
     fen_batch_provider = make_fen_batch_provider(cross_check_config.data, batch_size)
 
-    model_evals = []
+    ckpt_evals = []
+    nnue_evals = []
     engine_evals = []
     all_fens = []
 
@@ -321,7 +336,9 @@ def main():
         b = data_loader.get_sparse_batch_from_fens(
             input_feature_name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
-        model_evals += eval_model_batch(inner_model, b, cross_check_config.device)
+        if ckpt_model:
+            ckpt_evals += eval_model_batch(ckpt_model, b, cross_check_config.device)
+        nnue_evals += eval_model_batch(nnue_model, b, cross_check_config.device)
         data_loader.destroy_sparse_batch(b)
 
         engine_evals += eval_engine_batch(
@@ -333,7 +350,12 @@ def main():
         done += len(fens)
         print("Processed {} positions.".format(done))
 
-    compute_correlation(engine_evals, model_evals, all_fens)
+    if ckpt_model:
+        compute_correlation(nnue_evals, ckpt_evals, all_fens, "CKPT VS NNUE", "NNUE", "CKPT")
+        compute_correlation(engine_evals, nnue_evals, all_fens, "NNUE VS ENGINE", "ENG", "NNUE")
+        compute_correlation(engine_evals, ckpt_evals, all_fens, "CKPT VS ENGINE", "ENG", "CKPT")
+    else:
+        compute_correlation(engine_evals, nnue_evals, all_fens)
 
 
 if __name__ == "__main__":
