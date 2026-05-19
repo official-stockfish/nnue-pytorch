@@ -92,6 +92,7 @@ class NNUE(L.LightningModule):
 
         ft_wd = optimizer_config.ft_weight_decay
         dense_wd = optimizer_config.dense_weight_decay
+        factorized_wd = optimizer_config.factorized_weight_decay
 
         train_params = [
             # Feature Transformer
@@ -109,7 +110,7 @@ class NNUE(L.LightningModule):
             {
                 "params": [self.model.layer_stacks.l1.factorized_linear.weight],
                 "lr": LRs[2],
-                "weight_decay": dense_wd,
+                "weight_decay": factorized_wd,
             },
             {
                 "params": [self.model.layer_stacks.l1.factorized_linear.bias],

@@ -16,6 +16,9 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
     dense_weight_decay: float = 0.0
     """Weight decay to apply to the dense layer parameters."""
 
+    factorized_weight_decay: float = 0.0
+    """Weight decay to apply to the factorized dense layer parameters."""
+
     lr: float = 8.75e-4
     """Initial learning rate."""
 
