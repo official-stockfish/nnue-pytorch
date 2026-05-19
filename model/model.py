@@ -72,6 +72,10 @@ class NNUEModel(nn.Module):
         if include_input:
             self.input.clip_weights(self.quantization)
 
+    @torch.no_grad()
+    def zero_virtual_weights(self) -> None:
+        self.input.zero_virtual_weights()
+        self.layer_stacks.zero_virtual_weights()
 
     def forward_ft(
         self,

@@ -90,6 +90,11 @@ class ComposedFeatureTransformer(nn.Module):
             f.coalesce()
 
     @torch.no_grad()
+    def zero_virtual_weights(self) -> None:
+        for f in self.features:
+            f.zero_virtual_weights()
+
+    @torch.no_grad()
     def init_weights(self) -> None:
         num_psqt_buckets = self.num_psqt_buckets
         for f in self.features:

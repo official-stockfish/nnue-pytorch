@@ -63,6 +63,10 @@ class LayerStacks(nn.Module):
         return l3x_
 
     @torch.no_grad()
+    def zero_virtual_weights(self) -> None:
+        self.l1.zero_virtual_weights()
+
+    @torch.no_grad()
     def get_coalesced_layer_stacks(
         self,
     ) -> Generator[tuple[nn.Linear, nn.Linear, nn.Linear], None, None]:

@@ -21,6 +21,9 @@ class InputFeature(nn.Module, ABC):
     def coalesce(self) -> None: ...
 
     @abstractmethod
+    def zero_virtual_weights(self) -> torch.Tensor: ...
+
+    @abstractmethod
     def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None: ...
 
     @abstractmethod

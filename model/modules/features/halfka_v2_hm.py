@@ -72,12 +72,16 @@ class HalfKav2Hm(InputFeature):
     @torch.no_grad()
     def coalesce(self) -> None:
         self.weight.add_(self.virtual_weight.repeat(self.NUM_BUCKETS, 1))
+        self.zero_virtual_weights()
+
+    @torch.no_grad()
+    def zero_virtual_weights(self) -> None:
         self.virtual_weight.zero_()
 
     @torch.no_grad()
     def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None:
         """Initialize virtual weights to zero and set PSQT columns."""
-        self.virtual_weight.zero_()
+        self.zero_virtual_weights()
 
         scale = 1.0 / nnue2score
         L1 = self.num_outputs - num_psqt_buckets
@@ -166,7 +170,7 @@ class HalfKav2Hm(InputFeature):
             expanded[dst_offset + 11 * 64 + ksq] = 0
 
         self.weight.data.copy_(expanded)
-        self.virtual_weight.zero_()
+        self.zero_virtual_weights()
 
     @staticmethod
     def halfka_psqts() -> list[int]:

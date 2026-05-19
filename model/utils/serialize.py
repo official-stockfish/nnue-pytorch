@@ -258,6 +258,8 @@ class NNUEReader:
         self.read_int32(
             self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
+        self.model.zero_virtual_weights()
+
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
 
         layers = [

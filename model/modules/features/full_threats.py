@@ -32,6 +32,10 @@ class FullThreats(InputFeature):
         pass  # no virtual weights
 
     @torch.no_grad()
+    def zero_virtual_weights(self) -> None:
+        pass  # no virtual weights
+
+    @torch.no_grad()
     def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None:
         """Threats have no piece values, so PSQT columns are zero."""
         L1 = self.num_outputs - num_psqt_buckets
