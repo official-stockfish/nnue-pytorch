@@ -69,6 +69,7 @@ class ComposedFeatureTransformer(nn.Module):
             merged[:self.l1_size] = self.quantization.fake_quantize_weights(merged[:self.l1_size], "ft_weight")
             merged[self.l1_size:] = self.quantization.fake_quantize_weights(merged[self.l1_size:], "ft_psqt_weight")
             bias = self.quantization.fake_quantize_weights(bias, "ft_bias")
+            bias[self.l1_size:].zero_()
         return (
             SparseLinearFunction.apply(
                 feature_indices_0,

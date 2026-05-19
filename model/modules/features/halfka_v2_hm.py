@@ -108,9 +108,7 @@ class HalfKav2Hm(InputFeature):
         Returns a float tensor with NUM_REAL_FEATURES rows.
         """
         # Coalesce virtual weights
-        coalesced = self.weight.data + self.virtual_weight.data.repeat(
-            self.NUM_BUCKETS, 1
-        )
+        coalesced = self.merged_weight()
 
         # Remap 12 piece types -> 11 piece types
         export = coalesced.new_zeros(self.NUM_REAL_FEATURES, coalesced.shape[1])
