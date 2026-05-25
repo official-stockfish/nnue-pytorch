@@ -304,7 +304,7 @@ class NNUEReader:
 
         res = torch.tensor(
             decode_leb_128_array(d, reduce(operator.mul, shape, 1)),
-            dtype=torch.float64
+            dtype=torch.float32
         )
         res = res.reshape(shape)
         return res
@@ -328,7 +328,7 @@ class NNUEReader:
 
         if compression == "none":
             d = np.fromfile(self.f, dtype, reduce(operator.mul, shape, 1))
-            d = torch.from_numpy(d.astype(np.float64))
+            d = torch.from_numpy(d.astype(np.float32))
             d = d.reshape(shape)
             return d
         elif compression == "leb128":
