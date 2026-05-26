@@ -197,18 +197,18 @@ def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVAL
 
     # 1. Values Summary
     print(
-        f"{f'Average Absolute Value ({sf_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
+        f"{f'Average Absolute Value ({sf_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_sf'] for d in data) / len(data):>38.4f}"
     )
     print(
-        f"{f'Min / Max Value ({sf_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
+        f"{f'Min / Max Value ({sf_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_sf'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
     )
     print("-" * W)
 
     print(
-        f"{f'Average Absolute Value ({py_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
+        f"{f'Average Absolute Value ({py_name})':<30} | {py_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
     )
     print(
-        f"{f'Min / Max Value ({py_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
+        f"{f'Min / Max Value ({py_name})':<30} | {py_min:>17.1f} / {py_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
     )
     print("-" * W)
 
@@ -357,14 +357,14 @@ def main():
 
     if ckpt_model:
         compute_correlation(ckpt_evals, nnue_evals, all_fens, "CKPT VS NNUE", "CKPT", "NNUE")
-        compute_correlation(ckpt_quantized_evals, nnue_quantized_evals, all_fens, "CKPT (Q) VS NNUE (Q)", "CKPT", "NNUE")
-        compute_correlation(ckpt_evals, engine_evals, all_fens, "CKPT VS SF", "NNUE", "SF")
-        compute_correlation(ckpt_quantized_evals, engine_evals, all_fens, "QUANTIZED CKPT VS SF", "NNUE (Q)", "SF")
+        compute_correlation(ckpt_quantized_evals, nnue_quantized_evals, all_fens, "CKPT (Q) VS NNUE (Q)", "CKPT (Q)", "NNUE (Q)")
+        compute_correlation(ckpt_evals, engine_evals, all_fens, "CKPT VS SF", "CKPT", "SF")
+        compute_correlation(ckpt_quantized_evals, engine_evals, all_fens, "QUANTIZED CKPT VS SF", "CKPT (Q)", "SF")
         compute_correlation(nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF")
-        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "CKPT (Q)", "SF")
+        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "NNUE (Q)", "SF")
     else:
-        compute_correlation(nnue_evals, engine_evals, all_fens, "NNUE VS SF", "CKPT", "SF")
-        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "CKPT (Q)", "SF")
+        compute_correlation(nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF")
+        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "NNUE (Q)", "SF")
 
 
 if __name__ == "__main__":
