@@ -20,9 +20,10 @@ jobs:
       - name: Checkout Compatible Stockfish Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          # TODO: Change to official-stockfish as soon as the compatible commit is merged there
           repository: TonyCongqianWang/Stockfish
           path: Stockfish
-          ref: acea25425348f4beb69a9508f28b1ef12190daa5
+          ref: 37bfd637b2644c43188c1bd2f67681ae615a5264
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
