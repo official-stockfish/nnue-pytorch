@@ -59,7 +59,6 @@ class QuantizationConfig:
     nnue2score: float = 600.0
     weight_scale_l1: float = 128
     weight_scale_l2: float = 64.0
-    # weight_scale_l_out = (self.nnue2score * self.weight_scale_out) / self.hidden_quantized_one
     weight_scale_l_out: float = 128
     weight_scale_out: float = 16.0
     weight_quantized_max_hidden: float = 127.0 # i8 max
@@ -171,48 +170,46 @@ class QuantizationManager:
             },
         ]
 
-    def quantize_feature_transformer(
+    def quantize_feature_transformer_weights(
         self,
-        bias: Optional[torch.Tensor],
-        weight: Optional[torch.Tensor],
-        psqt_weight: Optional[torch.Tensor],
+        weight: torch.Tensor,
+        psqt_weight: torch.Tensor,
         f_weight_export_dtype: torch.dtype = torch.int16,
         callback: Optional[Callable] = None,
-    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        weight = weight.mul(self.weight_scales_dict["ft_weight"])
+        weight = _safe_convert(weight, f_weight_export_dtype)
+        psqt_weight = psqt_weight.mul(self.weight_scales_dict["ft_psqt_weight"])
+        psqt_weight = _safe_convert(psqt_weight, torch.int32)
 
-        if bias is not None:
-            # only weight can have different dtypes, bias is always int16, psqt_weight is always int32
-            bias = bias.mul(self.weight_scales_dict["ft_bias"])
-            bias = _safe_convert(bias, torch.int16)
+        if callback is not None:
+            callback("ft_weight", weight)
+            callback("psqt_weight", psqt_weight)
 
-            if callback is not None:
-                callback("ft_bias", bias)
+        return weight, psqt_weight
 
-        if weight is not None:
-            weight = weight.mul(self.weight_scales_dict["ft_weight"])
-            weight = _safe_convert(weight, f_weight_export_dtype)
+    def quantize_feature_transformer_bias(
+        self,
+        bias: torch.Tensor,
+        callback: Optional[Callable] = None,
+    ) -> torch.Tensor:
+        bias = bias.mul(self.weight_scales_dict["ft_bias"])
+        bias = _safe_convert(bias, torch.int16)
 
-            if callback is not None:
-                callback("ft_weight", weight)
+        if callback is not None:
+            callback("ft_bias", bias)
 
-        if psqt_weight is not None:
-            psqt_weight = psqt_weight.mul(self.weight_scales_dict["ft_psqt_weight"])
-            psqt_weight = _safe_convert(psqt_weight, torch.int32)
-
-            if callback is not None:
-                callback("psqt_weight", psqt_weight)
-
-        return bias, weight, psqt_weight
+        return bias
 
     def dequantize_feature_transformer(
         self,
-        bias: Optional[torch.Tensor],
-        weight: Optional[torch.Tensor],
-        psqt_weight: Optional[torch.Tensor],
-    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        bias = bias.divide(self.weight_scales_dict["ft_bias"]) if bias is not None else None
-        weight = weight.divide(self.weight_scales_dict["ft_weight"]) if weight is not None else None
-        psqt_weight = psqt_weight.divide(self.weight_scales_dict["ft_psqt_weight"]) if psqt_weight is not None else None
+        bias: torch.Tensor,
+        weight: torch.Tensor,
+        psqt_weight: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        bias = bias.divide(self.weight_scales_dict["ft_bias"])
+        weight = weight.divide(self.weight_scales_dict["ft_weight"])
+        psqt_weight = psqt_weight.divide(self.weight_scales_dict["ft_psqt_weight"])
 
         return bias, weight, psqt_weight
 

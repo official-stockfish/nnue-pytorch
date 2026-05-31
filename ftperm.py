@@ -535,12 +535,13 @@ def make_sparse_batch_provider(
         config=loader_config,
     )
 
+@torch.no_grad()
 def quantize_ft(model: NNUEModel) -> None:
     for f in model.input.features:
-        f.weight.data = f.weight.data.mul(model.quantization.ft_quantized_one).round()
-        f.weight.data = f.weight.data.div_(model.quantization.ft_quantized_one)
-    model.input.bias.data = model.input.bias.data.mul(model.quantization.ft_quantized_one).round()
-    model.input.bias.data.div_(model.quantization.ft_quantized_one)
+        f.weight.mul(model.quantization.ft_quantized_one).round_()
+        f.weight.div_(model.quantization.ft_quantized_one)
+    model.input.bias.mul_(model.quantization.ft_quantized_one).round_()
+    model.input.bias.div_(model.quantization.ft_quantized_one)
 
 
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
@@ -574,7 +575,7 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
         _, _ = wpsqt, bpsqt
         return l0_
 
-
+@torch.no_grad()
 def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
     permutation = list(perm)
 
@@ -592,11 +593,11 @@ def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
 
     # Apply the permutation in place.
     for f in model.input.features:
-        f.weight.data = f.weight.data[:, ft_permutation]
-    model.input.bias.data = model.input.bias.data[ft_permutation]
-    model.layer_stacks.l1.linear.weight.data = model.layer_stacks.l1.linear.weight.data[
+        f.weight.copy_(f.weight[:, ft_permutation])
+    model.input.bias.copy_(model.input.bias[ft_permutation])
+    model.layer_stacks.l1.linear.weight.copy_(model.layer_stacks.l1.linear.weight[
         :, permutation
-    ]
+    ])
 
 
 def ft_permute(model: NNUEModel, ft_perm_path: str) -> None:

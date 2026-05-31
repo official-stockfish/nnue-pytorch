@@ -183,8 +183,8 @@ class NNUEWriter:
         psqt_weight = export_weight[:, model.L1 :]
 
         # biases are exported as i16s
-        biases, _, _ = model.quantization.quantize_feature_transformer(
-            bias, None, None, torch.int16, get_histogram_callback("", self.verbose)
+        biases = model.quantization.quantize_feature_transformer_bias(
+            bias, get_histogram_callback("", self.verbose)
         )
 
         self.write_tensor(biases, ft_compression)
@@ -198,8 +198,8 @@ class NNUEWriter:
             ft_histogram_callback = get_histogram_callback(f.FEATURE_NAME, self.verbose)
             segment_weight = weight[offset : offset + n]
             segment_psqt_weight = psqt_weight[offset : offset + n]
-            _, segment_weight, segment_psqt_weight = model.quantization.quantize_feature_transformer(
-                None, segment_weight, segment_psqt_weight, f_export_dtype, ft_histogram_callback
+            segment_weight, segment_psqt_weight = model.quantization.quantize_feature_transformer_weights(
+                segment_weight, segment_psqt_weight, f_export_dtype, ft_histogram_callback
             )
             # compression is only useful for types larger than 1 byte
             segment_compression = ft_compression if not f_export_dtype == torch.int8 else "none"

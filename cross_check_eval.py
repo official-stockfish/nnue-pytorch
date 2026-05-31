@@ -137,9 +137,9 @@ def compute_basic_eval_stats(evals):
     return min_val, max_val, avg_val, avg_abs_val
 
 
-def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVALUATION SUMMARY", sf_name="Py", py_name="SF"):
-    if len(engine_evals) != len(model_evals):
-        raise Exception(f"Mismatch: {len(engine_evals)} vs {len(model_evals)}")
+def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
+    if len(ref_evals) != len(cmp_evals):
+        raise Exception(f"Mismatch: {len(ref_evals)} vs {len(cmp_evals)}")
 
     # Trainer parameters from your configuration
     IN_OFFSET = 280.0
@@ -149,7 +149,7 @@ def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVAL
     abs_errors = []
     q_errors = []
 
-    for e, m, f in zip(engine_evals, model_evals, fens):
+    for e, m, f in zip(ref_evals, cmp_evals, fens):
         ae = abs(m - e)
         q_sf = calculate_qf(e, IN_OFFSET, IN_SCALING)
         q_py = calculate_qf(m, IN_OFFSET, IN_SCALING)
@@ -171,7 +171,7 @@ def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVAL
         )
 
     # R^2 Calculation for Scores
-    mean_sf = sum(engine_evals) / len(engine_evals)
+    mean_sf = sum(ref_evals) / len(ref_evals)
     ss_res = sum((d["sf"] - d["py"]) ** 2 for d in data)
     ss_tot = sum((d["sf"] - mean_sf) ** 2 for d in data)
     r_squared_score = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0.0
@@ -183,8 +183,8 @@ def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVAL
     r_squared_q = 1 - (ss_res_q / ss_tot_q) if ss_tot_q != 0 else 0.0
 
     # Summary Stats
-    en_min, en_max, _, en_abs_avg = compute_basic_eval_stats(engine_evals)
-    py_min, py_max, _, py_abs_avg = compute_basic_eval_stats(model_evals)
+    en_min, en_max, _, en_abs_avg = compute_basic_eval_stats(ref_evals)
+    py_min, py_max, _, py_abs_avg = compute_basic_eval_stats(cmp_evals)
 
     W = 115
     print("\n" + "=" * W)
@@ -197,18 +197,18 @@ def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVAL
 
     # 1. Values Summary
     print(
-        f"{f'Average Absolute Value ({sf_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_sf'] for d in data) / len(data):>38.4f}"
+        f"{f'Average Absolute Value ({ref_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_sf'] for d in data) / len(data):>38.4f}"
     )
     print(
-        f"{f'Min / Max Value ({sf_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_sf'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
+        f"{f'Min / Max Value ({ref_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_sf'] for d in data):>17.4f} / {max(d['q_sf'] for d in data):<18.4f}"
     )
     print("-" * W)
 
     print(
-        f"{f'Average Absolute Value ({py_name})':<30} | {py_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
+        f"{f'Average Absolute Value ({cmp_name})':<30} | {py_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
     )
     print(
-        f"{f'Min / Max Value ({py_name})':<30} | {py_min:>17.1f} / {py_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
+        f"{f'Min / Max Value ({cmp_name})':<30} | {py_min:>17.1f} / {py_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
     )
     print("-" * W)
 
@@ -237,7 +237,7 @@ def compute_correlation(engine_evals, model_evals, fens, title="CROSS-CHECK EVAL
         print(f"\n>>> {title_text}")
         top = sorted(data, key=lambda x: x[key], reverse=True)[:5]
         print(
-            f"{col_name:>12} | {sf_name + ' Score':>10} | {py_name + ' Score':>10} | {sf_name + ' Q':>8} | {py_name + ' Q':>8} | {'FEN'}"
+            f"{col_name:>12} | {ref_name + ' Score':>10} | {cmp_name + ' Score':>10} | {ref_name + ' Q':>8} | {cmp_name + ' Q':>8} | {'FEN'}"
         )
         print("-" * W)
         for d in top:
