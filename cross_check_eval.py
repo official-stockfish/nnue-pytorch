@@ -308,7 +308,7 @@ def main():
         ckpt.to(cross_check_config.device)
         ckpt.eval()
         # --checkpoint - returns a Lightning NNUE wrapping a NNUEModel
-        ckpt_model = ckpt.model if isinstance(ckpt, M.NNUE) else ckpt
+        ckpt_model = ckpt.model
 
     nnue = read_model(
         cross_check_config.net,
@@ -317,7 +317,7 @@ def main():
     nnue.to(cross_check_config.device)
     nnue.eval()
     # --net - returns the NNUEModel directly
-    nnue_model = nnue.model if isinstance(nnue, M.NNUE) else nnue
+    nnue_model = nnue
 
     input_feature_name = nnue_model.input_feature_name
     fen_batch_provider = make_fen_batch_provider(cross_check_config.data, batch_size)
