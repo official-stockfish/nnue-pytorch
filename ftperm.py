@@ -535,16 +535,6 @@ def make_sparse_batch_provider(
         config=loader_config,
     )
 
-@torch.no_grad()
-def quantize_ft(model: NNUEModel) -> None:
-    for f in model.input.features:
-        f.weight.mul_(model.quantization.ft_quantized_one)
-        f.weight.round_()
-        f.weight.div_(model.quantization.ft_quantized_one)
-    model.input.bias.mul_(model.quantization.ft_quantized_one)
-    model.input.bias.round_()
-    model.input.bias.div_(model.quantization.ft_quantized_one)
-
 
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
     with torch.no_grad():
@@ -620,13 +610,12 @@ def gather_impl(
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
     BATCH_SIZE = 1024
 
-    weight_quantized_model = copy.deepcopy(model).to(device_str)
-    quantize_ft(weight_quantized_model)
+    copied_model = copy.deepcopy(model).to(device_str)
 
     sparse_batch_provider = make_sparse_batch_provider(
         dataset,
         BATCH_SIZE,
-        weight_quantized_model.input_feature_name,
+        copied_model.input_feature_name,
         loader_num_workers=loader_workers,
         loader_config=loader_config
     )
@@ -639,7 +628,7 @@ def gather_impl(
         # checks are already filtered by sparse_batch_provider.
         s_batch = next(sparse_batch_provider)
 
-        actmat = eval_ft(weight_quantized_model, s_batch, device_str).cpu()
+        actmat = eval_ft(copied_model, s_batch, device_str).cpu()
         actmat = actmat <= ZERO_POINT
         actmat = actmat.numpy()
         actmats.append(actmat)
