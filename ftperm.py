@@ -538,8 +538,12 @@ def make_sparse_batch_provider(
 @torch.no_grad()
 def quantize_ft(model: NNUEModel) -> None:
     for f in model.input.features:
-        f.weight.mul_(model.quantization.ft_quantized_one).round_().div_(model.quantization.ft_quantized_one)
-    model.input.bias.mul_(model.quantization.ft_quantized_one).round_().div_(model.quantization.ft_quantized_one)
+        f.weight.mul_(model.quantization.ft_quantized_one)
+        f.weight.round_()
+        f.weight.div_(model.quantization.ft_quantized_one)
+    model.input.bias.mul_(model.quantization.ft_quantized_one)
+    model.input.bias.round_()
+    model.input.bias.div_(model.quantization.ft_quantized_one)
 
 
 def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
