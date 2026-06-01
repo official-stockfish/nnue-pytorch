@@ -151,7 +151,7 @@ def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
 
     for e, m, f in zip(ref_evals, cmp_evals, fens):
         ae = abs(m - e)
-         # relative error, with a floor to avoid division by zero and to not exaggerate small evals too much
+        # relative error, with a floor to avoid division by zero and to not exaggerate small evals too much
         ae_rel = ae / (max(abs(e), 1/32))
         q_ref = calculate_qf(e, IN_OFFSET, IN_SCALING)
         q_cmp = calculate_qf(m, IN_OFFSET, IN_SCALING)
