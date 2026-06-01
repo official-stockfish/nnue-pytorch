@@ -66,10 +66,12 @@ class ComposedFeatureTransformer(nn.Module):
         merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
         bias = self.bias
         if fake_quantize_weights:
-            merged[:, :self.l1_size] = self.quantization.fake_quantize_weights(merged[:, :self.l1_size], "ft_weight")
-            merged[:, self.l1_size:] = self.quantization.fake_quantize_weights(merged[:, self.l1_size:], "ft_psqt_weight")
-            bias = self.quantization.fake_quantize_weights(bias, "ft_bias")
+            w  = self.quantization.fake_quantize_weights(merged[:, :self.l1_size], "ft_weight")
+            pw = self.quantization.fake_quantize_weights(merged[:, self.l1_size:], "ft_psqt_weight")
+            merged = torch.cat([w, pw], dim=1)
+            # Technically unnecessary to zero bias, but it makes it clearer that the PSQT part of the bias is not used.
             bias[self.l1_size:].zero_()
+            bias = self.quantization.fake_quantize_weights(bias, "ft_bias")
         return (
             SparseLinearFunction.apply(
                 feature_indices_0,

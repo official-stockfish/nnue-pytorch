@@ -151,35 +151,37 @@ def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
 
     for e, m, f in zip(ref_evals, cmp_evals, fens):
         ae = abs(m - e)
-        q_sf = calculate_qf(e, IN_OFFSET, IN_SCALING)
-        q_py = calculate_qf(m, IN_OFFSET, IN_SCALING)
-        qe = abs(q_py - q_sf)
+         # relative error, with a floor to avoid division by zero and to not exaggerate small evals too much
+        ae_rel = ae / (max(abs(e), 1/32))
+        q_ref = calculate_qf(e, IN_OFFSET, IN_SCALING)
+        q_cmp = calculate_qf(m, IN_OFFSET, IN_SCALING)
+        qe = abs(q_cmp - q_ref)
 
         abs_errors.append(ae)
         q_errors.append(qe)
         data.append(
             {
                 "fen": f,
-                "sf": e,
-                "py": m,
+                "ref": e,
+                "cmp": m,
                 "abs_err": ae,
-                "rel_err": ae / (abs(e) if e != 0 else 0.001),
-                "q_sf": q_sf,
-                "q_py": q_py,
+                "rel_err": ae_rel,
+                "q_ref": q_ref,
+                "q_cmp": q_cmp,
                 "q_err": qe,
             }
         )
 
     # R^2 Calculation for Scores
     mean_sf = sum(ref_evals) / len(ref_evals)
-    ss_res = sum((d["sf"] - d["py"]) ** 2 for d in data)
-    ss_tot = sum((d["sf"] - mean_sf) ** 2 for d in data)
+    ss_res = sum((d["ref"] - d["cmp"]) ** 2 for d in data)
+    ss_tot = sum((d["ref"] - mean_sf) ** 2 for d in data)
     r_squared_score = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0.0
 
     # R^2 Calculation for Q (Expected Score)
-    mean_q_sf = sum(d["q_sf"] for d in data) / len(data)
-    ss_res_q = sum((d["q_sf"] - d["q_py"]) ** 2 for d in data)
-    ss_tot_q = sum((d["q_sf"] - mean_q_sf) ** 2 for d in data)
+    mean_q_ref = sum(d["q_ref"] for d in data) / len(data)
+    ss_res_q = sum((d["q_ref"] - d["q_cmp"]) ** 2 for d in data)
+    ss_tot_q = sum((d["q_ref"] - mean_q_ref) ** 2 for d in data)
     r_squared_q = 1 - (ss_res_q / ss_tot_q) if ss_tot_q != 0 else 0.0
 
     # Summary Stats
@@ -197,18 +199,18 @@ def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
 
     # 1. Values Summary
     print(
-        f"{f'Average Absolute Value ({ref_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_sf'] for d in data) / len(data):>38.4f}"
+        f"{f'Average Absolute Value ({ref_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_ref'] for d in data) / len(data):>38.4f}"
     )
     print(
-        f"{f'Min / Max Value ({ref_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_sf'] for d in data):>17.4f} / {max(d['q_sf'] for d in data):<18.4f}"
+        f"{f'Min / Max Value ({ref_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_ref'] for d in data):>17.4f} / {max(d['q_ref'] for d in data):<18.4f}"
     )
     print("-" * W)
 
     print(
-        f"{f'Average Absolute Value ({cmp_name})':<30} | {py_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
+        f"{f'Average Absolute Value ({cmp_name})':<30} | {py_abs_avg:>38.2f} | {sum(d['q_cmp'] for d in data) / len(data):>38.4f}"
     )
     print(
-        f"{f'Min / Max Value ({cmp_name})':<30} | {py_min:>17.1f} / {py_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
+        f"{f'Min / Max Value ({cmp_name})':<30} | {py_min:>17.1f} / {py_max:<18.1f} | {min(d['q_cmp'] for d in data):>17.4f} / {max(d['q_cmp'] for d in data):<18.4f}"
     )
     print("-" * W)
 
@@ -244,7 +246,7 @@ def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
             v = d[key] * 100 if is_pct else d[key]
             v_str = f"{v:{fmt}}" + ("%" if is_pct else "")
             print(
-                f"{v_str:>12} | {d['sf']:>10.2f} | {d['py']:>10.2f} | {d['q_sf']:>8.4f} | {d['q_py']:>8.4f} | {d['fen']}"
+                f"{v_str:>12} | {d['ref']:>10.2f} | {d['cmp']:>10.2f} | {d['q_ref']:>8.4f} | {d['q_cmp']:>8.4f} | {d['fen']}"
             )
 
     print_top("TOP 5 LARGEST ABSOLUTE ERRORS", "abs_err", "Abs Err", "12.2f")

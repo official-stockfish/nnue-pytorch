@@ -57,7 +57,7 @@ def _fake_quantize_weights(value, weight_scale):
 @dataclass
 class QuantizationConfig:
     nnue2score: float = 600.0
-    weight_scale_l1: float = 128
+    weight_scale_l1: float = 128.0
     weight_scale_l2: float = 64.0
     weight_scale_l_out: float = 128
     weight_scale_out: float = 16.0
@@ -126,6 +126,7 @@ class QuantizationManager:
         return _fake_quantize_acts(preact, act_scale)
 
     def fake_quantize_skip_act(self, preact):
+        # currently no separate quantization necessary, but might be necessary in the future if quant schemes change.
         return preact
 
     def fake_quantize_output(self, preact: torch.Tensor) -> torch.Tensor:

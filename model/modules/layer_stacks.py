@@ -31,8 +31,8 @@ class LayerStacks(nn.Module):
     def forward(
         self, x: torch.Tensor,
         ls_indices: torch.Tensor,
-        fake_quantize_acts: bool=False,
-        fake_quantize_weights: bool=False,
+        fake_quantize_acts: bool=True,
+        fake_quantize_weights: bool=True,
     ):
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
         l1x_, l1x_out = l1c_.split(self.L2, dim=1)
