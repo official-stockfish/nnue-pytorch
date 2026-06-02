@@ -21,7 +21,7 @@ class LayerStacks(nn.Module):
         # there's a non-linearity and factorization breaks.
         # This is by design. The weights in the further layers should be
         # able to diverge a lot.
-        self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2 + 1, count, quantization, "ls_l1")
+        self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2, count, quantization, "ls_l1")
         self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
         self.output = StackedLinear(self.L3, 1, count, quantization, "ls_output")
 
@@ -35,7 +35,8 @@ class LayerStacks(nn.Module):
         fake_quantize_weights: bool=True,
     ):
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
-        l1x_, l1x_out = l1c_.split(self.L2, dim=1)
+        l1x_ = l1c_
+        l1x_out = l1c_[-2] - l1c_[-1]
 
         l1_sqr = torch.pow(l1x_, 2.0)
         if fake_quantize_acts:
@@ -51,13 +52,16 @@ class LayerStacks(nn.Module):
         l2c_ = self.l2(l1x_, ls_indices, fake_quantize_weights)
         if fake_quantize_acts:
             l2c_ = self.quantization.fake_quantize_ls_act(l2c_)
+        l2x_out = l2c_[-2] - l2c_[-1]
         l2x_ = self.quantization.clip_ls_act(l2c_)
 
         l3c_ = self.output(l2x_, ls_indices, fake_quantize_weights)
         if fake_quantize_acts:
             l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
+            l2x_out = self.quantization.fake_quantize_skip_act(l2x_out)
 
-        l3x_ = l3c_ + l1x_out
+        # Skip connections are multiplied by 2 to increase range compared to the clipped path.
+        l3x_ = l3c_ + 2 * l1x_out + 2 * l2x_out
         if fake_quantize_acts:
             l3x_ = self.quantization.fake_quantize_output(l3x_)
         return l3x_
