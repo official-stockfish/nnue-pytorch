@@ -2,7 +2,7 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .composed import ComposedFeatureTransformer, combine_input_features
+from .composed import ComposedFeatureTransformer
 from .full_threats import FullThreats
 from .halfka_v2_hm import HalfKav2Hm
 from .input_feature import InputFeature
@@ -17,10 +17,9 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
 }
 
 
-def get_feature_cls(name: str) -> Callable[[int], ComposedFeatureTransformer]:
+def get_feature_cls(name: str) -> list[Callable[[int], InputFeature]]:
     parts = name.split("+")
-    components = [_FEATURE_COMPONENTS[p] for p in parts]
-    return combine_input_features(*components)
+    return [_FEATURE_COMPONENTS[p] for p in parts]
 
 
 def get_available_features() -> list[str]:
@@ -52,7 +51,6 @@ def add_feature_args(parser: argparse.ArgumentParser) -> None:
 
 __all__ = [
     "ComposedFeatureTransformer",
-    "combine_input_features",
     "HalfKav2Hm",
     "FullThreats",
     "InputFeature",

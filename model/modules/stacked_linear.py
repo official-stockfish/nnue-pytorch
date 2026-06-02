@@ -2,15 +2,29 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from ..quantize import QuantizationManager
+
+from typing import Optional
+
 
 class StackedLinear(nn.Module):
-    def __init__(self, in_features: int, out_features: int, count: int):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        count: int,
+        quantization: Optional[QuantizationManager] = None,
+        layer_key: Optional[str] = None,
+    ):
         super().__init__()
 
         self.in_features = in_features
         self.out_features = out_features
         self.count = count
         self.linear = nn.Linear(in_features, out_features * count)
+
+        self.quantization = quantization
+        self.layer_key = layer_key
 
         self._init_uniformly()
 
@@ -22,8 +36,16 @@ class StackedLinear(nn.Module):
         self.linear.weight.copy_(init_weight.repeat(self.count, 1))
         self.linear.bias.copy_(init_bias.repeat(self.count))
 
-    def forward(self, x: torch.Tensor, ls_indices: torch.Tensor) -> torch.Tensor:
-        stacked_output = self.linear(x)
+    def forward(self, x: torch.Tensor, ls_indices: torch.Tensor, fake_quantize_weights: bool=False) -> torch.Tensor:
+        weight = self.linear.weight
+        bias = self.linear.bias
+        if fake_quantize_weights:
+            if self.quantization is None or self.layer_key is None:
+                raise RuntimeError("self.quantization and self.layer_key are required to use fake quantize weights.")
+            weight = self.quantization.fake_quantize_weights(weight, f"{self.layer_key}_weight")
+            bias = self.quantization.fake_quantize_weights(bias, f"{self.layer_key}_bias")
+
+        stacked_output = F.linear(x, weight, bias)
 
         return self.select_output(stacked_output, ls_indices)
 
@@ -58,24 +80,32 @@ class StackedLinear(nn.Module):
 
 
 class FactorizedStackedLinear(StackedLinear):
-    def __init__(self, in_features: int, out_features: int, count: int):
-        super().__init__(in_features, out_features, count)
+    def __init__(self, in_features: int, out_features: int, count: int, quantization: QuantizationManager, layer_key: str):
+        super().__init__(in_features, out_features, count, quantization, layer_key)
 
         self.factorized_linear = nn.Linear(in_features, out_features)
+        self.zero_virtual_weights()
 
-        with torch.no_grad():
-            self.factorized_linear.weight.zero_()
-            self.factorized_linear.bias.zero_()
-
-    def forward(self, x: torch.Tensor, ls_indices: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, ls_indices: torch.Tensor, fake_quantize_weights: bool=False) -> torch.Tensor:
         merged_weight = self.linear.weight + self.factorized_linear.weight.repeat(
             self.count, 1
         )
         merged_bias = self.linear.bias + self.factorized_linear.bias.repeat(self.count)
 
+        if fake_quantize_weights:
+            if self.quantization is None or self.layer_key is None:
+                raise RuntimeError("self.quantization and self.layer_key are required to use fake quantize weights.")
+            merged_weight = self.quantization.fake_quantize_weights(merged_weight, f"{self.layer_key}_weight")
+            merged_bias = self.quantization.fake_quantize_weights(merged_bias, f"{self.layer_key}_bias")
+
         stacked_output = F.linear(x, merged_weight, merged_bias)
 
         return self.select_output(stacked_output, ls_indices)
+
+    @torch.no_grad()
+    def zero_virtual_weights(self):
+        self.factorized_linear.weight.zero_()
+        self.factorized_linear.bias.zero_()
 
     @torch.no_grad()
     def at_index(self, index: int) -> nn.Linear:
@@ -95,5 +125,4 @@ class FactorizedStackedLinear(StackedLinear):
             self.linear.weight[begin:end, :].add_(self.factorized_linear.weight)
             self.linear.bias[begin:end].add_(self.factorized_linear.bias)
 
-        self.factorized_linear.weight.zero_()
-        self.factorized_linear.bias.zero_()
+        self.zero_virtual_weights()

@@ -31,7 +31,7 @@ class CrossCheckConfig:
     device: Literal["cuda", "mps", "cpu"] = "cuda"
     """Device for the NNUE model."""
 
-    count: int = 2**10
+    count: int = 8 * 2**10
     """Number of positions to process."""
 
 
@@ -44,10 +44,9 @@ class CliConfig:
 def read_model(
     nnue_path,
     config: M.NNUELightningConfig,
-    quantize_config: M.QuantizationConfig,
 ):
     with open(nnue_path, "rb") as f:
-        reader = M.NNUEReader(f, config.features, config.model_config, quantize_config)
+        reader = M.NNUEReader(f, config.features, config.model_config)
         return reader.model
 
 
@@ -58,12 +57,13 @@ def make_fen_batch_provider(data_path, batch_size):
         1,
         batch_size,
         data_loader.DataloaderSkipConfig(
-            random_fen_skipping=10,
+            random_fen_skipping=5,
+            soft_early_fen_skipping=-1,
         ),
     )
 
 
-def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
+def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, device: str, fake_quantize: bool):
     (
         us,
         them,
@@ -88,6 +88,8 @@ def eval_model_batch(model, batch: data_loader.SparseBatchPtr, device: str):
             black_values,
             psqt_indices,
             layer_stack_indices,
+            fake_quantize_acts=fake_quantize,
+            fake_quantize_weights=fake_quantize,
         )
         * model.quantization.nnue2score
     ]
@@ -135,9 +137,9 @@ def compute_basic_eval_stats(evals):
     return min_val, max_val, avg_val, avg_abs_val
 
 
-def compute_correlation(engine_evals, model_evals, fens):
-    if len(engine_evals) != len(model_evals):
-        raise Exception(f"Mismatch: {len(engine_evals)} vs {len(model_evals)}")
+def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
+    if len(ref_evals) != len(cmp_evals):
+        raise Exception(f"Mismatch: {len(ref_evals)} vs {len(cmp_evals)}")
 
     # Trainer parameters from your configuration
     IN_OFFSET = 280.0
@@ -147,45 +149,48 @@ def compute_correlation(engine_evals, model_evals, fens):
     abs_errors = []
     q_errors = []
 
-    for e, m, f in zip(engine_evals, model_evals, fens):
+    for e, m, f in zip(ref_evals, cmp_evals, fens):
         ae = abs(m - e)
-        q_sf = calculate_qf(e, IN_OFFSET, IN_SCALING)
-        q_py = calculate_qf(m, IN_OFFSET, IN_SCALING)
-        qe = abs(q_py - q_sf)
+        # relative error, with a floor to avoid division by zero and to not exaggerate small evals too much
+        ae_rel = ae / (max(abs(e), 1/32))
+        q_ref = calculate_qf(e, IN_OFFSET, IN_SCALING)
+        q_cmp = calculate_qf(m, IN_OFFSET, IN_SCALING)
+        qe = abs(q_cmp - q_ref)
 
         abs_errors.append(ae)
         q_errors.append(qe)
         data.append(
             {
                 "fen": f,
-                "sf": e,
-                "py": m,
+                "ref": e,
+                "cmp": m,
                 "abs_err": ae,
-                "rel_err": ae / (abs(e) if e != 0 else 1.0),
-                "q_sf": q_sf,
-                "q_py": q_py,
+                "rel_err": ae_rel,
+                "q_ref": q_ref,
+                "q_cmp": q_cmp,
                 "q_err": qe,
             }
         )
 
     # R^2 Calculation for Scores
-    mean_sf = sum(engine_evals) / len(engine_evals)
-    ss_res = sum((d["sf"] - d["py"]) ** 2 for d in data)
-    ss_tot = sum((d["sf"] - mean_sf) ** 2 for d in data)
+    mean_sf = sum(ref_evals) / len(ref_evals)
+    ss_res = sum((d["ref"] - d["cmp"]) ** 2 for d in data)
+    ss_tot = sum((d["ref"] - mean_sf) ** 2 for d in data)
     r_squared_score = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0.0
 
     # R^2 Calculation for Q (Expected Score)
-    mean_q_sf = sum(d["q_sf"] for d in data) / len(data)
-    ss_res_q = sum((d["q_sf"] - d["q_py"]) ** 2 for d in data)
-    ss_tot_q = sum((d["q_sf"] - mean_q_sf) ** 2 for d in data)
+    mean_q_ref = sum(d["q_ref"] for d in data) / len(data)
+    ss_res_q = sum((d["q_ref"] - d["q_cmp"]) ** 2 for d in data)
+    ss_tot_q = sum((d["q_ref"] - mean_q_ref) ** 2 for d in data)
     r_squared_q = 1 - (ss_res_q / ss_tot_q) if ss_tot_q != 0 else 0.0
 
     # Summary Stats
-    en_min, en_max, en_avg, en_abs_avg = compute_basic_eval_stats(engine_evals)
+    en_min, en_max, _, en_abs_avg = compute_basic_eval_stats(ref_evals)
+    py_min, py_max, _, py_abs_avg = compute_basic_eval_stats(cmp_evals)
 
     W = 115
     print("\n" + "=" * W)
-    print(f"{'CROSS-CHECK EVALUATION SUMMARY':^{W}}")
+    print(f"{title:^{W}}")
     print("=" * W)
     print(
         f"{'Metric':<30} | {'Score (Internal Units)':>38} | {'Q (Expected Score)':>38}"
@@ -194,10 +199,18 @@ def compute_correlation(engine_evals, model_evals, fens):
 
     # 1. Values Summary
     print(
-        f"{'Average Absolute Value':<30} | {en_abs_avg:>38.2f} | {sum(d['q_py'] for d in data) / len(data):>38.4f}"
+        f"{f'Average Absolute Value ({ref_name})':<30} | {en_abs_avg:>38.2f} | {sum(d['q_ref'] for d in data) / len(data):>38.4f}"
     )
     print(
-        f"{'Min / Max Value':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_py'] for d in data):>17.4f} / {max(d['q_py'] for d in data):<18.4f}"
+        f"{f'Min / Max Value ({ref_name})':<30} | {en_min:>17.1f} / {en_max:<18.1f} | {min(d['q_ref'] for d in data):>17.4f} / {max(d['q_ref'] for d in data):<18.4f}"
+    )
+    print("-" * W)
+
+    print(
+        f"{f'Average Absolute Value ({cmp_name})':<30} | {py_abs_avg:>38.2f} | {sum(d['q_cmp'] for d in data) / len(data):>38.4f}"
+    )
+    print(
+        f"{f'Min / Max Value ({cmp_name})':<30} | {py_min:>17.1f} / {py_max:<18.1f} | {min(d['q_cmp'] for d in data):>17.4f} / {max(d['q_cmp'] for d in data):<18.4f}"
     )
     print("-" * W)
 
@@ -222,18 +235,18 @@ def compute_correlation(engine_evals, model_evals, fens):
     print("=" * W)
 
     # Detailed Top 5 Offenders
-    def print_top(title, key, col_name, fmt, is_pct=False):
-        print(f"\n>>> {title}")
+    def print_top(title_text, key, col_name, fmt, is_pct=False):
+        print(f"\n>>> {title_text}")
         top = sorted(data, key=lambda x: x[key], reverse=True)[:5]
         print(
-            f"{col_name:>12} | {'SF Score':>10} | {'Py Score':>10} | {'SF Q':>8} | {'Py Q':>8} | {'FEN'}"
+            f"{col_name:>12} | {ref_name + ' Score':>10} | {cmp_name + ' Score':>10} | {ref_name + ' Q':>8} | {cmp_name + ' Q':>8} | {'FEN'}"
         )
         print("-" * W)
         for d in top:
             v = d[key] * 100 if is_pct else d[key]
             v_str = f"{v:{fmt}}" + ("%" if is_pct else "")
             print(
-                f"{v_str:>12} | {d['sf']:>10.1f} | {d['py']:>10.2f} | {d['q_sf']:>8.4f} | {d['q_py']:>8.4f} | {d['fen']}"
+                f"{v_str:>12} | {d['ref']:>10.2f} | {d['cmp']:>10.2f} | {d['q_ref']:>8.4f} | {d['q_cmp']:>8.4f} | {d['fen']}"
             )
 
     print_top("TOP 5 LARGEST ABSOLUTE ERRORS", "abs_err", "Abs Err", "12.2f")
@@ -288,27 +301,33 @@ def main():
 
     batch_size = 1024
 
+    ckpt_model = None
     if cross_check_config.checkpoint:
-        model = M.NNUE.load_from_checkpoint(
+        ckpt = M.NNUE.load_from_checkpoint(
             cross_check_config.checkpoint,
             config=nnue_lightning_config,
-            quantize_config=M.QuantizationConfig(),
         )
-    else:
-        model = read_model(
-            cross_check_config.net,
-            config=nnue_lightning_config,
-            quantize_config=M.QuantizationConfig(),
-        )
-    model.to(cross_check_config.device)
-    model.eval()
-    # --checkpoint - returns a Lightning NNUE wrapping a NNUEModel
+        ckpt.to(cross_check_config.device)
+        ckpt.eval()
+        # --checkpoint - returns a Lightning NNUE wrapping a NNUEModel
+        ckpt_model = ckpt.model
+
+    nnue = read_model(
+        cross_check_config.net,
+        config=nnue_lightning_config,
+    )
+    nnue.to(cross_check_config.device)
+    nnue.eval()
     # --net - returns the NNUEModel directly
-    inner_model = model.model if isinstance(model, M.NNUE) else model
-    input_feature_name = inner_model.input_feature_name
+    nnue_model = nnue
+
+    input_feature_name = nnue_model.input_feature_name
     fen_batch_provider = make_fen_batch_provider(cross_check_config.data, batch_size)
 
-    model_evals = []
+    ckpt_evals = []
+    ckpt_quantized_evals = []
+    nnue_evals = []
+    nnue_quantized_evals = []
     engine_evals = []
     all_fens = []
 
@@ -321,7 +340,12 @@ def main():
         b = data_loader.get_sparse_batch_from_fens(
             input_feature_name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
         )
-        model_evals += eval_model_batch(inner_model, b, cross_check_config.device)
+        if ckpt_model:
+            ckpt_evals += eval_model_batch(ckpt_model, b, cross_check_config.device, False)
+            ckpt_quantized_evals += eval_model_batch(ckpt_model, b, cross_check_config.device, True)
+
+        nnue_evals += eval_model_batch(nnue_model, b, cross_check_config.device, False)
+        nnue_quantized_evals += eval_model_batch(nnue_model, b, cross_check_config.device, True)
         data_loader.destroy_sparse_batch(b)
 
         engine_evals += eval_engine_batch(
@@ -333,7 +357,16 @@ def main():
         done += len(fens)
         print("Processed {} positions.".format(done))
 
-    compute_correlation(engine_evals, model_evals, all_fens)
+    if ckpt_model:
+        compute_correlation(ckpt_evals, nnue_evals, all_fens, "CKPT VS NNUE", "CKPT", "NNUE")
+        compute_correlation(ckpt_quantized_evals, nnue_quantized_evals, all_fens, "CKPT (Q) VS NNUE (Q)", "CKPT (Q)", "NNUE (Q)")
+        compute_correlation(ckpt_evals, engine_evals, all_fens, "CKPT VS SF", "CKPT", "SF")
+        compute_correlation(ckpt_quantized_evals, engine_evals, all_fens, "QUANTIZED CKPT VS SF", "CKPT (Q)", "SF")
+        compute_correlation(nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF")
+        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "NNUE (Q)", "SF")
+    else:
+        compute_correlation(nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF")
+        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "NNUE (Q)", "SF")
 
 
 if __name__ == "__main__":

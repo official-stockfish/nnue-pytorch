@@ -664,7 +664,6 @@ def main():
         args.model,
         feature_name,
         M.ModelConfig.get_model_config(args),
-        M.QuantizationConfig(),
     )
 
     if args.ref_model:
@@ -674,7 +673,6 @@ def main():
             args.ref_model,
             ref_feature_name,
             M.ModelConfig.get_model_config(args),
-            M.QuantizationConfig(),
         )
 
         print(

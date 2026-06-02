@@ -5,43 +5,66 @@ from torch import nn
 
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 from .config import LayerStacksConfig
-
+from ..quantize import QuantizationManager
 
 class LayerStacks(nn.Module):
-    def __init__(self, count: int, config: LayerStacksConfig):
+    def __init__(self, count: int, config: LayerStacksConfig, quantization: QuantizationManager):
         super().__init__()
 
         self.count = count
         self.L1 = config.L1
         self.L2 = config.L2
         self.L3 = config.L3
+        self.quantization = quantization
 
         # Factorizer only for the first layer because later
         # there's a non-linearity and factorization breaks.
         # This is by design. The weights in the further layers should be
         # able to diverge a lot.
-        self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2 + 1, count)
-        self.l2 = StackedLinear(self.L2 * 2, self.L3, count)
-        self.output = StackedLinear(self.L3, 1, count)
+        self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2 + 1, count, quantization, "ls_l1")
+        self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
+        self.output = StackedLinear(self.L3, 1, count, quantization, "ls_output")
 
         with torch.no_grad():
             self.output.linear.bias.zero_()
 
-    def forward(self, x: torch.Tensor, ls_indices: torch.Tensor):
-        l1c_ = self.l1(x, ls_indices)
+    def forward(
+        self, x: torch.Tensor,
+        ls_indices: torch.Tensor,
+        fake_quantize_acts: bool=True,
+        fake_quantize_weights: bool=True,
+    ):
+        l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
         l1x_, l1x_out = l1c_.split(self.L2, dim=1)
-        # multiply sqr crelu result by (255/256) to match quantized version
-        l1x_ = torch.clamp(
-            torch.cat([torch.pow(l1x_, 2.0) * (255 / 256), l1x_], dim=1), 0.0, 1.0
-        )
 
-        l2c_ = self.l2(l1x_, ls_indices)
-        l2x_ = torch.clamp(l2c_, 0.0, 1.0)
+        l1_sqr = torch.pow(l1x_, 2.0)
+        if fake_quantize_acts:
+            l1_sqr = self.quantization.fake_quantize_ls_act(l1_sqr)
+        l1_sqr = l1_sqr * (self.quantization.sqr_crelu_correction_factor)
 
-        l3c_ = self.output(l2x_, ls_indices)
+        if fake_quantize_acts:
+            l1x_ = self.quantization.fake_quantize_ls_act(l1x_)
+
+        l1x_ = torch.cat([l1_sqr, l1x_], dim=1)
+        l1x_ = self.quantization.clip_ls_act(l1x_)
+
+        l2c_ = self.l2(l1x_, ls_indices, fake_quantize_weights)
+        if fake_quantize_acts:
+            l2c_ = self.quantization.fake_quantize_ls_act(l2c_)
+        l2x_ = self.quantization.clip_ls_act(l2c_)
+
+        l3c_ = self.output(l2x_, ls_indices, fake_quantize_weights)
+        if fake_quantize_acts:
+            l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
+
         l3x_ = l3c_ + l1x_out
-
+        if fake_quantize_acts:
+            l3x_ = self.quantization.fake_quantize_output(l3x_)
         return l3x_
+
+    @torch.no_grad()
+    def zero_virtual_weights(self) -> None:
+        self.l1.zero_virtual_weights()
 
     @torch.no_grad()
     def get_coalesced_layer_stacks(

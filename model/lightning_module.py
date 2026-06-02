@@ -6,7 +6,6 @@ from torchmetrics import MeanMetric, MetricCollection
 
 from .config import NNUELightningConfig
 from .model import NNUEModel
-from .quantize import QuantizationConfig
 from .lambda_utils import LambdaController
 
 
@@ -53,7 +52,6 @@ class NNUE(L.LightningModule):
         config: NNUELightningConfig,
         max_epoch=None,
         num_batches_per_epoch=None,
-        quantize_config=QuantizationConfig(),
         param_index=0,
         num_psqt_buckets=8,
         num_ls_buckets=8,
@@ -63,7 +61,6 @@ class NNUE(L.LightningModule):
         self.model: NNUEModel = NNUEModel(
             config.features,
             config.model_config,
-            quantize_config,
             num_psqt_buckets,
             num_ls_buckets,
         )
@@ -95,6 +92,7 @@ class NNUE(L.LightningModule):
 
         ft_wd = optimizer_config.ft_weight_decay
         dense_wd = optimizer_config.dense_weight_decay
+        factorized_wd = optimizer_config.factorized_weight_decay
 
         train_params = [
             # Feature Transformer
@@ -112,7 +110,7 @@ class NNUE(L.LightningModule):
             {
                 "params": [self.model.layer_stacks.l1.factorized_linear.weight],
                 "lr": LRs[2],
-                "weight_decay": dense_wd,
+                "weight_decay": factorized_wd,
             },
             {
                 "params": [self.model.layer_stacks.l1.factorized_linear.bias],
@@ -250,6 +248,8 @@ class NNUE(L.LightningModule):
                 black_values,
                 psqt_indices,
                 layer_stack_indices,
+                self.config.use_fake_act_quantization,
+                self.config.use_fake_weight_quantization
             )
         )
 
