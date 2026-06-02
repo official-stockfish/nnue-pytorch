@@ -35,8 +35,8 @@ class LayerStacks(nn.Module):
         fake_quantize_weights: bool=True,
     ):
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
-        l1x_ = l1c_
         l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)
+        l1x_ = l1c_
 
         l1_sqr = torch.pow(l1x_, 2.0)
         if fake_quantize_acts:
@@ -50,9 +50,10 @@ class LayerStacks(nn.Module):
         l1x_ = self.quantization.clip_ls_act(l1x_)
 
         l2c_ = self.l2(l1x_, ls_indices, fake_quantize_weights)
+        l2x_out = l2c_[:, -2].view(-1, 1) - l2c_[:, -1].view(-1, 1)
+
         if fake_quantize_acts:
             l2c_ = self.quantization.fake_quantize_ls_act(l2c_)
-        l2x_out = l2c_[:, -2].view(-1, 1) - l2c_[:, -1].view(-1, 1)
         l2x_ = self.quantization.clip_ls_act(l2c_)
 
         l3c_ = self.output(l2x_, ls_indices, fake_quantize_weights)
