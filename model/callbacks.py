@@ -2,6 +2,8 @@ import lightning as L
 import torch
 import os
 import copy
+import shutil
+from collections import deque
 
 from torch.optim.swa_utils import AveragedModel
 
@@ -134,3 +136,101 @@ class ExplicitSWACallback(L.Callback):
         if trainer.is_global_zero:
             print(f"[ExplicitSWACallback] SWA model saved to {swa_savepath}")
         self.swap_weights(pl_module, to_eval=False)
+
+
+class SimplePeriodicCheckpoint(L.Callback):
+    def __init__(
+        self,
+        dirpath = None,
+        every_n_epochs: int = 1,
+        save_top_k: int = 1,
+        swa_start_epoch: int = -1,
+        save_last: bool = True
+    ):
+        super().__init__()
+        self.dirpath = dirpath
+        self.every_n_epochs = every_n_epochs
+        self.keep_last_k = save_top_k
+        self.swa_start_epoch = swa_start_epoch
+        self.save_last = save_last
+        self._saved_checkpoints = deque()
+
+        if not self.save_last:
+            assert self.every_n_epochs >= 1, "every_n_epochs must be at least 1 when save_last is False."
+
+    def __resolve_ckpt_dir(self, trainer: L.Trainer) -> str:
+        """
+        COPIED FROM PyTorch Lightning's ModelCheckpoint callback.
+        """
+        if self.dirpath is not None:
+            return self.dirpath
+
+        if len(trainer.loggers) > 0:
+            if trainer.loggers[0].save_dir is not None:
+                save_dir = trainer.loggers[0].save_dir
+            else:
+                save_dir = trainer.default_root_dir
+            name = trainer.loggers[0].name
+            version = trainer.loggers[0].version
+            version = version if isinstance(version, str) else f"version_{version}"
+            ckpt_path = os.path.join(save_dir, str(name), version, "checkpoints")
+        else:
+            # if no loggers, use default_root_dir
+            ckpt_path = os.path.join(trainer.default_root_dir, "checkpoints")
+
+        return ckpt_path
+
+    def on_train_start(self, trainer, pl_module):
+        self.dirpath = self.__resolve_ckpt_dir(trainer)
+        if trainer.is_global_zero:
+            os.makedirs(self.dirpath, exist_ok=True)
+
+    def _is_in_swa_phase(self, trainer) -> bool:
+        return self.swa_start_epoch >= 0 and trainer.current_epoch >= self.swa_start_epoch
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if self._is_in_swa_phase(trainer):
+            return
+
+        # PyTorch Lightning epochs are 0-indexed.
+        epoch = trainer.current_epoch
+        step = trainer.global_step
+
+        if (epoch + 1) % self.every_n_epochs == 0:
+            self._save_and_rotate(trainer, epoch, step)
+
+    def _save_and_rotate(self, trainer, epoch: int, step: int):
+        assert self.dirpath is not None
+        os.makedirs(self.dirpath, exist_ok=True)
+        if self.keep_last_k > 0:
+            filepath = os.path.join(self.dirpath, f"epoch={epoch}-step={step}.ckpt")
+        else:
+            filepath = os.path.join(self.dirpath, "last.ckpt")
+
+        trainer.save_checkpoint(filepath)
+
+        if self.keep_last_k > 0:
+            self._saved_checkpoints.append(filepath)
+
+            # File system operations must be restricted to global zero
+            if trainer.is_global_zero and self.save_last:
+                last_path = os.path.join(self.dirpath, "last.ckpt")
+                shutil.copy2(filepath, last_path)
+
+            while len(self._saved_checkpoints) > self.keep_last_k:
+                oldest_ckpt = self._saved_checkpoints.popleft()
+                if trainer.is_global_zero and os.path.exists(oldest_ckpt):
+                    try:
+                        os.remove(oldest_ckpt)
+                    except OSError:
+                        pass
+
+    def on_train_end(self, trainer, pl_module):
+        if not self.dirpath:
+            return
+
+        os.makedirs(self.dirpath, exist_ok=True)
+
+        epoch = trainer.current_epoch
+        step = trainer.global_step
+        self._save_and_rotate(trainer, epoch, step)
