@@ -153,10 +153,13 @@ class SimplePeriodicCheckpoint(L.Callback):
         self.keep_last_k = save_top_k
         self.swa_start_epoch = swa_start_epoch
         self.save_last = save_last
-        self._saved_checkpoints = deque()
 
+        self._saved_checkpoints = deque()
+        self._last_saved = None
+
+        assert self.every_n_epochs > 0, "every_n_epochs must be a positive integer."
         if not self.save_last:
-            assert self.every_n_epochs >= 1, "every_n_epochs must be at least 1 when save_last is False."
+            assert self.keep_last_k >= 1 or self.keep_last_k == -1, "save_top_k must be at least 1 when save_last is False."
 
     @torch.no_grad()
     @torch.compiler.disable
@@ -210,7 +213,12 @@ class SimplePeriodicCheckpoint(L.Callback):
     def _save_and_rotate(self, trainer, epoch: int, step: int):
         assert self.dirpath is not None
         os.makedirs(self.dirpath, exist_ok=True)
-        if self.keep_last_k > 0:
+        if self.keep_last_k > 0 or self.keep_last_k == -1:
+            if self._last_saved == (epoch, step):
+                # Skip if duplicate checkpoint for the same epoch and step.
+                # Prevents lost checkpoints due to rotating too often.
+                return
+            self._last_saved = (epoch, step)
             filepath = os.path.join(self.dirpath, f"epoch={epoch}-step={step}.ckpt")
         else:
             filepath = os.path.join(self.dirpath, "last.ckpt")
