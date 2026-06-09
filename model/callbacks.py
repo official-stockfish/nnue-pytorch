@@ -158,6 +158,8 @@ class SimplePeriodicCheckpoint(L.Callback):
         if not self.save_last:
             assert self.every_n_epochs >= 1, "every_n_epochs must be at least 1 when save_last is False."
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def __resolve_ckpt_dir(self, trainer: L.Trainer) -> str:
         """
         COPIED FROM PyTorch Lightning's ModelCheckpoint callback.
@@ -180,6 +182,8 @@ class SimplePeriodicCheckpoint(L.Callback):
 
         return ckpt_path
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def on_train_start(self, trainer, pl_module):
         self.dirpath = self.__resolve_ckpt_dir(trainer)
         if trainer.is_global_zero:
@@ -188,6 +192,8 @@ class SimplePeriodicCheckpoint(L.Callback):
     def _is_in_swa_phase(self, trainer) -> bool:
         return self.swa_start_epoch >= 0 and trainer.current_epoch >= self.swa_start_epoch
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def on_train_epoch_end(self, trainer, pl_module):
         if self._is_in_swa_phase(trainer):
             return
@@ -199,6 +205,8 @@ class SimplePeriodicCheckpoint(L.Callback):
         if (epoch + 1) % self.every_n_epochs == 0:
             self._save_and_rotate(trainer, epoch, step)
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def _save_and_rotate(self, trainer, epoch: int, step: int):
         assert self.dirpath is not None
         os.makedirs(self.dirpath, exist_ok=True)
@@ -225,6 +233,8 @@ class SimplePeriodicCheckpoint(L.Callback):
                     except OSError:
                         pass
 
+    @torch.no_grad()
+    @torch.compiler.disable
     def on_train_end(self, trainer, pl_module):
         if not self.dirpath:
             return
