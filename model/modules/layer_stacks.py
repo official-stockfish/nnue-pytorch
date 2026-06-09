@@ -23,7 +23,9 @@ class LayerStacks(nn.Module):
         # able to diverge a lot.
         self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2, count, quantization, "ls_l1")
         self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
-        self.output = StackedLinear(self.L3, 1, count, quantization, "ls_output")
+
+        # Output layer takes L1 (64) + L2 (64) = 128 inputs
+        self.output = StackedLinear(self.L2 * 2 + self.L3 * 2, 1, count, quantization, "ls_output")
 
         with torch.no_grad():
             self.output.linear.bias.zero_()
@@ -34,13 +36,17 @@ class LayerStacks(nn.Module):
         fake_quantize_acts: bool=True,
         fake_quantize_weights: bool=True,
     ):
+        # --- Layer 1 ---
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
+
+        # Extract the short-path skip connection before fake quantization
         l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)
         l1x_ = l1c_
 
         l1_sqr = torch.pow(l1x_, 2.0)
         if fake_quantize_acts:
             l1_sqr = self.quantization.fake_quantize_ls_act(l1_sqr)
+
         l1_sqr = l1_sqr * (self.quantization.sqr_crelu_correction_factor)
 
         if fake_quantize_acts:
@@ -49,22 +55,35 @@ class LayerStacks(nn.Module):
         l1x_ = torch.cat([l1_sqr, l1x_], dim=1)
         l1x_ = self.quantization.clip_ls_act(l1x_)
 
+        # --- Layer 2 ---
         l2c_ = self.l2(l1x_, ls_indices, fake_quantize_weights)
-        l2x_out = l2c_[:, -2].view(-1, 1) - l2c_[:, -1].view(-1, 1)
+        l2x_ = l2c_
+
+        l2_sqr = torch.pow(l2x_, 2.0)
+        if fake_quantize_acts:
+            l2_sqr = self.quantization.fake_quantize_ls_act(l2_sqr)
+
+        l2_sqr = l2_sqr * (self.quantization.sqr_crelu_correction_factor)
 
         if fake_quantize_acts:
-            l2c_ = self.quantization.fake_quantize_ls_act(l2c_)
-        l2x_ = self.quantization.clip_ls_act(l2c_)
+            l2x_ = self.quantization.fake_quantize_ls_act(l2x_)
 
-        l3c_ = self.output(l2x_, ls_indices, fake_quantize_weights)
+        l2x_ = torch.cat([l2_sqr, l2x_], dim=1)
+        l2x_ = self.quantization.clip_ls_act(l2x_)
+
+        # --- Output Layer ---
+        l3_input = torch.cat([l1x_, l2x_], dim=1)
+
+        l3c_ = self.output(l3_input, ls_indices, fake_quantize_weights)
+
         if fake_quantize_acts:
             l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
-            l2x_out = self.quantization.fake_quantize_skip_act(l2x_out)
 
-        # Skip connections are multiplied by 2 to increase range compared to the clipped path.
-        l3x_ = l3c_ + 2 * l1x_out + 2 * l2x_out
+        # Reintroduce the L1 skip connection
+        l3x_ = l3c_ + 2 * l1x_out
         if fake_quantize_acts:
             l3x_ = self.quantization.fake_quantize_output(l3x_)
+
         assert l3x_.shape[1] == 1, f"Expected output shape (batch_size, 1), got {l3x_.shape}"
         return l3x_
 
