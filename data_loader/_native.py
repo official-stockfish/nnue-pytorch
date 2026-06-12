@@ -30,6 +30,14 @@ def _pin_and_move(t: torch.Tensor, device, use_pinned_memory=False, dtype=None) 
     return out.to(device=device)
 
 
+# Feature Extractor Assumptions Configuration
+# If True, we assume active features always have value 1.0f and empty/padding slots 0.0f,
+# allowing us to skip transferring white_values/black_values over PCIe and reconstruct them on GPU.
+# We also assume layer_stack_indices is identical to psqt_indices and skip its H2D transfer.
+# Disable this if future feature extractors use non-binary values or different layer stack mappings.
+RECONSTRUCT_ON_DEVICE = True
+
+
 class SparseBatch(ctypes.Structure):
     _fields_ = [
         ("num_inputs", ctypes.c_int),
@@ -49,47 +57,70 @@ class SparseBatch(ctypes.Structure):
     ]
 
     def get_tensors(self, device, use_pinned_memory=False):
-        total_floats = self.size * 3 + self.size * self.max_active_features * 2
-        total_ints = self.size * 2 + self.size * self.max_active_features * 2
-
-        # Create CPU-side tensors sharing the contiguous C++ buffers
-        # self.is_white points to the start of the float block
-        float_block_cpu = torch.from_numpy(
-            np.ctypeslib.as_array(self.is_white, shape=(total_floats,))
-        )
-        # self.white points to the start of the int block
-        int_block_cpu = torch.from_numpy(
-            np.ctypeslib.as_array(self.white, shape=(total_ints,))
-        )
-
-        # Move the 2 contiguous blocks to the target device in exactly 2 H2D transfers
-        float_block_gpu = _pin_and_move(float_block_cpu, device, use_pinned_memory)
-        int_block_gpu = _pin_and_move(int_block_cpu, device, use_pinned_memory)
-
-        # Slice the contiguous blocks on the target device (zero-copy operations)
         size = self.size
         max_active = self.max_active_features
 
-        # Slices from float block
-        us = float_block_gpu[0 : size].view(size, 1)
-        outcome = float_block_gpu[size : 2 * size].view(size, 1)
-        score = float_block_gpu[2 * size : 3 * size].view(size, 1)
-        
-        offset_float = 3 * size
-        white_values = float_block_gpu[offset_float : offset_float + size * max_active].view(size, max_active)
-        offset_float += size * max_active
-        black_values = float_block_gpu[offset_float : offset_float + size * max_active].view(size, max_active)
+        if RECONSTRUCT_ON_DEVICE:
+            # We only transfer:
+            # - float block: is_white, outcome, score (3 * size floats)
+            # - int block: white, black, psqt_indices (2 * size * max_active + size ints)
+            total_floats = size * 3
+            total_ints = size * max_active * 2 + size
 
-        # Slices from int block
-        white_indices = int_block_gpu[0 : size * max_active].view(size, max_active)
-        offset_int = size * max_active
-        black_indices = int_block_gpu[offset_int : offset_int + size * max_active].view(size, max_active)
-        offset_int += size * max_active
-        
-        # psqt_indices and layer_stack_indices are sliced and then type-casted to long (int64) on the target device
-        psqt_indices = int_block_gpu[offset_int : offset_int + size].view(size).long()
-        offset_int += size
-        layer_stack_indices = int_block_gpu[offset_int : offset_int + size].view(size).long()
+            float_block_cpu = torch.from_numpy(
+                np.ctypeslib.as_array(self.is_white, shape=(total_floats,))
+            )
+            int_block_cpu = torch.from_numpy(
+                np.ctypeslib.as_array(self.white, shape=(total_ints,))
+            )
+
+            float_block_gpu = _pin_and_move(float_block_cpu, device, use_pinned_memory)
+            int_block_gpu = _pin_and_move(int_block_cpu, device, use_pinned_memory)
+
+            us = float_block_gpu[0 : size].view(size, 1)
+            outcome = float_block_gpu[size : 2 * size].view(size, 1)
+            score = float_block_gpu[2 * size : 3 * size].view(size, 1)
+
+            white_indices = int_block_gpu[0 : size * max_active].view(size, max_active)
+            black_indices = int_block_gpu[size * max_active : 2 * size * max_active].view(size, max_active)
+            psqt_indices = int_block_gpu[2 * size * max_active : 2 * size * max_active + size].view(size).long()
+
+            # Reconstruct binary masks and duplicate psqt_indices on target device
+            white_values = (white_indices >= 0).to(dtype=float_block_gpu.dtype)
+            black_values = (black_indices >= 0).to(dtype=float_block_gpu.dtype)
+            layer_stack_indices = psqt_indices
+        else:
+            # Fallback: transfer all 10 arrays from C++ heap allocations
+            total_floats = size * 3 + size * max_active * 2
+            total_ints = size * 2 + size * max_active * 2
+
+            float_block_cpu = torch.from_numpy(
+                np.ctypeslib.as_array(self.is_white, shape=(total_floats,))
+            )
+            int_block_cpu = torch.from_numpy(
+                np.ctypeslib.as_array(self.white, shape=(total_ints,))
+            )
+
+            float_block_gpu = _pin_and_move(float_block_cpu, device, use_pinned_memory)
+            int_block_gpu = _pin_and_move(int_block_cpu, device, use_pinned_memory)
+
+            us = float_block_gpu[0 : size].view(size, 1)
+            outcome = float_block_gpu[size : 2 * size].view(size, 1)
+            score = float_block_gpu[2 * size : 3 * size].view(size, 1)
+            
+            offset_float = 3 * size
+            white_values = float_block_gpu[offset_float : offset_float + size * max_active].view(size, max_active)
+            offset_float += size * max_active
+            black_values = float_block_gpu[offset_float : offset_float + size * max_active].view(size, max_active)
+
+            white_indices = int_block_gpu[0 : size * max_active].view(size, max_active)
+            offset_int = size * max_active
+            black_indices = int_block_gpu[offset_int : offset_int + size * max_active].view(size, max_active)
+            offset_int += size * max_active
+            
+            psqt_indices = int_block_gpu[offset_int : offset_int + size].view(size).long()
+            offset_int += size
+            layer_stack_indices = int_block_gpu[offset_int : offset_int + size].view(size).long()
 
         # Compute 'them' on the target device
         if not us.is_cuda and use_pinned_memory:
