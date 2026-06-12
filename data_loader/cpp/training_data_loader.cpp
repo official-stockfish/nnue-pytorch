@@ -56,7 +56,7 @@ struct HalfKAv2_hm {
     }
 
     static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
         auto& pos    = e.pos;
         auto  pieces = pos.piecesBB();
         auto  ksq    = pos.kingSquare(color);
@@ -65,7 +65,6 @@ struct HalfKAv2_hm {
         for (Square sq : pieces)
         {
             auto p      = pos.pieceAt(sq);
-            values[j]   = 1.0f;
             features[j] = feature_index(color, ksq, sq, p);
             ++j;
         }
@@ -78,9 +77,8 @@ struct HalfKAv2_hmExtractor: IFeatureExtractor {
     int max_active_features() const override { return HalfKAv2_hm::MAX_ACTIVE_FEATURES; }
     std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
                                              int*                     features,
-                                             float*                   values,
                                              Color                    color) const override {
-        return HalfKAv2_hm::fill_features_sparse(e, features, values, color);
+        return HalfKAv2_hm::fill_features_sparse(e, features, color);
     }
 };
 
@@ -219,7 +217,7 @@ struct FullThreats {
     }
 
     static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
         auto& pos         = e.pos;
         auto  pieces      = pos.piecesBB();
         auto  ksq         = pos.kingSquare(color);
@@ -249,7 +247,6 @@ struct FullThreats {
                         int    index = threat_index(color, attkr, from, to, attkd, ksq);
                         if (index >= 0)
                         {
-                            values[k]   = 1.0f;
                             features[k] = index;
                             k++;
                         }
@@ -261,7 +258,6 @@ struct FullThreats {
                         int    index = threat_index(color, attkr, from, to, attkd, ksq);
                         if (index >= 0)
                         {
-                            values[k]   = 1.0f;
                             features[k] = index;
                             k++;
                         }
@@ -273,7 +269,6 @@ struct FullThreats {
                         int    index = threat_index(color, attkr, from, to, attkd, ksq);
                         if (index >= 0)
                         {
-                            values[k]   = 1.0f;
                             features[k] = index;
                             k++;
                         }
@@ -290,7 +285,6 @@ struct FullThreats {
                             int   index = threat_index(color, attkr, from, to, attkd, ksq);
                             if (index >= 0)
                             {
-                                values[k]   = 1.0f;
                                 features[k] = index;
                                 k++;
                             }
@@ -308,9 +302,8 @@ struct FullThreatsExtractor: IFeatureExtractor {
     int max_active_features() const override { return FullThreats::MAX_ACTIVE_FEATURES; }
     std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
                                              int*                     features,
-                                             float*                   values,
                                              Color                    color) const override {
-        return FullThreats::fill_features_sparse(e, features, values, color);
+        return FullThreats::fill_features_sparse(e, features, color);
     }
 };
 
@@ -335,7 +328,6 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
 
     std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
                                              int*                     features,
-                                             float*                   values,
                                              Color                    color) const override {
         int total_written = 0;
         int input_offset  = 0;
@@ -343,7 +335,7 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
         for (auto& ext : extractors)
         {
             auto [written, ext_inputs] =
-              ext->fill_features_sparse(e, features + total_written, values + total_written, color);
+              ext->fill_features_sparse(e, features + total_written, color);
 
             // Offset the feature indices for this component
             for (int i = 0; i < written; ++i)
@@ -398,6 +390,17 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
 // Class Implementations
 // ---------------------------------------------------------
 
+template <typename T>
+struct BumpAllocator {
+    T* ptr;
+    BumpAllocator(T* block) : ptr(block) {}
+    T* alloc(size_t count) {
+        T* res = ptr;
+        ptr += count;
+        return res;
+    }
+};
+
 SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
                          const std::vector<TrainingDataEntry>& entries)
 #ifdef NNUE_LOADER_STATISTICS
@@ -408,15 +411,21 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
     num_inputs          = feature_set.inputs();
     size                = entries.size();
     max_active_features = feature_set.max_active_features();
-    is_white            = new float[size];
-    outcome             = new float[size];
-    score               = new float[size];
-    white               = new int[size * max_active_features];
-    black               = new int[size * max_active_features];
-    white_values        = new float[size * max_active_features];
-    black_values        = new float[size * max_active_features];
-    psqt_indices        = new int[size];
-    layer_stack_indices = new int[size];
+    const size_t total_floats = size * 3;
+    const size_t total_ints   = size + size * max_active_features * 2;
+
+    m_float_block = new float[total_floats];
+    m_int_block   = new int[total_ints];
+
+    BumpAllocator<float> float_alloc(m_float_block);
+    is_white     = float_alloc.alloc(size);
+    outcome      = float_alloc.alloc(size);
+    score        = float_alloc.alloc(size);
+
+    BumpAllocator<int> int_alloc(m_int_block);
+    white               = int_alloc.alloc(size * max_active_features);
+    black               = int_alloc.alloc(size * max_active_features);
+    piece_count         = int_alloc.alloc(size);
 
     num_active_white_features = 0;
     num_active_black_features = 0;
@@ -425,42 +434,30 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
         white[i] = -1;
     for (int i = 0; i < size * max_active_features; ++i)
         black[i] = -1;
-    for (int i = 0; i < size * max_active_features; ++i)
-        white_values[i] = 0.0f;
-    for (int i = 0; i < size * max_active_features; ++i)
-        black_values[i] = 0.0f;
 
     for (int i = 0; i < size; ++i)
         fill_entry(feature_set, i, entries[i]);
 }
 
 SparseBatch::~SparseBatch() {
-    delete[] is_white;
-    delete[] outcome;
-    delete[] score;
-    delete[] white;
-    delete[] black;
-    delete[] white_values;
-    delete[] black_values;
-    delete[] psqt_indices;
-    delete[] layer_stack_indices;
+    delete[] m_float_block;
+    delete[] m_int_block;
 }
 
 void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
     is_white[i]            = static_cast<float>(e.pos.sideToMove() == Color::White);
     outcome[i]             = (e.result + 1.0f) / 2.0f;
     score[i]               = e.score;
-    psqt_indices[i]        = (e.pos.piecesBB().count() - 1) / 4;
-    layer_stack_indices[i] = psqt_indices[i];
+    piece_count[i]         = e.pos.piecesBB().count();
     fill_features(fs, i, e);
 }
 
 void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
     const int offset = i * max_active_features;
     num_active_white_features +=
-      fs.fill_features_sparse(e, white + offset, white_values + offset, Color::White).first;
+      fs.fill_features_sparse(e, white + offset, Color::White).first;
     num_active_black_features +=
-      fs.fill_features_sparse(e, black + offset, black_values + offset, Color::Black).first;
+      fs.fill_features_sparse(e, black + offset, Color::Black).first;
 }
 
 int FeaturedBatchStream::calculate_num_reader_threads(int concurrency) {

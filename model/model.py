@@ -82,15 +82,13 @@ class NNUEModel(nn.Module):
         us: torch.Tensor,
         them: torch.Tensor,
         white_indices: torch.Tensor,
-        white_values: torch.Tensor,
         black_indices: torch.Tensor,
-        black_values: torch.Tensor,
         psqt_indices: torch.Tensor,
         fake_quantize_acts: bool,
         fake_quantize_weights: bool,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
        # NOTE possibly refactor this into own class. Fused kernel would be beneficial for speed.
-        wp, bp = self.input(white_indices, white_values, black_indices, black_values, fake_quantize_weights)
+        wp, bp = self.input(white_indices, black_indices, fake_quantize_weights)
         w, wpsqt = torch.split(wp, self.L1, dim=1)
         b, bpsqt = torch.split(bp, self.L1, dim=1)
 
@@ -122,9 +120,7 @@ class NNUEModel(nn.Module):
         us: torch.Tensor,
         them: torch.Tensor,
         white_indices: torch.Tensor,
-        white_values: torch.Tensor,
         black_indices: torch.Tensor,
-        black_values: torch.Tensor,
         psqt_indices: torch.Tensor,
         layer_stack_indices: torch.Tensor,
         fake_quantize_acts: bool=True,
@@ -134,9 +130,7 @@ class NNUEModel(nn.Module):
             us,
             them,
             white_indices,
-            white_values,
             black_indices,
-            black_values,
             psqt_indices,
             fake_quantize_acts,
             fake_quantize_weights,

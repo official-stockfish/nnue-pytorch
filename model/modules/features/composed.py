@@ -58,9 +58,7 @@ class ComposedFeatureTransformer(nn.Module):
     def forward(
         self,
         feature_indices_0,
-        feature_values_0,
         feature_indices_1,
-        feature_values_1,
         fake_quantize_weights: bool=False,
     ):
         merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
@@ -76,13 +74,11 @@ class ComposedFeatureTransformer(nn.Module):
         return (
             SparseLinearFunction.apply(
                 feature_indices_0,
-                feature_values_0,
                 merged,
                 bias,
             ),
             SparseLinearFunction.apply(
                 feature_indices_1,
-                feature_values_1,
                 merged,
                 bias,
             ),
