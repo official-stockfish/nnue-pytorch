@@ -49,79 +49,56 @@ class SparseBatch(ctypes.Structure):
     ]
 
     def get_tensors(self, device, use_pinned_memory=False):
-        white_values = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.white_values, shape=(self.size, self.max_active_features)
-                )
-            ),
-            device,
-            use_pinned_memory,
+        total_floats = self.size * 3 + self.size * self.max_active_features * 2
+        total_ints = self.size * 2 + self.size * self.max_active_features * 2
+
+        # Create CPU-side tensors sharing the contiguous C++ buffers
+        # self.is_white points to the start of the float block
+        float_block_cpu = torch.from_numpy(
+            np.ctypeslib.as_array(self.is_white, shape=(total_floats,))
         )
-        black_values = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.black_values, shape=(self.size, self.max_active_features)
-                )
-            ),
-            device,
-            use_pinned_memory,
+        # self.white points to the start of the int block
+        int_block_cpu = torch.from_numpy(
+            np.ctypeslib.as_array(self.white, shape=(total_ints,))
         )
-        white_indices = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.white, shape=(self.size, self.max_active_features)
-                )
-            ),
-            device,
-            use_pinned_memory,
-        )
-        black_indices = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.black, shape=(self.size, self.max_active_features)
-                )
-            ),
-            device,
-            use_pinned_memory,
-        )
-        us = _pin_and_move(
-            torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))),
-            device,
-            use_pinned_memory,
-        )
-        if torch.cuda.is_available() and use_pinned_memory:
+
+        # Move the 2 contiguous blocks to the target device in exactly 2 H2D transfers
+        float_block_gpu = _pin_and_move(float_block_cpu, device, use_pinned_memory)
+        int_block_gpu = _pin_and_move(int_block_cpu, device, use_pinned_memory)
+
+        # Slice the contiguous blocks on the target device (zero-copy operations)
+        size = self.size
+        max_active = self.max_active_features
+
+        # Slices from float block
+        us = float_block_gpu[0 : size].view(size, 1)
+        outcome = float_block_gpu[size : 2 * size].view(size, 1)
+        score = float_block_gpu[2 * size : 3 * size].view(size, 1)
+        
+        offset_float = 3 * size
+        white_values = float_block_gpu[offset_float : offset_float + size * max_active].view(size, max_active)
+        offset_float += size * max_active
+        black_values = float_block_gpu[offset_float : offset_float + size * max_active].view(size, max_active)
+
+        # Slices from int block
+        white_indices = int_block_gpu[0 : size * max_active].view(size, max_active)
+        offset_int = size * max_active
+        black_indices = int_block_gpu[offset_int : offset_int + size * max_active].view(size, max_active)
+        offset_int += size * max_active
+        
+        # psqt_indices and layer_stack_indices are sliced and then type-casted to long (int64) on the target device
+        psqt_indices = int_block_gpu[offset_int : offset_int + size].view(size).long()
+        offset_int += size
+        layer_stack_indices = int_block_gpu[offset_int : offset_int + size].view(size).long()
+
+        # Compute 'them' on the target device
+        if not us.is_cuda and use_pinned_memory:
             them = torch.empty_like(us, pin_memory=True)
             them.fill_(1.0)
             them.sub_(us)
         else:
             them = 1.0 - us
-        outcome = _pin_and_move(
-            torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))),
-            device,
-            use_pinned_memory,
-        )
-        score = _pin_and_move(
-            torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))),
-            device,
-            use_pinned_memory,
-        )
-        psqt_indices = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(self.psqt_indices, shape=(self.size,))
-            ),
-            device,
-            use_pinned_memory,
-            dtype=torch.long,
-        )
-        layer_stack_indices = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(self.layer_stack_indices, shape=(self.size,))
-            ),
-            device,
-            use_pinned_memory,
-            dtype=torch.long,
-        )
+
         return (
             us,
             them,
