@@ -8,11 +8,26 @@ import torch
 from .config import CDataloaderSkipConfig, CDataloaderDDPConfig
 
 
-def _pin_and_move(t: torch.Tensor, device) -> torch.Tensor:
+def _pin_and_move(t: torch.Tensor, device, use_pinned_memory=False, dtype=None) -> torch.Tensor:
+    if dtype is None:
+        dtype = t.dtype
+
     # Must copy off SparseBatch-backed memory before it is freed
-    if torch.cuda.is_available():
-        return t.pin_memory().to(device=device, non_blocking=True)
-    return t.to(device=device, copy=True)
+    if torch.cuda.is_available() and use_pinned_memory:
+        # Allocate a pinned CPU tensor and copy the data directly into it.
+        # This is much faster than t.clone().pin_memory() which does two copies/allocations.
+        out = torch.empty(t.shape, dtype=dtype, layout=t.layout, device="cpu", pin_memory=True)
+        out.copy_(t)
+        if device == "cpu" or (isinstance(device, torch.device) and device.type == "cpu"):
+            return out
+        return out.to(device=device, non_blocking=True)
+    
+    # If not using pinned memory, just copy to standard CPU storage
+    out = torch.empty(t.shape, dtype=dtype, layout=t.layout, device="cpu")
+    out.copy_(t)
+    if device == "cpu" or (isinstance(device, torch.device) and device.type == "cpu"):
+        return out
+    return out.to(device=device)
 
 
 class SparseBatch(ctypes.Structure):
@@ -33,7 +48,7 @@ class SparseBatch(ctypes.Structure):
         ("layer_stack_indices", ctypes.POINTER(ctypes.c_int)),
     ]
 
-    def get_tensors(self, device):
+    def get_tensors(self, device, use_pinned_memory=False):
         white_values = _pin_and_move(
             torch.from_numpy(
                 np.ctypeslib.as_array(
@@ -41,6 +56,7 @@ class SparseBatch(ctypes.Structure):
                 )
             ),
             device,
+            use_pinned_memory,
         )
         black_values = _pin_and_move(
             torch.from_numpy(
@@ -49,6 +65,7 @@ class SparseBatch(ctypes.Structure):
                 )
             ),
             device,
+            use_pinned_memory,
         )
         white_indices = _pin_and_move(
             torch.from_numpy(
@@ -57,6 +74,7 @@ class SparseBatch(ctypes.Structure):
                 )
             ),
             device,
+            use_pinned_memory,
         )
         black_indices = _pin_and_move(
             torch.from_numpy(
@@ -65,31 +83,44 @@ class SparseBatch(ctypes.Structure):
                 )
             ),
             device,
+            use_pinned_memory,
         )
         us = _pin_and_move(
             torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))),
             device,
+            use_pinned_memory,
         )
-        them = 1.0 - us
+        if torch.cuda.is_available() and use_pinned_memory:
+            them = torch.empty_like(us, pin_memory=True)
+            them.fill_(1.0)
+            them.sub_(us)
+        else:
+            them = 1.0 - us
         outcome = _pin_and_move(
             torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))),
             device,
+            use_pinned_memory,
         )
         score = _pin_and_move(
             torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))),
             device,
+            use_pinned_memory,
         )
         psqt_indices = _pin_and_move(
             torch.from_numpy(
                 np.ctypeslib.as_array(self.psqt_indices, shape=(self.size,))
-            ).long(),
+            ),
             device,
+            use_pinned_memory,
+            dtype=torch.long,
         )
         layer_stack_indices = _pin_and_move(
             torch.from_numpy(
                 np.ctypeslib.as_array(self.layer_stack_indices, shape=(self.size,))
-            ).long(),
+            ),
             device,
+            use_pinned_memory,
+            dtype=torch.long,
         )
         return (
             us,

@@ -117,6 +117,7 @@ class TrainingDataProvider:
         batch_size=None,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
         ddp_config: DataloaderDDPConfig = None,
+        use_pinned_memory=False,
     ):
         self.feature_set = feature_set.encode("utf-8")
         self.create_stream = create_stream
@@ -128,6 +129,7 @@ class TrainingDataProvider:
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.config = config
+        self.use_pinned_memory = use_pinned_memory
 
         if batch_size:
             self.stream = self.create_stream(
@@ -156,7 +158,7 @@ class TrainingDataProvider:
         v = self.fetch_next(self.stream)
 
         if v:
-            tensors = v.contents.get_tensors("cpu")
+            tensors = v.contents.get_tensors("cpu", use_pinned_memory=self.use_pinned_memory)
             self.destroy_part(v)
             return tensors
         else:
@@ -176,6 +178,7 @@ class SparseBatchProvider(TrainingDataProvider):
         num_workers=1,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
         ddp_config: DataloaderDDPConfig = None,
+        use_pinned_memory=False,
     ):
         super().__init__(
             feature_set,
@@ -189,6 +192,7 @@ class SparseBatchProvider(TrainingDataProvider):
             batch_size,
             config,
             ddp_config,
+            use_pinned_memory,
         )
 
 
@@ -202,6 +206,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         num_workers=1,
         config: DataloaderSkipConfig = DataloaderSkipConfig(),
         ddp_config: DataloaderDDPConfig = None,
+        use_pinned_memory=False,
     ):
         super().__init__()
         self.feature_set = feature_set
@@ -211,6 +216,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         self.num_workers = num_workers
         self.config = config
         self.ddp_config = ddp_config
+        self.use_pinned_memory = use_pinned_memory
 
     def __iter__(self):
         return SparseBatchProvider(
@@ -221,7 +227,18 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             num_workers=self.num_workers,
             config=self.config,
             ddp_config=self.ddp_config,
+            use_pinned_memory=self.use_pinned_memory,
         )
+
+
+def _safe_put(stop_event, q, item):
+    """Helper to ensure we don't hang on shutdown if queue is full."""
+    while not stop_event.is_set():
+        try:
+            q.put(item, timeout=1.0)
+            break
+        except queue.Full:
+            continue
 
 
 class FixedNumBatchesDataset(Dataset):
@@ -258,28 +275,27 @@ class FixedNumBatchesDataset(Dataset):
             return self.device
         return torch.device("cuda", torch.cuda.current_device())
 
-    def _safe_put(self, item):
-        """Helper to ensure we don't hang on shutdown if queue is full."""
-        while not self._stop_prefetching.is_set():
-            try:
-                self._prefetch_queue.put(item, timeout=1.0)
-                break
-            except queue.Full:
-                continue
-
-    def _prefetch_worker(self):
+    @staticmethod
+    def _prefetch_worker(
+        stop_event,
+        iterator,
+        prefetch_queue,
+        prefetch_device,
+        prefetch_to_device,
+    ):
         try:
             prefetch_stream = None
-            prefetch_device = self._prefetch_device
             if prefetch_device is not None:
                 torch.cuda.set_device(prefetch_device)
                 prefetch_stream = torch.cuda.Stream(device=prefetch_device)
 
-            while not self._stop_prefetching.is_set():
+            while not stop_event.is_set():
                 try:
-                    item = next(self.iter)
-                    if self.pin_memory:
-                        item = _recursive_pin(item)
+                    item = next(iterator)
+                    if item is None:
+                        _safe_put(stop_event, prefetch_queue, None)
+                        break
+
                     if prefetch_stream is not None:
                         with torch.cuda.stream(prefetch_stream):
                             item = _recursive_to_device(
@@ -288,12 +304,12 @@ class FixedNumBatchesDataset(Dataset):
                             ready_event = torch.cuda.Event()
                             ready_event.record(prefetch_stream)
                         item = _CudaPrefetchedItem(item=item, ready_event=ready_event)
-                    self._safe_put(item)
+                    _safe_put(stop_event, prefetch_queue, item)
                 except StopIteration:
-                    self._safe_put(None)
+                    _safe_put(stop_event, prefetch_queue, None)
                     break
         except Exception as e:
-            self._safe_put(e)
+            _safe_put(stop_event, prefetch_queue, e)
 
     def _start_prefetching(self):
         with self._lock:
@@ -301,9 +317,19 @@ class FixedNumBatchesDataset(Dataset):
                 # Resolve the concrete CUDA device on the consumer thread after the
                 # training process has selected its rank-local device.
                 self._prefetch_device = self._resolve_prefetch_device()
+                if hasattr(self.dataset, "use_pinned_memory"):
+                    self.dataset.use_pinned_memory = self.pin_memory
                 self.iter = iter(self.dataset)
                 self._prefetch_thread = threading.Thread(
-                    target=self._prefetch_worker, daemon=True
+                    target=FixedNumBatchesDataset._prefetch_worker,
+                    args=(
+                        self._stop_prefetching,
+                        self.iter,
+                        self._prefetch_queue,
+                        self._prefetch_device,
+                        self.prefetch_to_device,
+                    ),
+                    daemon=True,
                 )
                 self._prefetch_thread.start()
                 self._prefetch_started = True

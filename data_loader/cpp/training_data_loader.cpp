@@ -398,6 +398,17 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
 // Class Implementations
 // ---------------------------------------------------------
 
+template <typename T>
+struct BumpAllocator {
+    T* ptr;
+    BumpAllocator(T* block) : ptr(block) {}
+    T* alloc(size_t count) {
+        T* res = ptr;
+        ptr += count;
+        return res;
+    }
+};
+
 SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
                          const std::vector<TrainingDataEntry>& entries)
 #ifdef NNUE_LOADER_STATISTICS
@@ -408,15 +419,25 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
     num_inputs          = feature_set.inputs();
     size                = entries.size();
     max_active_features = feature_set.max_active_features();
-    is_white            = new float[size];
-    outcome             = new float[size];
-    score               = new float[size];
-    white               = new int[size * max_active_features];
-    black               = new int[size * max_active_features];
-    white_values        = new float[size * max_active_features];
-    black_values        = new float[size * max_active_features];
-    psqt_indices        = new int[size];
-    layer_stack_indices = new int[size];
+
+    const size_t total_floats = size * 3 + size * max_active_features * 2;
+    const size_t total_ints   = size * 2 + size * max_active_features * 2;
+
+    m_float_block = new float[total_floats];
+    m_int_block   = new int[total_ints];
+
+    BumpAllocator<float> float_alloc(m_float_block);
+    is_white     = float_alloc.alloc(size);
+    outcome      = float_alloc.alloc(size);
+    score        = float_alloc.alloc(size);
+    white_values = float_alloc.alloc(size * max_active_features);
+    black_values = float_alloc.alloc(size * max_active_features);
+
+    BumpAllocator<int> int_alloc(m_int_block);
+    white               = int_alloc.alloc(size * max_active_features);
+    black               = int_alloc.alloc(size * max_active_features);
+    psqt_indices        = int_alloc.alloc(size);
+    layer_stack_indices = int_alloc.alloc(size);
 
     num_active_white_features = 0;
     num_active_black_features = 0;
@@ -435,15 +456,8 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
 }
 
 SparseBatch::~SparseBatch() {
-    delete[] is_white;
-    delete[] outcome;
-    delete[] score;
-    delete[] white;
-    delete[] black;
-    delete[] white_values;
-    delete[] black_values;
-    delete[] psqt_indices;
-    delete[] layer_stack_indices;
+    delete[] m_float_block;
+    delete[] m_int_block;
 }
 
 void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
