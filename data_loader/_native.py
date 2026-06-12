@@ -27,29 +27,11 @@ class SparseBatch(ctypes.Structure):
         ("max_active_features", ctypes.c_int),
         ("white", ctypes.POINTER(ctypes.c_int)),
         ("black", ctypes.POINTER(ctypes.c_int)),
-        ("white_values", ctypes.POINTER(ctypes.c_float)),
-        ("black_values", ctypes.POINTER(ctypes.c_float)),
         ("psqt_indices", ctypes.POINTER(ctypes.c_int)),
         ("layer_stack_indices", ctypes.POINTER(ctypes.c_int)),
     ]
 
     def get_tensors(self, device):
-        white_values = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.white_values, shape=(self.size, self.max_active_features)
-                )
-            ),
-            device,
-        )
-        black_values = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.black_values, shape=(self.size, self.max_active_features)
-                )
-            ),
-            device,
-        )
         white_indices = _pin_and_move(
             torch.from_numpy(
                 np.ctypeslib.as_array(
@@ -95,9 +77,7 @@ class SparseBatch(ctypes.Structure):
             us,
             them,
             white_indices,
-            white_values,
             black_indices,
-            black_values,
             outcome,
             score,
             psqt_indices,

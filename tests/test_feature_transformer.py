@@ -15,7 +15,6 @@ from model.modules.feature_transformer.functions import (
 
 def SparseLinearFunctionEmulate(
     input_indices: torch.Tensor,
-    input_values: torch.Tensor,
     weight: torch.Tensor,
     bias: torch.Tensor,
 ) -> torch.Tensor:
@@ -28,10 +27,9 @@ def SparseLinearFunctionEmulate(
     for i in range(batch_size):
         for j in range(max_active_indices):
             feature = input_indices[i, j]
-            value = input_values[i, j]
             if feature < 0:
                 continue
-            inputs[i, feature] += value
+            inputs[i, feature] += 1.0
 
     return torch.mm(inputs, weight) + bias
 
@@ -55,24 +53,20 @@ def _run_test(device: torch.device):
     indices1 = (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES) * INPUT_SIZE).to(
         dtype=torch.int32
     )
-    values0 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32)
-    values1 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32)
 
     output00 = SparseLinearFunctionEmulate(
-        indices0.clone(), values0.clone(), weight0, bias0
+        indices0.clone(), weight0, bias0
     )
     output01 = SparseLinearFunctionEmulate(
-        indices1.clone(), values1.clone(), weight0, bias0
+        indices1.clone(), weight0, bias0
     )
     output10 = SparseLinearFunction.apply(
         indices0.clone().to(device),
-        values0.clone().to(device),
         weight1.to(device),
         bias1.to(device),
     )
     output11 = SparseLinearFunction.apply(
         indices1.clone().to(device),
-        values1.clone().to(device),
         weight1.to(device),
         bias1.to(device),
     )
@@ -102,24 +96,16 @@ def _run_padding_test(device: torch.device):
     active_indices = (torch.rand(BATCH_SIZE, N_ACTIVE) * INPUT_SIZE).to(
         dtype=torch.int32, device=device
     )
-    active_values = torch.rand(
-        BATCH_SIZE, N_ACTIVE, dtype=torch.float32, device=device
-    )
     padding_indices = torch.full(
         (BATCH_SIZE, N_PADDING), -1, dtype=torch.int32, device=device
     )
-    # Non-zero values in padding slots must not affect the output.
-    padding_values = torch.rand(
-        BATCH_SIZE, N_PADDING, dtype=torch.float32, device=device
-    )
 
     out_unpadded = SparseLinearFunction.apply(
-        active_indices, active_values, weight, bias
+        active_indices, weight, bias
     )
     indices_padded = torch.cat([active_indices, padding_indices], dim=1)
-    values_padded = torch.cat([active_values, padding_values], dim=1)
     out_padded = SparseLinearFunction.apply(
-        indices_padded, values_padded, weight, bias
+        indices_padded, weight, bias
     )
 
     assert torch.max(torch.abs(out_unpadded - out_padded)) < MAX_ERROR
@@ -168,14 +154,12 @@ def bench():
 
     layer = DoubleFeatureTransformer(INPUT_SIZE, STRIDE).cuda()
     indices0 = get_fake_indices()
-    values0 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
     indices1 = get_fake_indices()
-    values1 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
 
     start = time.time()
 
     for _ in range(ITERS):
-        output0, output1 = layer(indices0, values0, indices1, values1)
+        output0, output1 = layer(indices0, indices1)
         output0 = torch.clamp(output0, 0.0, 1.0)
         output1 = torch.clamp(output1, 0.0, 1.0)
 

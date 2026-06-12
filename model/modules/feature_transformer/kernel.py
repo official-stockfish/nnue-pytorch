@@ -113,7 +113,6 @@ extern "C" __global__
 */
 void sparse_input_linear_forward(
     const int32_t* const input_indices,
-    const float*   const input_values,
     const float*   const weight,
     const float*   const bias,
           float*   const output
@@ -129,7 +128,6 @@ void sparse_input_linear_forward(
           float*         shared_output_slice = shared_output                      + slice_offset;
 
     const int32_t* const input_index_row     = input_indices + block_idx * {max_active_indices};
-    const float*   const input_value_row     = input_values  + block_idx * {max_active_indices};
 
     #pragma unroll
     for (uint32_t s = 0; s < {output_thread_slice_size}; ++s)
@@ -140,14 +138,13 @@ void sparse_input_linear_forward(
     for (uint32_t k = 0; k < {max_active_indices}; ++k)
     {{
         const int32_t input_index = input_index_row[k];
-        const float   input_value = input_value_row[k];
         if (input_index != -1)
         {{
             const float* const weight_slice = weight + input_index * {output_size} + slice_offset;
             #pragma unroll
             for (uint32_t s = 0; s < {output_thread_slice_size}; ++s)
             {{
-                shared_output_slice[s] += weight_slice[s] * input_value;
+                shared_output_slice[s] += weight_slice[s];
             }}
         }} else break;
     }}
@@ -243,7 +240,6 @@ extern "C" __global__
 */
 void sparse_input_linear_backward(
     const int32_t* const input_indices,
-    const float*   const input_values,
           float*   const weight_grad,
           float*   const bias_grad,
     const float*   const output_grad
@@ -259,7 +255,6 @@ void sparse_input_linear_backward(
           float*         shared_output_grad_slice = shared_output_grad                      + slice_offset;
 
     const int32_t* const input_index_row          = input_indices + block_idx * {max_active_indices};
-    const float*   const input_value_row          = input_values  + block_idx * {max_active_indices};
 
     #pragma unroll
     for (uint32_t s = 0; s < {output_thread_slice_size}; ++s)
@@ -280,7 +275,6 @@ void sparse_input_linear_backward(
     for (uint32_t k = 0; k < {max_active_indices}; ++k)
     {{
         const int32_t input_index = input_index_row[k];
-        const float   input_value = input_value_row[k];
         if (input_index != -1)
         {{
             float* const weight_grad_slice = weight_grad + input_index * {output_size} + slice_offset;
@@ -290,7 +284,7 @@ void sparse_input_linear_backward(
                 const float sog = shared_output_grad_slice[s];
                 if (sog != 0.0f)
                 {{
-                    atomicAdd(&weight_grad_slice[s], sog * input_value);
+                    atomicAdd(&weight_grad_slice[s], sog);
                 }}
             }}
         }} else break;

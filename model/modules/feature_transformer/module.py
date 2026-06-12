@@ -43,26 +43,24 @@ class BaseFeatureTransformer(nn.Module):
 
 
 class FeatureTransformer(BaseFeatureTransformer):
-    def forward(self, feature_indices, feature_values):
+    def forward(self, feature_indices):
         return SparseLinearFunction.apply(
-            feature_indices, feature_values, self.weight, self.bias
+            feature_indices, self.weight, self.bias
         )
 
 
 class DoubleFeatureTransformer(BaseFeatureTransformer):
     def forward(
-        self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
+        self, feature_indices_0, feature_indices_1
     ):
         return (
             SparseLinearFunction.apply(
                 feature_indices_0,
-                feature_values_0,
                 self.weight,
                 self.bias,
             ),
             SparseLinearFunction.apply(
                 feature_indices_1,
-                feature_values_1,
                 self.weight,
                 self.bias,
             ),
