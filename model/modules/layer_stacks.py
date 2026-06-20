@@ -79,8 +79,8 @@ class LayerStacks(nn.Module):
         if fake_quantize_acts:
             l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
 
-        # Reintroduce the L1 skip connection
-        l3x_ = l3c_ + 2 * l1x_out
+        # l1 skip connection
+        l3x_ = l3c_ + l1x_out
         if fake_quantize_acts:
             l3x_ = self.quantization.fake_quantize_output(l3x_)
 
