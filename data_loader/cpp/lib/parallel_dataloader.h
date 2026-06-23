@@ -109,8 +109,7 @@ namespace binpack
             auto worker = [this]()
             {
                 std::vector<unsigned char> m_chunk{};
-                std::optional<PackedMoveScoreListReader> m_movelistReader(std::nullopt);
-                std::size_t m_offset(0);
+                ChunkReader m_chunkReader{};
                 std::vector<TrainingDataEntry> m_localBuffer;
                 m_localBuffer.reserve(threadBufferSize);
 
@@ -118,50 +117,21 @@ namespace binpack
                     m_distribution_weights.begin(), m_distribution_weights.end()
                 );
 
-                bool isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk, local_dist);
+                bool isEnd = fetchNextChunkIfNeeded(m_chunkReader, m_chunk, local_dist);
 
                 while(!isEnd && !m_stopFlag.load())
                 {
                     while (m_localBuffer.size() < threadBufferSize)
                     {
-                        if (m_movelistReader.has_value())
+                        const auto e = m_chunkReader.next(m_chunk);
+
+                        if (!m_chunkReader.hasNext(m_chunk))
                         {
-                            const auto e = m_movelistReader->nextEntry();
-
-                            if (!m_movelistReader->hasNext())
-                            {
-                                m_offset += m_movelistReader->numReadBytes();
-                                m_movelistReader.reset();
-
-                                isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk, local_dist);
-                            }
-
-                            if (!m_skipPredicate || !m_skipPredicate(e))
-                                m_localBuffer.emplace_back(e);
+                            isEnd = fetchNextChunkIfNeeded(m_chunkReader, m_chunk, local_dist);
                         }
-                        else
-                        {
-                            PackedTrainingDataEntry packed;
-                            std::memcpy(&packed, m_chunk.data() + m_offset, sizeof(PackedTrainingDataEntry));
-                            m_offset += sizeof(PackedTrainingDataEntry);
 
-                            const std::uint16_t numPlies = (m_chunk[m_offset] << 8) | m_chunk[m_offset + 1];
-                            m_offset += 2;
-
-                            const auto e = unpackEntry(packed);
-
-                            if (numPlies > 0)
-                            {
-                                m_movelistReader.emplace(e, reinterpret_cast<unsigned char*>(m_chunk.data()) + m_offset, numPlies);
-                            }
-                            else
-                            {
-                                isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk, local_dist);
-                            }
-
-                            if (!m_skipPredicate || !m_skipPredicate(e))
-                                m_localBuffer.emplace_back(e);
-                        }
+                        if (!m_skipPredicate || !m_skipPredicate(e))
+                            m_localBuffer.emplace_back(e);
 
                         if (isEnd || m_stopFlag.load())
                         {
@@ -308,10 +278,10 @@ namespace binpack
             return m_numRunningWorkers.load() <= 0;
         }
 
-        bool fetchNextChunkIfNeeded(std::size_t& m_offset, std::vector<unsigned char>& m_chunk,
-                                std::discrete_distribution<std::size_t>& local_dist)
+        bool fetchNextChunkIfNeeded(ChunkReader& m_chunkReader, std::vector<unsigned char>& m_chunk,
+                                    std::discrete_distribution<std::size_t>& local_dist)
         {
-            if (m_offset + sizeof(PackedTrainingDataEntry) + 2 > m_chunk.size())
+            if (!m_chunkReader.hasNext(m_chunk))
             {
                 auto& prng = rng::get_thread_local_rng();
 
@@ -445,7 +415,7 @@ namespace binpack
                 }
 
                 m_chunk = inputFile.readNextChunk();
-                m_offset = 0;
+                m_chunkReader = ChunkReader{};
 
                 if (m_world_size > 1)
                 {
