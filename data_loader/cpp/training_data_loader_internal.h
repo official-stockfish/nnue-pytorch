@@ -59,6 +59,8 @@ struct SparseBatch final {
 #endif
 
 private:
+    float* m_float_block = nullptr;
+    int*   m_int_block = nullptr;
     void fill_entry(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
     void fill_features(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
 };
