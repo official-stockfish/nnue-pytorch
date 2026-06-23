@@ -79,6 +79,11 @@ namespace thread_safe_types
                 m_ringNotFull.notify_all();
         }
 
+        bool is_empty() {
+            std::lock_guard lock(m_ringMutex);
+            return m_ringCount == 0;
+        }
+
         void reserve_internal(size_t size) {
             for (auto& slot : m_ringBuffer) {
                 slot.reserve(size);
@@ -145,6 +150,11 @@ namespace thread_safe_types
             m_ringNotEmpty.notify_all();
             if(signalProducers)
                 m_ringNotFull.notify_all();
+        }
+
+        bool is_empty() {
+            std::lock_guard lock(m_ringMutex);
+            return !m_isFull;
         }
 
 
