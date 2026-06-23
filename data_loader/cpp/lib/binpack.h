@@ -28,6 +28,8 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <cstdio>
 #include <cassert>
+#include <stdexcept>
+#include <cstdint>
 #include <ios>
 #include <string>
 #include <vector>
