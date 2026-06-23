@@ -427,7 +427,7 @@ def main():
         # On MPS, torch.compile is currently unstable
         if is_master_process():
             print("Disabling torch.compile for accelerator='mps'.")
-    else:
+    elif args.compile_backend:
         # Since we compile the entire lightning module we have quite a few graph breaks
         torch._dynamo.config.cache_size_limit = 64
         nnue = torch.compile(nnue, backend=args.compile_backend)

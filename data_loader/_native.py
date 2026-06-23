@@ -71,19 +71,19 @@ class SparseBatch(ctypes.Structure):
 
         white_indices = int_block_gpu[0 : size * max_active].view(size, max_active)
         black_indices = int_block_gpu[size * max_active : 2 * size * max_active].view(size, max_active)
-        piece_count = int_block_gpu[2 * size * max_active : 2 * size * max_active + size].view(size).long()
-        
-        # Calculate indices based on the piece count on the target device
-        psqt_indices = (piece_count - 1) // 4
-        layer_stack_indices = psqt_indices
+        piece_count_i32 = int_block_gpu[2 * size * max_active : 2 * size * max_active + size].view(size)
 
         # Compute 'them' on the target device
         if not us.is_cuda and use_pinned_memory:
             them = torch.empty_like(us, pin_memory=True)
             them.fill_(1.0)
             them.sub_(us)
+
+            piece_count = torch.empty(size, dtype=torch.int64, device="cpu", pin_memory=True)
+            piece_count.copy_(piece_count_i32)
         else:
             them = 1.0 - us
+            piece_count = piece_count_i32.to(dtype=torch.int64)
 
         return (
             us,
@@ -92,8 +92,7 @@ class SparseBatch(ctypes.Structure):
             black_indices,
             outcome,
             score,
-            psqt_indices,
-            layer_stack_indices,
+            piece_count,
         )
 
 

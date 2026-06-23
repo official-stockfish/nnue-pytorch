@@ -71,8 +71,7 @@ def gather_statistics_from_batches(batches, bucket_size):
             black_indices,
             outcome,
             score,
-            psqt_indices,
-            layer_stack_indices,
+            piece_count,
         ) = batch
         batch_size = len(us)
         bucket = torch.round(score / bucket_size) * bucket_size

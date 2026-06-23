@@ -287,7 +287,6 @@ class FixedNumBatchesDataset(Dataset):
         iterator,
         prefetch_queue,
         prefetch_device,
-        prefetch_to_device,
     ):
         try:
             prefetch_stream = None
@@ -339,7 +338,6 @@ class FixedNumBatchesDataset(Dataset):
                         self.iter,
                         self._prefetch_queue,
                         self._prefetch_device,
-                        self.prefetch_to_device,
                     ),
                     daemon=True,
                 )
