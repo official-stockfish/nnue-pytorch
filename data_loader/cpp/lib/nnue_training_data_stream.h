@@ -28,18 +28,6 @@ namespace training_data {
         return ends_with(filename, "." + extension);
     }
 
-    static std::string filename_with_extension(const std::string& filename, const std::string& ext)
-    {
-        if (ends_with(filename, ext))
-        {
-            return filename;
-        }
-        else
-        {
-            return filename + "." + ext;
-        }
-    }
-
     struct BasicSfenInputStream
     {
         virtual std::optional<TrainingDataEntry> next() = 0;
@@ -225,7 +213,7 @@ namespace training_data {
 
         void fill_threadsafe(std::vector<TrainingDataEntry>& v, std::size_t n) override
         {
-            auto k = m_stream->fill(v, n);
+            std::size_t k = static_cast<size_t>(m_stream->fill(v, n));
             if (n != k)
             {
                 m_eof.store(true, std::memory_order_release);
