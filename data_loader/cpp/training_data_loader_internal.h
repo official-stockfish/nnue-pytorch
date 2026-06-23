@@ -23,7 +23,6 @@ struct IFeatureExtractor {
     virtual int max_active_features() const = 0;
     virtual std::pair<int, int> fill_features_sparse(const struct binpack::TrainingDataEntry& e,
                                                      int* features,
-                                                     float* values,
                                                      chess::Color color) const = 0;
 };
 
@@ -49,8 +48,6 @@ struct SparseBatch final {
     int    max_active_features;
     int* white;
     int* black;
-    float* white_values;
-    float* black_values;
     int* psqt_indices;
     int* layer_stack_indices;
 
