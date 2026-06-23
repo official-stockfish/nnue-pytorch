@@ -8,11 +8,26 @@ import torch
 from .config import CDataloaderSkipConfig, CDataloaderDDPConfig
 
 
-def _pin_and_move(t: torch.Tensor, device) -> torch.Tensor:
+def _pin_and_move(t: torch.Tensor, device, use_pinned_memory=False, dtype=None) -> torch.Tensor:
+    if dtype is None:
+        dtype = t.dtype
+
     # Must copy off SparseBatch-backed memory before it is freed
-    if torch.cuda.is_available():
-        return t.pin_memory().to(device=device, non_blocking=True)
-    return t.to(device=device, copy=True)
+    if torch.cuda.is_available() and use_pinned_memory:
+        # Allocate a pinned CPU tensor and copy the data directly into it.
+        # This is much faster than t.clone().pin_memory() which does two copies/allocations.
+        out = torch.empty(t.shape, dtype=dtype, layout=t.layout, device="cpu", pin_memory=True)
+        out.copy_(t)
+        if device == "cpu" or (isinstance(device, torch.device) and device.type == "cpu"):
+            return out
+        return out.to(device=device, non_blocking=True)
+    
+    # If not using pinned memory, just copy to standard CPU storage
+    out = torch.empty(t.shape, dtype=dtype, layout=t.layout, device="cpu")
+    out.copy_(t)
+    if device == "cpu" or (isinstance(device, torch.device) and device.type == "cpu"):
+        return out
+    return out.to(device=device)
 
 
 class SparseBatch(ctypes.Structure):
@@ -27,52 +42,41 @@ class SparseBatch(ctypes.Structure):
         ("max_active_features", ctypes.c_int),
         ("white", ctypes.POINTER(ctypes.c_int)),
         ("black", ctypes.POINTER(ctypes.c_int)),
-        ("psqt_indices", ctypes.POINTER(ctypes.c_int)),
-        ("layer_stack_indices", ctypes.POINTER(ctypes.c_int)),
+        ("piece_count", ctypes.POINTER(ctypes.c_int)),
     ]
 
-    def get_tensors(self, device):
-        white_indices = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.white, shape=(self.size, self.max_active_features)
-                )
-            ),
-            device,
+    def get_tensors(self, device, use_pinned_memory=False):
+        size = self.size
+        max_active = self.max_active_features
+
+        # We only transfer:
+        # - float block: is_white, outcome, score (3 * size floats)
+        # - int block: white, black, piece_count (2 * size * max_active + size ints)
+        total_floats = size * 3
+        total_ints = size * max_active * 2 + size
+
+        float_block_cpu = torch.from_numpy(
+            np.ctypeslib.as_array(self.is_white, shape=(total_floats,))
         )
-        black_indices = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(
-                    self.black, shape=(self.size, self.max_active_features)
-                )
-            ),
-            device,
+        int_block_cpu = torch.from_numpy(
+            np.ctypeslib.as_array(self.white, shape=(total_ints,))
         )
-        us = _pin_and_move(
-            torch.from_numpy(np.ctypeslib.as_array(self.is_white, shape=(self.size, 1))),
-            device,
-        )
+
+        float_block_gpu = _pin_and_move(float_block_cpu, device, use_pinned_memory)
+        int_block_gpu = _pin_and_move(int_block_cpu, device, use_pinned_memory)
+
+        us = float_block_gpu[0 : size].view(size, 1)
+        outcome = float_block_gpu[size : 2 * size].view(size, 1)
+        score = float_block_gpu[2 * size : 3 * size].view(size, 1)
+
+        white_indices = int_block_gpu[0 : size * max_active].view(size, max_active)
+        black_indices = int_block_gpu[size * max_active : 2 * size * max_active].view(size, max_active)
+        piece_count_i32 = int_block_gpu[2 * size * max_active : 2 * size * max_active + size].view(size)
+
         them = 1.0 - us
-        outcome = _pin_and_move(
-            torch.from_numpy(np.ctypeslib.as_array(self.outcome, shape=(self.size, 1))),
-            device,
-        )
-        score = _pin_and_move(
-            torch.from_numpy(np.ctypeslib.as_array(self.score, shape=(self.size, 1))),
-            device,
-        )
-        psqt_indices = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(self.psqt_indices, shape=(self.size,))
-            ).long(),
-            device,
-        )
-        layer_stack_indices = _pin_and_move(
-            torch.from_numpy(
-                np.ctypeslib.as_array(self.layer_stack_indices, shape=(self.size,))
-            ).long(),
-            device,
-        )
+        piece_count = piece_count_i32.to(dtype=torch.int64)
+        psqt_indices = (piece_count - 1) // 4
+        layer_stack_indices = psqt_indices
 
         return (
             us,
