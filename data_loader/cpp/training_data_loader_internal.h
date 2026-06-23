@@ -86,7 +86,7 @@ protected:
     std::unique_ptr<training_data::BasicSfenInputStream> m_stream;
 };
 
-struct FeaturedBatchStream: Stream<SparseBatch> {
+struct FeaturedBatchStream final : Stream<SparseBatch> {
     using BaseType = Stream<SparseBatch>;
     static constexpr double worker_thread_ratio = 0.14;
 
@@ -138,7 +138,7 @@ private:
     Fen* m_fens;
 };
 
-struct FenBatchStream: Stream<FenBatch> {
+struct FenBatchStream final : Stream<FenBatch> {
     using BaseType = Stream<FenBatch>;
     static constexpr double worker_thread_ratio = 0.5;
 
