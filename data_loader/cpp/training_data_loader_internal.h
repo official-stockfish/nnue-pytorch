@@ -13,7 +13,7 @@
 #include <string_view>
 #include <utility>
 
-#include "lib/nnue_training_data_formats.h"
+#include "lib/parallel_dataloader.h"
 #include "lib/nnue_training_data_stream.h"
 #include "training_data_loader_structs.h"
 
@@ -165,3 +165,4 @@ private:
     static int calculate_num_reader_threads(int concurrency);
     static int calculate_num_worker_threads(int concurrency);
 };
+
