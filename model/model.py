@@ -114,6 +114,12 @@ class NNUEModel(nn.Module):
 
         return l0_, wpsqt, bpsqt
 
+    def calculate_buckets(self, piece_count: torch.Tensor):
+        psqt_indices = (piece_count - 1) // 4
+        layer_stack_indices = psqt_indices
+
+        return psqt_indices, layer_stack_indices
+
 
     def forward(
         self,
@@ -121,11 +127,12 @@ class NNUEModel(nn.Module):
         them: torch.Tensor,
         white_indices: torch.Tensor,
         black_indices: torch.Tensor,
-        psqt_indices: torch.Tensor,
-        layer_stack_indices: torch.Tensor,
+        piece_count: torch.Tensor,
         fake_quantize_acts: bool=True,
         fake_quantize_weights: bool=True,
     ):
+        psqt_indices, layer_stack_indices = self.calculate_buckets(piece_count)
+
         l0_, wpsqt, bpsqt = self.forward_ft(
             us,
             them,

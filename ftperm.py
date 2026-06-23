@@ -32,8 +32,10 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm^ -
 """
 
 import copy
-from dataclasses import dataclass, field, replace
 import time
+
+from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
 from typing import Callable, Generator, TypeAlias, Annotated, Union, Literal, TypeVar, Optional
 
 import tyro
@@ -536,7 +538,7 @@ def make_sparse_batch_provider(
     )
 
 
-def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str) -> torch.Tensor:
+def eval_ft(model: NNUEModel, batch: Iterable[torch.Tensor], device_str: str) -> torch.Tensor:
     with torch.no_grad():
         batch_tuple = tuple(
             batch_part.to(device=device_str) for batch_part in batch
@@ -548,9 +550,9 @@ def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr, device_str: str
             black_indices,
             outcome,
             score,
-            psqt_indices,
-            layer_stack_indices,
+            piece_count,
         ) = batch_tuple
+        psqt_indices, _  = model.calculate_buckets(piece_count)
         l0_, wpsqt, bpsqt = model.forward_ft(
             us,
             them,

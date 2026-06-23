@@ -232,18 +232,15 @@ class NNUE(L.LightningModule):
             black_indices,
             outcome,
             score,
-            psqt_indices,
-            layer_stack_indices,
+            piece_count,
         ) = batch
-
         scorenet = (
             self.model(
                 us,
                 them,
                 white_indices,
                 black_indices,
-                psqt_indices,
-                layer_stack_indices,
+                piece_count,
                 self.config.use_fake_act_quantization,
                 self.config.use_fake_weight_quantization
             )
