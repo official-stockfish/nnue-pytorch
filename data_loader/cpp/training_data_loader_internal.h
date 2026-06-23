@@ -48,14 +48,15 @@ struct SparseBatch final {
     int    max_active_features;
     int* white;
     int* black;
-    int* psqt_indices;
-    int* layer_stack_indices;
+    int* piece_count;
 
 #ifdef NNUE_LOADER_STATISTICS
     std::vector<struct binpack::TrainingDataEntry> entries_copy;
 #endif
 
 private:
+    float* m_float_block = nullptr;
+    int*   m_int_block = nullptr;
     void fill_entry(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
     void fill_features(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
 };
