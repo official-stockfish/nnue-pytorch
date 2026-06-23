@@ -68,13 +68,10 @@ def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, devi
         us,
         them,
         white_indices,
-        white_values,
         black_indices,
-        black_values,
         outcome,
         score,
-        psqt_indices,
-        layer_stack_indices,
+        piece_count,
     ) = batch.contents.get_tensors(device)
 
     evals = [
@@ -83,11 +80,8 @@ def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, devi
             us,
             them,
             white_indices,
-            white_values,
             black_indices,
-            black_values,
-            psqt_indices,
-            layer_stack_indices,
+            piece_count,
             fake_quantize_acts=fake_quantize,
             fake_quantize_weights=fake_quantize,
         )

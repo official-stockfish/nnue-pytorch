@@ -185,7 +185,7 @@ struct DistributionReport {
 
         for (int i = 0; i < b_size; ++i) {
             int pc = batch->entries_copy[i].pos.piecesBB().count();
-            int ply = batch->entries_copy[i].ply;
+            size_t ply = static_cast<size_t>(batch->entries_copy[i].ply);
 
             if (pc >= 0 && pc <= 32) {
                 pc_counts[pc]++;
@@ -419,7 +419,6 @@ int main(int argc, char** argv) {
 // --- Configuration Resolution ---
     CliConfig active_config = default_cli_config;
     fs::path target_config_path;
-    bool using_custom_config = false;
 
     if (!cli_settings_path.empty()) {
         target_config_path = fs::absolute(cli_settings_path);
@@ -439,7 +438,6 @@ int main(int argc, char** argv) {
         }
         try {
             active_config = build_config_from_map(parsed_ini);
-            using_custom_config = true;
             std::cout << "Configuration loaded successfully from: " << target_config_path << "\n";
         } catch (const std::exception& e) {
             std::cerr << "FATAL: Config file at " << target_config_path
@@ -459,8 +457,10 @@ int main(int argc, char** argv) {
     if (iteration_count < 1) iteration_count = 1;
 
 #ifdef NNUE_LOADER_STATISTICS
+    (void)do_cache_files;
     run_report(concurrency, iteration_count, max_plies, file_count, files, active_config);
 #else
+    (void)max_plies;
     run_bench(concurrency, iteration_count, do_cache_files, file_count, files, active_config);
 #endif
 

@@ -1,4 +1,5 @@
 import ctypes
+import os  # noqa: F401
 
 from ._native import c_lib, SparseBatchPtr, FenBatchPtr
 from .config import (
