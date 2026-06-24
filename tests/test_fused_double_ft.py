@@ -11,6 +11,9 @@ from model.modules.feature_transformer.functions import _HAS_CUPY_KERNELS
 
 @pytest.mark.skipif(not torch.cuda.is_available() or not _HAS_CUPY_KERNELS, reason="CUDA and CuPy required for custom kernel")
 def test_fused_double_ft():
+    torch.manual_seed(0)
+    torch.cuda.manual_seed_all(0)
+
     batch_size = 4
     max_active = 32
     num_inputs = 100

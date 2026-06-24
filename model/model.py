@@ -90,7 +90,7 @@ class NNUEModel(nn.Module):
         fake_quantize_acts: bool,
         fake_quantize_weights: bool,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if USE_FUSED_DOUBLE_FT and _HAS_CUPY_KERNELS and us.is_cuda:
+        if USE_FUSED_DOUBLE_FT and _HAS_CUPY_KERNELS and us.is_cuda and them.is_cuda and white_indices.is_cuda and black_indices.is_cuda and psqt_indices.is_cuda:
             merged, bias = self.input.merged_weight_and_bias(fake_quantize_weights)
             ft_max_act = self.quantization.max_ft_activation
             l0_, wpsqt, bpsqt = FusedDoubleFtFunction.apply(

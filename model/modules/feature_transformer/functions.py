@@ -160,12 +160,35 @@ class _CudaFusedDoubleFtFunction(autograd.Function):
     @staticmethod
     def forward(ctx, us, them, white_indices, black_indices, psqt_indices, weight, bias, max_ft_activation, l1_size):
         ctx.save_for_backward(us, them, white_indices, black_indices, psqt_indices, weight, bias)
-        ctx.max_ft_activation = max_ft_activation
-        ctx.l1_size = l1_size
+        ctx.max_ft_activation = float(max_ft_activation)
+        ctx.l1_size = int(l1_size)
+
+        assert l1_size % 2 == 0
+
+        assert us.is_cuda and them.is_cuda
+        assert white_indices.is_cuda and black_indices.is_cuda and psqt_indices.is_cuda
+        assert weight.is_cuda and bias.is_cuda
+        assert us.device == them.device == white_indices.device == black_indices.device == psqt_indices.device == weight.device == bias.device
+
+        assert us.dtype == torch.float32 and them.dtype == torch.float32
+        assert white_indices.dtype == torch.int32 and black_indices.dtype == torch.int32
+        assert psqt_indices.dtype == torch.int64
+        assert weight.dtype == torch.float32 and bias.dtype == torch.float32
+
+        assert white_indices.ndim == 2 and black_indices.ndim == 2
+        assert psqt_indices.ndim == 1
+        assert len(weight.shape) == 2
+        assert len(bias.shape) == 1
+        assert weight.shape[1] == bias.shape[0]
+        assert white_indices.shape == black_indices.shape
+        assert white_indices.shape[0] == psqt_indices.shape[0]
+
+        assert us.is_contiguous() and them.is_contiguous()
+        assert white_indices.is_contiguous() and black_indices.is_contiguous() and psqt_indices.is_contiguous()
+        assert weight.is_contiguous() and bias.is_contiguous()
 
         batch_size = white_indices.shape[0]
         max_active_features = white_indices.shape[1]
-        assert l1_size % 2 == 0
 
         l0_ = torch.empty(batch_size, l1_size, dtype=torch.float32, device=us.device, requires_grad=True)
         wpsqt = torch.empty(batch_size, 1, dtype=torch.float32, device=us.device, requires_grad=True)
@@ -237,8 +260,41 @@ class _CudaFusedDoubleFtFunction(autograd.Function):
 class FusedDoubleFtFunction:
     @staticmethod
     def apply(us, them, white_indices, black_indices, psqt_indices, weight, bias, max_ft_activation, l1_size):
-        if _HAS_CUPY_KERNELS and white_indices.is_cuda:
-            return _CudaFusedDoubleFtFunction.apply(
-                us, them, white_indices, black_indices, psqt_indices, weight, bias, max_ft_activation, l1_size
+        if not _HAS_CUPY_KERNELS:
+            raise RuntimeError("CuPy kernels not available for FusedDoubleFtFunction")
+
+        if not (
+            us.is_cuda
+            and them.is_cuda
+            and white_indices.is_cuda
+            and black_indices.is_cuda
+            and psqt_indices.is_cuda
+            and weight.is_cuda
+            and bias.is_cuda
+        ):
+            raise RuntimeError("CUDA tensors required for FusedDoubleFtFunction")
+
+        if not (
+            us.device
+            == them.device
+            == white_indices.device
+            == black_indices.device
+            == psqt_indices.device
+            == weight.device
+            == bias.device
+        ):
+            raise RuntimeError(
+                "All tensors must be on the same CUDA device for FusedDoubleFtFunction"
             )
-        raise RuntimeError("CUDA required for FusedDoubleFtFunction")
+
+        return _CudaFusedDoubleFtFunction.apply(
+            us,
+            them,
+            white_indices,
+            black_indices,
+            psqt_indices,
+            weight,
+            bias,
+            max_ft_activation,
+            l1_size,
+        )
