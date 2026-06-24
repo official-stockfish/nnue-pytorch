@@ -1,12 +1,17 @@
 import torch
 import torch.nn.functional as F
 from torch import autograd
+import numpy as np
 
 _HAS_CUPY_KERNELS = False
 try:
-    from .kernel import (
+    from .sparse_linear_kernel import (
         make_sparse_input_linear_forward_kernel,
         make_sparse_input_linear_backward_kernel,
+    )
+    from .fused_ft_kernel import (
+        make_fused_double_ft_forward_kernel,
+        make_fused_double_ft_backward_kernel,
     )
     _HAS_CUPY_KERNELS = True
 except (ImportError, OSError, RuntimeError):
@@ -149,3 +154,91 @@ class SparseLinearFunction:
                 feature_indices, weight, bias
             )
         return _torch_sparse_linear(feature_indices, weight, bias)
+
+
+class _CudaFusedDoubleFtFunction(autograd.Function):
+    @staticmethod
+    def forward(ctx, us, them, white_indices, black_indices, psqt_indices, weight, bias, max_ft_activation, l1_size):
+        ctx.save_for_backward(us, them, white_indices, black_indices, psqt_indices, weight, bias)
+        ctx.max_ft_activation = max_ft_activation
+        ctx.l1_size = l1_size
+
+        batch_size = white_indices.shape[0]
+        max_active_features = white_indices.shape[1]
+        assert l1_size % 2 == 0
+
+        l0_ = torch.empty(batch_size, l1_size, dtype=torch.float32, device=us.device, requires_grad=True)
+        wpsqt = torch.empty(batch_size, 1, dtype=torch.float32, device=us.device, requires_grad=True)
+        bpsqt = torch.empty(batch_size, 1, dtype=torch.float32, device=us.device, requires_grad=True)
+
+        output_size = bias.shape[0]
+        kernel = make_fused_double_ft_forward_kernel(max_active_features, l1_size)
+        kernel(
+            grid=(batch_size,),
+            args=(
+                us.data_ptr(),
+                them.data_ptr(),
+                white_indices.data_ptr(),
+                black_indices.data_ptr(),
+                psqt_indices.data_ptr(),
+                weight.data_ptr(),
+                bias.data_ptr(),
+                np.float32(max_ft_activation),
+                l0_.data_ptr(),
+                wpsqt.data_ptr(),
+                bpsqt.data_ptr(),
+                np.int32(output_size),
+            )
+        )
+
+        return l0_, wpsqt, bpsqt
+
+    @staticmethod
+    def backward(ctx, grad_l0, grad_wpsqt, grad_bpsqt):
+        us, them, white_indices, black_indices, psqt_indices, weight, bias = ctx.saved_tensors
+        max_ft_activation = ctx.max_ft_activation
+        l1_size = ctx.l1_size
+
+        grad_l0 = grad_l0.contiguous()
+        grad_wpsqt = grad_wpsqt.contiguous()
+        grad_bpsqt = grad_bpsqt.contiguous()
+
+        batch_size = white_indices.shape[0]
+        max_active_features = white_indices.shape[1]
+        output_size = bias.shape[0]
+
+        grad_weight = torch.zeros(weight.shape[0], output_size, dtype=torch.float32, device=us.device)
+        grad_bias = torch.zeros(output_size, dtype=torch.float32, device=us.device)
+
+        kernel = make_fused_double_ft_backward_kernel(max_active_features, l1_size)
+        kernel(
+            grid=(batch_size,),
+            args=(
+                us.data_ptr(),
+                them.data_ptr(),
+                white_indices.data_ptr(),
+                black_indices.data_ptr(),
+                psqt_indices.data_ptr(),
+                weight.data_ptr(),
+                bias.data_ptr(),
+                np.float32(max_ft_activation),
+                grad_l0.data_ptr(),
+                grad_wpsqt.data_ptr(),
+                grad_bpsqt.data_ptr(),
+                grad_weight.data_ptr(),
+                grad_bias.data_ptr(),
+                np.int32(output_size),
+            )
+        )
+
+        return None, None, None, None, None, grad_weight, grad_bias, None, None
+
+
+class FusedDoubleFtFunction:
+    @staticmethod
+    def apply(us, them, white_indices, black_indices, psqt_indices, weight, bias, max_ft_activation, l1_size):
+        if _HAS_CUPY_KERNELS and white_indices.is_cuda:
+            return _CudaFusedDoubleFtFunction.apply(
+                us, them, white_indices, black_indices, psqt_indices, weight, bias, max_ft_activation, l1_size
+            )
+        raise RuntimeError("CUDA required for FusedDoubleFtFunction")
