@@ -443,10 +443,28 @@ SparseBatch::~SparseBatch() {
     delete[] m_int_block;
 }
 
+static float remap_tablebase_score(int score) {
+    static constexpr int   MATE_SCORE          = 32000;
+    static constexpr int   MAX_MATE_PLY        = 245;
+    static constexpr int   TB_MATE_THRESHOLD   = MATE_SCORE - MAX_MATE_PLY;
+    static constexpr float REMAP_BASE          = 15000.0f;
+    static constexpr float REMAP_SCALE         = 15000.0f;
+    static constexpr float REMAP_DECAY         = 0.9f;
+
+    const int abs_score = std::abs(score);
+    if (abs_score >= TB_MATE_THRESHOLD)
+    {
+        const int plies = std::max(0, MATE_SCORE - abs_score);
+        const float remapped_abs = REMAP_BASE + std::pow(REMAP_DECAY, static_cast<float>(plies)) * REMAP_SCALE;
+        return (score < 0) ? -remapped_abs : remapped_abs;
+    }
+    return static_cast<float>(score);
+}
+
 void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
     is_white[i]            = static_cast<float>(e.pos.sideToMove() == Color::White);
     outcome[i]             = (e.result + 1.0f) / 2.0f;
-    score[i]               = e.score;
+    score[i]               = remap_tablebase_score(e.score);
     piece_count[i]         = e.pos.piecesBB().count();
     fill_features(fs, i, e);
 }
