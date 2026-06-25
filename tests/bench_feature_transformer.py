@@ -29,26 +29,30 @@ def run_bench():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Helper to generate fake indices
+    # Helper to generate fake indices safely using native integers
     def get_fake_indices():
-        return torch.cat(
-            [
-                torch.sort(
-                    (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4))
-                    * INPUT_SIZE,
-                    dim=1,
-                )[0].to(dtype=torch.int32),
-                torch.full(
-                    (BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32
-                ),
-            ],
-            dim=1,
-        ).to(device)
+        random_indices = torch.randint(
+            0, INPUT_SIZE, 
+            (BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4), 
+            dtype=torch.int32, 
+            device=device
+        )
+        sorted_indices, _ = torch.sort(random_indices, dim=1)
+        padding = torch.full(
+            (BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), 
+            -1, 
+            dtype=torch.int32, 
+            device=device
+        )
+        return torch.cat([sorted_indices, padding], dim=1)
 
     indices0 = get_fake_indices()
     indices1 = get_fake_indices()
-    us = torch.randn(BATCH_SIZE, 1, dtype=torch.float32, device=device)
-    them = torch.randn(BATCH_SIZE, 1, dtype=torch.float32, device=device)
+    
+    # 'us' initialized as 0.0 or 1.0, 'them' derived as 1.0 - us
+    us = torch.randint(0, 2, (BATCH_SIZE, 1), dtype=torch.float32, device=device)
+    them = 1.0 - us
+    
     piece_count = torch.randint(1, 32, (BATCH_SIZE,), dtype=torch.int64, device=device)
     psqt_indices = (piece_count - 1) // 4
 
@@ -167,3 +171,4 @@ def run_bench():
 
 if __name__ == "__main__":
     run_bench()
+
