@@ -8,7 +8,7 @@ from .input_feature import InputFeature
 
 from ...quantize import QuantizationManager
 
-class ComposedFeatureTransformer(nn.Module):
+class ComposedFeatures(nn.Module):
     """Thin coordinator that wraps one or more InputFeature modules.
 
     Each feature owns its own weight parameters. This class owns the shared
@@ -71,26 +71,6 @@ class ComposedFeatureTransformer(nn.Module):
         bias = torch.cat([b, pb], dim=0)
 
         return merged, bias
-
-    def forward(
-        self,
-        feature_indices_0,
-        feature_indices_1,
-        fake_quantize_weights: bool=False,
-    ):
-        merged, bias = self.merged_weight_and_bias(fake_quantize_weights)
-        return (
-            SparseLinearFunction.apply(
-                feature_indices_0,
-                merged,
-                bias,
-            ),
-            SparseLinearFunction.apply(
-                feature_indices_1,
-                merged,
-                bias,
-            ),
-        )
 
     @torch.no_grad()
     def coalesce(self) -> None:

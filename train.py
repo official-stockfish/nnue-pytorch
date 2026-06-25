@@ -403,7 +403,7 @@ def main():
         print("Loss parameters:")
         print(args.nnue_lightning_config.loss_params)
         print("Feature set: {}".format(feature_name))
-        print("Num inputs: {}".format(nnue.model.input.NUM_INPUTS))
+        print("Num inputs: {}".format(nnue.model.input.features.NUM_INPUTS))
 
         print("Training with: {}".format(train_datasets))
         print("Validating with: {}".format(val_datasets))

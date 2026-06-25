@@ -579,12 +579,12 @@ def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
     permutation.extend([x + l1_size // 2 for x in permutation])
 
     # Add identity permutation for PSQT weights
-    ft_permutation = permutation + list(range(l1_size, model.input.num_outputs))
+    ft_permutation = permutation + list(range(l1_size, model.input.features.num_outputs))
 
     # Apply the permutation in place.
-    for f in model.input.features:
+    for f in model.input.features.features:
         f.weight.copy_(f.weight[:, ft_permutation])
-    model.input.bias.copy_(model.input.bias[ft_permutation])
+    model.input.features.bias.copy_(model.input.features.bias[ft_permutation])
     model.layer_stacks.l1.linear.weight.copy_(model.layer_stacks.l1.linear.weight[
         :, permutation
     ])

@@ -7,7 +7,6 @@ import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model.modules import DoubleFeatureTransformer
 from model.modules.feature_transformer.functions import (
     SparseLinearFunction,
 )
@@ -131,48 +130,6 @@ def test_mps():
     _run_padding_test(torch.device("mps"))
 
 
-def bench():
-    INPUT_SIZE = 40960
-    BATCH_SIZE = 8192
-    ITERS = 64
-    STRIDE = 264
-    MAX_ACTIVE_FEATURES = 64
-
-    def get_fake_indices():
-        return torch.cat(
-            [
-                torch.sort(
-                    (torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES * 3 // 4)) * INPUT_SIZE,
-                    dim=1,
-                )[0].to(dtype=torch.int32),
-                torch.full(
-                    (BATCH_SIZE, MAX_ACTIVE_FEATURES // 4), -1, dtype=torch.int32
-                ),
-            ],
-            dim=1,
-        ).cuda()
-
-    layer = DoubleFeatureTransformer(INPUT_SIZE, STRIDE).cuda()
-    indices0 = get_fake_indices()
-    indices1 = get_fake_indices()
-
-    start = time.time()
-
-    for _ in range(ITERS):
-        output0, output1 = layer(indices0, indices1)
-        output0 = torch.clamp(output0, 0.0, 1.0)
-        output1 = torch.clamp(output1, 0.0, 1.0)
-
-        g = ((output0 - output1) ** 2).mean()
-        g.backward()
-
-        torch.cuda.synchronize()
-
-    end = time.time()
-
-    print("{} pos/s".format((ITERS * BATCH_SIZE) / (end - start)))
-
-
 if __name__ == "__main__":
     _run_test(torch.device("cpu"))
     _run_padding_test(torch.device("cpu"))
@@ -182,5 +139,4 @@ if __name__ == "__main__":
     if torch.backends.mps.is_available():
         _run_test(torch.device("mps"))
         _run_padding_test(torch.device("mps"))
-    if torch.cuda.is_available():
-        bench()
+
