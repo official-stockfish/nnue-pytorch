@@ -10,7 +10,6 @@ from model.config import ModelConfig
 from model.modules import (
     ComposedFeatures,
     DoubleFeatureTransformer,
-    get_use_fused_double_ft,
     set_use_fused_double_ft,
 )
 from model.modules.feature_transformer.functions import SparseLinearFunction

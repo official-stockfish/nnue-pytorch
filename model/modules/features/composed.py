@@ -3,7 +3,6 @@ from torch import nn
 
 from typing import Callable
 
-from ..feature_transformer import SparseLinearFunction
 from .input_feature import InputFeature
 
 from ...quantize import QuantizationManager
