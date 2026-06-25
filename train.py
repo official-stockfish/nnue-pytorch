@@ -9,7 +9,7 @@ import torch
 from torch import set_num_threads as t_set_num_threads
 from torch.utils.data import DataLoader
 from lightning.pytorch import loggers as pl_loggers
-from lightning.pytorch.callbacks import Callback, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback
 
 import data_loader
 import model as M
@@ -41,20 +41,6 @@ class TimeLimitAfterCheckpoint(Callback):
             print(
                 f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
             )
-
-
-class ConsolidatedCheckpoint(ModelCheckpoint):
-    def __init__(self, *args, **kwargs):
-        # We force this to True to decouple from the validation schedule
-        kwargs.setdefault("save_on_train_epoch_end", True)
-        kwargs.setdefault("monitor", None)
-        super().__init__(*args, **kwargs)
-
-    def on_train_end(self, trainer, pl_module):
-        if self.dirpath:
-            # Manually trigger a final save to last.ckpt
-            path = os.path.join(self.dirpath, "last.ckpt")
-            trainer.save_checkpoint(path)
 
 
 class SimpleLineLogger(Callback):
@@ -417,7 +403,7 @@ def main():
             print("Using default torch num_threads setting.")
         print("", flush=True)
 
-    checkpoint_callback = ConsolidatedCheckpoint(
+    checkpoint_callback = M.SimplePeriodicCheckpoint(
         save_last=args.save_last_network,
         every_n_epochs=args.network_save_period,
         save_top_k=args.save_top_k,
@@ -472,7 +458,7 @@ def main():
         callbacks=trainer_callbacks,
         log_every_n_steps=refresh_rate,
         enable_progress_bar=False,
-        enable_checkpointing=True,
+        enable_checkpointing=False, # we handle checkpointing in the callback to have more control
         benchmark=True,
         num_sanity_val_steps=0 if val is None else 2,
         check_val_every_n_epoch=args.check_val_every_n_epoch,
