@@ -173,7 +173,7 @@ class NNUEWriter:
             raise Exception("Invalid compression method.")
 
     def write_feature_transformer(self, model: NNUEModel, ft_compression: str) -> None:
-        layer = model.input
+        layer = model.input.features
 
         bias = layer.bias.data[: model.L1]
 
@@ -262,7 +262,7 @@ class NNUEReader:
         )  # Feature transformer hash
         self.model.zero_virtual_weights()
 
-        self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
+        self.read_feature_transformer(self.model.input.features, self.model.num_psqt_buckets)
 
         layers = [
             self.model.layer_stacks.l1,

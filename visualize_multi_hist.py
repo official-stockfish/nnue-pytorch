@@ -92,7 +92,7 @@ def main():
         for m in args.models
     ]
 
-    coalesced_ins = [model.input.get_export_weights() for model in models]
+    coalesced_ins = [model.input.features.get_export_weights() for model in models]
     input_weights = [
         coalesced_in[:, : config.L1].flatten().numpy() for coalesced_in in coalesced_ins
     ]

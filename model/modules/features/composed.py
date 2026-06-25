@@ -3,12 +3,11 @@ from torch import nn
 
 from typing import Callable
 
-from ..feature_transformer import SparseLinearFunction
 from .input_feature import InputFeature
 
 from ...quantize import QuantizationManager
 
-class ComposedFeatureTransformer(nn.Module):
+class ComposedFeatures(nn.Module):
     """Thin coordinator that wraps one or more InputFeature modules.
 
     Each feature owns its own weight parameters. This class owns the shared
@@ -55,10 +54,8 @@ class ComposedFeatureTransformer(nn.Module):
         with torch.no_grad():
             self.bias.uniform_(-sigma, sigma)
 
-    def forward(
+    def merged_weight_and_bias(
         self,
-        feature_indices_0,
-        feature_indices_1,
         fake_quantize_weights: bool=False,
     ):
         merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
@@ -71,18 +68,8 @@ class ComposedFeatureTransformer(nn.Module):
         # Technically unnecessary to zero bias, but it makes it clearer that the PSQT part of the bias is not used.
         pb = torch.zeros_like(self.bias[self.l1_size:], dtype=b.dtype)
         bias = torch.cat([b, pb], dim=0)
-        return (
-            SparseLinearFunction.apply(
-                feature_indices_0,
-                merged,
-                bias,
-            ),
-            SparseLinearFunction.apply(
-                feature_indices_1,
-                merged,
-                bias,
-            ),
-        )
+
+        return merged, bias
 
     @torch.no_grad()
     def coalesce(self) -> None:

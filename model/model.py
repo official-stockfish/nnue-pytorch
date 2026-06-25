@@ -2,9 +2,8 @@ import torch
 from torch import nn
 
 from .config import ModelConfig
-from .modules import LayerStacks, ComposedFeatureTransformer, get_feature_cls
+from .modules import LayerStacks, ComposedFeatures, DoubleFeatureTransformer, get_feature_cls
 from .quantize import QuantizationManager
-
 
 class NNUEModel(nn.Module):
     def __init__(
@@ -27,15 +26,16 @@ class NNUEModel(nn.Module):
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
-        self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.num_psqt_buckets, self.quantization)
-        self.feature_name = self.input.FEATURE_NAME
-        self.input_feature_name = self.input.INPUT_FEATURE_NAME
-        self.feature_hash = self.input.HASH
+        features = ComposedFeatures(feature_cls, self.L1, self.num_psqt_buckets, self.quantization)
+        self.input = DoubleFeatureTransformer(features)
+        self.feature_name = self.input.features.FEATURE_NAME
+        self.input_feature_name = self.input.features.INPUT_FEATURE_NAME
+        self.feature_hash = self.input.features.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
-        self.input.init_weights()
+        self.input.features.init_weights()
 
 
     @torch.no_grad()
@@ -45,7 +45,7 @@ class NNUEModel(nn.Module):
         by the quantization scheme.
         """
         if include_input:
-            self.input.clip_weights(self.quantization)
+            self.input.features.clip_weights(self.quantization)
 
         for group in self.weight_clipping:
             for p in group["params"]:
@@ -73,7 +73,7 @@ class NNUEModel(nn.Module):
 
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
-        self.input.zero_virtual_weights()
+        self.input.features.zero_virtual_weights()
         self.layer_stacks.zero_virtual_weights()
 
 
@@ -87,32 +87,15 @@ class NNUEModel(nn.Module):
         fake_quantize_acts: bool,
         fake_quantize_weights: bool,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-       # NOTE possibly refactor this into own class. Fused kernel would be beneficial for speed.
-        wp, bp = self.input(white_indices, black_indices, fake_quantize_weights)
-        w, wpsqt = torch.split(wp, self.L1, dim=1)
-        b, bpsqt = torch.split(bp, self.L1, dim=1)
-
-        psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
-        wpsqt = wpsqt.gather(1, psqt_indices_unsq)
-        bpsqt = bpsqt.gather(1, psqt_indices_unsq)
-
-        l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-        # do not fake quantize sum of (quantized) weights
-        l0_ = self.quantization.clip_ft_act(l0_)
-
-        l0_s = torch.split(l0_, self.L1 // 2, dim=1)
-        l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
-        l0_ = torch.cat(l0_s1, dim=1)
-
-        if fake_quantize_acts:
-            l0_ = self.quantization.fake_quantize_ft_act(l0_)
-        # We multiply by a correction factor,
-        # so we can use only bitshift and multiplication at inference.
-        # When using fake quantization any correction factor
-        # not equal 1.0 will lead to diverging discrete grids
-        l0_ = l0_ * self.quantization.l0_correction_factor
-
-        return l0_, wpsqt, bpsqt
+        return self.input(
+            us,
+            them,
+            white_indices,
+            black_indices,
+            psqt_indices,
+            fake_quantize_acts,
+            fake_quantize_weights,
+        )
 
     def calculate_buckets(self, piece_count: torch.Tensor):
         psqt_indices = (piece_count - 1) // 4
