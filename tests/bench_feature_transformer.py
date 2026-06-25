@@ -49,7 +49,7 @@ def run_bench():
     indices1 = get_fake_indices()
     us = torch.randn(BATCH_SIZE, 1, dtype=torch.float32, device=device)
     them = torch.randn(BATCH_SIZE, 1, dtype=torch.float32, device=device)
-    piece_count = torch.randint(1, 32, (BATCH_SIZE,), dtype=torch.int32, device=device)
+    piece_count = torch.randint(1, 32, (BATCH_SIZE,), dtype=torch.int64, device=device)
     psqt_indices = (piece_count - 1) // 4
 
     # 1) Benchmark: Direct SparseLinearFunction
