@@ -447,9 +447,9 @@ static float remap_tablebase_score(int score) {
     static constexpr int   MATE_SCORE          = 32000;
     static constexpr int   MAX_MATE_PLY        = 245;
     static constexpr int   TB_MATE_THRESHOLD   = MATE_SCORE - MAX_MATE_PLY;
-    static constexpr float REMAP_BASE          = 15000.0f;
-    static constexpr float REMAP_SCALE         = 15000.0f;
-    static constexpr float REMAP_DECAY         = 0.9f;
+    static constexpr float REMAP_BASE          = 5000.0f;
+    static constexpr float REMAP_SCALE         = 10000.0f;
+    static constexpr float REMAP_DECAY         = 0.8f;
 
     const int abs_score = std::abs(score);
     if (abs_score >= TB_MATE_THRESHOLD)
