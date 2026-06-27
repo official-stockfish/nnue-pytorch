@@ -1776,7 +1776,7 @@ For AVX2 such blocks must be at least 8 int32s (type of the output values) wide,
 
 There is some additional workload in the forward pass to support it, and it doesn't vectorize as nicely as in previous cases, but it might still be a win for some architectures.
 
-However, with this approach, the training needs to be aware of this and try to create those blocks of 0 weights without harming the network too much. This can be achieved with weight pruning, which will be described later. The inference code will be very similar to the linear layer with sparse inputs case.
+However, with this approach, the training needs to be aware of this and try to create those blocks of 0 weights without harming the network too much. This can be achieved with weight pruning. The inference code will be very similar to the linear layer with sparse inputs case.
 
 
 ```cpp
