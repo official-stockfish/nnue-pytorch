@@ -372,20 +372,24 @@ def main():
     else:
         assert os.path.exists(args.resume_from_model)
         try:
-            nnue = torch.load(
-                args.resume_from_model, weights_only=False, map_location="cpu"
+            # Load only the weights from the checkpoint and (re)initialize the
+            # run-specific arguments by passing them explicitly. This avoids the
+            # brittle post-init overwrite of attributes; the architecture-defining
+            # hyperparameters (num_psqt_buckets, num_ls_buckets) are restored from
+            # the checkpoint via `save_hyperparameters`.
+            nnue = M.NNUE.load_from_checkpoint(
+                args.resume_from_model,
+                config=args.nnue_lightning_config,
+                max_epoch=max_epoch,
+                num_batches_per_epoch=args.num_batches_per_epoch,
+                param_index=args.dataloader_config.param_index,
+                map_location="cpu",
             )
             nnue.train()
         except ModuleNotFoundError as e:
             raise RuntimeError(
                 f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
             )
-        # we can set the following here just like that because when resuming
-        # from .pt the optimizer is only created after the training is started
-        nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch = args.num_batches_per_epoch
-        nnue.config = args.nnue_lightning_config
-        nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
 
