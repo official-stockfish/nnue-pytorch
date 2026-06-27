@@ -58,6 +58,13 @@ class NNUE(L.LightningModule):
     ):
         super().__init__()
 
+        # Persist only the architecture-defining hyperparameters so that
+        # `load_from_checkpoint` can reconstruct the model with the correct
+        # shapes while the run-specific arguments (config, max_epoch, ...) are
+        # passed explicitly when resuming. We deliberately avoid pickling the
+        # whole config into the checkpoint to keep it robust against refactors.
+        self.save_hyperparameters("num_psqt_buckets", "num_ls_buckets")
+
         self.model: NNUEModel = NNUEModel(
             config.features,
             config.model_config,

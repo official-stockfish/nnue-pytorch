@@ -66,7 +66,7 @@ class TrainingConfig:
     """Torch seed to use."""
 
     resume_from_model: Optional[str] = None
-    """Initializes training using the weights from the given .pt model."""
+    """Initializes training using the weights from the given .ckpt model."""
 
     resume_from_checkpoint: Optional[str] = None
     """Initializes training using a given .ckpt model."""
