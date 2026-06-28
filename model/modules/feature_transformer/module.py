@@ -1,19 +1,12 @@
 import torch
 from torch import nn
 
-from .functions import SparseLinearFunction, FusedDoubleFtFunction, _HAS_CUPY_KERNELS
+from .functions import (
+    SparseLinearFunction,
+    FusedDoubleFtFunction,
+    resolve_double_ft_backend,
+)
 from ..features.composed import ComposedFeatures
-
-_USE_FUSED_DOUBLE_FT = True
-
-
-def get_use_fused_double_ft() -> bool:
-    return _USE_FUSED_DOUBLE_FT
-
-
-def set_use_fused_double_ft(val: bool):
-    global _USE_FUSED_DOUBLE_FT
-    _USE_FUSED_DOUBLE_FT = val
 
 
 class DoubleFeatureTransformer(nn.Module):
@@ -31,19 +24,16 @@ class DoubleFeatureTransformer(nn.Module):
         fake_quantize_acts: bool,
         fake_quantize_weights: bool,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if (
-            get_use_fused_double_ft()
-            and _HAS_CUPY_KERNELS
-            and us.is_cuda
-            and them.is_cuda
-            and white_indices.is_cuda
-            and black_indices.is_cuda
-            and psqt_indices.is_cuda
-        ):
-            merged, bias = self.features.merged_weight_and_bias(
-                fake_quantize_weights
-            )
-            ft_max_act = self.features.quantization.max_ft_activation
+        merged, bias = self.features.merged_weight_and_bias(
+            fake_quantize_weights
+        )
+        ft_max_act = self.features.quantization.max_ft_activation
+
+        impl = resolve_double_ft_backend(
+            us, them, white_indices, black_indices, psqt_indices, merged, bias
+        )
+
+        if impl == "fused":
             l0_, wpsqt, bpsqt = FusedDoubleFtFunction.apply(
                 us,
                 them,
@@ -56,11 +46,8 @@ class DoubleFeatureTransformer(nn.Module):
                 self.features.l1_size,
             )
         else:
-            merged, bias = self.features.merged_weight_and_bias(
-                fake_quantize_weights
-            )
-            wp = SparseLinearFunction.apply(white_indices, merged, bias)
-            bp = SparseLinearFunction.apply(black_indices, merged, bias)
+            wp = SparseLinearFunction.apply(white_indices, merged, bias, backend=impl)
+            bp = SparseLinearFunction.apply(black_indices, merged, bias, backend=impl)
 
             w, wpsqt = torch.split(wp, self.features.l1_size, dim=1)
             b, bpsqt = torch.split(bp, self.features.l1_size, dim=1)

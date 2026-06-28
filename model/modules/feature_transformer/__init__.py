@@ -1,13 +1,9 @@
-from .functions import SparseLinearFunction
-from .module import (
-    DoubleFeatureTransformer,
-    get_use_fused_double_ft,
-    set_use_fused_double_ft,
-)
+from .functions import SparseLinearFunction, get_double_ft_impl, set_double_ft_impl
+from .module import DoubleFeatureTransformer
 
 __all__ = [
     "SparseLinearFunction",
     "DoubleFeatureTransformer",
-    "get_use_fused_double_ft",
-    "set_use_fused_double_ft",
+    "get_double_ft_impl",
+    "set_double_ft_impl",
 ]

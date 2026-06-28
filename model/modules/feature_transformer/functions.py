@@ -142,18 +142,96 @@ class _CudaSparseLinearFunction(autograd.Function):
         return None, weight_grad, bias_grad
 
 
+# Allowed modes: "auto", "fused", "sparse", "torch"
+_DOUBLE_FT_IMPL = "auto"
+
+
+def set_double_ft_impl(mode: str):
+    """Set the implementation mode for the double feature transformer.
+
+    Allowed modes: "auto", "fused", "sparse", "torch"
+    """
+    global _DOUBLE_FT_IMPL
+    assert mode in ("auto", "fused", "sparse", "torch"), f"Invalid mode: {mode}"
+    _DOUBLE_FT_IMPL = mode
+
+
+def get_double_ft_impl() -> str:
+    return _DOUBLE_FT_IMPL
+
+
+def resolve_double_ft_backend(
+    us: torch.Tensor,
+    them: torch.Tensor,
+    white_indices: torch.Tensor,
+    black_indices: torch.Tensor,
+    psqt_indices: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+) -> str:
+    """Resolves the implementation mode, ensuring strict enforcement and no silent fallbacks."""
+    mode = get_double_ft_impl()
+
+    cupy_available = _HAS_CUPY_KERNELS
+    all_cuda = (
+        us.is_cuda
+        and them.is_cuda
+        and white_indices.is_cuda
+        and black_indices.is_cuda
+        and psqt_indices.is_cuda
+        and weight.is_cuda
+        and bias.is_cuda
+    )
+    cuda_capable = cupy_available and all_cuda
+
+    if mode == "fused":
+        if not cupy_available:
+            raise RuntimeError("Fused double FT backend requested, but CuPy kernels are not available.")
+        if not all_cuda:
+            raise RuntimeError("Fused double FT backend requested, but not all tensors/parameters are on CUDA.")
+        return "fused"
+
+    elif mode == "sparse":
+        if not cupy_available:
+            raise RuntimeError("Sparse backend requested, but CuPy kernels are not available.")
+        if not all_cuda:
+            raise RuntimeError("Sparse backend requested, but not all tensors/parameters are on CUDA.")
+        return "sparse"
+
+    elif mode == "torch":
+        return "torch"
+
+    elif mode == "auto":
+        return "fused" if cuda_capable else "torch"
+
+    else:
+        raise ValueError(f"Invalid double FT implementation mode: {mode}")
+
+
 class SparseLinearFunction:
     """
     Uses custom CuPy CUDA kernel when available. Otherwise falls back to a
     PyTorch implementation that works on any device (CPU, MPS).
     """
     @staticmethod
-    def apply(feature_indices, weight, bias):
-        if _HAS_CUPY_KERNELS and feature_indices.is_cuda:
-            return _CudaSparseLinearFunction.apply(
-                feature_indices, weight, bias
-            )
-        return _torch_sparse_linear(feature_indices, weight, bias)
+    def apply(feature_indices, weight, bias, backend: str = "auto"):
+        if backend == "auto":
+            if _HAS_CUPY_KERNELS and feature_indices.is_cuda and weight.is_cuda and bias.is_cuda:
+                return _CudaSparseLinearFunction.apply(feature_indices, weight, bias)
+            return _torch_sparse_linear(feature_indices, weight, bias)
+
+        elif backend == "sparse":
+            if not _HAS_CUPY_KERNELS:
+                raise RuntimeError("CuPy sparse linear kernel is not available.")
+            if not (feature_indices.is_cuda and weight.is_cuda and bias.is_cuda):
+                raise RuntimeError("Sparse CUDA kernel requested but tensors are not on CUDA.")
+            return _CudaSparseLinearFunction.apply(feature_indices, weight, bias)
+
+        elif backend == "torch":
+            return _torch_sparse_linear(feature_indices, weight, bias)
+
+        else:
+            raise ValueError(f"Invalid SparseLinear backend requested: {backend}")
 
 
 class _CudaFusedDoubleFtFunction(autograd.Function):
@@ -260,33 +338,6 @@ class _CudaFusedDoubleFtFunction(autograd.Function):
 class FusedDoubleFtFunction:
     @staticmethod
     def apply(us, them, white_indices, black_indices, psqt_indices, weight, bias, max_ft_activation, l1_size):
-        if not _HAS_CUPY_KERNELS:
-            raise RuntimeError("CuPy kernels not available for FusedDoubleFtFunction")
-
-        if not (
-            us.is_cuda
-            and them.is_cuda
-            and white_indices.is_cuda
-            and black_indices.is_cuda
-            and psqt_indices.is_cuda
-            and weight.is_cuda
-            and bias.is_cuda
-        ):
-            raise RuntimeError("CUDA tensors required for FusedDoubleFtFunction")
-
-        if not (
-            us.device
-            == them.device
-            == white_indices.device
-            == black_indices.device
-            == psqt_indices.device
-            == weight.device
-            == bias.device
-        ):
-            raise RuntimeError(
-                "All tensors must be on the same CUDA device for FusedDoubleFtFunction"
-            )
-
         return _CudaFusedDoubleFtFunction.apply(
             us,
             them,

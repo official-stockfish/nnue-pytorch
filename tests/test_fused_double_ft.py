@@ -9,8 +9,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from model.modules.feature_transformer.functions import _HAS_CUPY_KERNELS
 from model.modules import (
     DoubleFeatureTransformer,
-    get_use_fused_double_ft,
-    set_use_fused_double_ft,
+    get_double_ft_impl,
+    set_double_ft_impl,
 )
 
 
@@ -87,10 +87,10 @@ def test_fused_double_ft():
     dummy_features = DummyComposedFeatures(weight, bias, l1)
     double_ft = DoubleFeatureTransformer(dummy_features)
 
-    orig_fused = get_use_fused_double_ft()
+    orig_impl = get_double_ft_impl()
     try:
         # 1) Fused kernel
-        set_use_fused_double_ft(True)
+        set_double_ft_impl("fused")
         l0_fused, wpsqt_fused, bpsqt_fused = double_ft(
             us,
             them,
@@ -111,7 +111,7 @@ def test_fused_double_ft():
         weight.grad.zero_()
         bias.grad.zero_()
 
-        set_use_fused_double_ft(False)
+        set_double_ft_impl("torch")
         l0_fallback, wpsqt, bpsqt = double_ft(
             us,
             them,
@@ -135,4 +135,4 @@ def test_fused_double_ft():
         )
         torch.testing.assert_close(grad_bias_fused, bias.grad, atol=1e-4, rtol=1e-3)
     finally:
-        set_use_fused_double_ft(orig_fused)
+        set_double_ft_impl(orig_impl)

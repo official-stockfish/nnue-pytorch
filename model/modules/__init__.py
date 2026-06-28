@@ -1,7 +1,7 @@
 from .feature_transformer import (
     DoubleFeatureTransformer,
-    get_use_fused_double_ft,
-    set_use_fused_double_ft,
+    get_double_ft_impl,
+    set_double_ft_impl,
 )
 from .features import (
     ComposedFeatures,
@@ -18,8 +18,8 @@ from .layer_stacks import LayerStacks
 
 __all__ = [
     "DoubleFeatureTransformer",
-    "get_use_fused_double_ft",
-    "set_use_fused_double_ft",
+    "get_double_ft_impl",
+    "set_double_ft_impl",
     "ComposedFeatures",
     "FullThreats",
     "HalfKav2Hm",

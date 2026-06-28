@@ -10,7 +10,7 @@ from model.config import ModelConfig
 from model.modules import (
     ComposedFeatures,
     DoubleFeatureTransformer,
-    set_use_fused_double_ft,
+    set_double_ft_impl,
 )
 from model.modules.feature_transformer.functions import SparseLinearFunction
 from model.modules.features import get_feature_cls
@@ -81,8 +81,7 @@ def run_bench():
     piece_count = torch.randint(1, 32, (BATCH_SIZE,), dtype=torch.int64, device=device)
     psqt_indices = (piece_count - 1) // 4
 
-    # 3) Benchmark: Direct SparseLinearFunction
-    print("Benchmarking direct SparseLinearFunction...")
+    print("Benchmarking SparseLinearFunction...")
     weight = torch.randn(
         ACTUAL_INPUT_SIZE, STRIDE, dtype=torch.float32, device=device, requires_grad=True
     )
@@ -92,8 +91,8 @@ def run_bench():
 
     for _ in range(WARMUP_ITERS):
         output0 = SparseLinearFunction.apply(indices0, weight, bias)
-        output1 = SparseLinearFunction.apply(indices1, weight, bias)
-        g = ((output0 - output1) ** 2).mean()
+        output0 = torch.clamp(output0, 0.0, 1.0)
+        g = output0.mean()
         g.backward()
 
     if device.type == "cuda":
@@ -102,11 +101,8 @@ def run_bench():
     start = time.time()
     for _ in range(ITERS):
         output0 = SparseLinearFunction.apply(indices0, weight, bias)
-        output1 = SparseLinearFunction.apply(indices1, weight, bias)
         output0 = torch.clamp(output0, 0.0, 1.0)
-        output1 = torch.clamp(output1, 0.0, 1.0)
-
-        g = ((output0 - output1) ** 2).mean()
+        g = output0.mean()
         g.backward()
 
     if device.type == "cuda":
@@ -118,31 +114,34 @@ def run_bench():
         )
     )
 
-    # 4) Benchmark: DoubleFeatureTransformer (Fused vs Fallback)
-    for use_fused in [False, True]:
-        set_use_fused_double_ft(use_fused)
-        mode_str = "Fused" if use_fused else "Fallback"
+    for mode in ["torch", "sparse", "fused"]:
+        set_double_ft_impl(mode)
+        mode_str = mode.capitalize()
         print(f"Benchmarking DoubleFeatureTransformer ({mode_str})...")
 
-        for p in compiled_double_ft.parameters():
-            if p.grad is not None:
-                p.grad.zero_()
+        try:
+            for p in compiled_double_ft.parameters():
+                if p.grad is not None:
+                    p.grad.zero_()
 
-        for _ in range(WARMUP_ITERS):
-            l0_, wpsqt, bpsqt = compiled_double_ft(
-                us,
-                them,
-                indices0,
-                indices1,
-                psqt_indices,
-                fake_quantize_acts=True,
-                fake_quantize_weights=True,
-            )
-            g = l0_.sum() + wpsqt.sum() + bpsqt.sum()
-            g.backward()
+            for _ in range(WARMUP_ITERS):
+                l0_, wpsqt, bpsqt = compiled_double_ft(
+                    us,
+                    them,
+                    indices0,
+                    indices1,
+                    psqt_indices,
+                    fake_quantize_acts=True,
+                    fake_quantize_weights=True,
+                )
+                g = l0_.sum() + wpsqt.sum() + bpsqt.sum()
+                g.backward()
 
-        if device.type == "cuda":
-            torch.cuda.synchronize()
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+        except RuntimeError as e:
+            print(f"Error during {mode_str}: {e}")
+            continue
 
         start = time.time()
         for _ in range(ITERS):
