@@ -347,7 +347,7 @@ namespace binpack
 
                             auto to_utc_tm = [](std::time_t time, std::tm& result)
                             {
-                                #if defined(_MSC_VER)
+                                #if defined(_MSC_VER) || defined(_WIN32)
                                 gmtime_s(&result, &time);
                                 #else
                                 gmtime_r(&time, &result);
