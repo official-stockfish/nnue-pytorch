@@ -69,6 +69,12 @@ class LossParams:
     """weight boost parameter 2 (default=0.5)"""
     lambda_: Annotated[float, tyro.conf.arg(name="lambda")] = 1.0
     """1.0=train on evaluations, 0.0=train on game results, interpolates between (default=1.0)."""
+    tb_remap_base: float = 7000.0
+    """Tablebase score remapping base value (default=7000.0)"""
+    tb_remap_scale: float = 20000.0
+    """Tablebase score remapping scale value (default=20000.0)"""
+    tb_remap_decay: float = 0.8
+    """Tablebase score remapping decay parameter (default=0.8)"""
 
     def __post_init__(self):
         if (self.start_lambda is not None) != (self.end_lambda is not None):
