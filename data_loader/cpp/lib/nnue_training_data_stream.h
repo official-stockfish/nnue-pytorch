@@ -1,7 +1,7 @@
 #ifndef _SFEN_STREAM_H_
 #define _SFEN_STREAM_H_
 
-#include "nnue_training_data_formats.h"
+#include "parallel_dataloader.h"
 
 #include <optional>
 #include <fstream>

@@ -7,7 +7,6 @@
 #include <atomic>
 #include <cstdint>
 #include <condition_variable>
-#include <functional>
 #include <concepts>
 
 namespace thread_safe_types
