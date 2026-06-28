@@ -82,6 +82,67 @@ struct HalfKAv2_hmExtractor: IFeatureExtractor {
     }
 };
 
+struct K16Q2 {
+    static constexpr std::string_view NAME = "K16Q2";
+
+    static constexpr int NUM_SQ              = 64;
+    static constexpr int NUM_PT              = 12;
+    static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
+    static constexpr int INPUTS              = NUM_PLANES * NUM_SQ / 2;
+    static constexpr int MAX_ACTIVE_FEATURES = 32;
+
+    // clang-format off
+    static constexpr int KingBuckets[64] = {
+      15, 15, 14, 14, 14, 14, 15, 15,
+      15, 15, 14, 14, 14, 14, 15, 15,
+      13, 13, 12, 12, 12, 12, 13, 13,
+      13, 13, 12, 12, 12, 12, 13, 13,
+      11, 10,  9,  8,  8,  9, 10, 11,
+      11, 10,  9,  8,  8,  9, 10, 11,
+       7,  6,  5,  4,  4,  5,  6,  7,
+       3,  2,  1,  0,  0,  1,  2,  3
+    };
+    // clang-format on
+
+    static int feature_index(Color color, Square ksq, Square sq, Piece p, bool opponent_has_queen) {
+        Square o_ksq = orient_flip_2(color, ksq, ksq);
+        auto   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+        int    k_bucket = KingBuckets[static_cast<int>(o_ksq)];
+        int    combined_bucket = k_bucket * 2 + (opponent_has_queen ? 1 : 0);
+        return static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
+             + combined_bucket * NUM_PLANES;
+    }
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos    = e.pos;
+        auto  pieces = pos.piecesBB();
+        auto  ksq    = pos.kingSquare(color);
+
+        Color opp_color = (color == Color::White ? Color::Black : Color::White);
+        bool opponent_has_queen = !pos.piecesBB(Piece(PieceType::Queen, opp_color)).isEmpty();
+
+        int j = 0;
+        for (Square sq : pieces)
+        {
+            auto p      = pos.pieceAt(sq);
+            features[j] = feature_index(color, ksq, sq, p, opponent_has_queen);
+            ++j;
+        }
+        return {j, INPUTS};
+    }
+};
+
+struct K16Q2Extractor: IFeatureExtractor {
+    int inputs() const override { return K16Q2::INPUTS; }
+    int max_active_features() const override { return K16Q2::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
+                                             int*                     features,
+                                             Color                    color) const override {
+        return K16Q2::fill_features_sparse(e, features, color);
+    }
+};
+
 constexpr int numvalidtargets[12] = {6, 6, 10, 10, 8, 8, 8, 8, 10, 10, 0, 0};
 
 using ThreatOffsetTable = std::array<std::array<int, 66>, 12>;
@@ -351,6 +412,8 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
 static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view name) {
     if (name == "HalfKAv2_hm")
         return std::make_unique<HalfKAv2_hmExtractor>();
+    if (name == "K16Q2")
+        return std::make_unique<K16Q2Extractor>();
     if (name == "Full_Threats")
         return std::make_unique<FullThreatsExtractor>();
     return nullptr;
