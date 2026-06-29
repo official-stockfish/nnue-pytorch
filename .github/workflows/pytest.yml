@@ -34,4 +34,4 @@ jobs:
 
       - name: Run pytest
         run: |
-          ./run_docker.sh CPU . --non-interactive --exec pytest
+          ./run_docker.sh CPU . --skip-build --non-interactive --exec pytest
