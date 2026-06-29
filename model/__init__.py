@@ -1,4 +1,4 @@
-from .callbacks import WeightClippingCallback, ExplicitSWACallback
+from .callbacks import WeightClippingCallback, ExplicitSWACallback, SimplePeriodicCheckpoint
 from .config import ModelConfig, LossParams, NNUELightningConfig
 from .optimizers import OptimizerConfig, RangerLiteWrapper, ScheduleFreeWrapper
 
@@ -22,6 +22,7 @@ from .utils import (
 __all__ = [
     "WeightClippingCallback",
     "ExplicitSWACallback",
+    "SimplePeriodicCheckpoint",
     "ModelConfig",
     "LossParams",
     "add_feature_args",
