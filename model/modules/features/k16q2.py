@@ -30,13 +30,11 @@ def _orient(is_white_pov: bool, sq: int, ksq: int) -> int:
     return (7 * (kfile < 4)) ^ (56 * (not is_white_pov)) ^ sq
 
 
-def _k16q2_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece) -> int:
+def _k16q2_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece, opponent_has_queen: bool = False) -> int:
     """Feature index using 12 piece types (no king merging)."""
     p_idx = (p.piece_type - 1) * 2 + (p.color != is_white_pov)
     o_ksq = _orient(is_white_pov, king_sq, king_sq)
     k_bucket = KingBuckets[o_ksq]
-    # PSQT init values are computed for empty boards, so no opponent queen.
-    opponent_has_queen = False
     combined_bucket = k_bucket * 2 + (1 if opponent_has_queen else 0)
     return _orient(is_white_pov, sq, king_sq) + p_idx * 64 + combined_bucket * 768
 
@@ -196,9 +194,10 @@ class K16Q2(InputFeature):
         for ksq in range(64):
             for s in range(64):
                 for pt, val in piece_values.items():
-                    idxw = _k16q2_idx(True, ksq, s, chess.Piece(pt, chess.WHITE))
-                    idxb = _k16q2_idx(True, ksq, s, chess.Piece(pt, chess.BLACK))
-                    values[idxw] = val
-                    values[idxb] = -val
+                    for q in [False, True]:
+                        idxw = _k16q2_idx(True, ksq, s, chess.Piece(pt, chess.WHITE), q)
+                        idxb = _k16q2_idx(True, ksq, s, chess.Piece(pt, chess.BLACK), q)
+                        values[idxw] = val
+                        values[idxb] = -val
 
         return values
