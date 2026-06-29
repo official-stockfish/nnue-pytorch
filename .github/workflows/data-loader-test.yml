@@ -31,11 +31,3 @@ jobs:
 
       - name: Run cmake compiled report (50 iterations)
         run: ./build/training_data_loader_report -i 50 ./.pgo/small.binpack
-
-      - name: Install pytest dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run pytest test_ddp_loader.py
-        run: pytest tests/test_ddp_loader.py

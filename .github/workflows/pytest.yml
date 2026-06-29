@@ -2,7 +2,8 @@ name: Pytest
 
 on:
   pull_request:
-    types: [ opened, synchronize, reopened, ready_for_review ]
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [master]
   push:
     branches: [master]
 
@@ -11,22 +12,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ruff:
+  pytest:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 # v3.8.0
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Build and load CPU Docker image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: Dockerfile.CPU
+          push: false
+          load: true
+          tags: nnue-pytorch:cpu
+          cache-from: type=gha,scope=cpu-cache
+          cache-to: type=gha,mode=max,scope=cpu-cache
 
       - name: Run pytest
         run: |
-          pytest tests/test_feature_transformer.py tests/test_sparse_linear_device_parity.py
+          ./run_docker.sh CPU . --non-interactive --exec pytest
