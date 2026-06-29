@@ -2,7 +2,7 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .composed import ComposedFeatureTransformer
+from .composed import ComposedFeatures
 from .full_threats import FullThreats
 from .halfka_v2_hm import HalfKav2Hm
 from .input_feature import InputFeature
@@ -50,7 +50,7 @@ def add_feature_args(parser: argparse.ArgumentParser) -> None:
 
 
 __all__ = [
-    "ComposedFeatureTransformer",
+    "ComposedFeatures",
     "HalfKav2Hm",
     "FullThreats",
     "InputFeature",
