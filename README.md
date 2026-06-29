@@ -57,7 +57,7 @@ _Building the container will take it's time and disk space (~30-60GB)_
         cmake \
         make
     conda activate nnue_pytorch
-    ```
+    ```ap
 - Afterwards run:
     ```
     pip install --no-cache-dir -r requirements.txt
