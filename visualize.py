@@ -334,15 +334,20 @@ class NNUEVisualizer:
                 if self.args.ref_model:
                     l1_weights_ -= ref_layers[bucket_id][0].weight.data.numpy()
 
-                N = l1_weights_.size // (2 * self.M)
+                # The feature transformer outputs are pairwise-multiplied before
+                # the first fully-connected layer, so this layer takes L1 inputs
+                # (not 2 * L1) split into two equal perspective halves (our/their),
+                # each of size L1 // 2. The post-multiplication inputs no longer
+                # map one-to-one to the feature transformer neurons, so the
+                # sorted-neuron reordering is not applied here.
+                N = l1_weights_.shape[0]
+                half = l1_weights_.shape[1] // 2
 
-                l1_weights = np.zeros((2 * N, self.M))
+                l1_weights = np.zeros((2 * N, half))
 
                 for i in range(N):
-                    l1_weights[2 * i] = l1_weights_[i][self.sorted_input_neurons]
-                    l1_weights[2 * i + 1] = l1_weights_[i][
-                        self.M + self.sorted_input_neurons
-                    ]
+                    l1_weights[2 * i] = l1_weights_[i][:half]
+                    l1_weights[2 * i + 1] = l1_weights_[i][half : 2 * half]
                 return l1_weights, N
 
             def get_l2_weights(bucket_id, l2):
