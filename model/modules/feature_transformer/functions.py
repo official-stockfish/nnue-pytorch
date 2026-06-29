@@ -90,7 +90,6 @@ class _CudaSparseLinearFunction(autograd.Function):
             output_size,
             dtype=torch.float32,
             device=device,
-            requires_grad=True,
         )
 
         kernel = make_sparse_input_linear_forward_kernel(
@@ -152,7 +151,8 @@ def set_double_ft_impl(mode: str):
     Allowed modes: "auto", "fused", "sparse", "torch"
     """
     global _DOUBLE_FT_IMPL
-    assert mode in ("auto", "fused", "sparse", "torch"), f"Invalid mode: {mode}"
+    if mode not in ("auto", "fused", "sparse", "torch"):
+        raise ValueError(f"Invalid mode: {mode}")
     _DOUBLE_FT_IMPL = mode
 
 
@@ -268,9 +268,9 @@ class _CudaFusedDoubleFtFunction(autograd.Function):
         batch_size = white_indices.shape[0]
         max_active_features = white_indices.shape[1]
 
-        l0_ = torch.empty(batch_size, l1_size, dtype=torch.float32, device=us.device, requires_grad=True)
-        wpsqt = torch.empty(batch_size, 1, dtype=torch.float32, device=us.device, requires_grad=True)
-        bpsqt = torch.empty(batch_size, 1, dtype=torch.float32, device=us.device, requires_grad=True)
+        l0_ = torch.empty(batch_size, l1_size, dtype=torch.float32, device=us.device)
+        wpsqt = torch.empty(batch_size, 1, dtype=torch.float32, device=us.device)
+        bpsqt = torch.empty(batch_size, 1, dtype=torch.float32, device=us.device)
 
         output_size = bias.shape[0]
         kernel = make_fused_double_ft_forward_kernel(max_active_features, l1_size)

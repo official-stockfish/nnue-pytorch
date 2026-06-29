@@ -46,6 +46,8 @@ class DoubleFeatureTransformer(nn.Module):
                 self.features.l1_size,
             )
         else:
+            assert self.features.l1_size % 2 == 0
+
             wp = SparseLinearFunction.apply(white_indices, merged, bias, backend=impl)
             bp = SparseLinearFunction.apply(black_indices, merged, bias, backend=impl)
 

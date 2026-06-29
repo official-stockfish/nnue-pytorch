@@ -17,6 +17,9 @@ class ComposedFeatures(nn.Module):
     def __init__(self, feature_classes: list[Callable[[int], InputFeature]], l1_size: int, num_psqt_buckets:int, quantization: QuantizationManager):
         super().__init__()
 
+        if not l1_size % 2 == 0:
+            raise ValueError(f"l1_size must be even, got {l1_size}.")
+
         self.l1_size = l1_size
         self.num_psqt_buckets = num_psqt_buckets
         self.num_outputs = l1_size + num_psqt_buckets
