@@ -443,6 +443,7 @@ SparseBatch::~SparseBatch() {
     delete[] m_int_block;
 }
 
+
 void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
     is_white[i]            = static_cast<float>(e.pos.sideToMove() == Color::White);
     outcome[i]             = (e.result + 1.0f) / 2.0f;
