@@ -63,6 +63,8 @@ namespace binpack
     struct CompressedTrainingDataEntryParallelReader
     {
         static constexpr std::size_t chunkSize = suggestedChunkSize;
+        static constexpr std::size_t sharedChunkQueueCapacity = 256;
+        using FileChunk = std::vector<unsigned char>;
 
         CompressedTrainingDataEntryParallelReader(
             int concurrency,
@@ -105,6 +107,202 @@ namespace binpack
             m_ddp_chunks_to_skip_after_read.resize(m_inputFiles.size(), 0);
 
             m_stopFlag.store(false);
+            m_readersFinished.store(false);
+
+            int numReaders = std::max(1, static_cast<int>(std::min(0.5 * paths.size(), 0.5 * concurrency)));
+            m_numRunningReaders.store(numReaders);
+
+            m_fileExhausted = std::make_unique<std::atomic_bool[]>(m_inputFiles.size());
+            for (size_t i = 0; i < m_inputFiles.size(); ++i)
+            {
+                m_fileExhausted[i].store(false, std::memory_order_relaxed);
+            }
+
+            auto readerWorker = [this]()
+            {
+                auto& prng = rng::get_thread_local_rng();
+                std::discrete_distribution<std::size_t> local_dist(
+                    m_distribution_weights.begin(), m_distribution_weights.end()
+                );
+
+                while (!m_stopFlag.load())
+                {
+                    bool allExhausted = true;
+                    for (size_t i = 0; i < m_inputFiles.size(); ++i)
+                    {
+                        if (!m_fileExhausted[i].load(std::memory_order_relaxed))
+                        {
+                            allExhausted = false;
+                            break;
+                        }
+                    }
+
+                    if (allExhausted)
+                    {
+                        break;
+                    }
+
+                    std::size_t fileId = local_dist(prng);
+
+                    if (m_fileExhausted[fileId].load(std::memory_order_relaxed))
+                    {
+                        continue;
+                    }
+
+                    // Try to lock the file mutex
+                    std::unique_lock lock(*m_fileMutexes[fileId], std::defer_lock);
+                    if (!lock.try_lock_for(kMaxLockWaitTime))
+                    {
+                        m_timeout_count.fetch_add(1, std::memory_order_relaxed);
+
+                        auto now = std::chrono::steady_clock::now().time_since_epoch();
+                        int64_t now_sec = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+                        int64_t last_sec = m_last_warning_time.load(std::memory_order_relaxed);
+
+                        if (now_sec - last_sec >= kWarningCooldownSeconds)
+                        {
+                            if (m_last_warning_time.compare_exchange_strong(last_sec, now_sec, std::memory_order_relaxed))
+                            {
+                                uint64_t count_to_print = m_timeout_count.exchange(0, std::memory_order_relaxed);
+
+                                auto utc_now = std::chrono::system_clock::now();
+                                std::time_t utc_time = std::chrono::system_clock::to_time_t(utc_now);
+
+                                auto to_utc_tm = [](std::time_t time, std::tm& result)
+                                {
+                                    #if defined(_MSC_VER)
+                                    gmtime_s(&result, &time);
+                                    #else
+                                    gmtime_r(&time, &result);
+                                    #endif
+                                };
+
+                                std::tm utc_tm{};
+                                to_utc_tm(utc_time, utc_tm);
+
+                                std::cerr << "[" << std::put_time(&utc_tm, "%Y-%m-%d %H:%M:%S UTC") << "] "
+                                          << "[Warning] Dataloader mutex acquisition for file with ID "
+                                          << fileId << " name " << m_inputFiles[fileId].path()
+                                          << " timed out after " << kMaxLockWaitTime.count()
+                                          << "ms. Re-rolling file. "
+                                          << "(" << count_to_print << " timeouts since last warning)\n";
+                            }
+                        }
+                        continue;
+                    }
+
+                    auto& inputFile = m_inputFiles[fileId];
+
+                    auto seek_for_ddp_rank = [&](std::size_t rank) -> bool
+                    {
+                        std::size_t skipped = 0;
+                        if (inputFile.skipChunks(rank, &skipped))
+                        {
+                            return true;
+                        }
+                        if (!m_cyclic)
+                        {
+                            return false;
+                        }
+                        if (skipped == 0)
+                        {
+                            return false;
+                        }
+                        inputFile.seek_to_start();
+                        const std::size_t offset = rank % skipped;
+                        const bool ok = inputFile.skipChunks(offset);
+                        assert(ok);
+                        return ok;
+                    };
+
+                    // DDP: chunk-based skipping
+                    if (m_world_size > 1)
+                    {
+                        if (!m_files_seeked_for_ddp[fileId])
+                        {
+                            const std::size_t rank = static_cast<std::size_t>(m_rank);
+                            if (!seek_for_ddp_rank(rank))
+                            {
+                                m_fileExhausted[fileId].store(true, std::memory_order_relaxed);
+                                continue;
+                            }
+                            m_files_seeked_for_ddp[fileId] = true;
+                        }
+                        else if (m_ddp_chunks_to_skip_after_read[fileId] > 0)
+                        {
+                            const bool success = inputFile.skipChunks(m_ddp_chunks_to_skip_after_read[fileId]);
+                            if (!success)
+                            {
+                                if (!m_cyclic)
+                                {
+                                    m_fileExhausted[fileId].store(true, std::memory_order_relaxed);
+                                    continue;
+                                }
+                                inputFile.seek_to_start();
+                                const std::size_t rank = static_cast<std::size_t>(m_rank);
+                                if (!seek_for_ddp_rank(rank))
+                                {
+                                    m_fileExhausted[fileId].store(true, std::memory_order_relaxed);
+                                    continue;
+                                }
+                            }
+                            m_ddp_chunks_to_skip_after_read[fileId] = 0;
+                        }
+                    }
+
+                    if (!inputFile.hasNextChunk())
+                    {
+                        if (m_cyclic)
+                        {
+                            inputFile.seek_to_start();
+
+                            if (m_world_size > 1)
+                            {
+                                const std::size_t rank = static_cast<std::size_t>(m_rank);
+                                if (!seek_for_ddp_rank(rank))
+                                {
+                                    m_fileExhausted[fileId].store(true, std::memory_order_relaxed);
+                                    continue;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            m_fileExhausted[fileId].store(true, std::memory_order_relaxed);
+                            continue;
+                        }
+                    }
+
+                    std::vector<unsigned char> chunk = inputFile.readNextChunk();
+
+                    if (m_world_size > 1)
+                    {
+                        m_ddp_chunks_to_skip_after_read[fileId] = static_cast<std::size_t>(m_world_size - 1);
+                    }
+
+                    lock.unlock(); // Release file lock immediately after read
+
+                    bool success = m_sharedChunkQueue.put(chunk, [this]() {
+                        return this->m_stopFlag.load();
+                    });
+
+                    if (!success)
+                    {
+                        break;
+                    }
+                }
+
+                if (m_numRunningReaders.fetch_sub(1) == 1)
+                {
+                    m_readersFinished.store(true);
+                    m_sharedChunkQueue.signal_stop();
+                }
+            };
+
+            for (int i = 0; i < numReaders; ++i)
+            {
+                m_readerThreads.emplace_back(readerWorker);
+            }
 
             auto worker = [this]()
             {
@@ -114,11 +312,7 @@ namespace binpack
                 std::vector<TrainingDataEntry> m_localBuffer;
                 m_localBuffer.reserve(threadBufferSize);
 
-                std::discrete_distribution<std::size_t> local_dist(
-                    m_distribution_weights.begin(), m_distribution_weights.end()
-                );
-
-                bool isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk, local_dist);
+                bool isEnd = fetchNextChunkFromSharedQueue(m_offset, m_chunk);
 
                 while(!isEnd && !m_stopFlag.load())
                 {
@@ -133,7 +327,7 @@ namespace binpack
                                 m_offset += m_movelistReader->numReadBytes();
                                 m_movelistReader.reset();
 
-                                isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk, local_dist);
+                                isEnd = fetchNextChunkFromSharedQueue(m_offset, m_chunk);
                             }
 
                             if (!m_skipPredicate || !m_skipPredicate(e))
@@ -156,7 +350,7 @@ namespace binpack
                             }
                             else
                             {
-                                isEnd = fetchNextChunkIfNeeded(m_offset, m_chunk, local_dist);
+                                isEnd = fetchNextChunkFromSharedQueue(m_offset, m_chunk);
                             }
 
                             if (!m_skipPredicate || !m_skipPredicate(e))
@@ -246,7 +440,15 @@ namespace binpack
         ~CompressedTrainingDataEntryParallelReader()
         {
             m_stopFlag.store(true);
+            m_sharedChunkQueue.signal_stop();
             m_ringBuffer.signal_stop();
+            for (auto& reader : m_readerThreads)
+            {
+                if (reader.joinable())
+                {
+                    reader.join();
+                }
+            }
             for (auto& worker : m_workers)
             {
                 if (worker.joinable())
@@ -308,153 +510,43 @@ namespace binpack
             return m_numRunningWorkers.load() <= 0;
         }
 
-        bool fetchNextChunkIfNeeded(std::size_t& m_offset, std::vector<unsigned char>& m_chunk,
-                                std::discrete_distribution<std::size_t>& local_dist)
+        bool fetchNextChunkFromSharedQueue(std::size_t& m_offset, std::vector<unsigned char>& m_chunk)
         {
             if (m_offset + sizeof(PackedTrainingDataEntry) + 2 > m_chunk.size())
             {
-                auto& prng = rng::get_thread_local_rng();
-
-                std::size_t fileId;
-                std::unique_lock<std::remove_reference_t<decltype(*m_fileMutexes[0])>> lock;
-
-                while (true)
+                if (m_stopFlag.load())
                 {
-                    fileId = local_dist(prng);
-                    lock = std::unique_lock(*m_fileMutexes[fileId], std::defer_lock);
-
-                    if (lock.try_lock_for(kMaxLockWaitTime))
-                    {
-                        break;
-                    }
-
-                    m_timeout_count.fetch_add(1, std::memory_order_relaxed);
-
-                    auto now = std::chrono::steady_clock::now().time_since_epoch();
-                    int64_t now_sec = std::chrono::duration_cast<std::chrono::seconds>(now).count();
-                    int64_t last_sec = m_last_warning_time.load(std::memory_order_relaxed);
-
-                    if (now_sec - last_sec >= kWarningCooldownSeconds)
-                    {
-                        // Ensure only one thread evaluates this to true during the evaluation window
-                        if (m_last_warning_time.compare_exchange_strong(last_sec, now_sec, std::memory_order_relaxed))
-                        {
-                            // Atomically retrieve the total count and reset it to 0 without dropping concurrent increments
-                            uint64_t count_to_print = m_timeout_count.exchange(0, std::memory_order_relaxed);
-
-                            auto        utc_now  = std::chrono::system_clock::now();
-                            std::time_t utc_time = std::chrono::system_clock::to_time_t(utc_now);
-
-                            auto to_utc_tm = [](std::time_t time, std::tm& result)
-                            {
-                                #if defined(_MSC_VER) || defined(_WIN32)
-                                gmtime_s(&result, &time);
-                                #else
-                                gmtime_r(&time, &result);
-                                #endif
-                            };
-
-                            std::tm utc_tm{};
-                            to_utc_tm(utc_time, utc_tm);
-
-                            std::cerr << "[" << std::put_time(&utc_tm, "%Y-%m-%d %H:%M:%S UTC") << "] "
-                                      << "[Warning] Dataloader mutex acquisition for file with ID "
-                                      << fileId << " name " << m_inputFiles[fileId].path()
-                                      << " timed out after " << kMaxLockWaitTime.count()
-                                      << "ms. Re-rolling file. "
-                                      << "(" << count_to_print << " timeouts since last warning)\n";
-                        }
-                    }
+                    return true;
                 }
 
-                auto& inputFile = m_inputFiles[fileId];
-
-                auto seek_for_ddp_rank = [&](std::size_t rank) -> bool
+                if (m_readersFinished.load() && m_sharedChunkQueue.is_empty())
                 {
-                    std::size_t skipped = 0;
-                    if (inputFile.skipChunks(rank, &skipped))
-                    {
-                        return true;
-                    }
-                    if (!m_cyclic)
-                    {
-                        return false;
-                    }
-                    if (skipped == 0)
-                    {
-                        return false;
-                    }
-                    inputFile.seek_to_start();
-                    const std::size_t offset = rank % skipped;
-                    const bool ok = inputFile.skipChunks(offset);
-                    assert(ok);
-                    return ok;
-                };
-
-                // DDP: chunk-based skipping
-                if (m_world_size > 1)
-                {
-                    if (!m_files_seeked_for_ddp[fileId])
-                    {
-                        const std::size_t rank = static_cast<std::size_t>(m_rank);
-                        if (!seek_for_ddp_rank(rank))
-                        {
-                            return true;
-                        }
-                        m_files_seeked_for_ddp[fileId] = true;
-                    }
-                    else if (m_ddp_chunks_to_skip_after_read[fileId] > 0)
-                    {
-                        const bool success = inputFile.skipChunks(m_ddp_chunks_to_skip_after_read[fileId]);
-                        if (!success)
-                        {
-                            if (!m_cyclic)
-                            {
-                                return true;
-                            }
-                            inputFile.seek_to_start();
-                            const std::size_t rank = static_cast<std::size_t>(m_rank);
-                            if (!seek_for_ddp_rank(rank))
-                            {
-                                return true;
-                            }
-                        }
-                        m_ddp_chunks_to_skip_after_read[fileId] = 0;
-                    }
+                    return true;
                 }
 
-                if (!inputFile.hasNextChunk())
+                bool success = m_sharedChunkQueue.take(
+                    m_chunk,
+                    [this]() { return m_stopFlag.load() || (m_readersFinished.load() && m_sharedChunkQueue.is_empty()); }
+                );
+
+                if (success)
                 {
-                    if (m_cyclic)
-                    {
-                        inputFile.seek_to_start();
-
-                        if (m_world_size > 1)
-                        {
-                            const std::size_t rank = static_cast<std::size_t>(m_rank);
-                            if (!seek_for_ddp_rank(rank))
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        return true;
-                    }
+                    m_offset = 0;
+                    return false;
                 }
-
-                m_chunk = inputFile.readNextChunk();
-                m_offset = 0;
-
-                if (m_world_size > 1)
-                {
-                    m_ddp_chunks_to_skip_after_read[fileId] = static_cast<std::size_t>(m_world_size - 1);
-                }
+                return true;
             }
 
             return false;
         }
+
+        // Shared Raw Chunk Queue
+        thread_safe_types::ThreadSafeRingBuffer<FileChunk, sharedChunkQueueCapacity> m_sharedChunkQueue;
+
+        std::unique_ptr<std::atomic_bool[]> m_fileExhausted;
+        std::vector<std::thread> m_readerThreads;
+        std::atomic_bool m_readersFinished;
+        std::atomic_int m_numRunningReaders;
     };
 
 }
