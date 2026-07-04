@@ -9,6 +9,7 @@ IMAGE_BASE_NAME="nnue-pytorch"
 GPU_INPUT=""
 DATA_PATH=""
 SKIP_SETUP="false"
+SKIP_BUILD="false"
 INTERACTIVE="true"
 EXEC_ARGS=()
 
@@ -31,6 +32,10 @@ while [[ $# -gt 0 ]]; do
         SKIP_SETUP="true"
         shift
         ;;
+      --skip-build)
+        SKIP_BUILD="true"
+        shift
+        ;;
       --non-interactive)
         INTERACTIVE="false"
         shift
@@ -42,10 +47,11 @@ while [[ $# -gt 0 ]]; do
         break
         ;;
       --help)
-        echo "Usage: $0 [GPU_BRAND] [DATA_PATH] [--skip-setup] [--non-interactive] [--exec <command>]"
+        echo "Usage: $0 [GPU_BRAND] [DATA_PATH] [--skip-setup] [--skip-build] [--non-interactive] [--exec <command>]"
         echo "  GPU_BRAND: NVIDIA, AMD, or CPU (optional, will prompt if not provided)."
         echo "  DATA_PATH: Path to data directory to mount (optional, will prompt if not provided)."
         echo "  --skip-setup: Skip running the setup script inside the container."
+        echo "  --skip-build: Skip building the Docker image."
         echo "  --non-interactive: Run the container in non-interactive mode (no shell). For fully non-interactive workflows, GPU_BRAND and DATA_PATH are required."
         echo "  --exec <command>: Command to execute inside the container instead of starting a shell."
         echo "  Note: --exec must be used at the end and does not imply --non-interactive, but typically used together."
@@ -99,8 +105,12 @@ case "$GPU_INPUT" in
     ;;
 esac
 
-echo "Building image $IMAGE_TAG from $DOCKERFILE"
-docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" .
+if [ "$SKIP_BUILD" != "true" ]; then
+  echo "Building image $IMAGE_TAG from $DOCKERFILE"
+  docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" .
+else
+  echo "Skipping docker build as --skip-build was specified."
+fi
 
 # 4. Handle Data Path selection
 if [ -z "$DATA_PATH" ]; then

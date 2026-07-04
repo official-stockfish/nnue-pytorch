@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [master]
     paths:
+      - ".github/workflows/data-loader-test.yml"
       - "data_loader/**"
       - "setup_script.sh"
       - "compile_data_loader.bat"
