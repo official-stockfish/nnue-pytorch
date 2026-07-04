@@ -19,25 +19,65 @@ class LambdaController(nn.Module):
         self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
 
 
-    def forward(self, loss_params: LossParams, current_epoch: int, max_epoch: int, is_training: bool, scorenet: Tensor) -> Tensor | float:
-        lp = loss_params
-        start_lambda = lp.start_lambda if lp.start_lambda is not None else lp.lambda_
-        end_lambda = lp.end_lambda if lp.end_lambda is not None else lp.lambda_
-        actual_lambda = start_lambda + (end_lambda - start_lambda) * (current_epoch / max_epoch)
+    def forward(self, loss_params: LossParams, current_step: int, max_steps: int, is_training: bool, scorenet: Tensor) -> Tensor | float:
+        cfg = loss_params.lambda_config
+        start_lambda = cfg.start_lambda if cfg.start_lambda is not None else cfg.lambda_
+        end_lambda = cfg.end_lambda if cfg.end_lambda is not None else cfg.lambda_
+
+        if cfg.lambda_schedule_steps >= 0:
+            total_steps = cfg.lambda_schedule_steps
+        else:
+            total_steps = max_steps
+
+        if total_steps > 0:
+            ratio = min(1.0, current_step / total_steps)
+        else:
+            ratio = 1.0
+
+        actual_lambda = start_lambda + (end_lambda - start_lambda) * ratio
+
+        cos_val = 0.0
+        if cfg.lambda_schedule_steps >= 0:
+            if current_step >= cfg.lambda_schedule_steps:
+                cos_val = 1.0 if cfg.lambda_cycle_warmup_pct == 1.0 else 0.0
+            else:
+                warmup_steps = cfg.lambda_cycle_warmup_pct * cfg.lambda_schedule_steps
+                if current_step < warmup_steps:
+                    if warmup_steps > 0:
+                        cos_val = 0.5 * (1.0 - math.cos(math.pi * current_step / warmup_steps))
+                    else:
+                        cos_val = 1.0
+                else:
+                    cooldown_steps = cfg.lambda_schedule_steps - warmup_steps
+                    if cooldown_steps > 0:
+                        cos_val = 0.5 * (1.0 + math.cos(math.pi * (current_step - warmup_steps) / cooldown_steps))
+                    else:
+                        cos_val = 0.0
+
+            actual_lambda = actual_lambda + cfg.lambda_cycle_delta * cos_val
 
         if is_training:
-            if lp.jitter_lambda_batch != 0.0:
-                jitter_lambda_batch = lp.jitter_lambda_batch * math.sqrt(1 - lp.jitter_decay_lambda_batch ** 2)
+            if cfg.jitter_lambda_batch != 0.0:
+                jitter_lambda_batch = cfg.jitter_lambda_batch * math.sqrt(1 - cfg.jitter_decay_lambda_batch ** 2)
                 batch_jitter_delta = jitter_lambda_batch * torch.randn_like(self.jitter_buffer)
-                self.jitter_buffer.mul_(lp.jitter_decay_lambda_batch).add_(batch_jitter_delta)
-                actual_lambda = actual_lambda + self.jitter_buffer.expand_as(scorenet)
+                self.jitter_buffer.mul_(cfg.jitter_decay_lambda_batch).add_(batch_jitter_delta)
+                batch_jitter = self.jitter_buffer.expand_as(scorenet)
+                if cfg.lambda_schedule_steps >= 0 and cfg.lambda_cycle_jitter:
+                    batch_jitter = batch_jitter * cos_val
+                actual_lambda = actual_lambda + batch_jitter
 
-            if lp.jitter_lambda_sample != 0.0:
-                actual_lambda = actual_lambda + torch.randn_like(scorenet) * lp.jitter_lambda_sample
+            if cfg.jitter_lambda_sample != 0.0:
+                sample_jitter = torch.randn_like(scorenet) * cfg.jitter_lambda_sample
+                if cfg.lambda_schedule_steps >= 0 and cfg.lambda_cycle_jitter:
+                    sample_jitter = sample_jitter * cos_val
+                actual_lambda = actual_lambda + sample_jitter
         else:
-            eval_jitter_lambda = lp.jitter_lambda_sample + lp.jitter_lambda_batch
+            eval_jitter_lambda = cfg.jitter_lambda_sample + cfg.jitter_lambda_batch
             if eval_jitter_lambda != 0.0:
-                actual_lambda = actual_lambda + torch.randn_like(scorenet) * eval_jitter_lambda
+                sample_jitter = torch.randn_like(scorenet) * eval_jitter_lambda
+                if cfg.lambda_schedule_steps >= 0 and cfg.lambda_cycle_jitter:
+                    sample_jitter = sample_jitter * cos_val
+                actual_lambda = actual_lambda + sample_jitter
 
         if torch.is_tensor(actual_lambda):
             return actual_lambda.clamp(0.0, 1.0)
