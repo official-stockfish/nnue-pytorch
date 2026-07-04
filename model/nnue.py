@@ -94,6 +94,11 @@ class NNUE(nn.Module):
         self.num_batches_per_epoch = num_batches_per_epoch
         self.param_index = param_index
 
+        self.max_steps = 0
+        if max_epoch is not None and num_batches_per_epoch is not None:
+            self.max_steps = max_epoch * num_batches_per_epoch
+        self.step_counter = 0
+
         # lazy init so `resume_from_model` with config changes works correctly
         self.optimizer_wrapper = None
 
@@ -204,6 +209,8 @@ class NNUE(nn.Module):
     # --- hooks ---
     def on_train_epoch_start(self):
         self.optimizer_wrapper.on_train_epoch_start(self)
+        if self.max_epoch is not None and self.num_batches_per_epoch is not None:
+            self.max_steps = self.max_epoch * self.num_batches_per_epoch
 
     def on_train_epoch_end(self):
         self.optimizer_wrapper.on_train_epoch_end(self)
@@ -287,23 +294,26 @@ class NNUE(nn.Module):
     # --- Training step implementation ---
 
     def train_step(self, batch, current_epoch, global_step):
-        loss = self.compute_loss(batch, current_epoch)
+        _ = current_epoch
+        loss = self.compute_loss(batch, global_step)
         self.loss_metrics["train_loss_epoch"].update(loss)
         return {"loss": loss, "train_loss": loss.detach()}
 
     @torch.no_grad()
     def val_step(self, batch, current_epoch, global_step):
-        loss = self.compute_loss(batch, current_epoch)
+        _ = current_epoch
+        loss = self.compute_loss(batch, global_step)
         self.loss_metrics["val_loss_epoch"].update(loss)
         return {"val_loss": loss}
 
     @torch.no_grad()
     def test_step(self, batch, current_epoch, global_step):
-        loss = self.compute_loss(batch, current_epoch)
+        _ = current_epoch
+        loss = self.compute_loss(batch, global_step)
         self.loss_metrics["test_loss_epoch"].update(loss)
         return {"test_loss": loss}
 
-    def compute_loss(self, batch: tuple[Tensor, ...], current_epoch: int):
+    def compute_loss(self, batch: tuple[Tensor, ...], current_step: int):
         (
             us,
             them,
@@ -322,10 +332,10 @@ class NNUE(nn.Module):
             self.config.use_fake_act_quantization,
             self.config.use_fake_weight_quantization,
         )
-        return self.compute_loss_with_scorenet(scorenet, batch, current_epoch)
+        return self.compute_loss_with_scorenet(scorenet, batch, current_step)
 
     def compute_loss_with_scorenet(
-        self, scorenet: Tensor, batch: tuple[Tensor, ...], current_epoch: int
+        self, scorenet: Tensor, batch: tuple[Tensor, ...], current_step: int
     ):
         (
             _us,
@@ -341,8 +351,8 @@ class NNUE(nn.Module):
 
         actual_lambda = self.lambda_scheduler(
             loss_params=self.config.loss_params,
-            current_epoch=current_epoch,
-            max_epoch=self.max_epoch,
+            current_step=current_step,
+            max_steps=self.max_steps,
             is_training=self.training,
             scorenet=scorenet,
         )
