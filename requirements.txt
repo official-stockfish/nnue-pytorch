@@ -10,4 +10,5 @@ requests
 lightning
 tyro
 ruff
+pytest
 schedulefree
