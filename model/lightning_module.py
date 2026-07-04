@@ -18,7 +18,34 @@ def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
     ]
 
 
+def remap_tablebase_score(
+    score: Tensor,
+    base: float,
+    scale: float,
+    decay: float
+) -> Tensor:
+    mate_score = 32000
+    max_mate_ply = 245
+    tb_mate_threshold = mate_score - max_mate_ply
+
+    abs_score = score.abs()
+    is_mate = abs_score >= tb_mate_threshold
+
+    plies = (mate_score - abs_score).clamp(min=0)
+    remapped_abs = base + (decay ** plies) * scale
+    remapped_score = torch.where(score < 0, -remapped_abs, remapped_abs)
+
+    return torch.where(is_mate, remapped_score, score)
+
+
 def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
+    score = remap_tablebase_score(
+        score,
+        base=loss_params.tb_remap_base,
+        scale=loss_params.tb_remap_scale,
+        decay=loss_params.tb_remap_decay
+    )
+
     # convert the network and search scores to an estimate match result
     # based on the win_rate_model, with scalings and offsets optimized
     q = (scorenet - loss_params.in_offset) / loss_params.in_scaling

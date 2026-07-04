@@ -22,7 +22,7 @@ jobs:
         with:
           repository: official-stockfish/Stockfish
           path: Stockfish
-          ref: 313ea4ab0410872e99f0668c74edc7e49e9a0b6a
+          ref: d5bbc6b67d3184fc39fa87a18596e77e92af990c
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
