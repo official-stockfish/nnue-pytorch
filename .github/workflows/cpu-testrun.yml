@@ -34,9 +34,9 @@ jobs:
       - name: Checkout Stockfish Master
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: official-stockfish/Stockfish
+          repository: TonyCongqianWang/Stockfish
           path: Stockfish
-          ref: f4bcd40409f94bd397a083c5d6243bac6dcc6d85
+          ref: b7160b0011ff62193839863cd2a3c9aca0b75011
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
