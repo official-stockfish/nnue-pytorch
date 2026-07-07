@@ -5,7 +5,7 @@ from typing import Callable
 
 from ..features.input_feature import InputFeature
 from ...quantize import QuantizationManager
-from .doubleFtFunction import DoubleFtFunction
+from .double_ft_functions import double_feature_transform
 
 
 class ComposedFeatureTransformer(nn.Module):
@@ -127,7 +127,7 @@ class ComposedFeatureTransformer(nn.Module):
         )
         ft_max_act = self.quantization.max_ft_activation
 
-        l0_, wpsqt, bpsqt = DoubleFtFunction.apply(
+        l0_, wpsqt, bpsqt = double_feature_transform(
             us,
             them,
             white_indices,

@@ -10,7 +10,7 @@ from model.config import ModelConfig
 from model.modules import (
     ComposedFeatureTransformer,
 )
-from model.modules.feature_transformer.functions import SparseLinearFunction
+from model.modules.feature_transformer.sparse_linear_functions import SparseLinearFunction
 from model.modules.features import get_feature_cls
 from model.quantize import QuantizationManager
 

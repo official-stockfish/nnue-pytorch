@@ -6,8 +6,8 @@ import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model.modules.feature_transformer.doubleFtFunction import DoubleFtFunction
-from model.modules.feature_transformer.fusedDoubleFtFunction import _HAS_CUPY_KERNELS
+from model.modules.feature_transformer.double_ft_functions import double_feature_transform
+from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNELS
 
 
 @pytest.mark.skipif(
@@ -55,7 +55,7 @@ def test_fused_double_ft():
     )
 
     # 1) Fused kernel
-    l0_fused, wpsqt_fused, bpsqt_fused = DoubleFtFunction.apply(
+    l0_fused, wpsqt_fused, bpsqt_fused = double_feature_transform(
         us,
         them,
         white_indices,
@@ -78,7 +78,7 @@ def test_fused_double_ft():
     weight.grad.zero_()
     bias.grad.zero_()
 
-    l0_fallback, wpsqt, bpsqt = DoubleFtFunction.apply(
+    l0_fallback, wpsqt, bpsqt = double_feature_transform(
         us,
         them,
         white_indices,

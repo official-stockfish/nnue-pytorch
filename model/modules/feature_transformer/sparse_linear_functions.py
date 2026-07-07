@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 from torch import autograd
-import numpy as np
 
 _HAS_CUPY_KERNELS = False
 try:
