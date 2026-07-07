@@ -3,11 +3,12 @@ from torch import nn
 
 from typing import Callable
 
-from .input_feature import InputFeature
-
+from ..features.input_feature import InputFeature
 from ...quantize import QuantizationManager
+from .doubleFtFunction import DoubleFtFunction
 
-class ComposedFeatures(nn.Module):
+
+class ComposedFeatureTransformer(nn.Module):
     """Thin coordinator that wraps one or more InputFeature modules.
 
     Each feature owns its own weight parameters. This class owns the shared
@@ -109,3 +110,42 @@ class ComposedFeatures(nn.Module):
     def clip_weights(self, quantization) -> None:
         for f in self.features:
             f.clip_weights(quantization)
+
+    def forward(
+        self,
+        us: torch.Tensor,
+        them: torch.Tensor,
+        white_indices: torch.Tensor,
+        black_indices: torch.Tensor,
+        psqt_indices: torch.Tensor,
+        fake_quantize_acts: bool,
+        fake_quantize_weights: bool,
+        backend: str = "auto",
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        merged, bias = self.merged_weight_and_bias(
+            fake_quantize_weights
+        )
+        ft_max_act = self.quantization.max_ft_activation
+
+        l0_, wpsqt, bpsqt = DoubleFtFunction.apply(
+            us,
+            them,
+            white_indices,
+            black_indices,
+            psqt_indices,
+            merged,
+            bias,
+            ft_max_act,
+            self.l1_size,
+            backend,
+        )
+
+        if fake_quantize_acts:
+            l0_ = self.quantization.fake_quantize_ft_act(l0_)
+        # We multiply by a correction factor,
+        # so we can use only bitshift and multiplication at inference.
+        # When using fake quantization any correction factor
+        # not equal 1.0 will lead to diverging discrete grids
+        l0_ = l0_ * self.quantization.l0_correction_factor
+
+        return l0_, wpsqt, bpsqt

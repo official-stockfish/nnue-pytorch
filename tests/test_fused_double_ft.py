@@ -6,38 +6,8 @@ import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model.modules.feature_transformer.functions import _HAS_CUPY_KERNELS
-from model.modules import (
-    DoubleFeatureTransformer,
-    get_double_ft_impl,
-    set_double_ft_impl,
-)
-
-
-class DummyComposedFeatures:
-    def __init__(self, weight, bias, l1_size):
-        self.weight = weight
-        self.bias = bias
-        self.l1_size = l1_size
-
-        # Simple quantization mock
-        class DummyQuantization:
-            max_ft_activation = 127.0
-            l0_correction_factor = 1.0
-
-            def clip_ft_act(self, x):
-                return torch.clamp(x, 0.0, 127.0)
-
-            def fake_quantize_ft_act(self, x):
-                return x
-
-        self.quantization = DummyQuantization()
-
-    def merged_weight_and_bias(self, fake_quantize_weights=False):
-        b = self.bias[: self.l1_size]
-        pb = torch.zeros_like(self.bias[self.l1_size :], dtype=b.dtype)
-        bias = torch.cat([b, pb], dim=0)
-        return self.weight, bias
+from model.modules.feature_transformer.doubleFtFunction import DoubleFtFunction
+from model.modules.feature_transformer.fusedDoubleFtFunction import _HAS_CUPY_KERNELS
 
 
 @pytest.mark.skipif(
@@ -84,55 +54,52 @@ def test_fused_double_ft():
         output_size, dtype=torch.float32, device="cuda", requires_grad=True
     )
 
-    dummy_features = DummyComposedFeatures(weight, bias, l1)
-    double_ft = DoubleFeatureTransformer(dummy_features)
+    # 1) Fused kernel
+    l0_fused, wpsqt_fused, bpsqt_fused = DoubleFtFunction.apply(
+        us,
+        them,
+        white_indices,
+        black_indices,
+        psqt_indices,
+        weight,
+        bias,
+        127.0,  # max_ft_activation
+        l1,     # l1_size
+        "fused",
+    )
 
-    orig_impl = get_double_ft_impl()
-    try:
-        # 1) Fused kernel
-        set_double_ft_impl("fused")
-        l0_fused, wpsqt_fused, bpsqt_fused = double_ft(
-            us,
-            them,
-            white_indices,
-            black_indices,
-            psqt_indices,
-            fake_quantize_acts=False,
-            fake_quantize_weights=False,
-        )
+    loss_fused = l0_fused.sum() + wpsqt_fused.sum() + bpsqt_fused.sum()
+    loss_fused.backward()
 
-        loss_fused = l0_fused.sum() + wpsqt_fused.sum() + bpsqt_fused.sum()
-        loss_fused.backward()
+    grad_weight_fused = weight.grad.clone()
+    grad_bias_fused = bias.grad.clone()
 
-        grad_weight_fused = weight.grad.clone()
-        grad_bias_fused = bias.grad.clone()
+    # 2) Fallback
+    weight.grad.zero_()
+    bias.grad.zero_()
 
-        # 2) Fallback
-        weight.grad.zero_()
-        bias.grad.zero_()
+    l0_fallback, wpsqt, bpsqt = DoubleFtFunction.apply(
+        us,
+        them,
+        white_indices,
+        black_indices,
+        psqt_indices,
+        weight,
+        bias,
+        127.0,  # max_ft_activation
+        l1,     # l1_size
+        "torch",
+    )
 
-        set_double_ft_impl("torch")
-        l0_fallback, wpsqt, bpsqt = double_ft(
-            us,
-            them,
-            white_indices,
-            black_indices,
-            psqt_indices,
-            fake_quantize_acts=False,
-            fake_quantize_weights=False,
-        )
+    loss_fallback = l0_fallback.sum() + wpsqt.sum() + bpsqt.sum()
+    loss_fallback.backward()
 
-        loss_fallback = l0_fallback.sum() + wpsqt.sum() + bpsqt.sum()
-        loss_fallback.backward()
+    # Compare
+    torch.testing.assert_close(l0_fused, l0_fallback, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(wpsqt_fused, wpsqt, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(bpsqt_fused, bpsqt, atol=1e-5, rtol=1e-4)
 
-        # Compare
-        torch.testing.assert_close(l0_fused, l0_fallback, atol=1e-5, rtol=1e-4)
-        torch.testing.assert_close(wpsqt_fused, wpsqt, atol=1e-5, rtol=1e-4)
-        torch.testing.assert_close(bpsqt_fused, bpsqt, atol=1e-5, rtol=1e-4)
-
-        torch.testing.assert_close(
-            grad_weight_fused, weight.grad, atol=1e-4, rtol=1e-3
-        )
-        torch.testing.assert_close(grad_bias_fused, bias.grad, atol=1e-4, rtol=1e-3)
-    finally:
-        set_double_ft_impl(orig_impl)
+    torch.testing.assert_close(
+        grad_weight_fused, weight.grad, atol=1e-4, rtol=1e-3
+    )
+    torch.testing.assert_close(grad_bias_fused, bias.grad, atol=1e-4, rtol=1e-3)

@@ -8,9 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.config import ModelConfig
 from model.modules import (
-    ComposedFeatures,
-    DoubleFeatureTransformer,
-    set_double_ft_impl,
+    ComposedFeatureTransformer,
 )
 from model.modules.feature_transformer.functions import SparseLinearFunction
 from model.modules.features import get_feature_cls
@@ -32,14 +30,13 @@ def run_bench():
     quantization = QuantizationManager(config.quantize_config)
     feature_classes = get_feature_cls("HalfKAv2_hm^")
 
-    features = ComposedFeatures(
+    double_ft = ComposedFeatureTransformer(
         feature_classes, STRIDE, num_psqt_buckets=8, quantization=quantization
-    )
-    double_ft = DoubleFeatureTransformer(features).to(device)
+    ).to(device)
 
     if hasattr(torch, "compile"):
         try:
-            print("Compiling DoubleFeatureTransformer...")
+            print("Compiling ComposedFeatureTransformer...")
             compiled_double_ft = torch.compile(double_ft)
         except Exception as e:
             print(f"Compilation failed or not supported: {e}")
@@ -48,8 +45,8 @@ def run_bench():
         compiled_double_ft = double_ft
 
     # Extract the exact hardware-allocated feature bounds
-    ACTUAL_INPUT_SIZE = features.NUM_INPUTS
-    ACTUAL_MAX_ACTIVE = features.MAX_ACTIVE_FEATURES
+    ACTUAL_INPUT_SIZE = double_ft.NUM_INPUTS
+    ACTUAL_MAX_ACTIVE = double_ft.MAX_ACTIVE_FEATURES
         
     print(f"Detected internal feature size limit: {ACTUAL_INPUT_SIZE}")
     print(f"Detected max active features: {ACTUAL_MAX_ACTIVE}")
@@ -115,9 +112,8 @@ def run_bench():
     )
 
     for mode in ["torch", "sparse", "fused"]:
-        set_double_ft_impl(mode)
         mode_str = mode.capitalize()
-        print(f"Benchmarking DoubleFeatureTransformer ({mode_str})...")
+        print(f"Benchmarking ComposedFeatureTransformer ({mode_str})...")
 
         try:
             for p in compiled_double_ft.parameters():
@@ -133,6 +129,7 @@ def run_bench():
                     psqt_indices,
                     fake_quantize_acts=True,
                     fake_quantize_weights=True,
+                    backend=mode,
                 )
                 g = l0_.sum() + wpsqt.sum() + bpsqt.sum()
                 g.backward()
@@ -156,6 +153,7 @@ def run_bench():
                 psqt_indices,
                 fake_quantize_acts=True,
                 fake_quantize_weights=True,
+                backend=mode,
             )
             g = l0_.sum() + wpsqt.sum() + bpsqt.sum()
             g.backward()
@@ -164,7 +162,7 @@ def run_bench():
             torch.cuda.synchronize()
         end = time.time()
         print(
-            f"DoubleFeatureTransformer ({mode_str}): { (ITERS * BATCH_SIZE) / (end - start) } pos/s"
+            f"ComposedFeatureTransformer ({mode_str}): { (ITERS * BATCH_SIZE) / (end - start) } pos/s"
         )
 
 

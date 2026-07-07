@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 from .config import ModelConfig
-from .modules import LayerStacks, ComposedFeatures, DoubleFeatureTransformer, get_feature_cls
+from .modules import LayerStacks, ComposedFeatureTransformer, get_feature_cls
 from .quantize import QuantizationManager
 
 class NNUEModel(nn.Module):
@@ -26,16 +26,15 @@ class NNUEModel(nn.Module):
         self.num_psqt_buckets = num_psqt_buckets
         self.num_ls_buckets = num_ls_buckets
 
-        features = ComposedFeatures(feature_cls, self.L1, self.num_psqt_buckets, self.quantization)
-        self.input = DoubleFeatureTransformer(features)
-        self.feature_name = self.input.features.FEATURE_NAME
-        self.input_feature_name = self.input.features.INPUT_FEATURE_NAME
-        self.feature_hash = self.input.features.HASH
+        self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.num_psqt_buckets, self.quantization)
+        self.feature_name = self.input.FEATURE_NAME
+        self.input_feature_name = self.input.INPUT_FEATURE_NAME
+        self.feature_hash = self.input.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
-        self.input.features.init_weights()
+        self.input.init_weights()
 
 
     @torch.no_grad()
@@ -45,7 +44,7 @@ class NNUEModel(nn.Module):
         by the quantization scheme.
         """
         if include_input:
-            self.input.features.clip_weights(self.quantization)
+            self.input.clip_weights(self.quantization)
 
         for group in self.weight_clipping:
             for p in group["params"]:
@@ -73,7 +72,7 @@ class NNUEModel(nn.Module):
 
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
-        self.input.features.zero_virtual_weights()
+        self.input.zero_virtual_weights()
         self.layer_stacks.zero_virtual_weights()
 
 
