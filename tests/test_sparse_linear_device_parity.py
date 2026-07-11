@@ -6,7 +6,7 @@ import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model.modules.feature_transformer.functions import _torch_sparse_linear
+from model.modules.feature_transformer.sparse_linear_functions import _torch_sparse_linear
 
 
 @pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS not available")

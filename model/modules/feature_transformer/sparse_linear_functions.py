@@ -4,7 +4,7 @@ from torch import autograd
 
 _HAS_CUPY_KERNELS = False
 try:
-    from .kernel import (
+    from .sparse_linear_kernel import (
         make_sparse_input_linear_forward_kernel,
         make_sparse_input_linear_backward_kernel,
     )
@@ -85,7 +85,6 @@ class _CudaSparseLinearFunction(autograd.Function):
             output_size,
             dtype=torch.float32,
             device=device,
-            requires_grad=True,
         )
 
         kernel = make_sparse_input_linear_forward_kernel(
@@ -137,15 +136,30 @@ class _CudaSparseLinearFunction(autograd.Function):
         return None, weight_grad, bias_grad
 
 
+# Allowed modes: "auto", "fused", "sparse", "torch"
+
+
 class SparseLinearFunction:
     """
     Uses custom CuPy CUDA kernel when available. Otherwise falls back to a
     PyTorch implementation that works on any device (CPU, MPS).
     """
     @staticmethod
-    def apply(feature_indices, weight, bias):
-        if _HAS_CUPY_KERNELS and feature_indices.is_cuda:
-            return _CudaSparseLinearFunction.apply(
-                feature_indices, weight, bias
-            )
-        return _torch_sparse_linear(feature_indices, weight, bias)
+    def apply(feature_indices, weight, bias, backend: str = "auto"):
+        if backend == "auto":
+            if _HAS_CUPY_KERNELS and feature_indices.is_cuda and weight.is_cuda and bias.is_cuda:
+                return _CudaSparseLinearFunction.apply(feature_indices, weight, bias)
+            return _torch_sparse_linear(feature_indices, weight, bias)
+
+        elif backend == "sparse":
+            if not _HAS_CUPY_KERNELS:
+                raise RuntimeError("CuPy sparse linear kernel is not available.")
+            if not (feature_indices.is_cuda and weight.is_cuda and bias.is_cuda):
+                raise RuntimeError("Sparse CUDA kernel requested but tensors are not on CUDA.")
+            return _CudaSparseLinearFunction.apply(feature_indices, weight, bias)
+
+        elif backend == "torch":
+            return _torch_sparse_linear(feature_indices, weight, bias)
+
+        else:
+            raise ValueError(f"Invalid SparseLinear backend requested: {backend}")

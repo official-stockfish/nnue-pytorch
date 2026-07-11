@@ -1,10 +1,7 @@
 from .feature_transformer import (
-    BaseFeatureTransformer,
-    DoubleFeatureTransformer,
-    FeatureTransformer,
+    ComposedFeatureTransformer,
 )
 from .features import (
-    ComposedFeatureTransformer,
     FullThreats,
     HalfKav2Hm,
     InputFeature,
@@ -17,9 +14,6 @@ from .config import LayerStacksConfig
 from .layer_stacks import LayerStacks
 
 __all__ = [
-    "BaseFeatureTransformer",
-    "DoubleFeatureTransformer",
-    "FeatureTransformer",
     "ComposedFeatureTransformer",
     "FullThreats",
     "HalfKav2Hm",

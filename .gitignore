@@ -11,3 +11,5 @@ easy_train_data
 pgo_data/
 bench
 bench_*
+!tests/**/*.py
+
