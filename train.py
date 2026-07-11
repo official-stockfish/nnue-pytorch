@@ -1,3 +1,4 @@
+import math
 import time
 import warnings
 import os
@@ -18,10 +19,6 @@ import tyro
 from config import TrainingConfig
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
-
-
-import math
-
 
 class TimeLimitAfterCheckpoint(Callback):
     def __init__(self, max_time: str):
