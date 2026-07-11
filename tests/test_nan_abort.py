@@ -43,10 +43,13 @@ class DummyModel(L.LightningModule):
     def configure_optimizers(self):
         return torch.optim.SGD(self.parameters(), lr=0.1)
 
-def test_nan_in_training():
-    model = DummyModel(produce_nan_at_step=3, validation_nan=False)
+@pytest.fixture
+def dummy_dataloader():
     dataset = DummyDataset()
-    dataloader = DataLoader(dataset, batch_size=1)
+    return DataLoader(dataset, batch_size=1)
+
+def test_nan_in_training(dummy_dataloader):
+    model = DummyModel(produce_nan_at_step=3, validation_nan=False)
     
     callback = TerminateOnNaN()
     trainer = L.Trainer(
@@ -57,15 +60,13 @@ def test_nan_in_training():
         logger=False,
     )
     
-    trainer.fit(model, dataloader)
+    trainer.fit(model, dummy_dataloader)
     assert model.global_step < 10, "Should have stopped early due to train loss NaN"
     assert trainer.should_stop is True
     assert callback.nan_detected is True
 
-def test_nan_in_validation():
+def test_nan_in_validation(dummy_dataloader):
     model = DummyModel(produce_nan_at_step=999, validation_nan=True)
-    dataset = DummyDataset()
-    dataloader = DataLoader(dataset, batch_size=1)
     
     callback = TerminateOnNaN()
     trainer = L.Trainer(
@@ -76,6 +77,6 @@ def test_nan_in_validation():
         logger=False,
     )
     
-    trainer.fit(model, dataloader, val_dataloaders=dataloader)
+    trainer.fit(model, dummy_dataloader, val_dataloaders=dummy_dataloader)
     assert trainer.should_stop is True
     assert callback.nan_detected is True
