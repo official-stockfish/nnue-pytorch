@@ -19,16 +19,7 @@ def _recursive_pin(obj):
     return obj
 
 
-def _recursive_to_device(obj, device, non_blocking=False):
-    if isinstance(obj, torch.Tensor):
-        return obj.to(device=device, non_blocking=non_blocking)
-    elif isinstance(obj, dict):
-        return {
-            k: _recursive_to_device(v, device, non_blocking) for k, v in obj.items()
-        }
-    elif isinstance(obj, (list, tuple)):
-        return type(obj)(_recursive_to_device(v, device, non_blocking) for v in obj)
-    return obj
+
 
 
 def _recursive_record_stream(obj, stream):
@@ -302,9 +293,7 @@ class FixedNumBatchesDataset(Dataset):
                             if item is None:
                                 _safe_put(stop_event, prefetch_queue, None)
                                 break
-                            item = _recursive_to_device(
-                                item, prefetch_device, non_blocking=True
-                            )
+
                             ready_event = torch.cuda.Event()
                             ready_event.record(prefetch_stream)
                         item = _CudaPrefetchedItem(item=item, ready_event=ready_event)
