@@ -44,6 +44,10 @@ class TimeLimitAfterCheckpoint(Callback):
 
 
 class TerminateOnNaN(Callback):
+    def __init__(self):
+        super().__init__()
+        self.nan_detected = False
+
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         local_stop = False
         if outputs is not None:
@@ -60,15 +64,18 @@ class TerminateOnNaN(Callback):
                 stop_tensor = torch.tensor(1.0 if local_stop else 0.0, device=pl_module.device)
                 dist.all_reduce(stop_tensor, op=dist.ReduceOp.MAX)
                 if stop_tensor.item() > 0.5:
+                    self.nan_detected = True
                     if local_stop:
                         print(f"\n[TerminateOnNaN] [Rank {trainer.global_rank}] NaN/Inf detected in train loss. Aborting training...", flush=True)
                     trainer.should_stop = True
             else:
                 if local_stop:
+                    self.nan_detected = True
                     print("\n[TerminateOnNaN] NaN/Inf detected in train loss. Aborting training...", flush=True)
                     trainer.should_stop = True
         else:
             if local_stop:
+                self.nan_detected = True
                 print("\n[TerminateOnNaN] NaN/Inf detected in train loss. Aborting training...", flush=True)
                 trainer.should_stop = True
 
@@ -88,15 +95,18 @@ class TerminateOnNaN(Callback):
                 stop_tensor = torch.tensor(1.0 if local_stop else 0.0, device=pl_module.device)
                 dist.all_reduce(stop_tensor, op=dist.ReduceOp.MAX)
                 if stop_tensor.item() > 0.5:
+                    self.nan_detected = True
                     if local_stop:
                         print(f"\n[TerminateOnNaN] [Rank {trainer.global_rank}] NaN/Inf detected in val loss. Aborting training...", flush=True)
                     trainer.should_stop = True
             else:
                 if local_stop:
+                    self.nan_detected = True
                     print("\n[TerminateOnNaN] NaN/Inf detected in val loss. Aborting training...", flush=True)
                     trainer.should_stop = True
         else:
             if local_stop:
+                self.nan_detected = True
                 print("\n[TerminateOnNaN] NaN/Inf detected in val loss. Aborting training...", flush=True)
                 trainer.should_stop = True
 
@@ -548,7 +558,11 @@ def main():
     else:
         trainer.fit(nnue, train, val)
 
-    if 0 <= args.swa_start_epoch < args.max_epochs:
+    # Check if we aborted due to NaN
+    nan_callback = next((c for c in trainer.callbacks if isinstance(c, TerminateOnNaN)), None)
+    aborted_due_to_nan = bool(nan_callback and nan_callback.nan_detected)
+
+    if 0 <= args.swa_start_epoch < args.max_epochs and not aborted_due_to_nan:
         nnue.eval()
         swa_callback.swap_weights(nnue, to_eval=True)
         if val is not None:
@@ -559,17 +573,22 @@ def main():
 
 
     if trainer.is_global_zero:
-        last_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last.ckpt")
-        swa_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last_swa.ckpt")
-        non_swa_path =  os.path.join(tb_logger.log_dir, "checkpoints", "last_non_swa.ckpt")
-        if os.path.exists(swa_savepath):
-            if os.path.exists(last_savepath):
-                print(f"Renaming existing checkpoint at {last_savepath} to {non_swa_path} to preserve original model.")
-                os.rename(last_savepath, non_swa_path)
-            os.rename(swa_savepath, last_savepath)
+        if not aborted_due_to_nan:
+            last_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last.ckpt")
+            swa_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last_swa.ckpt")
+            non_swa_path =  os.path.join(tb_logger.log_dir, "checkpoints", "last_non_swa.ckpt")
+            if os.path.exists(swa_savepath):
+                if os.path.exists(last_savepath):
+                    print(f"Renaming existing checkpoint at {last_savepath} to {non_swa_path} to preserve original model.")
+                    os.rename(last_savepath, non_swa_path)
+                os.rename(swa_savepath, last_savepath)
 
         with open(os.path.join(logdir, "training_finished"), "w"):
             pass
+
+    if aborted_due_to_nan:
+        print("\n[TerminateOnNaN] Exiting with non-zero status code due to NaN/Inf detection.", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
