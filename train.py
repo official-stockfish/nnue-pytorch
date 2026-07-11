@@ -20,6 +20,9 @@ from config import TrainingConfig
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
 
+import math
+
+
 class TimeLimitAfterCheckpoint(Callback):
     def __init__(self, max_time: str):
         parts = list(map(int, max_time.strip().split(":")))
@@ -41,6 +44,66 @@ class TimeLimitAfterCheckpoint(Callback):
             print(
                 f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
             )
+
+
+class TerminateOnNaN(Callback):
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        local_stop = False
+        if outputs is not None:
+            loss = outputs.get("loss") if isinstance(outputs, dict) else outputs
+            if isinstance(loss, torch.Tensor):
+                if not torch.isfinite(loss).all():
+                    local_stop = True
+            elif not math.isfinite(loss):
+                local_stop = True
+
+        if trainer.world_size > 1:
+            import torch.distributed as dist
+            if dist.is_available() and dist.is_initialized():
+                stop_tensor = torch.tensor(1.0 if local_stop else 0.0, device=pl_module.device)
+                dist.all_reduce(stop_tensor, op=dist.ReduceOp.MAX)
+                if stop_tensor.item() > 0.5:
+                    if local_stop:
+                        print(f"\n[TerminateOnNaN] [Rank {trainer.global_rank}] NaN/Inf detected in train loss. Aborting training...", flush=True)
+                    trainer.should_stop = True
+            else:
+                if local_stop:
+                    print("\n[TerminateOnNaN] NaN/Inf detected in train loss. Aborting training...", flush=True)
+                    trainer.should_stop = True
+        else:
+            if local_stop:
+                print("\n[TerminateOnNaN] NaN/Inf detected in train loss. Aborting training...", flush=True)
+                trainer.should_stop = True
+
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+        val_loss = trainer.callback_metrics.get("val_loss")
+        local_stop = False
+        if val_loss is not None:
+            if isinstance(val_loss, torch.Tensor):
+                if not torch.isfinite(val_loss).all():
+                    local_stop = True
+            elif not math.isfinite(val_loss):
+                local_stop = True
+
+        if trainer.world_size > 1:
+            import torch.distributed as dist
+            if dist.is_available() and dist.is_initialized():
+                stop_tensor = torch.tensor(1.0 if local_stop else 0.0, device=pl_module.device)
+                dist.all_reduce(stop_tensor, op=dist.ReduceOp.MAX)
+                if stop_tensor.item() > 0.5:
+                    if local_stop:
+                        print(f"\n[TerminateOnNaN] [Rank {trainer.global_rank}] NaN/Inf detected in val loss. Aborting training...", flush=True)
+                    trainer.should_stop = True
+            else:
+                if local_stop:
+                    print("\n[TerminateOnNaN] NaN/Inf detected in val loss. Aborting training...", flush=True)
+                    trainer.should_stop = True
+        else:
+            if local_stop:
+                print("\n[TerminateOnNaN] NaN/Inf detected in val loss. Aborting training...", flush=True)
+                trainer.should_stop = True
+
+
 
 
 class ConsolidatedCheckpoint(ModelCheckpoint):
@@ -454,6 +517,7 @@ def main():
             checkpoint_callback,
             SimpleLineLogger(refresh_rate=refresh_rate),
             TimeLimitAfterCheckpoint(args.max_time),
+            TerminateOnNaN(),
             M.WeightClippingCallback(),
         ]
     if 0 <= args.swa_start_epoch < args.max_epochs:
