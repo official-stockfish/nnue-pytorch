@@ -520,11 +520,12 @@ def main():
     )
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
+    nan_callback = TerminateOnNaN()
     trainer_callbacks = [
             checkpoint_callback,
             SimpleLineLogger(refresh_rate=refresh_rate),
             TimeLimitAfterCheckpoint(args.max_time),
-            TerminateOnNaN(),
+            nan_callback,
             M.WeightClippingCallback(),
         ]
     if 0 <= args.swa_start_epoch < args.max_epochs:
@@ -559,8 +560,7 @@ def main():
         trainer.fit(nnue, train, val)
 
     # Check if we aborted due to NaN
-    nan_callback = next((c for c in trainer.callbacks if isinstance(c, TerminateOnNaN)), None)
-    aborted_due_to_nan = bool(nan_callback and nan_callback.nan_detected)
+    aborted_due_to_nan = nan_callback.nan_detected
 
     if 0 <= args.swa_start_epoch < args.max_epochs and not aborted_due_to_nan:
         nnue.eval()
