@@ -462,11 +462,17 @@ def main():
             swa_callback
         )
 
+    if n_devices > 1:
+        from lightning.pytorch.strategies import DDPStrategy
+        strategy = DDPStrategy(bucket_cap_mb=10, find_unused_parameters=False)
+    else:
+        strategy = "auto"
+
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
         accelerator=accelerator,
-        strategy="ddp" if n_devices > 1 else "auto",
+        strategy=strategy,
         devices=devices,
         logger=loggers,
         callbacks=trainer_callbacks,
