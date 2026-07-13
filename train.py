@@ -429,7 +429,7 @@ def main():
             print("Disabling torch.compile for accelerator='mps'.")
     else:
         # Since we compile the entire lightning module we have quite a few graph breaks
-        torch._dynamo.config.cache_size_limit = 64
+        torch._dynamo.config.cache_size_limit = 128
         nnue = torch.compile(nnue, backend=args.compile_backend)
     # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
     # see lightning/fabric/plugins/environments/slurm.py near line 110
