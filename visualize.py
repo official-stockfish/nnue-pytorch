@@ -340,9 +340,7 @@ class NNUEVisualizer:
 
                 for i in range(N):
                     l1_weights[2 * i] = l1_weights_[i][self.sorted_input_neurons]
-                    l1_weights[2 * i + 1] = l1_weights_[i][
-                        self.M + self.sorted_input_neurons
-                    ]
+                    l1_weights[2 * i + 1] = l1_weights_[i+N][self.sorted_input_neurons]
                 return l1_weights, N
 
             def get_l2_weights(bucket_id, l2):
@@ -373,6 +371,8 @@ class NNUEVisualizer:
                 self.model.layer_stacks.get_coalesced_layer_stacks()
             ):
                 l1_weights, N = get_l1_weights(bucket_id, l1)
+                # truncate to prevent matshow rendering a blank plot
+                truncated_l1_weights = l1_weights[:, :16]
                 l2_weights = get_l2_weights(bucket_id, l2)
                 output_weights = output.weight.data.numpy()
 
@@ -381,7 +381,7 @@ class NNUEVisualizer:
 
                 ax = axs[0, bucket_id]
                 im = ax.matshow(
-                    np.abs(l1_weights) if plot_abs else l1_weights,
+                    np.abs(truncated_l1_weights) if plot_abs else truncated_l1_weights,
                     vmin=vmin,
                     vmax=vmax,
                     cmap=cmap,
@@ -407,7 +407,7 @@ class NNUEVisualizer:
                 )
 
             row_names = ["bucket {}".format(i) for i in range(num_buckets)]
-            col_names = ["l1", "l2", "output"]
+            col_names = ["l1 (truncated)", "l2", "output"]
             for i in range(3):
                 for j in range(num_buckets):
                     ax = axs[i, j]
