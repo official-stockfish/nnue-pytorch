@@ -307,55 +307,25 @@ namespace binpack
             auto worker = [this]()
             {
                 std::vector<unsigned char> m_chunk{};
-                std::optional<PackedMoveScoreListReader> m_movelistReader(std::nullopt);
-                std::size_t m_offset(0);
+                ChunkReader m_chunkReader{};
                 std::vector<TrainingDataEntry> m_localBuffer;
                 m_localBuffer.reserve(threadBufferSize);
 
-                bool isEnd = fetchNextChunkFromSharedQueue(m_offset, m_chunk);
+                bool isEnd = fetchNextChunkFromSharedQueue(m_chunkReader, m_chunk);
 
                 while(!isEnd && !m_stopFlag.load())
                 {
                     while (m_localBuffer.size() < threadBufferSize)
                     {
-                        if (m_movelistReader.has_value())
+                        const auto e = m_chunkReader.next(m_chunk);
+
+                        if (!m_chunkReader.hasNext(m_chunk))
                         {
-                            const auto e = m_movelistReader->nextEntry();
-
-                            if (!m_movelistReader->hasNext())
-                            {
-                                m_offset += m_movelistReader->numReadBytes();
-                                m_movelistReader.reset();
-
-                                isEnd = fetchNextChunkFromSharedQueue(m_offset, m_chunk);
-                            }
-
-                            if (!m_skipPredicate || !m_skipPredicate(e))
-                                m_localBuffer.emplace_back(e);
+                            isEnd = fetchNextChunkFromSharedQueue(m_chunkReader, m_chunk);
                         }
-                        else
-                        {
-                            PackedTrainingDataEntry packed;
-                            std::memcpy(&packed, m_chunk.data() + m_offset, sizeof(PackedTrainingDataEntry));
-                            m_offset += sizeof(PackedTrainingDataEntry);
 
-                            const std::uint16_t numPlies = (m_chunk[m_offset] << 8) | m_chunk[m_offset + 1];
-                            m_offset += 2;
-
-                            const auto e = unpackEntry(packed);
-
-                            if (numPlies > 0)
-                            {
-                                m_movelistReader.emplace(e, reinterpret_cast<unsigned char*>(m_chunk.data()) + m_offset, numPlies);
-                            }
-                            else
-                            {
-                                isEnd = fetchNextChunkFromSharedQueue(m_offset, m_chunk);
-                            }
-
-                            if (!m_skipPredicate || !m_skipPredicate(e))
-                                m_localBuffer.emplace_back(e);
-                        }
+                        if (!m_skipPredicate || !m_skipPredicate(e))
+                            m_localBuffer.emplace_back(e);
 
                         if (isEnd || m_stopFlag.load())
                         {
@@ -510,9 +480,9 @@ namespace binpack
             return m_numRunningWorkers.load() <= 0;
         }
 
-        bool fetchNextChunkFromSharedQueue(std::size_t& m_offset, std::vector<unsigned char>& m_chunk)
+        bool fetchNextChunkFromSharedQueue(ChunkReader& m_chunkReader, std::vector<unsigned char>& m_chunk)
         {
-            if (m_offset + sizeof(PackedTrainingDataEntry) + 2 > m_chunk.size())
+            if (!m_chunkReader.hasNext(m_chunk))
             {
                 if (m_stopFlag.load())
                 {
@@ -531,7 +501,7 @@ namespace binpack
 
                 if (success)
                 {
-                    m_offset = 0;
+                    m_chunkReader = ChunkReader{};
                     return false;
                 }
                 return true;
