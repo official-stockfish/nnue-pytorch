@@ -116,12 +116,17 @@ class CDataLoaderAPI:
         self._define_prototypes()
 
     def _load_library(self):
-        for lib in glob.glob("./build/*training_data_loader.*"):
-            if not (
-                lib.endswith(".so") or lib.endswith("dll") or lib.endswith(".dylib")
-            ):
-                continue
-            return ctypes.cdll.LoadLibrary(os.path.abspath(lib))
+        candidates = []
+        for pattern in (
+            "./build/**/*training_data_loader.*",
+            "./build/*training_data_loader.*",
+        ):
+            for lib in glob.glob(pattern, recursive=True):
+                if lib.endswith((".so", ".dll", ".dylib")):
+                    candidates.append(os.path.abspath(lib))
+
+        for lib in sorted(set(candidates), key=os.path.getmtime, reverse=True):
+            return ctypes.cdll.LoadLibrary(lib)
         raise FileNotFoundError("Cannot find data_loader shared library.")
 
     def _define_prototypes(self):

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from .full_threats import FullThreats
 from .halfka_v2_hm import HalfKav2Hm
 from .input_feature import InputFeature
+from .pp_3wide import PP3Wide
 
 import tyro
 from typing import Annotated
@@ -13,7 +14,10 @@ from typing import Annotated
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "HalfKAv2_hm^": HalfKav2Hm,
     "Full_Threats": FullThreats,
+    "PP_3Wide": PP3Wide,
 }
+
+DEFAULT_FEATURES = "Full_Threats+PP_3Wide+HalfKAv2_hm^"
 
 
 def get_feature_cls(name: str) -> list[Callable[[int], InputFeature]]:
@@ -32,25 +36,26 @@ class FeatureConfig:
         tyro.conf.arg(
             help="The feature set to use. Available: "
             + ", ".join(get_available_features())
-            + ". Combine with +, e.g. Full_Threats+HalfKAv2_hm^"
+            + ". Combine with +, e.g. Full_Threats+PP_3Wide+HalfKAv2_hm^"
         ),
-    ] = "Full_Threats+HalfKAv2_hm^"
+    ] = DEFAULT_FEATURES
 
 
 def add_feature_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--features",
         dest="features",
-        default="Full_Threats+HalfKAv2_hm^",
+        default=DEFAULT_FEATURES,
         help="The feature set to use. Available: "
         + ", ".join(get_available_features())
-        + ". Combine with +, e.g. Full_Threats+HalfKAv2_hm^",
+        + ". Combine with +, e.g. Full_Threats+PP_3Wide+HalfKAv2_hm^",
     )
 
 
 __all__ = [
     "HalfKav2Hm",
     "FullThreats",
+    "PP3Wide",
     "InputFeature",
     "get_feature_cls",
     "get_available_features",
