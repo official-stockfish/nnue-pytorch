@@ -103,6 +103,13 @@ namespace binpack
             m_file.seekg(0, std::ios_base::beg);
         }
 
+        void readNextChunkInto(std::vector<unsigned char>& buffer)
+        {
+            const auto size = readChunkHeader().chunkSize;
+            buffer.resize(size);
+            m_file.read(reinterpret_cast<char*>(buffer.data()), size);
+        }
+
         [[nodiscard]] bool skipChunks(std::size_t n, std::size_t* skipped_out)
         {
             if (skipped_out) *skipped_out = 0;
@@ -197,6 +204,24 @@ namespace binpack
             return { size };
         }
     };
+
+    template <typename T>
+    [[nodiscard]] bool read_chunk_into(T& reader, std::vector<unsigned char>& buffer)
+    {
+        if (!reader.hasNextChunk())
+        {
+            return false;
+        }
+
+        reader.readNextChunkInto(buffer);
+        return true;
+    }
+
+    template <typename T>
+    [[nodiscard]] bool readChunkInto(T& reader, std::vector<unsigned char>& buffer)
+    {
+        return read_chunk_into(reader, buffer);
+    }
 
 
     [[nodiscard]] inline TrainingDataEntry packedSfenValueToTrainingDataEntry(const nodchip::PackedSfenValue& psv)
@@ -452,6 +477,89 @@ namespace binpack
         std::size_t m_readOffset = 0;
         std::int16_t m_lastScore = 0;
         std::uint16_t m_numReadPlies = 0;
+    };
+
+    struct ChunkReader
+    {
+        [[nodiscard]] bool hasNext(const std::vector<unsigned char>& chunk) const
+        {
+            if (m_movelistReader.has_value() && m_movelistReader->hasNext())
+            {
+                return true;
+            }
+
+            return !m_isEnd && m_offset + sizeof(PackedTrainingDataEntry) + 2 <= chunk.size();
+        }
+
+        [[nodiscard]] TrainingDataEntry next(std::vector<unsigned char>& chunk)
+        {
+            if (m_movelistReader.has_value())
+            {
+                auto& reader = m_movelistReader.value();
+                const auto entry = reader.nextEntry();
+
+                if (!reader.hasNext())
+                {
+                    m_offset += reader.numReadBytes();
+                    m_movelistReader.reset();
+                    finishIfAtEnd(chunk);
+                }
+
+                return entry;
+            }
+
+            const auto entry = readEntry(chunk);
+
+            const std::uint16_t numPlies = readPlies(chunk);
+
+            if (numPlies > 0)
+            {
+                m_movelistReader.emplace(entry, chunk.data() + m_offset, numPlies);
+            }
+            else
+            {
+                finishIfAtEnd(chunk);
+            }
+
+            return entry;
+        }
+
+    private:
+        std::optional<PackedMoveScoreListReader> m_movelistReader;
+        std::size_t m_offset = 0;
+        bool m_isEnd = false;
+
+        [[nodiscard]] TrainingDataEntry readEntry(const std::vector<unsigned char>& chunk)
+        {
+            const auto size = sizeof(PackedTrainingDataEntry);
+
+            assert(m_offset + size <= chunk.size());
+
+            PackedTrainingDataEntry packed;
+            std::memcpy(&packed, chunk.data() + m_offset, sizeof(PackedTrainingDataEntry));
+            m_offset += size;
+
+            return unpackEntry(packed);
+        }
+
+        [[nodiscard]] std::uint16_t readPlies(const std::vector<unsigned char>& chunk)
+        {
+            assert(m_offset + 2 <= chunk.size());
+
+            const std::uint16_t ply =
+                (static_cast<std::uint16_t>(chunk[m_offset]) << 8)
+                | static_cast<std::uint16_t>(chunk[m_offset + 1]);
+            m_offset += 2;
+            return ply;
+        }
+
+        void finishIfAtEnd(const std::vector<unsigned char>& chunk)
+        {
+            if (m_offset + sizeof(PackedTrainingDataEntry) + 2 > chunk.size())
+            {
+                m_isEnd = true;
+            }
+        }
     };
 
     struct PackedMoveScoreList
@@ -711,8 +819,7 @@ namespace binpack
         CompressedTrainingDataEntryReader(std::string path, std::ios_base::openmode om = std::ios_base::app) :
             m_inputFile(path, om | std::ios_base::in),
             m_chunk(),
-            m_movelistReader(std::nullopt),
-            m_offset(0),
+            m_chunkReader(),
             m_isEnd(false)
         {
             if (!m_inputFile.hasNextChunk())
@@ -732,35 +839,9 @@ namespace binpack
 
         [[nodiscard]] TrainingDataEntry next()
         {
-            if (m_movelistReader.has_value())
-            {
-                const auto e = m_movelistReader->nextEntry();
+            const auto e = m_chunkReader.next(m_chunk);
 
-                if (!m_movelistReader->hasNext())
-                {
-                    m_offset += m_movelistReader->numReadBytes();
-                    m_movelistReader.reset();
-
-                    fetchNextChunkIfNeeded();
-                }
-
-                return e;
-            }
-
-            PackedTrainingDataEntry packed;
-            std::memcpy(&packed, m_chunk.data() + m_offset, sizeof(PackedTrainingDataEntry));
-            m_offset += sizeof(PackedTrainingDataEntry);
-
-            const std::uint16_t numPlies = (m_chunk[m_offset] << 8) | m_chunk[m_offset + 1];
-            m_offset += 2;
-
-            const auto e = unpackEntry(packed);
-
-            if (numPlies > 0)
-            {
-                m_movelistReader.emplace(e, reinterpret_cast<unsigned char*>(m_chunk.data()) + m_offset, numPlies);
-            }
-            else
+            if (!m_chunkReader.hasNext(m_chunk))
             {
                 fetchNextChunkIfNeeded();
             }
@@ -771,24 +852,24 @@ namespace binpack
     private:
         CompressedTrainingDataFile m_inputFile;
         std::vector<unsigned char> m_chunk;
-        std::optional<PackedMoveScoreListReader> m_movelistReader;
-        std::size_t m_offset;
+        ChunkReader m_chunkReader;
         bool m_isEnd;
 
         void fetchNextChunkIfNeeded()
         {
-            if (m_offset + sizeof(PackedTrainingDataEntry) + 2 > m_chunk.size())
+            if (m_chunkReader.hasNext(m_chunk))
             {
-                if (m_inputFile.hasNextChunk())
-                {
-                    m_chunk = m_inputFile.readNextChunk();
-                    m_offset = 0;
-                }
-                else
-                {
-                    m_isEnd = true;
-                }
+                return;
             }
+
+            if (m_inputFile.hasNextChunk())
+            {
+                m_inputFile.readNextChunkInto(m_chunk);
+                m_chunkReader = ChunkReader{};
+                return;
+            }
+
+            m_isEnd = true;
         }
     };
 }
