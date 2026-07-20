@@ -130,6 +130,10 @@ What this document DOES NOT contain:
     + [A part of the feature transformer directly forwarded to the output.](#a-part-of-the-feature-transformer-directly-forwarded-to-the-output)
     + [Multiple PSQT outputs and multiple subnetworks](#multiple-psqt-outputs-and-multiple-subnetworks)
 * [Historical Stockfish evaluation network architectures](#historical-stockfish-evaluation-network-architectures)
+    + ["SFNNv16" architecture](#sfnnv16-architecture)
+    + ["SFNNv15" architecture](#sfnnv15-architecture)
+    + ["SFNNv14.1" architecture](#sfnnv141-architecture)
+    + ["SFNNv14" architecture](#sfnnv14-architecture)
     + ["SFNNv13" architecture](#sfnnv13-architecture)
     + ["SFNNv12" architecture](#sfnnv12-architecture)
     + ["SFNNv11" architecture](#sfnnv11-architecture)
@@ -2987,6 +2991,38 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 ```
 
 ## Historical Stockfish evaluation network architectures
+
+### "SFNNv16" architecture
+
+Uses Full_Threats, PP_3Wide, and HalfKAv2_hm input features.
+
+2026-07-?? - *
+
+![](img/SFNNv16_architecture_detailed_v2.svg)
+
+### "SFNNv15" architecture
+
+Same as "SFNNv14.1" with an activated residual main subnet.
+
+2026-07-03 - 2026-07-??
+
+![](img/SFNNv15_architecture_detailed_v2.svg)
+
+### "SFNNv14.1" architecture
+
+Same as "SFNNv14" with updated fixed-point quantization.
+
+2026-05-26 - 2026-07-03
+
+![](img/SFNNv14.1_architecture_detailed_v2.svg)
+
+### "SFNNv14" architecture
+
+Uses Full_Threats with opposed-pawn features and HalfKAv2_hm input features.
+
+2026-04-02 - 2026-05-26
+
+![](img/SFNNv14_architecture_detailed_v2.svg)
 
 ### "SFNNv13" architecture
 
