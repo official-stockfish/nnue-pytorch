@@ -2994,15 +2994,13 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 ### "SFNNv16" architecture
 
-Uses Full_Threats, PP_3Wide, and HalfKAv2_hm input features.
+Added PP_3Wide features.
 
 2026-07-?? - *
 
 ![](img/SFNNv16_architecture_detailed_v2.svg)
 
 ### "SFNNv15" architecture
-
-Same as "SFNNv14.1" with an activated residual main subnet.
 
 2026-07-03 - 2026-07-??
 
@@ -3018,7 +3016,7 @@ Same as "SFNNv14" with updated fixed-point quantization.
 
 ### "SFNNv14" architecture
 
-Uses Full_Threats with opposed-pawn features and HalfKAv2_hm input features.
+Added opposed-pawn features to FullThreats.
 
 2026-04-02 - 2026-05-26
 
@@ -3036,7 +3034,7 @@ Same as "SFNNv12" with L2 size increased to 32.
 
 ### "SFNNv12" architecture
 
-Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 82672 indices.
+Removed king to piece threats from FullThreats.
 
 2026-02-12 - 2026-02-18
 
@@ -3046,7 +3044,7 @@ Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 8267
 
 ### "SFNNv11" architecture
 
-Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 89392 indices.
+Removed piece to king threats from FullThreats.
 
 2026-02-04 - 2026-02-12
 
@@ -3056,7 +3054,7 @@ Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 8939
 
 ### "SFNNv10" architecture
 
-Same as "SFNNv5" with FullThreats+HalfKAv2_hm input features, L1 size reduced to 1024, and 255 as the feature transformer quantization scale.
+Added FullThreats input features, L1 size reduced to 1024, and used 255 as the feature transformer quantization scale.
 
 2025-11-12 - 2026-02-04
 
@@ -3066,7 +3064,7 @@ Same as "SFNNv5" with FullThreats+HalfKAv2_hm input features, L1 size reduced to
 
 ### "SFNNv9" architecture
 
-Same as "SFNNv5" with L1 size increased to 3072.
+Same as "SFNNv8" with L1 size increased to 3072.
 
 2024-04-01 - 2025-11-12
 
@@ -3076,7 +3074,7 @@ Same as "SFNNv5" with L1 size increased to 3072.
 
 ### "SFNNv8" architecture
 
-Same as "SFNNv5" with L1 size increased to 2560.
+Same as "SFNNv7" with L1 size increased to 2560.
 
 2023-09-22 - 2024-04-01
 
@@ -3086,7 +3084,7 @@ Same as "SFNNv5" with L1 size increased to 2560.
 
 ### "SFNNv7" architecture
 
-Same as "SFNNv5" with L1 size increased to 2048.
+Same as "SFNNv6" with L1 size increased to 2048.
 
 2023-07-01 - 2023-09-22
 
