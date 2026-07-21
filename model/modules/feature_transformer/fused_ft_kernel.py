@@ -36,6 +36,7 @@ void fused_double_ft_forward(
           float* __restrict__ l0_out,
           float* __restrict__ wpsqt_out,
           float* __restrict__ bpsqt_out,
+          float* __restrict__ clamped_out,
     const int32_t        output_size
 ) {
     const uint32_t block_idx = blockIdx.x;
@@ -86,6 +87,12 @@ void fused_double_ft_forward(
         
         l0_out[block_idx * l1_size + i] = l0_w0 * l0_w1;
         l0_out[block_idx * l1_size + l1_half + i] = l0_b0 * l0_b1;
+
+        const uint32_t clamp_base = block_idx * 4 * l1_half;
+        clamped_out[clamp_base + 0 * l1_half + i] = l0_w0;
+        clamped_out[clamp_base + 1 * l1_half + i] = l0_w1;
+        clamped_out[clamp_base + 2 * l1_half + i] = l0_b0;
+        clamped_out[clamp_base + 3 * l1_half + i] = l0_b1;
     }
     
     if (threadIdx.x == 0) {
@@ -147,6 +154,7 @@ void fused_double_ft_backward(
     const float* __restrict__ grad_l0,
     const float* __restrict__ grad_wpsqt,
     const float* __restrict__ grad_bpsqt,
+    const float* __restrict__ clamped_out,
           float* __restrict__ grad_weight,
           float* __restrict__ grad_bias,
     const int32_t        output_size
@@ -166,46 +174,21 @@ void fused_double_ft_backward(
     #pragma unroll
     for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
         uint32_t i = slice_offset + s;
-        float w0 = __ldg(&bias[i]);
-        float w1 = __ldg(&bias[i + l1_half]);
-        float b0 = __ldg(&bias[i]);
-        float b1 = __ldg(&bias[i + l1_half]);
-        
-        for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-            int w_idx = w_idx_row[k];
-            if (w_idx != -1) {
-                w0 += __ldg(&weight[w_idx * output_size + i]);
-                w1 += __ldg(&weight[w_idx * output_size + i + l1_half]);
-            } else break;
-        }
-        
-        for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-            int b_idx = b_idx_row[k];
-            if (b_idx != -1) {
-                b0 += __ldg(&weight[b_idx * output_size + i]);
-                b1 += __ldg(&weight[b_idx * output_size + i + l1_half]);
-            } else break;
-        }
-        
-        float l0_w0 = us_val * w0 + them_val * b0;
-        float l0_w1 = us_val * w1 + them_val * b1;
-        float l0_b0 = us_val * b0 + them_val * w0;
-        float l0_b1 = us_val * b1 + them_val * w1;
-        
-        float clamped_w0 = l0_w0; if (clamped_w0 < 0.0f) clamped_w0 = 0.0f; else if (clamped_w0 > max_ft_act) clamped_w0 = max_ft_act;
-        float clamped_w1 = l0_w1; if (clamped_w1 < 0.0f) clamped_w1 = 0.0f; else if (clamped_w1 > max_ft_act) clamped_w1 = max_ft_act;
-        float clamped_b0 = l0_b0; if (clamped_b0 < 0.0f) clamped_b0 = 0.0f; else if (clamped_b0 > max_ft_act) clamped_b0 = max_ft_act;
-        float clamped_b1 = l0_b1; if (clamped_b1 < 0.0f) clamped_b1 = 0.0f; else if (clamped_b1 > max_ft_act) clamped_b1 = max_ft_act;
-        
+        const uint32_t clamp_base = block_idx * 4 * l1_half;
+        float clamped_w0 = __ldg(&clamped_out[clamp_base + 0 * l1_half + i]);
+        float clamped_w1 = __ldg(&clamped_out[clamp_base + 1 * l1_half + i]);
+        float clamped_b0 = __ldg(&clamped_out[clamp_base + 2 * l1_half + i]);
+        float clamped_b1 = __ldg(&clamped_out[clamp_base + 3 * l1_half + i]);
+
         float g_l0_w0 = __ldg(&grad_l0[block_idx * l1_size + i]) * clamped_w1;
         float g_l0_w1 = __ldg(&grad_l0[block_idx * l1_size + i]) * clamped_w0;
         float g_l0_b0 = __ldg(&grad_l0[block_idx * l1_size + l1_half + i]) * clamped_b1;
         float g_l0_b1 = __ldg(&grad_l0[block_idx * l1_size + l1_half + i]) * clamped_b0;
-        
-        if (l0_w0 <= 0.0f || l0_w0 >= max_ft_act) g_l0_w0 = 0.0f;
-        if (l0_w1 <= 0.0f || l0_w1 >= max_ft_act) g_l0_w1 = 0.0f;
-        if (l0_b0 <= 0.0f || l0_b0 >= max_ft_act) g_l0_b0 = 0.0f;
-        if (l0_b1 <= 0.0f || l0_b1 >= max_ft_act) g_l0_b1 = 0.0f;
+
+        if (clamped_w0 == 0.0f || clamped_w0 == max_ft_act) g_l0_w0 = 0.0f;
+        if (clamped_w1 == 0.0f || clamped_w1 == max_ft_act) g_l0_w1 = 0.0f;
+        if (clamped_b0 == 0.0f || clamped_b0 == max_ft_act) g_l0_b0 = 0.0f;
+        if (clamped_b1 == 0.0f || clamped_b1 == max_ft_act) g_l0_b1 = 0.0f;
         
         float g_w0 = us_val * g_l0_w0 + them_val * g_l0_b0;
         float g_b0 = them_val * g_l0_w0 + us_val * g_l0_b0;
