@@ -2996,13 +2996,17 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 Added PP_3Wide features.
 
-2026-07-?? - *
+2026-07-20 - *
+
+[Commit f4bcd40409f94bd397a083c5d6243bac6dcc6d85](https://github.com/official-stockfish/Stockfish/commit/f4bcd40409f94bd397a083c5d6243bac6dcc6d85)
 
 ![](img/SFNNv16_architecture_detailed_v2.svg)
 
 ### "SFNNv15" architecture
 
-2026-07-03 - 2026-07-??
+2026-07-03 - 2026-07-20
+
+[Commit e33bb26ee7320629dd9114a936a38e6f4d43d52a](https://github.com/official-stockfish/Stockfish/commit/e33bb26ee7320629dd9114a936a38e6f4d43d52a)
 
 ![](img/SFNNv15_architecture_detailed_v2.svg)
 
@@ -3012,6 +3016,8 @@ Same as "SFNNv14" with updated fixed-point quantization.
 
 2026-05-26 - 2026-07-03
 
+[Commit 313ea4ab0410872e99f0668c74edc7e49e9a0b6a](https://github.com/official-stockfish/Stockfish/commit/313ea4ab0410872e99f0668c74edc7e49e9a0b6a)
+
 ![](img/SFNNv14.1_architecture_detailed_v2.svg)
 
 ### "SFNNv14" architecture
@@ -3020,13 +3026,15 @@ Added opposed-pawn features to FullThreats.
 
 2026-04-02 - 2026-05-26
 
+[Commit 5eeca7392ee90b7a43da69e647e3d596e42992fd](https://github.com/official-stockfish/Stockfish/commit/5eeca7392ee90b7a43da69e647e3d596e42992fd)
+
 ![](img/SFNNv14_architecture_detailed_v2.svg)
 
 ### "SFNNv13" architecture
 
 Same as "SFNNv12" with L2 size increased to 32.
 
-2026-02-18 - *
+2026-02-18 - 2026-04-02
 
 [Commit a6d055d7e27ab3e29a42e8b94215102824760057](https://github.com/official-stockfish/Stockfish/commit/a6d055d7e27ab3e29a42e8b94215102824760057)
 
