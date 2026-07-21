@@ -16,7 +16,6 @@ except (ImportError, OSError, RuntimeError):
 class FusedDoubleFtFunction(autograd.Function):
     @staticmethod
     def forward(ctx, us, them, white_indices, black_indices, psqt_indices, weight, bias, max_ft_activation, l1_size):
-        ctx.save_for_backward(us, them, white_indices, black_indices, psqt_indices, weight, bias)
         ctx.max_ft_activation = float(max_ft_activation)
         ctx.l1_size = int(l1_size)
 
@@ -46,10 +45,12 @@ class FusedDoubleFtFunction(autograd.Function):
 
         batch_size = white_indices.shape[0]
         max_active_features = white_indices.shape[1]
+        l1_half = l1_size // 2
 
         l0_ = torch.empty(batch_size, l1_size, dtype=torch.float32, device=us.device)
         wpsqt = torch.empty(batch_size, 1, dtype=torch.float32, device=us.device)
         bpsqt = torch.empty(batch_size, 1, dtype=torch.float32, device=us.device)
+        clamped_out = torch.empty(batch_size, 4, l1_half, dtype=torch.float32, device=us.device)
 
         output_size = bias.shape[0]
         kernel = make_fused_double_ft_forward_kernel(max_active_features, l1_size)
@@ -67,15 +68,17 @@ class FusedDoubleFtFunction(autograd.Function):
                 l0_.data_ptr(),
                 wpsqt.data_ptr(),
                 bpsqt.data_ptr(),
+                clamped_out.data_ptr(),
                 np.int32(output_size),
             )
         )
 
+        ctx.save_for_backward(us, them, white_indices, black_indices, psqt_indices, weight, bias, clamped_out)
         return l0_, wpsqt, bpsqt
 
     @staticmethod
     def backward(ctx, grad_l0, grad_wpsqt, grad_bpsqt):
-        us, them, white_indices, black_indices, psqt_indices, weight, bias = ctx.saved_tensors
+        us, them, white_indices, black_indices, psqt_indices, weight, bias, clamped_out = ctx.saved_tensors
         max_ft_activation = ctx.max_ft_activation
         l1_size = ctx.l1_size
 
@@ -105,6 +108,7 @@ class FusedDoubleFtFunction(autograd.Function):
                 grad_l0.data_ptr(),
                 grad_wpsqt.data_ptr(),
                 grad_bpsqt.data_ptr(),
+                clamped_out.data_ptr(),
                 grad_weight.data_ptr(),
                 grad_bias.data_ptr(),
                 np.int32(output_size),
