@@ -25,24 +25,24 @@ typedef long long int64_t;
 
 extern "C" __global__
 void fused_double_ft_forward(
-    const float*   const us,
-    const float*   const them,
-    const int32_t* const white_indices,
-    const int32_t* const black_indices,
-    const int64_t* const psqt_indices,
-    const float*   const weight,
-    const float*   const bias,
+    const float* __restrict__ us,
+    const float* __restrict__ them,
+    const int32_t* __restrict__ white_indices,
+    const int32_t* __restrict__ black_indices,
+    const int64_t* __restrict__ psqt_indices,
+    const float* __restrict__ weight,
+    const float* __restrict__ bias,
     const float          max_ft_act,
-          float*   const l0_out,
-          float*   const wpsqt_out,
-          float*   const bpsqt_out,
+          float* __restrict__ l0_out,
+          float* __restrict__ wpsqt_out,
+          float* __restrict__ bpsqt_out,
     const int32_t        output_size
 ) {
     const uint32_t block_idx = blockIdx.x;
     const uint32_t slice_offset = threadIdx.x * """ + str(output_thread_slice_size) + r""";
     
-    const float us_val = us[block_idx];
-    const float them_val = them[block_idx];
+    const float us_val = __ldg(&us[block_idx]);
+    const float them_val = __ldg(&them[block_idx]);
     
     const int32_t* const w_idx_row = white_indices + block_idx * """ + str(max_active_indices) + r""";
     const int32_t* const b_idx_row = black_indices + block_idx * """ + str(max_active_indices) + r""";
@@ -53,24 +53,24 @@ void fused_double_ft_forward(
     #pragma unroll
     for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
         uint32_t i = slice_offset + s;
-        float w0 = bias[i];
-        float w1 = bias[i + l1_half];
-        float b0 = bias[i];
-        float b1 = bias[i + l1_half];
+        float w0 = __ldg(&bias[i]);
+        float w1 = __ldg(&bias[i + l1_half]);
+        float b0 = __ldg(&bias[i]);
+        float b1 = __ldg(&bias[i + l1_half]);
         
         for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
             int w_idx = w_idx_row[k];
             if (w_idx != -1) {
-                w0 += weight[w_idx * output_size + i];
-                w1 += weight[w_idx * output_size + i + l1_half];
+                w0 += __ldg(&weight[w_idx * output_size + i]);
+                w1 += __ldg(&weight[w_idx * output_size + i + l1_half]);
             } else break;
         }
         
         for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
             int b_idx = b_idx_row[k];
             if (b_idx != -1) {
-                b0 += weight[b_idx * output_size + i];
-                b1 += weight[b_idx * output_size + i + l1_half];
+                b0 += __ldg(&weight[b_idx * output_size + i]);
+                b1 += __ldg(&weight[b_idx * output_size + i + l1_half]);
             } else break;
         }
         
@@ -89,21 +89,21 @@ void fused_double_ft_forward(
     }
     
     if (threadIdx.x == 0) {
-        int64_t p_idx = psqt_indices[block_idx];
-        float w_psqt_val = bias[l1_size + p_idx];
+        int64_t p_idx = __ldg(&psqt_indices[block_idx]);
+        float w_psqt_val = __ldg(&bias[l1_size + p_idx]);
         for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
             int w_idx = w_idx_row[k];
             if (w_idx != -1) {
-                w_psqt_val += weight[w_idx * output_size + l1_size + p_idx];
+                w_psqt_val += __ldg(&weight[w_idx * output_size + l1_size + p_idx]);
             } else break;
         }
         wpsqt_out[block_idx] = w_psqt_val;
 
-        float b_psqt_val = bias[l1_size + p_idx];
+        float b_psqt_val = __ldg(&bias[l1_size + p_idx]);
         for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
             int b_idx = b_idx_row[k];
             if (b_idx != -1) {
-                b_psqt_val += weight[b_idx * output_size + l1_size + p_idx];
+                b_psqt_val += __ldg(&weight[b_idx * output_size + l1_size + p_idx]);
             } else break;
         }
         bpsqt_out[block_idx] = b_psqt_val;
@@ -136,26 +136,26 @@ typedef long long int64_t;
 
 extern "C" __global__
 void fused_double_ft_backward(
-    const float*   const us,
-    const float*   const them,
-    const int32_t* const white_indices,
-    const int32_t* const black_indices,
-    const int64_t* const psqt_indices,
-    const float*   const weight,
-    const float*   const bias,
+    const float* __restrict__ us,
+    const float* __restrict__ them,
+    const int32_t* __restrict__ white_indices,
+    const int32_t* __restrict__ black_indices,
+    const int64_t* __restrict__ psqt_indices,
+    const float* __restrict__ weight,
+    const float* __restrict__ bias,
     const float          max_ft_act,
-    const float*   const grad_l0,
-    const float*   const grad_wpsqt,
-    const float*   const grad_bpsqt,
-          float*   const grad_weight,
-          float*   const grad_bias,
+    const float* __restrict__ grad_l0,
+    const float* __restrict__ grad_wpsqt,
+    const float* __restrict__ grad_bpsqt,
+          float* __restrict__ grad_weight,
+          float* __restrict__ grad_bias,
     const int32_t        output_size
 ) {
     const uint32_t block_idx = blockIdx.x;
     const uint32_t slice_offset = threadIdx.x * """ + str(output_thread_slice_size) + r""";
     
-    const float us_val = us[block_idx];
-    const float them_val = them[block_idx];
+    const float us_val = __ldg(&us[block_idx]);
+    const float them_val = __ldg(&them[block_idx]);
     
     const int32_t* const w_idx_row = white_indices + block_idx * """ + str(max_active_indices) + r""";
     const int32_t* const b_idx_row = black_indices + block_idx * """ + str(max_active_indices) + r""";
@@ -166,24 +166,24 @@ void fused_double_ft_backward(
     #pragma unroll
     for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
         uint32_t i = slice_offset + s;
-        float w0 = bias[i];
-        float w1 = bias[i + l1_half];
-        float b0 = bias[i];
-        float b1 = bias[i + l1_half];
+        float w0 = __ldg(&bias[i]);
+        float w1 = __ldg(&bias[i + l1_half]);
+        float b0 = __ldg(&bias[i]);
+        float b1 = __ldg(&bias[i + l1_half]);
         
         for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
             int w_idx = w_idx_row[k];
             if (w_idx != -1) {
-                w0 += weight[w_idx * output_size + i];
-                w1 += weight[w_idx * output_size + i + l1_half];
+                w0 += __ldg(&weight[w_idx * output_size + i]);
+                w1 += __ldg(&weight[w_idx * output_size + i + l1_half]);
             } else break;
         }
         
         for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
             int b_idx = b_idx_row[k];
             if (b_idx != -1) {
-                b0 += weight[b_idx * output_size + i];
-                b1 += weight[b_idx * output_size + i + l1_half];
+                b0 += __ldg(&weight[b_idx * output_size + i]);
+                b1 += __ldg(&weight[b_idx * output_size + i + l1_half]);
             } else break;
         }
         
@@ -197,10 +197,10 @@ void fused_double_ft_backward(
         float clamped_b0 = l0_b0; if (clamped_b0 < 0.0f) clamped_b0 = 0.0f; else if (clamped_b0 > max_ft_act) clamped_b0 = max_ft_act;
         float clamped_b1 = l0_b1; if (clamped_b1 < 0.0f) clamped_b1 = 0.0f; else if (clamped_b1 > max_ft_act) clamped_b1 = max_ft_act;
         
-        float g_l0_w0 = grad_l0[block_idx * l1_size + i] * clamped_w1;
-        float g_l0_w1 = grad_l0[block_idx * l1_size + i] * clamped_w0;
-        float g_l0_b0 = grad_l0[block_idx * l1_size + l1_half + i] * clamped_b1;
-        float g_l0_b1 = grad_l0[block_idx * l1_size + l1_half + i] * clamped_b0;
+        float g_l0_w0 = __ldg(&grad_l0[block_idx * l1_size + i]) * clamped_w1;
+        float g_l0_w1 = __ldg(&grad_l0[block_idx * l1_size + i]) * clamped_w0;
+        float g_l0_b0 = __ldg(&grad_l0[block_idx * l1_size + l1_half + i]) * clamped_b1;
+        float g_l0_b1 = __ldg(&grad_l0[block_idx * l1_size + l1_half + i]) * clamped_b0;
         
         if (l0_w0 <= 0.0f || l0_w0 >= max_ft_act) g_l0_w0 = 0.0f;
         if (l0_w1 <= 0.0f || l0_w1 >= max_ft_act) g_l0_w1 = 0.0f;
@@ -233,9 +233,9 @@ void fused_double_ft_backward(
     }
     
     if (threadIdx.x == 0) {
-        int64_t p_idx = psqt_indices[block_idx];
-        float gw_psqt = grad_wpsqt[block_idx];
-        float gb_psqt = grad_bpsqt[block_idx];
+        int64_t p_idx = __ldg(&psqt_indices[block_idx]);
+        float gw_psqt = __ldg(&grad_wpsqt[block_idx]);
+        float gb_psqt = __ldg(&grad_bpsqt[block_idx]);
         
         atomicAdd(&grad_bias[l1_size + p_idx], gw_psqt + gb_psqt);
         
