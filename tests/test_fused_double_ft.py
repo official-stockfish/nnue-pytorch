@@ -14,14 +14,14 @@ from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNE
     not torch.cuda.is_available() or not _HAS_CUPY_KERNELS,
     reason="CUDA and CuPy required for custom kernel",
 )
-def test_fused_double_ft():
+@pytest.mark.parametrize("l1", [32, 2048])
+def test_fused_double_ft(l1):
     torch.manual_seed(0)
     torch.cuda.manual_seed_all(0)
 
     batch_size = 4
     max_active = 32
     num_inputs = 100
-    l1 = 32
     num_psqt_buckets = 8
 
     output_size = l1 + num_psqt_buckets
