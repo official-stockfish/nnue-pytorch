@@ -62,6 +62,9 @@ class TrainingConfig:
     compile_backend: Literal["inductor", "cudagraphs"] = "inductor"
     """Which backend to use for torch.compile. inductor works well with larger nets, cudagraphs with smaller nets."""
 
+    process_group_backend: Optional[Literal["nccl", "gloo", "mpi"]] = None
+    """Process group backend for DDP. None lets Lightning choose (nccl for CUDA, gloo for CPU)."""
+
     seed: int = 42
     """Torch seed to use."""
 

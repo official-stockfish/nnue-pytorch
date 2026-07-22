@@ -11,6 +11,7 @@ from torch import set_num_threads as t_set_num_threads
 from torch.utils.data import DataLoader
 from lightning.pytorch import loggers as pl_loggers
 from lightning.pytorch.callbacks import Callback, ModelCheckpoint
+from lightning.pytorch.strategies import DDPStrategy
 
 import data_loader
 import model as M
@@ -538,7 +539,18 @@ def main():
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
         accelerator=accelerator,
-        strategy="ddp" if n_devices > 1 else "auto",
+        strategy=(
+            DDPStrategy(
+                process_group_backend=args.process_group_backend,
+                gradient_as_bucket_view=True,
+                static_graph=True,
+                find_unused_parameters=False,
+                bucket_cap_mb=50,
+                broadcast_buffers=False,
+            )
+            if n_devices > 1
+            else "auto"
+        ),
         devices=devices,
         logger=loggers,
         callbacks=trainer_callbacks,
