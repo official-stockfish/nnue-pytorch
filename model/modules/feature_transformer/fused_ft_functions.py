@@ -7,9 +7,11 @@ try:
     from .fused_ft_kernel import (
         make_fused_double_ft_forward_kernel,
         make_fused_double_ft_backward_kernel,
+        BACKWARD_TILE_SIZE,
     )
     _HAS_CUPY_KERNELS = True
 except (ImportError, OSError, RuntimeError):
+    BACKWARD_TILE_SIZE = 1
     pass
 
 
@@ -94,8 +96,9 @@ class FusedDoubleFtFunction(autograd.Function):
         grad_bias = torch.zeros(output_size, dtype=torch.float32, device=us.device)
 
         kernel = make_fused_double_ft_backward_kernel(max_active_features, l1_size)
+        grid_size = (batch_size + BACKWARD_TILE_SIZE - 1) // BACKWARD_TILE_SIZE
         kernel(
-            grid=(batch_size,),
+            grid=(grid_size,),
             args=(
                 us.data_ptr(),
                 them.data_ptr(),
@@ -111,6 +114,7 @@ class FusedDoubleFtFunction(autograd.Function):
                 clamped_out.data_ptr(),
                 grad_weight.data_ptr(),
                 grad_bias.data_ptr(),
+                np.int32(batch_size),
                 np.int32(output_size),
             )
         )
