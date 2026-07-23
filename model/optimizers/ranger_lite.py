@@ -397,7 +397,7 @@ class RangerLite(torch.optim.Optimizer):
                 )
                 _RangerLiteFusedKernels._adam_kernel(grid=(grid,), block=(block,), args=args)
 
-    def _fused_update_group_phase2(self, group, variance_normalized=None):
+    def _fused_update_group_phase2(self, group, variance_norm_value=None):
         """Apply the fused phase-2 update kernel (moment + optional decay + param).
 
         Assumes variance_ma has already been updated by the caller.
@@ -414,8 +414,8 @@ class RangerLite(torch.optim.Optimizer):
         noise_norm = math.sqrt((1.0 + pnm_factor) ** 2 + pnm_factor ** 2)
 
         wd_factor = 0.0
-        if decay and variance_normalized is not None:
-            wd_factor = float(decay * lr / variance_normalized.item())
+        if decay and variance_norm_value is not None:
+            wd_factor = decay * lr / variance_norm_value
 
         for p in group["params"]:
             if p.grad is None:
@@ -564,7 +564,7 @@ class RangerLite(torch.optim.Optimizer):
                 )
                 _RangerLiteFusedKernels._variance_kernel(grid=(grid,), block=(block,), args=args)
 
-            variance_normalized = None
+            variance_norm_value = None
             if needs_variance_sum:
                 variance_ma_sum = None
                 for p, group in active_params:
@@ -579,9 +579,10 @@ class RangerLite(torch.optim.Optimizer):
                 if not self.param_size:
                     self.param_size = param_size
                 variance_normalized = torch.sqrt(variance_ma_sum / self.param_size).clamp_min(self.eps)
+                variance_norm_value = variance_normalized.item()
 
             for group in self.param_groups:
-                self._fused_update_group_phase2(group, variance_normalized)
+                self._fused_update_group_phase2(group, variance_norm_value)
 
             if self.lookahead_active:
                 self.lookahead_process_step()
