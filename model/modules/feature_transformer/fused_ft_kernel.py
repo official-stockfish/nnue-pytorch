@@ -67,9 +67,6 @@ void fused_double_ft_forward(
             if (w_idx != -1) {
                 w0 += __ldg(&weight[w_idx * output_size + i]);
                 w1 += __ldg(&weight[w_idx * output_size + i + l1_half]);
-                if (threadIdx.x == 0) {
-                    w_psqt_val += __ldg(&weight[w_idx * output_size + l1_size + p_idx]);
-                }
             } else break;
         }
 
@@ -78,9 +75,6 @@ void fused_double_ft_forward(
             if (b_idx != -1) {
                 b0 += __ldg(&weight[b_idx * output_size + i]);
                 b1 += __ldg(&weight[b_idx * output_size + i + l1_half]);
-                if (threadIdx.x == 0) {
-                    b_psqt_val += __ldg(&weight[b_idx * output_size + l1_size + p_idx]);
-                }
             } else break;
         }
 
@@ -105,6 +99,18 @@ void fused_double_ft_forward(
     }
 
     if (threadIdx.x == 0) {
+        for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
+            int w_idx = w_idx_row[k];
+            if (w_idx != -1) {
+                w_psqt_val += __ldg(&weight[w_idx * output_size + l1_size + p_idx]);
+            } else break;
+        }
+        for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
+            int b_idx = b_idx_row[k];
+            if (b_idx != -1) {
+                b_psqt_val += __ldg(&weight[b_idx * output_size + l1_size + p_idx]);
+            } else break;
+        }
         wpsqt_out[block_idx] = w_psqt_val;
         bpsqt_out[block_idx] = b_psqt_val;
     }
@@ -123,12 +129,13 @@ BACKWARD_TILE_SIZE = 4
 _fused_double_ft_backward_kernel_cache = dict()
 
 @torch.compiler.disable(recursive=False)
-def make_fused_double_ft_backward_kernel(max_active_indices: int, l1_size: int, tile_size: int = BACKWARD_TILE_SIZE):
+def make_fused_double_ft_backward_kernel(max_active_indices: int, l1_size: int, tile_size: int = BACKWARD_TILE_SIZE, num_psqt_buckets: int = 8):
     l1_half = l1_size // 2
     num_threads = _get_num_threads_for_backward(l1_half)
     output_thread_slice_size = l1_half // num_threads
-    
-    key = (max_active_indices, l1_size, num_threads, tile_size)
+    output_size = l1_size + num_psqt_buckets
+
+    key = (max_active_indices, l1_size, num_threads, tile_size, num_psqt_buckets)
     if key not in _fused_double_ft_backward_kernel_cache:
         kernel = cp.RawKernel(
             r"""
@@ -162,7 +169,7 @@ void fused_double_ft_backward(
     const int32_t l1_half = """ + str(l1_half) + r""";
     const int32_t tile_size = """ + str(tile_size) + r""";
 
-    __shared__ float shared_grad_bias[""" + str(l1_size + 8) + r"""];
+    __shared__ float shared_grad_bias[""" + str(output_size) + r"""];
     for (int i = threadIdx.x; i < output_size; i += blockDim.x) {
         shared_grad_bias[i] = 0.0f;
     }

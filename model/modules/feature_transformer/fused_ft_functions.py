@@ -95,7 +95,8 @@ class FusedDoubleFtFunction(autograd.Function):
         grad_weight = torch.zeros(weight.shape[0], output_size, dtype=torch.float32, device=us.device)
         grad_bias = torch.zeros(output_size, dtype=torch.float32, device=us.device)
 
-        kernel = make_fused_double_ft_backward_kernel(max_active_features, l1_size)
+        num_psqt_buckets = output_size - l1_size
+        kernel = make_fused_double_ft_backward_kernel(max_active_features, l1_size, num_psqt_buckets=num_psqt_buckets)
         grid_size = (batch_size + BACKWARD_TILE_SIZE - 1) // BACKWARD_TILE_SIZE
         kernel(
             grid=(grid_size,),
