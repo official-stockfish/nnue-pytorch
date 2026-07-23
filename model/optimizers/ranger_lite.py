@@ -566,7 +566,6 @@ class RangerLite(torch.optim.Optimizer):
 
             variance_normalized = None
             if needs_variance_sum:
-                device = active_params[0][0].device
                 variance_ma_sum = None
                 for p, group in active_params:
                     state = self.state[p]
