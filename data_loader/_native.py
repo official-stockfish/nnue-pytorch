@@ -125,8 +125,15 @@ class CDataLoaderAPI:
                 if lib.endswith((".so", ".dll", ".dylib")):
                     candidates.append(os.path.abspath(lib))
 
+        last_error: OSError | None = None
         for lib in sorted(set(candidates), key=os.path.getmtime, reverse=True):
-            return ctypes.cdll.LoadLibrary(lib)
+            try:
+                return ctypes.cdll.LoadLibrary(lib)
+            except OSError as e:
+                last_error = e
+
+        if last_error is not None:
+            raise OSError("Found data_loader shared libraries but failed to load any of them.") from last_error
         raise FileNotFoundError("Cannot find data_loader shared library.")
 
     def _define_prototypes(self):
