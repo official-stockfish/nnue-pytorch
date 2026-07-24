@@ -6,7 +6,9 @@ import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model.modules.feature_transformer.double_ft_functions import double_feature_transform
+from model.modules.feature_transformer.double_ft_functions import (
+    double_feature_transform,
+)
 from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNELS
 
 

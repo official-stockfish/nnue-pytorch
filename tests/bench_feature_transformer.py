@@ -10,7 +10,9 @@ from model.config import ModelConfig
 from model.modules import (
     ComposedFeatureTransformer,
 )
-from model.modules.feature_transformer.sparse_linear_functions import SparseLinearFunction
+from model.modules.feature_transformer.sparse_linear_functions import (
+    SparseLinearFunction,
+)
 from model.modules.features import get_feature_cls
 from model.quantize import QuantizationManager
 
@@ -38,7 +40,7 @@ def run_bench():
         try:
             print("Compiling ComposedFeatureTransformer...")
             compiled_double_ft = torch.compile(double_ft)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Compilation failed or not supported: {e}")
             compiled_double_ft = double_ft
     else:
@@ -106,9 +108,7 @@ def run_bench():
         torch.cuda.synchronize()
     end = time.time()
     print(
-        "Direct SparseLinearFunction: {} pos/s".format(
-            (ITERS * BATCH_SIZE) / (end - start)
-        )
+        f"Direct SparseLinearFunction: {(ITERS * BATCH_SIZE) / (end - start)} pos/s"
     )
 
     for mode in ["torch", "sparse", "fused"]:

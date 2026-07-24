@@ -2,10 +2,10 @@ import csv
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 
-def _make_version(root_dir: Union[str, Path]) -> str:
+def _make_version(root_dir: str | Path) -> str:
     """Return the next version_N string by scanning root_dir/lightning_logs."""
     log_root = Path(root_dir) / "lightning_logs"
     max_version = -1
@@ -21,7 +21,7 @@ def _make_version(root_dir: Union[str, Path]) -> str:
 class _Logger(ABC):
     """Base interface shared by plain loggers."""
 
-    def __init__(self, root_dir: Union[str, Path], version: Optional[str] = None):
+    def __init__(self, root_dir: str | Path, version: str | None = None):
         self._root_dir = Path(root_dir)
         self._version = version if version is not None else _make_version(self._root_dir)
         self._log_dir = self._root_dir / "lightning_logs" / self._version
@@ -36,32 +36,29 @@ class _Logger(ABC):
         return self._version
 
     @abstractmethod
-    def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
+    def log_metrics(self, metrics: dict[str, Any], step: int | None = None) -> None:
         """Log a dictionary of metrics at the given step."""
 
-    def log_epoch_end(self, metrics: Dict[str, Any], epoch: Optional[int] = None) -> None:
+    def log_epoch_end(self, metrics: dict[str, Any], epoch: int | None = None) -> None:
         """Optional hook called at the end of an epoch."""
-        pass
 
-    def finalize(self, status: Optional[str] = None) -> None:
+    def finalize(self, status: str | None = None) -> None:
         """Flush and close any underlying writers."""
-        pass
 
     def save(self) -> None:
         """No-op for parity with PyTorch Lightning logger API."""
-        pass
 
 
 class CSVLogger(_Logger):
     """Plain CSV logger that mirrors PyTorch Lightning's CSVLogger layout."""
 
-    def __init__(self, root_dir: Union[str, Path], version: Optional[str] = None):
+    def __init__(self, root_dir: str | Path, version: str | None = None):
         super().__init__(root_dir, version)
         self._metrics_file = self._log_dir / "metrics.csv"
         self._columns: list[str] = []
         self._file_initialized = False
 
-    def _initialize_columns(self, metrics: Dict[str, Any]) -> None:
+    def _initialize_columns(self, metrics: dict[str, Any]) -> None:
         # Standard ordering: epoch, step, then alphabetically sorted metrics.
         metric_keys = sorted(k for k in metrics if k not in ("epoch", "step"))
         self._columns = ["epoch", "step"] + metric_keys
@@ -72,7 +69,7 @@ class CSVLogger(_Logger):
             writer.writerow(self._columns)
         self._file_initialized = True
 
-    def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
+    def log_metrics(self, metrics: dict[str, Any], step: int | None = None) -> None:
         if not metrics:
             return
 
@@ -114,7 +111,7 @@ class CSVLogger(_Logger):
             writer = csv.writer(f)
             writer.writerow(row)
 
-    def log_epoch_end(self, metrics: Dict[str, Any], epoch: Optional[int] = None) -> None:
+    def log_epoch_end(self, metrics: dict[str, Any], epoch: int | None = None) -> None:
         if epoch is not None and "epoch" not in metrics:
             metrics = {**metrics, "epoch": epoch}
         self.log_metrics(metrics)
@@ -142,7 +139,7 @@ class _NoOpSummaryWriter:
 class TensorBoardLogger(_Logger):
     """Plain TensorBoard logger, or a no-op stub if tensorboard is unavailable."""
 
-    def __init__(self, root_dir: Union[str, Path], version: Optional[str] = None):
+    def __init__(self, root_dir: str | Path, version: str | None = None):
         super().__init__(root_dir, version)
         try:
             from torch.utils.tensorboard import SummaryWriter
@@ -151,7 +148,7 @@ class TensorBoardLogger(_Logger):
 
         self._writer = SummaryWriter(log_dir=str(self._log_dir))
 
-    def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
+    def log_metrics(self, metrics: dict[str, Any], step: int | None = None) -> None:
         if not metrics:
             return
 
@@ -165,12 +162,12 @@ class TensorBoardLogger(_Logger):
             self._writer.add_scalar(key, scalar_value, global_step=step)
         self._writer.flush()
 
-    def log_epoch_end(self, metrics: Dict[str, Any], epoch: Optional[int] = None) -> None:
+    def log_epoch_end(self, metrics: dict[str, Any], epoch: int | None = None) -> None:
         # TensorBoard handles step-based logging; log_epoch_end delegates to
         # log_metrics using the provided epoch as the step if no step is given.
         step = epoch
         self.log_metrics(metrics, step=step)
 
-    def finalize(self, status: Optional[str] = None) -> None:
+    def finalize(self, status: str | None = None) -> None:
         self._writer.flush()
         self._writer.close()

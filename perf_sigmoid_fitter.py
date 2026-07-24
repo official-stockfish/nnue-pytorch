@@ -1,9 +1,11 @@
+import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import curve_fit
-import sys
-import data_loader
 import torch
+from scipy.optimize import curve_fit
+
+import data_loader
 
 
 def sigmoid(x, k):
@@ -14,7 +16,7 @@ def sigmoid(x, k):
 def fit_data(x, y, sigma):
     # 1/361 is the initial guess. It's good enough to find the solution
     p0 = [1 / 361]
-    popt, pcov = curve_fit(sigmoid, x, y, p0, sigma, method="dogbox")
+    popt, _pcov = curve_fit(sigmoid, x, y, p0, sigma, method="dogbox")
     return popt[0]
 
 
@@ -25,7 +27,7 @@ def do_plot(data, filename):
     fig.suptitle(filename)
     x = list(data.keys())
     y = [data[k][1] for k in x]
-    x, y = zip(*list(sorted(zip(x, y), key=lambda x: x[0])))
+    x, y = zip(*sorted(zip(x, y), key=lambda x: x[0]))
     axs[0].plot(x, y)
     axs[0].set_ylabel("density")
     axs[0].set_xlabel("eval")
@@ -42,7 +44,7 @@ def do_plot(data, filename):
     print("inv k: ", 1 / k)
     axs[1].scatter(x, y, label="perf")
     y = [sigmoid(xx, k) for xx in x]
-    axs[1].scatter(x, y, label="sigmoid(x/{})".format(1.0 / k))
+    axs[1].scatter(x, y, label=f"sigmoid(x/{1.0 / k})")
     axs[1].legend(loc="upper left")
     axs[1].set_ylabel("perf")
     axs[1].set_xlabel("eval")
@@ -50,7 +52,7 @@ def do_plot(data, filename):
     # save to a .png file
     plot_filename = ".".join(filename.split(".")[:-1]) + ".png"
     plt.savefig(plot_filename)
-    print("plot saved at {}".format(plot_filename))
+    print(f"plot saved at {plot_filename}")
 
 
 def gather_statistics_from_batches(batches, bucket_size):
@@ -61,17 +63,17 @@ def gather_statistics_from_batches(batches, bucket_size):
     evals and corresponding game outcomes.
     The result is a dictionary of the form { eval : (perf%, count) }
     """
-    data = dict()
+    data = {}
     i = 0
     for batch in batches:
         (
             us,
-            them,
-            white_indices,
-            black_indices,
+            _them,
+            _white_indices,
+            _black_indices,
             outcome,
             score,
-            piece_count,
+            _piece_count,
         ) = batch
         batch_size = len(us)
         bucket = torch.round(score / bucket_size) * bucket_size
@@ -85,7 +87,7 @@ def gather_statistics_from_batches(batches, bucket_size):
             else:
                 data[bucket_id] = (pp, 1)
         i += batch_size
-        print("Loaded {} positions...".format(i))
+        print(f"Loaded {i} positions...")
     return data
 
 
@@ -122,7 +124,7 @@ def show_help():
     print("Usage: python perf_sigmoid_fitter.py filename [count] [bucket_size]")
     print("count is the number of positions. Default: 1000000")
     print("bucket_size determines how the evals are bucketed. Default: 16")
-    print("")
+    print()
     print("This file can be used as a module")
     print("The function `gather_statistics_from_batches` can be used to determine")
     print("the sigmoid scaling factor for each batch during training")

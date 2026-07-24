@@ -6,17 +6,18 @@
 #
 # Modifications and Refactoring by @TonyCongqianWang
 
-import warnings
-import torch
-import math
 import collections
+import math
+import warnings
+
+import torch
 
 try:
     import cupy as cp
     import numpy as np
 
     _HAS_CUPY = True
-except Exception:
+except Exception:  # noqa: BLE001
     cp = None
     np = None
     _HAS_CUPY = False
@@ -229,14 +230,14 @@ class RangerLite(torch.optim.Optimizer):
         normloss_factor=1e-4,
         use_legacy_scoping_bug=False,
     ):
-        defaults = dict(
-            lr=lr,
-            weight_decay=weight_decay,
-            betas=betas,
-            eps=eps,
-            pnm_momentum=pnm_momentum,
-            normloss_factor=normloss_factor,
-        )
+        defaults = {
+            'lr': lr,
+            'weight_decay': weight_decay,
+            'betas': betas,
+            'eps': eps,
+            'pnm_momentum': pnm_momentum,
+            'normloss_factor': normloss_factor,
+        }
         super().__init__(params, defaults)
 
         self.lookahead_active = lookahead_active
@@ -783,14 +784,13 @@ class RangerLite(torch.optim.Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
-                if "lookahead_params" in state:
-                    if "is_swapped" not in state:
-                        # Only swap if we haven't already swapped.
-                        # Perform pointer swap to avoid unnecessary tensor copies.
-                        tmp_ref = p.data
-                        p.data = state["lookahead_params"]
-                        state["lookahead_params"] = tmp_ref
-                        state["is_swapped"] = True
+                if "lookahead_params" in state and "is_swapped" not in state:
+                    # Only swap if we haven't already swapped.
+                    # Perform pointer swap to avoid unnecessary tensor copies.
+                    tmp_ref = p.data
+                    p.data = state["lookahead_params"]
+                    state["lookahead_params"] = tmp_ref
+                    state["is_swapped"] = True
 
     def restore_for_training(self):
         """Restores fast weights for training. Idempotent."""

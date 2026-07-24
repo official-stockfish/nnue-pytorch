@@ -2,8 +2,9 @@ import torch
 from torch import nn
 
 from .config import ModelConfig
-from .modules import LayerStacks, ComposedFeatureTransformer, get_feature_cls
+from .modules import ComposedFeatureTransformer, LayerStacks, get_feature_cls
 from .quantize import QuantizationManager
+
 
 class NNUEModel(nn.Module):
     def __init__(

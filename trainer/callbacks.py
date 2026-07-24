@@ -266,7 +266,7 @@ class CheckpointManager(Callback):
         save_last: bool = True,
         every_n_epochs: int = 20,
         save_top_k: int = -1,
-        dirpath: str = None,
+        dirpath: str | None = None,
     ):
         super().__init__()
         self.save_last = save_last

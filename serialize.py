@@ -1,10 +1,10 @@
 import hashlib
 import os
+from dataclasses import dataclass, field
+from typing import Annotated, Literal
+
 import torch
 import tyro
-
-from dataclasses import dataclass, field
-from typing import Optional, Literal, Annotated, Union
 from tyro.conf import OmitArgPrefixes, Positional
 
 try:
@@ -23,7 +23,7 @@ class SerializeConfig:
     """Ignore target file name and save as nn-<sha>.nnue. If target is a directory,
     the file is placed there; otherwise it goes to dirname(target) or CWD."""
 
-    description: Optional[str] = None
+    description: str | None = None
     """The description string to include in the network.
     Only works when serializing into a .nnue file."""
 
@@ -31,14 +31,14 @@ class SerializeConfig:
     """Compression method to use for FT weights and biases.
     Either 'none' or 'leb128'. Only allowed if saving to .nnue."""
 
-    ft_perm: Optional[str] = None
+    ft_perm: str | None = None
     """Path to a file that defines the permutation to use on the feature transformer."""
 
     ft_optimize: bool = False
     """Whether to perform full feature transformer optimization (ftperm.py)
     on the resulting network. This process is very time consuming."""
 
-    ft_optimize_data: Optional[str] = None
+    ft_optimize_data: str | None = None
     """Path to the dataset to use for FT optimization."""
 
     ft_optimize_count: int = 10000
@@ -48,7 +48,7 @@ class SerializeConfig:
     """Whether to run FT optimization on the resolved torch device.
     Disable this to force FT optimization to run on the CPU instead."""
 
-    device: Union[int, Literal["cpu", "mps"]] = 0
+    device: int | Literal["cpu", "mps"] = 0
     """Device to use for ft_optimize acceleration."""
 
     loader_num_workers: int = 4
@@ -81,7 +81,7 @@ def main():
     nnue_lightning_config = args.nnue_lightning_config
     feature_name = nnue_lightning_config.features
 
-    print("Converting %s to %s" % (args.source, args.target))
+    print(f"Converting {args.source} to {args.target}")
 
     # Treat --out-sha as targeting .nnue even if target doesn't end with .nnue
     target_is_nnue = serialize_config.out_sha or args.target.endswith(".nnue")
@@ -111,17 +111,17 @@ def main():
             if serialize_config.description is None:
                 model_description = reader.description
     else:
-        raise Exception("Invalid network input format.")
+        raise ValueError("Invalid network input format.")
 
     if ft_compression != "none" and not target_is_nnue:
         print("Warning: Compression method for non `.nnue` target ignored.")
         ft_compression = "none"
 
     if ft_compression not in ["none", "leb128"]:
-        raise Exception("Invalid compression method.")
+        raise ValueError("Invalid compression method.")
 
     if serialize_config.ft_optimize and serialize_config.ft_perm is not None:
-        raise Exception("Options --ft_perm and --ft_optimize are mutually exclusive.")
+        raise ValueError("Options --ft_perm and --ft_optimize are mutually exclusive.")
 
     if serialize_config.ft_perm is not None and target_is_nnue:
         import ftperm
@@ -136,14 +136,14 @@ def main():
         import ftperm
 
         if serialize_config.ft_optimize_data is None:
-            raise Exception(
+            raise ValueError(
                 "Invalid dataset path for FT optimization. (--ft_optimize_data)"
             )
         if (
             serialize_config.ft_optimize_count is None
             or serialize_config.ft_optimize_count < 1
         ):
-            raise Exception(
+            raise ValueError(
                 "Invalid number of positions to optimize FT with. (--ft_optimize_count)"
             )
 
@@ -162,7 +162,7 @@ def main():
         )
 
     if args.target.endswith(".ckpt"):
-        raise Exception("Cannot convert into .ckpt")
+        raise ValueError("Cannot convert into .ckpt")
     elif args.target.endswith(".pt"):
         torch.save(nnue, args.target)
     elif target_is_nnue:
@@ -188,7 +188,7 @@ def main():
                 f.write(buf)
             print(f"Wrote {args.target}")
     else:
-        raise Exception("Invalid network output format.")
+        raise ValueError("Invalid network output format.")
 
 
 if __name__ == "__main__":

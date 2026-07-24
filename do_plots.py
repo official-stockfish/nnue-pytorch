@@ -1,10 +1,10 @@
-from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+import argparse
+import collections
+import os
+import re
 
 import matplotlib.pyplot as plt
-import argparse
-import re
-import os
-import collections
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 
 def find_event_files(root_dir):
@@ -34,7 +34,7 @@ def get_list_aggregator(aggregation_mode="avg"):
     elif aggregation_mode == "avg":
         return lambda x: sum(x) / len(x)
     else:
-        raise Exception("Invalid aggregation_mode {}".format(aggregation_mode))
+        raise ValueError(f"Invalid aggregation_mode {aggregation_mode}")
 
 
 def aggregate_dict(values, aggregation_mode="avg"):
@@ -47,7 +47,7 @@ def aggregate_dict(values, aggregation_mode="avg"):
 
     aggregate_list = get_list_aggregator(aggregation_mode)
 
-    res = dict()
+    res = {}
     for k, v in values.items():
         res[k] = aggregate_list(v)
     return res
@@ -127,23 +127,21 @@ def do_plots(out_filename, root_dirs, elo_range, loss_range, split):
             split_root_dirs.sort()
 
         for root_dir in split_root_dirs:
-            print("Processing root_dir {}".format(root_dir))
+            print(f"Processing root_dir {root_dir}")
             tfevents_files = find_event_files(root_dir)
-            print("Found {} tfevents files.".format(len(tfevents_files)))
+            print(f"Found {len(tfevents_files)} tfevents files.")
 
-            val_losses = collections.defaultdict(lambda: [])
-            train_losses = collections.defaultdict(lambda: [])
+            val_losses = collections.defaultdict(list)
+            train_losses = collections.defaultdict(list)
             for i, tfevents_file in enumerate(tfevents_files):
                 print(
-                    "Processing tfevents file {}/{}: {}".format(
-                        i + 1, len(tfevents_files), tfevents_file
-                    )
+                    f"Processing tfevents file {i + 1}/{len(tfevents_files)}: {tfevents_file}"
                 )
                 events_acc = EventAccumulator(tfevents_file, tf_size_guidance)
                 events_acc.Reload()
 
                 vv = events_acc.Scalars("val_loss")
-                print("Found {} val_loss entries.".format(len(vv)))
+                print(f"Found {len(vv)} val_loss entries.")
                 minloss = min([v[2] for v in vv])
                 for v in vv:
                     if v[2] < minloss + loss_range:
@@ -152,7 +150,7 @@ def do_plots(out_filename, root_dirs, elo_range, loss_range, split):
 
                 vv = events_acc.Scalars("train_loss")
                 minloss = min([v[2] for v in vv])
-                print("Found {} train_loss entries.".format(len(vv)))
+                print(f"Found {len(vv)} train_loss entries.")
                 for v in vv:
                     if v[2] < minloss + loss_range:
                         step = v[1]
@@ -172,7 +170,7 @@ def do_plots(out_filename, root_dirs, elo_range, loss_range, split):
 
         ordo_file = find_ordo_file(user_root_dir)
         if ordo_file:
-            print("Found ordo file {}".format(ordo_file))
+            print(f"Found ordo file {ordo_file}")
             if ax_elo is None:
                 ax_elo = fig.add_subplot(313)
                 ax_elo.set_xlabel("epoch")
@@ -191,13 +189,12 @@ def do_plots(out_filename, root_dirs, elo_range, loss_range, split):
                     epoch = row[1]
                     elo = row[2]
                     error = row[3]
-                    if epoch not in epochs:
-                        if elo > maxelo - elo_range:
-                            epochs.append(epoch)
-                            elos.append(elo)
-                            errors.append(error)
+                    if epoch not in epochs and elo > maxelo - elo_range:
+                        epochs.append(epoch)
+                        elos.append(elo)
+                        errors.append(error)
 
-                print("Found ordo data for {} epochs".format(len(epochs)))
+                print(f"Found ordo data for {len(epochs)} epochs")
 
                 ax_elo.errorbar(epochs, elos, yerr=errors, label=root_dir)
 
@@ -209,7 +206,7 @@ def do_plots(out_filename, root_dirs, elo_range, loss_range, split):
     if ax_elo:
         ax_elo.legend()
 
-    print("Saving plot at {}".format(out_filename))
+    print(f"Saving plot at {out_filename}")
     # plt.show()
     plt.savefig(out_filename, dpi=300)
 

@@ -1,10 +1,9 @@
+
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 
 from ..quantize import QuantizationManager
-
-from typing import Optional
 
 
 class StackedLinear(nn.Module):
@@ -13,8 +12,8 @@ class StackedLinear(nn.Module):
         in_features: int,
         out_features: int,
         count: int,
-        quantization: Optional[QuantizationManager] = None,
-        layer_key: Optional[str] = None,
+        quantization: QuantizationManager | None = None,
+        layer_key: str | None = None,
     ):
         super().__init__()
 

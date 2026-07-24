@@ -1,23 +1,19 @@
-import time
-import warnings
 import os
-import sys
 import random
-import numpy as np
-from datetime import timedelta
+import sys
+import warnings
 
+import numpy as np
 import torch
 import torch.distributed as dist
+import tyro
 from torch import set_num_threads as t_set_num_threads
 from torch.utils.data import DataLoader
 
 import data_loader
 import model as M
-import tyro
-
 from config import TrainingConfig
 from data_loader.config import DataloaderDDPConfig
-from trainer.engine import init_distributed, SimpleTrainer
 from trainer.callbacks import (
     CheckpointManager,
     ExplicitSWA,
@@ -26,6 +22,7 @@ from trainer.callbacks import (
     TimeLimit,
     WeightClipper,
 )
+from trainer.engine import SimpleTrainer, init_distributed
 from trainer.loggers import CSVLogger, TensorBoardLogger
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
@@ -112,7 +109,7 @@ def make_data_loaders(
 
 def is_master_process():
     # torchrun sets 'RANK'. If not set, we assume it's a single-process run (Rank 0).
-    return int(os.environ.get("RANK", 0)) == 0
+    return int(os.environ.get("RANK", "0")) == 0
 
 
 def _normalize_optimizer_and_schedulers(optimizer_and_schedulers):
@@ -150,11 +147,11 @@ def main():
 
     for dataset in args.datasets:
         if not os.path.exists(dataset):
-            raise Exception("{0} does not exist".format(dataset))
+            raise RuntimeError(f"{dataset} does not exist")
 
     for val_dataset in args.validation_datasets:
         if not os.path.exists(val_dataset):
-            raise Exception("{0} does not exist".format(val_dataset))
+            raise RuntimeError(f"{val_dataset} does not exist")
 
     train_datasets = args.datasets
     val_datasets = None
@@ -273,20 +270,20 @@ def main():
         )
         print("Loss parameters:")
         print(args.nnue_lightning_config.loss_params)
-        print("Feature set: {}".format(feature_name))
-        print("Num inputs: {}".format(nnue.model.input.NUM_INPUTS))
+        print(f"Feature set: {feature_name}")
+        print(f"Num inputs: {nnue.model.input.NUM_INPUTS}")
 
-        print("Training with: {}".format(train_datasets))
-        print("Validating with: {}".format(val_datasets))
-        print("Seed {}".format(args.seed))
+        print(f"Training with: {train_datasets}")
+        print(f"Validating with: {val_datasets}")
+        print(f"Seed {args.seed}")
         print(args.dataloader_config)
-        print("Using log dir {}".format(tb_logger.log_dir))
+        print(f"Using log dir {tb_logger.log_dir}")
         print(f"Using {actual_workers} workers for C++ data loader.")
         if actual_threads > 0:
-            print("Set torch num_threads to {} threads.".format(actual_threads))
+            print(f"Set torch num_threads to {actual_threads} threads.")
         else:
             print("Using default torch num_threads setting.")
-        print("", flush=True)
+        print(flush=True)
 
     if accelerator == "mps":
         # On MPS, torch.compile is currently unstable

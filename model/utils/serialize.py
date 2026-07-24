@@ -1,12 +1,13 @@
-from functools import reduce
 import operator
 import struct
-from typing import BinaryIO, Sequence, Optional
+from collections.abc import Sequence
+from functools import reduce
+from typing import BinaryIO
 
 import numpy as np
 import numpy.typing as npt
-from numba import njit
 import torch
+from numba import njit
 from torch import nn
 
 from ..config import ModelConfig
@@ -27,8 +28,8 @@ def ascii_hist(name, x, bins=7):
     print(name)
     for xi, n in zip(X, N):
         bar = "#" * int(n * 1.0 * width / nmax)
-        xi = "{0: <8.4g}".format(xi).ljust(10)
-        print("{0}| {1}".format(xi, bar))
+        xi = f"{xi: <8.4g}".ljust(10)
+        print(f"{xi}| {bar}")
 
 def get_histogram_callback(hist_title: str, verbose: bool):
     if not verbose:
@@ -167,10 +168,10 @@ class NNUEWriter:
         if compression == "none":
             self.buf.extend(arr.tobytes())
         elif compression == "leb128":
-            self.buf.extend("COMPRESSED_LEB128".encode("utf-8"))
+            self.buf.extend(b"COMPRESSED_LEB128")
             self.write_leb_128_array(arr)
         else:
-            raise Exception("Invalid compression method.")
+            raise ValueError("Invalid compression method.")
 
     def write_feature_transformer(self, model: NNUEModel, ft_compression: str) -> None:
         layer = model.input
@@ -202,7 +203,7 @@ class NNUEWriter:
                 segment_weight, segment_psqt_weight, f_export_dtype, ft_histogram_callback
             )
             # compression is only useful for types larger than 1 byte
-            segment_compression = ft_compression if not f_export_dtype == torch.int8 else "none"
+            segment_compression = ft_compression if f_export_dtype != torch.int8 else "none"
             offset += n
 
             self.write_tensor(segment_weight, segment_compression)
@@ -213,7 +214,7 @@ class NNUEWriter:
         self,
         model: NNUEModel,
         layer: nn.Linear,
-        layer_key: Optional[str],
+        layer_key: str | None,
         desc: str,
     ) -> None:
         # FC layers are stored as int8 weights, and int32 biases
@@ -300,7 +301,7 @@ class NNUEReader:
         len_bytes = self.read_int32()
         d = self.f.read(len_bytes)
         if len(d) != len_bytes:
-            raise Exception("Unexpected end of file when reading compressed data.")
+            raise EOFError("Unexpected end of file when reading compressed data.")
 
         res = torch.tensor(
             decode_leb_128_array(d, reduce(operator.mul, shape, 1)),
@@ -334,7 +335,7 @@ class NNUEReader:
         elif compression == "leb128":
             return self.read_leb_128_array(dtype, shape)
         else:
-            raise Exception("Invalid compression method.")
+            raise ValueError("Invalid compression method.")
 
     def read_feature_transformer(self, layer, num_psqt_buckets: int) -> None:
         num_outputs = layer.num_outputs
@@ -395,5 +396,5 @@ class NNUEReader:
     def read_int32(self, expected: int | None = None) -> int:
         v = struct.unpack("<I", self.f.read(4))[0]
         if expected is not None and v != expected:
-            raise Exception("Expected: %x, got %x" % (expected, v))
+            raise ValueError(f"Expected: {expected:x}, got: {v:x}")
         return v

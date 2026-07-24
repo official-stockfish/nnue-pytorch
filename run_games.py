@@ -1,13 +1,13 @@
-import re
+import argparse
+import math
 import os
+import random
+import re
+import shutil
 import subprocess
 import sys
-import time
-import argparse
-import shutil
 import threading
-import math
-import random
+import time
 from pathlib import Path, PurePath
 
 from model import add_feature_args
@@ -41,7 +41,7 @@ class GameParams:
         self.nodes_per_move = nodes_per_move
 
         if not time_per_game and not time_increment_per_move and not nodes_per_move:
-            raise Exception("Invalid TC specification.")
+            raise RuntimeError("Invalid TC specification.")
 
     def get_all_params(self):
         params = []
@@ -114,17 +114,16 @@ def parse_ordo(root_dir, nnues):
         ordo_scores[name] = (-500, 1000)
 
     if os.path.exists(ordo_file_name):
-        ordo_file = open(ordo_file_name, "r")
-        lines = ordo_file.readlines()
-        for line in lines:
-            if "nn-epoch" in line:
-                fields = line.split()
-                net = fields[1]
-                rating = float(fields[3])
-                error = float(fields[4])
-                for name in nnues:
-                    if net in name:
-                        ordo_scores[name] = (rating, error)
+        with open(ordo_file_name, "r") as ordo_file:
+            for line in ordo_file:
+                if "nn-epoch" in line:
+                    fields = line.split()
+                    net = fields[1]
+                    rating = float(fields[3])
+                    error = float(fields[4])
+                    for name in nnues:
+                        if net in name:
+                            ordo_scores[name] = (rating, error)
 
     return ordo_scores
 
@@ -187,25 +186,24 @@ def run_match(
     for i in range(tries):
         print_atomic(" ".join(command))
         print_atomic(
-            "Running match with c-chess-cli ... {}".format(pgn_file_name), flush=True
+            f"Running match with c-chess-cli ... {pgn_file_name}", flush=True
         )
-        c_chess_out = open(os.path.join(root_dir, "c_chess.out"), "w")
-        process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-        )
-        seen = {}
-        for line in process.stdout:
-            line = line.decode("utf-8")
-            c_chess_out.write(line)
-            if "Score" in line:
-                epoch_num = re.search(r"epoch(\d+)", line)
-                if epoch_num.group(1) not in seen:
-                    sys.stdout.write("\n")
-                seen[epoch_num.group(1)] = True
-                sys.stdout.write("\r" + line.rstrip())
-                sys.stdout.flush()
+        with open(os.path.join(root_dir, "c_chess.out"), "w") as c_chess_out:
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            )
+            seen = {}
+            for line in process.stdout:
+                line = line.decode("utf-8")
+                c_chess_out.write(line)
+                if "Score" in line:
+                    epoch_num = re.search(r"epoch(\d+)", line)
+                    if epoch_num.group(1) not in seen:
+                        sys.stdout.write("\n")
+                    seen[epoch_num.group(1)] = True
+                    sys.stdout.write("\r" + line.rstrip())
+                    sys.stdout.flush()
         sys.stdout.write("\n")
-        c_chess_out.close()
         if process.wait() != 0:
             if i == tries - 1:
                 print_atomic("Error running match!")
@@ -284,7 +282,7 @@ def run_approximate_ordo(root_dir):
     ordo_file_name = os.path.join(root_dir, "ordo.out")
     ordo_file_name_temp = os.path.join(root_dir, "ordo_temp.out")
 
-    entries = dict()
+    entries = {}
     white = None
     black = None
     try:
@@ -314,7 +312,7 @@ def run_approximate_ordo(root_dir):
                     if result_str == "1/2-1/2":
                         entries[white].add_draws(1)
                         entries[black].add_draws(1)
-    except:
+    except (OSError, UnicodeDecodeError):
         return
 
     entries_ordered = sorted(
@@ -372,7 +370,7 @@ def run_ordo(root_dir, ordo_exe, concurrency):
         f"{ordo_file_name_temp}",
     ]
 
-    print_atomic("Running ordo ranking ... {}".format(ordo_file_name), flush=True)
+    print_atomic(f"Running ordo ranking ... {ordo_file_name}", flush=True)
     with subprocess.Popen(command) as process:
         if process.wait():
             print_atomic("Error running ordo!")
@@ -402,11 +400,11 @@ def run_round(
     # find a list of networks to test
     nnues = find_nnue(root_dir)
     if len(nnues) == 0:
-        print_atomic("No .nnue files found in {}".format(root_dir))
+        print_atomic(f"No .nnue files found in {root_dir}")
         time.sleep(10)
         return
     else:
-        print_atomic("Found {} nn-epoch*.nnue files".format(len(nnues)))
+        print_atomic(f"Found {len(nnues)} nn-epoch*.nnue files")
 
     # Get info from ordo data if that is around
     ordo_scores = parse_ordo(root_dir, nnues)
@@ -416,12 +414,10 @@ def run_round(
     ordo_scores = dict(
         sorted(ordo_scores.items(), key=lambda item: item[1][0], reverse=True)
     )
-    count = 0
-    for net in ordo_scores:
+    for count, net in enumerate(ordo_scores, start=1):
         print_atomic(
-            "   {} : {} +- {}".format(net, ordo_scores[net][0], ordo_scores[net][1])
+            f"   {net} : {ordo_scores[net][0]} +- {ordo_scores[net][1]}"
         )
-        count += 1
         if count == 3:
             break
 
@@ -437,7 +433,7 @@ def run_round(
     best = []
     for net in ordo_scores:
         print_atomic(
-            "   {} : {} +- {}".format(net, ordo_scores[net][0], ordo_scores[net][1])
+            f"   {net} : {ordo_scores[net][0]} +- {ordo_scores[net][1]}"
         )
         best.append(net)
         if len(best) == 3:
@@ -482,12 +478,12 @@ def run_round(
         with open(main_pgn_file_name, "w"):
             pass
     try:
-        with open(main_pgn_file_name, "a") as file_to:
-            with open(curr_pgn_file_name, "r") as file_from:
-                for line in file_from:
-                    file_to.write(line)
+        with open(main_pgn_file_name, "a") as file_to, open(
+            curr_pgn_file_name, "r"
+        ) as file_from:
+            file_to.writelines(file_from)
         os.remove(curr_pgn_file_name)
-    except:
+    except (OSError, PermissionError):
         print_atomic("Something went wrong when adding new games to the main file.")
 
 

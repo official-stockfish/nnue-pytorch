@@ -1,7 +1,9 @@
+from dataclasses import dataclass
+
 import torch
 
-from dataclasses import dataclass
 from .ranger_lite import RangerLite
+
 
 @dataclass(kw_only=True, frozen=False)
 class RangerLiteConfig:

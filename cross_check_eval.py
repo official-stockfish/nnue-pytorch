@@ -1,18 +1,17 @@
-import subprocess
-import re
 import math
-
-import torch
-import tyro
+import re
+import subprocess
+from dataclasses import dataclass
+from typing import Literal
 
 import chess
+import torch
+import tyro
+from tyro.conf import OmitArgPrefixes
 
 import data_loader
 import model as M
 
-from dataclasses import dataclass
-from typing import Optional, Literal
-from tyro.conf import OmitArgPrefixes
 
 @dataclass(frozen=True)
 class CrossCheckConfig:
@@ -26,7 +25,7 @@ class CrossCheckConfig:
     net: str
     """Path to the .nnue net to evaluate."""
 
-    checkpoint: Optional[str] = None
+    checkpoint: str | None = None
     """Optional checkpoint (used instead of nnue for local eval)."""
 
     device: Literal["cuda", "mps", "cpu"] = "cuda"
@@ -70,8 +69,8 @@ def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, devi
         them,
         white_indices,
         black_indices,
-        outcome,
-        score,
+        _outcome,
+        _score,
         piece_count,
     ) = batch.contents.get_tensors(device)
 
@@ -134,7 +133,7 @@ def compute_basic_eval_stats(evals):
 
 def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
     if len(ref_evals) != len(cmp_evals):
-        raise Exception(f"Mismatch: {len(ref_evals)} vs {len(cmp_evals)}")
+        raise ValueError(f"Mismatch: {len(ref_evals)} vs {len(cmp_evals)}")
 
     # Trainer parameters from your configuration
     IN_OFFSET = 280.0
@@ -261,19 +260,17 @@ def eval_engine_batch(engine_path, net_path, fens):
         stdout=subprocess.PIPE,
         universal_newlines=True,
     )
-    parts = ["uci", "setoption name EvalFile value {}".format(net_path)]
+    parts = ["uci", f"setoption name EvalFile value {net_path}"]
     for fen in fens:
-        parts.append("position fen {}".format(fen))
+        parts.append(f"position fen {fen}")
         parts.append("eval")
     parts.append("quit")
     query = "\n".join(parts)
     out = engine.communicate(input=query)[0]
     evals = re.findall(re_nnue_eval, out)
     if len(evals) != len(fens):
-        raise Exception(
-            "number of evals returned by the engine doesn't match the number of fens. Got {} evals and {} fens. Output was:\n{}".format(
-                len(evals), len(fens), out
-            )
+        raise ValueError(
+            f"number of evals returned by the engine doesn't match the number of fens. Got {len(evals)} evals and {len(fens)} fens. Output was:\n{out}"
         )
     return [int(v) for v in evals]
 
@@ -328,7 +325,7 @@ def main():
     all_fens = []
 
     done = 0
-    print("Processed {} positions.".format(done))
+    print(f"Processed {done} positions.")
     while done < cross_check_config.count:
         fens = filter_fens(next(fen_batch_provider))
         all_fens += fens
@@ -351,7 +348,7 @@ def main():
         )
 
         done += len(fens)
-        print("Processed {} positions.".format(done))
+        print(f"Processed {done} positions.")
 
     if ckpt_model:
         compute_correlation(ckpt_evals, nnue_evals, all_fens, "CKPT VS NNUE", "CKPT", "NNUE")

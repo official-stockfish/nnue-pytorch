@@ -1,7 +1,8 @@
 import argparse
+
 import chess
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 import model as M
 
@@ -31,7 +32,7 @@ class NNUEVisualizer:
                     "" if self.args.label is None else self.args.label + "_", name
                 ),
             )
-            print("Saving {}".format(destname))
+            print(f"Saving {destname}")
             if fig is not None:
                 fig.savefig(destname)
             else:
@@ -245,7 +246,7 @@ class NNUEVisualizer:
             plt.tight_layout()
 
             def format_coord(x, y):
-                x, y = int(round(x)), int(round(y))
+                x, y = round(x), round(y)
 
                 x_ = x % widthx
                 y_ = y % widthy
@@ -280,15 +281,11 @@ class NNUEVisualizer:
 
                 neuron_id = int(numx * (y // widthy) + x // widthx)
                 if self.args.sort_input_neurons:
-                    neuron_label = "sorted neuron {} (original {})".format(
-                        neuron_id, self.sorted_input_neurons[neuron_id]
-                    )
+                    neuron_label = f"sorted neuron {neuron_id} (original {self.sorted_input_neurons[neuron_id]})"
                 else:
-                    neuron_label = "neuron {}".format(neuron_id)
+                    neuron_label = f"neuron {neuron_id}"
 
-                return "{}, {} on {}, white king on {}".format(
-                    neuron_label, piece_name, piece_square_name, king_square_name
-                )
+                return f"{neuron_label}, {piece_name} on {piece_square_name}, white king on {king_square_name}"
 
             ax = plt.gca()
             ax.format_coord = format_coord
@@ -406,7 +403,7 @@ class NNUEVisualizer:
                     cmap=cmap,
                 )
 
-            row_names = ["bucket {}".format(i) for i in range(num_buckets)]
+            row_names = [f"bucket {i}" for i in range(num_buckets)]
             col_names = ["l1", "l2", "output"]
             for i in range(3):
                 for j in range(num_buckets):
@@ -526,7 +523,7 @@ class NNUEVisualizer:
                     np.expand_dims(output_bias, axis=0), vmin=vmin, vmax=vmax, cmap=cmap
                 )
 
-            row_names = ["bucket {}".format(i) for i in range(num_buckets)]
+            row_names = [f"bucket {i}" for i in range(num_buckets)]
             col_names = ["l1", "l2", "output"]
             for i in range(3):
                 for j in range(num_buckets):
@@ -676,9 +673,7 @@ def main():
         )
 
         print(
-            "Visualizing difference between {} and {}".format(
-                args.model, args.ref_model
-            )
+            f"Visualizing difference between {args.model} and {args.ref_model}"
         )
 
         from os.path import basename
@@ -686,7 +681,7 @@ def main():
         label = "diff " + label + "-" + basename(args.ref_model)
     else:
         ref_model = None
-        print("Visualizing {}".format(args.model))
+        print(f"Visualizing {args.model}")
 
     if args.label is None:
         args.label = label

@@ -7,8 +7,10 @@ tensorboard
 numba
 numpy<2.0
 requests
-lightning
 tyro
-ruff
+ruff==0.16.0
 pytest
 schedulefree
+torchmetrics
+tqdm
+scipy

@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 
-import time
-import sys
-import psutil
-import re
-import subprocess
+import argparse
+import contextlib
 import importlib
 import importlib.metadata
-import argparse
-import math
 import logging
+import math
+import re
+import subprocess
+import sys
+import time
+
+import psutil
 
 EXITCODE_OK = 0
 EXITCODE_MISSING_DEPENDENCIES = 2
@@ -24,14 +26,8 @@ LOGGER.propagate = False
 
 
 def validate_python_version():
-    if sys.version_info >= (3, 7):
-        LOGGER.info(f"Found python version {sys.version}. OK.")
-        return True
-    else:
-        LOGGER.error(
-            f"Found python version {sys.version} but 3.7 is required. Exiting."
-        )
-        return False
+    LOGGER.info(f"Found python version {sys.version}. OK.")
+    return True
 
 
 # Functions for checking external dependencies.
@@ -66,7 +62,7 @@ def validate_cmake():
             LOGGER.error(
                 f"Found cmake executable version {version_str} but at least 3.4 required. Exiting."
             )
-    except:
+    except (OSError, ValueError, IndexError):
         success = False
         LOGGER.error("No cmake executable found. Exiting.")
 
@@ -87,7 +83,7 @@ def validate_make():
             LOGGER.error(
                 f"Found make executable version {version_str} but at least 3 required. Exiting."
             )
-    except:
+    except (OSError, ValueError, IndexError):
         success = False
         LOGGER.error("No make executable found. Exiting.")
 
@@ -107,7 +103,7 @@ def validate_gcc():
                 major_version = int(version_str.split(".")[0])
                 minor_version = int(version_str.split(".")[1])
                 success = (major_version, minor_version) >= (9, 2)
-            except:
+            except (TypeError, ValueError):
                 continue
         if success:
             LOGGER.info(f"Found gcc executable version {version_str}. OK.")
@@ -115,7 +111,7 @@ def validate_gcc():
             LOGGER.error(
                 f"Found gcc executable version {version_str} but at least 9.2 required. Exiting."
             )
-    except:
+    except (OSError, ValueError, IndexError):
         success = False
         LOGGER.error("No gcc executable found. Exiting.")
 
@@ -125,7 +121,7 @@ def validate_gcc():
 def maybe_int(v):
     try:
         return int(v)
-    except:
+    except (TypeError, ValueError):
         return v
 
 
@@ -138,14 +134,12 @@ class PackageInfo:
         self._spec = importlib.util.find_spec(name)
         self._version_str = None
         self._version_tup = None
-        try:
+        with contextlib.suppress(ImportError, ValueError):
             if self._spec:
                 self._version_str = importlib.metadata.version(name)
                 self._version_tup = tuple(
                     maybe_int(v) for v in self._version_str.split(".")
                 )
-        except:
-            pass
 
     @property
     def exists(self):
@@ -243,7 +237,7 @@ def validate_environment_requirements():
         success &= validate_cmake()
         success &= validate_gcc()
         success &= validate_imports()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         LOGGER.error(e)
         return False
     return success
@@ -254,33 +248,35 @@ if not validate_environment_requirements():
     sys.exit(EXITCODE_MISSING_DEPENDENCIES)
 
 # Only now import the rest of the required packages
-from asciimatics.widgets import (
-    Frame,
-    Layout,
-    Divider,
-    Button,
-    TextBox,
-    Widget,
-    VerticalDivider,
-    MultiColumnListBox,
-    Label,
-    PopUpDialog,
-)
+import io
+import itertools
+import os
+import shutil
+import urllib.parse
+import urllib.request
+import zipfile
+from pathlib import Path
+from threading import Event, Lock, Thread
+
+import GPUtil
+import requests
+from asciimatics.event import KeyboardEvent
+from asciimatics.exceptions import ResizeScreenError, StopApplication
 from asciimatics.scene import Scene
 from asciimatics.screen import Screen
-from asciimatics.exceptions import ResizeScreenError, StopApplication
-from asciimatics.event import KeyboardEvent
-from threading import Thread, Lock, Event
-import GPUtil
-import io
-import os
-import requests
-import zipfile
-import shutil
-import urllib.request
-import urllib.parse
+from asciimatics.widgets import (
+    Button,
+    Divider,
+    Frame,
+    Label,
+    Layout,
+    MultiColumnListBox,
+    PopUpDialog,
+    TextBox,
+    VerticalDivider,
+    Widget,
+)
 from tqdm.auto import tqdm
-from pathlib import Path
 
 # Specify which versions of ordo and c-chess-cli we want.
 # We rely on specific well-tested commits because we know exactly what we need.
@@ -305,11 +301,12 @@ def terminate_process_on_exit(process):
     """
 
     if sys.platform == "win32":
-        try:
-            # We cannot execute from string so we write the script to a file.
-            # Doesn't do anything if the file already exists.
-            with open(".process_watchdog_helper.bat", "x") as file:
-                file.write(""":waitforpid
+        # We cannot execute from string so we write the script to a file.
+        # Doesn't do anything if the file already exists.
+        with contextlib.suppress(OSError), open(
+            ".process_watchdog_helper.bat", "x"
+        ) as file:
+            file.write(""":waitforpid
 tasklist /nh /fi "pid eq %1" 2>nul | find "%1" >nul
 if %ERRORLEVEL%==0 (
     timeout /t 5 /nobreak >nul
@@ -317,8 +314,6 @@ if %ERRORLEVEL%==0 (
 ) else (
     wmic process where processid="%2" call terminate >nul
 )""")
-        except:
-            pass
 
         subprocess.Popen(
             [".process_watchdog_helper.bat", str(os.getpid()), str(process.pid)],
@@ -391,7 +386,8 @@ if sys.platform == "win32":
             # encode as utf-8 because LPCSTR is bytes not str
             self.name = str(os.path.abspath(name)).replace("\\", "/").encode("utf-8")
             self.acquired = False
-            self.file = open(self.name, "a+")
+            with open(self.name, "a+") as f:
+                self.file = os.fdopen(os.dup(f.fileno()), "a+")
             self.handle = WINAPI_CreateMutex(None, False, self.name)
             if not self.handle:
                 raise ctypes.WinError()
@@ -422,10 +418,8 @@ if sys.platform == "win32":
             if not ret:
                 raise ctypes.WinError()
 
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(self.name)
-            except:
-                pass
 
             self.handle = None
 
@@ -443,7 +437,8 @@ else:
         def __init__(self, name):
             self.name = name
             self.acquired = False
-            self.file = open(self.name, "a+")
+            with open(self.name, "a+") as f:
+                self.file = os.fdopen(os.dup(f.fileno()), "a+")
 
         def acquire(self):
             fcntl.lockf(self.file, fcntl.LOCK_EX)
@@ -491,7 +486,7 @@ class DecayingRunningAverage:
     def value(self):
         try:
             return self._total / self._count
-        except:
+        except ZeroDivisionError:
             return float("NaN")
 
     def update(self, value):
@@ -510,7 +505,7 @@ class SystemResources:
     """
 
     def __init__(self):
-        self._gpus = dict()
+        self._gpus = {}
         for gpu in GPUtil.getGPUs():
             self._gpus[gpu.id] = gpu
         self._cpu_usage = psutil.cpu_percent() / 100.0
@@ -667,10 +662,8 @@ def find_best_checkpoint(root_dir):
         lines = ordo_file.readlines()
         for line in lines:
             if "nn-epoch" in line:
-                try:
+                with contextlib.suppress(AttributeError, IndexError, TypeError, ValueError):
                     entries.append(OrdoEntry(line=line))
-                except:
-                    pass
 
     entries.sort(key=lambda x: -x.elo + x.elo_error)
 
@@ -692,7 +685,7 @@ def find_best_checkpoint(root_dir):
 RESOURCE_MONITOR = SystemResourcesMonitor(2)
 
 # A regex pattern for a float number.
-NUMERIC_CONST_PATTERN = "[-+]?(?:(?:\d*\.\d+)|(?:\d+\.?))(?:[Ee][+-]?\d+)?"
+NUMERIC_CONST_PATTERN = r"[-+]?(?:(?:\d*\.\d+)|(?:\d+\.?))(?:[Ee][+-]?\d+)?"
 
 
 class TrainingRun(Thread):
@@ -737,8 +730,10 @@ class TrainingRun(Thread):
         resume_training=False,
         start_lambda=None,
         end_lambda=None,
-        additional_args=[],
+        additional_args=None,
     ):
+        if additional_args is None:
+            additional_args = []
         super().__init__()
         self._gpu_id = gpu_id
         self._run_id = run_id
@@ -834,11 +829,8 @@ class TrainingRun(Thread):
         if self._start_from_model and not resumed:
             args.append(f"--resume-from-model={self._start_from_model}")
 
-        for arg in self._additional_args:
-            args.append(arg)
-
-        for dataset in self._training_datasets:
-            args.append(dataset)
+        args.extend(self._additional_args)
+        args.extend(self._training_datasets)
 
         for dataset in self._validation_datasets:
             args.append(f"--validation-data={dataset}")
@@ -921,10 +913,9 @@ class TrainingRun(Thread):
                     else:
                         # Actually this is where most of the errors from pytorch must be handled.
                         LOGGER.info(line)
-                except:
+                except (AttributeError, TypeError, ValueError, ZeroDivisionError):
                     # Usually errors. Aside from that all output should be catched above. We want these logged.
                     LOGGER.info(line)
-                    pass
 
                 if "CUDA_ERROR_OUT_OF_MEMORY" in line or "CUDA out of memory" in line:
                     self._process.terminate()
@@ -1027,8 +1018,8 @@ def requests_get_content(url, *args, **kwargs):
         result = requests.get(url, *args, **kwargs)
         result.raise_for_status()
         return result.content
-    except Exception:
-        raise Exception(f"GET request to {url} failed")
+    except requests.RequestException:
+        raise RuntimeError(f"GET request to {url} failed")
 
 
 def get_zipfile_members_strip_common_prefix(zipfile):
@@ -1077,10 +1068,8 @@ def is_ordo_setup(directory):
         with subprocess.Popen(
             [ordo_path, "--help"], stdout=subprocess.DEVNULL
         ) as process:
-            if process.wait(timeout=TIMEOUT):
-                return False
-            return True
-    except:
+            return not process.wait(timeout=TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
         return False
 
 
@@ -1106,10 +1095,10 @@ def setup_ordo(directory):
 
     with subprocess.Popen(["make"], cwd=directory) as process:
         if process.wait():
-            raise Exception("Ordo compilation failed.")
+            raise RuntimeError("Ordo compilation failed.")
 
     if not is_ordo_setup(directory):
-        raise Exception("Ordo does not work.")
+        raise RuntimeError("Ordo does not work.")
 
 
 def make_c_chess_cli_executable_path(directory):
@@ -1123,10 +1112,8 @@ def is_c_chess_cli_setup(directory):
     try:
         path = make_c_chess_cli_executable_path(directory)
         with subprocess.Popen([path, "-version"], stdout=subprocess.DEVNULL) as process:
-            if process.wait(timeout=TIMEOUT):
-                return False
-            return True
-    except:
+            return not process.wait(timeout=TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
         return False
 
 
@@ -1151,10 +1138,10 @@ def setup_c_chess_cli(directory):
         [sys.executable, "make.py", "-c", "gcc"], cwd=directory
     ) as process:
         if process.wait():
-            raise Exception("c-chess-cli compilation failed.")
+            raise RuntimeError("c-chess-cli compilation failed.")
 
     if not is_c_chess_cli_setup(directory):
-        raise Exception("c-chess-cli does not work")
+        raise RuntimeError("c-chess-cli does not work")
 
 
 def make_stockfish_executable_path(directory):
@@ -1168,10 +1155,8 @@ def is_stockfish_setup(directory):
     try:
         path = make_stockfish_executable_path(directory)
         with subprocess.Popen([path, "compiler"], stdout=subprocess.DEVNULL) as process:
-            if process.wait(timeout=TIMEOUT):
-                return False
-            return True
-    except:
+            return not process.wait(timeout=TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
         return False
 
 
@@ -1192,10 +1177,10 @@ def setup_stockfish(directory, repo, branch_or_commit, arch, threads=1):
         ["make", "build", f"ARCH={arch}", f"-j{threads}"], cwd=srcdir, env=env
     ) as process:
         if process.wait():
-            raise Exception(f"stockfish {repo}/{branch_or_commit} compilation failed")
+            raise RuntimeError(f"stockfish {repo}/{branch_or_commit} compilation failed")
 
     if not is_stockfish_setup(directory):
-        raise Exception(f"stockfish {repo}/{branch_or_commit} does not work")
+        raise RuntimeError(f"stockfish {repo}/{branch_or_commit} does not work")
 
 
 def is_nnue_pytorch_setup(directory):
@@ -1203,10 +1188,8 @@ def is_nnue_pytorch_setup(directory):
         with subprocess.Popen(
             [sys.executable, "data_loader/__init__.py"], cwd=directory
         ) as process:
-            if process.wait(timeout=TIMEOUT):
-                return False
-            return True
-    except:
+            return not process.wait(timeout=TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
         return False
 
 
@@ -1226,12 +1209,12 @@ def setup_nnue_pytorch(directory, repo, branch_or_commit):
     command += [os.path.join(directory, "compile_data_loader.bat")]
     with subprocess.Popen(command, cwd=directory) as process:
         if process.wait():
-            raise Exception(
+            raise RuntimeError(
                 f"nnue-pytorch {repo}/{branch_or_commit} data loader compilation failed"
             )
 
     if not is_nnue_pytorch_setup(directory):
-        raise Exception("Incorrect nnue-pytorch setup or timeout.")
+        raise RuntimeError("Incorrect nnue-pytorch setup or timeout.")
 
 
 class CChessCliRunningTestEntry:
@@ -1329,8 +1312,10 @@ class NetworkTesting(Thread):
         stockfish_test_exe=None,
         features=None,
         active=True,
-        additional_args=[],
+        additional_args=None,
     ):
+        if additional_args is None:
+            additional_args = []
         super().__init__()
 
         self._nnue_pytorch_directory = os.path.abspath(nnue_pytorch_directory)
@@ -1389,8 +1374,7 @@ class NetworkTesting(Thread):
         if self._ordo_exe:
             (args.append(f"--ordo_exe={self._ordo_exe}"),)
 
-        for arg in self._additional_args:
-            args.append(arg)
+        args.extend(self._additional_args)
 
         return args
 
@@ -1416,7 +1400,7 @@ class NetworkTesting(Thread):
                 ]
                 return "\n".join(lines)
             elif self._current_test is not None:
-                perf_pct = int(round(self._current_test.performance * 100))
+                perf_pct = round(self._current_test.performance * 100)
                 cpu_usage = RESOURCE_MONITOR.resources.cpu_usage
                 lines = [
                     f"CPU load: {cpu_usage * 100:0.1f}%",
@@ -1471,7 +1455,7 @@ class NetworkTesting(Thread):
                             if self._current_test.total_games % 100 == 0:
                                 LOGGER.info(self._current_test.line)
                             self._current_convert = None
-                        except:
+                        except (AttributeError, IndexError, TypeError, ValueError):
                             self._current_test = None
                     elif line.startswith("Converting"):
                         fields = OrdoEntry.NET_PATTERN.search(line)
@@ -1481,7 +1465,7 @@ class NetworkTesting(Thread):
                             LOGGER.info(
                                 f"Converting network epoch {self._current_convert[0]}, run id {self._current_convert[1]}"
                             )
-                        except:
+                        except (AttributeError, IndexError, TypeError, ValueError):
                             self._current_convert = None
                     elif line.startswith("Error running match!"):
                         self._process.terminate()
@@ -1491,11 +1475,11 @@ class NetworkTesting(Thread):
                         self._current_test = None
 
                     self._has_started = True
-                except:
+                except (AttributeError, IndexError, TypeError, ValueError):
                     LOGGER.info(line)
                 finally:
                     self._mutex.release()
-        except:
+        except (OSError, TypeError, ValueError):
             self._process.terminate()
             self._process.wait()
 
@@ -1522,24 +1506,22 @@ class NetworkTesting(Thread):
     def _update_results_from_ordo_file(self, ordo_file_path):
         new_results = []
 
-        try:
+        with contextlib.suppress(OSError):
             with open(ordo_file_path, "r") as ordo_file:
                 lines = ordo_file.readlines()
                 # Print the first few lines for the CLI interface.
                 for line in lines[:7]:
                     LOGGER.info(line.strip())
                 for line in lines:
-                    try:
+                    with contextlib.suppress(
+                        AttributeError, IndexError, TypeError, ValueError
+                    ):
                         entry = OrdoEntry(line=line)
                         new_results.append(entry)
-                    except:
-                        pass
             self._results = new_results
-        except:
-            pass
 
     def get_ordered_results(self):
-        return list(sorted(self._results, key=lambda x: -x.elo))
+        return sorted(self._results, key=lambda x: -x.elo)
 
     @property
     def has_finished(self):
@@ -1581,13 +1563,13 @@ class TrainerRunsWidget(Widget):
     def __init__(self, runs, name=None):
         super().__init__(name)
 
-        self._runs = list(sorted(runs, key=lambda x: (x.gpu_id, x.run_id)))
+        self._runs = sorted(runs, key=lambda x: (x.gpu_id, x.run_id))
 
         self._selected_index = 0
 
     def add_run(self, run):
         self._runs.append(run)
-        self._runs = list(sorted(runs, key=lambda x: (x.gpu_id, x.run_id)))
+        self._runs = sorted(self._runs, key=lambda x: (x.gpu_id, x.run_id))
 
     def required_height(self, offset, w):
         # A special value indicating that it should use the whole column.
@@ -1614,7 +1596,7 @@ class TrainerRunsWidget(Widget):
 
     def _get_gpu_usage(self, gpu_ids):
         gpus = RESOURCE_MONITOR.resources.gpus
-        by_gpu_id = dict()
+        by_gpu_id = {}
         for gpu_id in gpu_ids:
             if gpu_id in gpus:
                 gpu = gpus[gpu_id]
@@ -1646,7 +1628,7 @@ class TrainerRunsWidget(Widget):
             return lines
         else:
             try:
-                width = self._w - self._offset
+                self._w - self._offset
                 loss = run.current_loss
                 epoch = run.current_epoch
                 max_epoch = run.num_epochs - 1
@@ -1667,7 +1649,7 @@ class TrainerRunsWidget(Widget):
                     f"    Epoch: {epoch}/{max_epoch}; Step: {step_in_epoch}/{max_step}",
                     f"    Loss: {loss}",
                 ]
-            except:
+            except (TypeError, ValueError, ZeroDivisionError):
                 return [f"  Run {run.run_id} - Waiting for enough data to display..."]
 
     def _make_gpu_text(self, gpu_id, gpu_usage):
@@ -1887,8 +1869,6 @@ def app(screen, scene, training_runs, network_testing):
         ]
 
         screen.play(scenes, stop_on_resize=True, start_scene=scene, allow_int=True)
-    except Exception as e:
-        raise e
     finally:
         TUI_SCREEN = None
 
@@ -1908,7 +1888,7 @@ def str2bool(v):
 
 
 def flatten_once(lst):
-    return sum(lst, [])
+    return list(itertools.chain.from_iterable(lst))
 
 
 def parse_cli_args():
@@ -2343,30 +2323,30 @@ def parse_cli_args():
         args.validation_datasets = []
 
     if len(args.training_datasets) == 0:
-        raise Exception("No training data specified")
+        raise RuntimeError("No training data specified")
 
     if args.lambda_ < 0.0 or args.lambda_ > 1.0:
-        raise Exception("lambda must be within [0, 1]")
+        raise RuntimeError("lambda must be within [0, 1]")
 
     args.validation_datasets = args.validation_datasets or args.training_datasets
     for dataset in args.validation_datasets:
         if not Path(dataset).is_file():
-            raise Exception(f"Invalid validation data set file name: {dataset}")
+            raise RuntimeError(f"Invalid validation data set file name: {dataset}")
 
     for dataset in args.training_datasets:
         if not Path(dataset).is_file():
-            raise Exception(f"Invalid training data set file name: {dataset}")
+            raise RuntimeError(f"Invalid training data set file name: {dataset}")
 
     # these are not required because testing is optional
     if args.engine_base_branch and args.engine_base_branch.count("/") != 2:
-        raise Exception(f"Invalid base engine repo path: {args.engine_base_branch}")
+        raise RuntimeError(f"Invalid base engine repo path: {args.engine_base_branch}")
 
     if args.engine_test_branch and args.engine_test_branch.count("/") != 2:
-        raise Exception(f"Invalid test engine repo path: {args.engine_test_branch}")
+        raise RuntimeError(f"Invalid test engine repo path: {args.engine_test_branch}")
 
     # this one is required because it has other important scripts
     if not args.nnue_pytorch_branch or args.nnue_pytorch_branch.count("/") != 2:
-        raise Exception(f"Invalid test trainer repo path: {args.nnue_pytorch_branch}")
+        raise RuntimeError(f"Invalid test trainer repo path: {args.nnue_pytorch_branch}")
 
     if (
         not args.network_testing_time_per_game
@@ -2382,12 +2362,12 @@ def parse_cli_args():
         args.start_from_engine_test_net,
         args.start_from_experiment,
     ].count(True) > 1:
-        raise Exception(
+        raise RuntimeError(
             "Only one of --start-from-model, --start-from-engine-test-net, and --start-from-experiment can be specified at a time."
         )
 
     if args.start_from_engine_test_net and not args.engine_test_branch:
-        raise Exception(
+        raise RuntimeError(
             "--start-from-engine-test-net but --engine-test-branch not given"
         )
 
@@ -2413,10 +2393,7 @@ def log_args(directory, args):
 
 def is_url(path):
     return (
-        path.startswith("http://")
-        or path.startswith("https://")
-        or path.startswith("ftp://")
-        or path.startswith("sftp://")
+        path.startswith(("http://", "https://", "ftp://", "sftp://"))
     )
 
 
@@ -2463,7 +2440,7 @@ def setup_book(directory, args):
         LOGGER.error(
             "Cannot handle the book. Currently only .epd books are supported. If compressed with .zip the name must be a.epd.zip. No other compression format is supported right now."
         )
-        raise Exception("Cannot handle opening book")
+        raise RuntimeError("Cannot handle opening book")
 
     destination_temp_file_path = os.path.abspath(os.path.join(directory, temp_filename))
     destination_file_path = os.path.abspath(os.path.join(directory, filename))
@@ -2496,7 +2473,7 @@ def setup_book(directory, args):
                 LOGGER.error(
                     f"Expected only a book with name {filename} in the archive but did not find it or found more"
                 )
-                raise Exception("Unexpected opening book archive content.")
+                raise RuntimeError("Unexpected opening book archive content.")
             LOGGER.info(f"Extracting {temp_filename} to {filename}")
             zipped.extract(filename, directory)
 
@@ -2524,7 +2501,7 @@ def prepare_start_model(
 
     if model_path.endswith(".pt"):
         shutil.copyfile(model_path, destination_model_path)
-    elif model_path.endswith(".nnue") or model_path.endswith(".ckpt"):
+    elif model_path.endswith((".nnue", ".ckpt")):
         if model_path.endswith(".nnue") and features.endswith("^"):
             features = features[:-1]
 
@@ -2541,10 +2518,10 @@ def prepare_start_model(
             stderr=subprocess.STDOUT,
         ) as process:
             if process.wait():
-                raise Exception("Failed to run serialize.py for start model.")
+                raise RuntimeError("Failed to run serialize.py for start model.")
 
         if not os.path.exists(destination_model_path):
-            raise Exception("Failed to convert start model.")
+            raise RuntimeError("Failed to convert start model.")
 
     return destination_model_path
 
@@ -2561,7 +2538,7 @@ def prepare_start_model_from_experiment(
     if best_model is None:
         best_model = find_latest_checkpoint(root_dir)
     if best_model is None:
-        raise Exception(
+        raise RuntimeError(
             "Could not find any viable .ckpt nor .nnue files in the start experiment."
         )
     return prepare_start_model(
@@ -2586,7 +2563,7 @@ def get_default_feature_set_from_nnue_pytorch(nnue_pytorch_directory):
                 if line.startswith("default="):
                     # Extract the default value from: default="HalfKAv2_hm^",
                     return line.split('"')[1]
-    except Exception:
+    except OSError:
         LOGGER.warning(
             "Could not read default feature set from %s, using fallback.",
             features_init,
@@ -2653,7 +2630,7 @@ def main():
 
     # Global (workspace) setup
 
-    with SystemWideMutex(os.path.join(absolute_workspace_path, ".lock")) as mutex:
+    with SystemWideMutex(os.path.join(absolute_workspace_path, ".lock")):
         ordo_directory = os.path.join(absolute_workspace_path, "ordo")
         c_chess_cli_directory = os.path.join(absolute_workspace_path, "c-chess-cli")
         books_directory = os.path.join(absolute_workspace_path, "books")

@@ -1,8 +1,9 @@
 import torch
 
-from .serialize import NNUEReader
 from ..config import ModelConfig, NNUELightningConfig
 from ..model import NNUEModel
+from .serialize import NNUEReader
+
 
 def load_model(
     filename: str,
@@ -34,4 +35,4 @@ def load_model(
         return reader.model
 
     else:
-        raise Exception("Invalid filetype: " + str(filename))
+        raise ValueError("Invalid filetype: " + str(filename))

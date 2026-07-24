@@ -1,11 +1,11 @@
 import ctypes
-import os
 import glob
+import os
 
 import numpy as np
 import torch
 
-from .config import CDataloaderSkipConfig, CDataloaderDDPConfig
+from .config import CDataloaderDDPConfig, CDataloaderSkipConfig
 
 
 def _pin_and_move(t: torch.Tensor, device, use_pinned_memory=False, dtype=None) -> torch.Tensor:
