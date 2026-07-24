@@ -640,12 +640,13 @@ def gather_impl(
 def command_gather(args: FeaturePermutationConfig) -> None:
     assert isinstance(args.subcommand, GatherConfig)
     if args.subcommand.checkpoint:
+        config = M.NNUELightningConfig(
+            model_config=args.model_config,
+            features=args.subcommand.feature_config.features,
+        )
         nnue = NNUE.load_from_checkpoint(
             args.subcommand.checkpoint,
-            feature_name=args.subcommand.feature_config.features,
-            config=M.NNUELightningConfig(
-                model_config=args.model_config,
-            ),
+            config=config,
             map_location=torch.device("cpu"),
         )
         model = nnue.model

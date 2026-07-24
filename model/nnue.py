@@ -1,4 +1,3 @@
-import lightning as L
 import torch
 
 from torch import Tensor, nn
@@ -72,7 +71,7 @@ def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
     return loss
 
 
-class NNUE(L.LightningModule):
+class NNUE(nn.Module):
 
     def __init__(
         self,
@@ -193,65 +192,119 @@ class NNUE(L.LightningModule):
     def eval(self):
         return self.train(False)
 
+    @staticmethod
+    def load_from_checkpoint(path, config, map_location="cpu"):
+        checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+        nnue = NNUE(config=config)
+        nnue.load_state_dict(checkpoint["state_dict"])
+        return nnue
+
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)
 
-    # --- lightning hooks ---
+    # --- hooks ---
     def on_train_epoch_start(self):
         self.optimizer_wrapper.on_train_epoch_start(self)
 
     def on_train_epoch_end(self):
         self.optimizer_wrapper.on_train_epoch_end(self)
-        self._log_epoch_end("train_loss_epoch")
+        self.loss_metrics["train_loss_epoch"].reset()
 
     def on_validation_epoch_start(self):
         self.optimizer_wrapper.on_validation_epoch_start(self)
 
     def on_validation_epoch_end(self):
-        self._log_epoch_end("val_loss_epoch")
+        self.loss_metrics["val_loss_epoch"].reset()
 
     def on_test_epoch_start(self):
         self.optimizer_wrapper.on_test_epoch_start(self)
 
     def on_test_epoch_end(self):
-        self._log_epoch_end("test_loss_epoch")
+        self.loss_metrics["test_loss_epoch"].reset()
 
     def on_save_checkpoint(self, checkpoint):
         self.optimizer_wrapper.on_save_checkpoint(self, checkpoint)
         self.lambda_scheduler.on_save_checkpoint(checkpoint)
 
-    def on_load_checkpoint(self, checkpoint):
-        self.lambda_scheduler.on_load_checkpoint(self, checkpoint)
+    def on_load_checkpoint(self, checkpoint, resuming: bool):
+        self.lambda_scheduler.on_load_checkpoint(self, checkpoint, resuming=resuming)
 
     def on_train_batch_start(self, batch, batch_idx):
         self.optimizer_wrapper.on_train_batch_start(self, batch, batch_idx)
 
-    def _log_epoch_end(self, loss_type):
-        self.log(
-            f"{loss_type}",
-            self.loss_metrics[f"{loss_type}"],
-            prog_bar=False,
-            sync_dist=True,
-            on_epoch=True,
-            on_step=False,
-        )
+    # --- checkpoint state helpers ---
+    def state_dict(self, *args, **kwargs):
+        state = super().state_dict(*args, **kwargs)
+
+        # torch.compile() adds _orig_mod. prefixes to parameter/buffer keys.
+        # Strip them so checkpoints remain loadable by an uncompiled NNUE.
+        if any("_orig_mod." in k for k in state):
+            state = {k.replace("_orig_mod.", ""): v for k, v in state.items()}
+
+        # Lambda scheduler state (jitter_buffer is persistent=False)
+        state["lambda_scheduler_state_dict"] = self.lambda_scheduler.state_dict()
+        state["jitter_buffer_value"] = self.lambda_scheduler.jitter_buffer
+
+        # Optimizer state
+        if self.optimizer_wrapper is not None and getattr(self.optimizer_wrapper, "optimizer", None) is not None:
+            state["optimizer_state_dict"] = self.optimizer_wrapper.optimizer.state_dict()
+
+        return state
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        state_dict = dict(state_dict)
+        lambda_scheduler_state = state_dict.pop("lambda_scheduler_state_dict", None)
+        jitter_buffer_value = state_dict.pop("jitter_buffer_value", None)
+        optimizer_state = state_dict.pop("optimizer_state_dict", None)
+
+        # If this NNUE (or a submodule) was torch.compile'd, the expected keys
+        # contain _orig_mod. prefixes that plain checkpoint keys don't have.
+        # Build a mapping from the plain key to the actual key and remap.
+        expected = super().state_dict()
+        if any("_orig_mod." in k for k in expected):
+            remap = {k.replace("_orig_mod.", ""): k for k in expected}
+            state_dict = {remap.get(k, k): v for k, v in state_dict.items()}
+
+        super().load_state_dict(state_dict, *args, **kwargs)
+
+        if lambda_scheduler_state is not None:
+            self.lambda_scheduler.load_state_dict(lambda_scheduler_state)
+
+        if jitter_buffer_value is not None:
+            self.lambda_scheduler.jitter_buffer.copy_(
+                jitter_buffer_value.to(
+                    device=self.lambda_scheduler.jitter_buffer.device,
+                    dtype=self.lambda_scheduler.jitter_buffer.dtype,
+                )
+            )
+
+        if (
+            optimizer_state is not None
+            and self.optimizer_wrapper is not None
+            and getattr(self.optimizer_wrapper, "optimizer", None) is not None
+        ):
+            self.optimizer_wrapper.optimizer.load_state_dict(optimizer_state)
 
     # --- Training step implementation ---
 
-    def training_step(self, batch, batch_idx):
-        return self.step_(batch, batch_idx, "train_loss")
+    def train_step(self, batch, current_epoch, global_step):
+        loss = self.compute_loss(batch, current_epoch)
+        self.loss_metrics["train_loss_epoch"].update(loss)
+        return {"loss": loss, "train_loss": loss.detach()}
 
     @torch.no_grad()
-    def validation_step(self, batch, batch_idx):
-        self.step_(batch, batch_idx, "val_loss")
+    def val_step(self, batch, current_epoch, global_step):
+        loss = self.compute_loss(batch, current_epoch)
+        self.loss_metrics["val_loss_epoch"].update(loss)
+        return {"val_loss": loss}
 
     @torch.no_grad()
-    def test_step(self, batch, batch_idx):
-        self.step_(batch, batch_idx, "test_loss")
+    def test_step(self, batch, current_epoch, global_step):
+        loss = self.compute_loss(batch, current_epoch)
+        self.loss_metrics["test_loss_epoch"].update(loss)
+        return {"test_loss": loss}
 
-    def step_(self, batch: tuple[Tensor, ...], batch_idx, loss_type):
-        _ = batch_idx  # unused, but required by pytorch-lightning
-
+    def compute_loss(self, batch: tuple[Tensor, ...], current_epoch: int):
         (
             us,
             them,
@@ -261,39 +314,42 @@ class NNUE(L.LightningModule):
             score,
             piece_count,
         ) = batch
-        scorenet = (
-            self.model(
-                us,
-                them,
-                white_indices,
-                black_indices,
-                piece_count,
-                self.config.use_fake_act_quantization,
-                self.config.use_fake_weight_quantization
-            )
+        scorenet = self.model(
+            us,
+            them,
+            white_indices,
+            black_indices,
+            piece_count,
+            self.config.use_fake_act_quantization,
+            self.config.use_fake_weight_quantization,
         )
+        return self.compute_loss_with_scorenet(scorenet, batch, current_epoch)
+
+    def compute_loss_with_scorenet(
+        self, scorenet: Tensor, batch: tuple[Tensor, ...], current_epoch: int
+    ):
+        (
+            _us,
+            _them,
+            _white_indices,
+            _black_indices,
+            outcome,
+            score,
+            _piece_count,
+        ) = batch
 
         scorenet = scorenet * self.model.quantization.nnue2score
 
         actual_lambda = self.lambda_scheduler(
             loss_params=self.config.loss_params,
-            current_epoch=self.current_epoch,
+            current_epoch=current_epoch,
             max_epoch=self.max_epoch,
             is_training=self.training,
-            scorenet=scorenet
+            scorenet=scorenet,
         )
 
         sf_loss = calculate_sf_loss(
             scorenet, score, outcome, self.config.loss_params, actual_lambda
         )
 
-        self.loss_metrics[f"{loss_type}_epoch"].update(sf_loss)
-        self.log(
-            loss_type,
-            sf_loss,
-            prog_bar=False,
-            sync_dist=False,
-            on_epoch=False,
-            on_step=True,
-        )
         return sf_loss

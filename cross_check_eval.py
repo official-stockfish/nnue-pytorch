@@ -2,6 +2,7 @@ import subprocess
 import re
 import math
 
+import torch
 import tyro
 
 import chess
@@ -297,13 +298,14 @@ def main():
 
     ckpt_model = None
     if cross_check_config.checkpoint:
-        ckpt = M.NNUE.load_from_checkpoint(
-            cross_check_config.checkpoint,
-            config=nnue_lightning_config,
+        checkpoint = torch.load(
+            cross_check_config.checkpoint, map_location="cpu", weights_only=False
         )
+        ckpt = M.NNUE(config=nnue_lightning_config)
+        ckpt.load_state_dict(checkpoint["state_dict"])
         ckpt.to(cross_check_config.device)
         ckpt.eval()
-        # --checkpoint - returns a Lightning NNUE wrapping a NNUEModel
+        # --checkpoint - returns a plain NNUE wrapping a NNUEModel
         ckpt_model = ckpt.model
 
     nnue = read_model(
