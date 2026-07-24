@@ -1,11 +1,12 @@
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Literal
+from typing import Literal
+
 import tyro
 from tyro.conf import (
-    OmitArgPrefixes,
-    UseAppendAction,
     FlagConversionOff,
+    OmitArgPrefixes,
     Positional,
+    UseAppendAction,
 )
 
 from data_loader.config import DataloaderSkipConfig
@@ -14,10 +15,10 @@ from model.config import NNUELightningConfig
 
 @dataclass(kw_only=True)
 class TrainingConfig:
-    datasets: Positional[Tuple[str, ...]] = ()
+    datasets: Positional[tuple[str, ...]] = ()
     """Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if no validation data is specified."""
 
-    validation_datasets: UseAppendAction[Tuple[str, ...]] = ()
+    validation_datasets: UseAppendAction[tuple[str, ...]] = ()
     """Validation data to use for validation instead of the training data."""
 
     validation_size: int = 0
@@ -26,10 +27,10 @@ class TrainingConfig:
     check_val_every_n_epoch: int = 1
     """Number of epochs between validation (has to be >= 1)."""
 
-    default_root_dir: Optional[str] = None
+    default_root_dir: str | None = None
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
 
-    gpus: Optional[str] = None
+    gpus: str | None = None
     """List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Only used when accelerator="cuda"."""
 
     pin_memory: bool = True
@@ -62,16 +63,16 @@ class TrainingConfig:
     compile_backend: Literal["inductor", "cudagraphs"] = "inductor"
     """Which backend to use for torch.compile. inductor works well with larger nets, cudagraphs with smaller nets."""
 
-    process_group_backend: Optional[Literal["nccl", "gloo", "mpi"]] = None
+    process_group_backend: Literal["nccl", "gloo", "mpi"] | None = None
     """Process group backend for DDP. None picks nccl for CUDA, gloo for CPU."""
 
     seed: int = 42
     """Torch seed to use."""
 
-    resume_from_model: Optional[str] = None
+    resume_from_model: str | None = None
     """Initializes training using the weights from the given .pt model."""
 
-    resume_from_checkpoint: Optional[str] = None
+    resume_from_checkpoint: str | None = None
     """Initializes training using a given .ckpt model."""
 
     network_save_period: int = 20

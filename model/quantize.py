@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Optional, Callable, NotRequired, TypedDict, TYPE_CHECKING
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 import torch
 
@@ -176,7 +177,7 @@ class QuantizationManager:
         weight: torch.Tensor,
         psqt_weight: torch.Tensor,
         f_weight_export_dtype: torch.dtype = torch.int16,
-        callback: Optional[Callable] = None,
+        callback: Callable | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         weight = weight.mul(self.weight_scales_dict["ft_weight"])
         weight = _safe_convert(weight, f_weight_export_dtype)
@@ -192,7 +193,7 @@ class QuantizationManager:
     def quantize_feature_transformer_bias(
         self,
         bias: torch.Tensor,
-        callback: Optional[Callable] = None,
+        callback: Callable | None = None,
     ) -> torch.Tensor:
         bias = bias.mul(self.weight_scales_dict["ft_bias"])
         bias = _safe_convert(bias, torch.int16)
@@ -219,7 +220,7 @@ class QuantizationManager:
         bias: torch.Tensor,
         weight: torch.Tensor,
         layer_key: str,
-        callback: Optional[Callable] = None,
+        callback: Callable | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         weight_key = f"{layer_key}_weight"
         bias_key = f"{layer_key}_bias"

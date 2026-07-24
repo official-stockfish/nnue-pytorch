@@ -1,4 +1,5 @@
 import math
+
 import torch
 from torch import Tensor, nn
 
@@ -48,10 +49,9 @@ class LambdaController(nn.Module):
         checkpoint["jitter_buffer_value"] = self.jitter_buffer
 
     def on_load_checkpoint(self, pl_module, checkpoint, resuming: bool = False):
-        if resuming:
-            if "jitter_buffer_value" in checkpoint:
-                jitter_buffer_value = checkpoint["jitter_buffer_value"].to(
-                    device=self.jitter_buffer.device,
-                    dtype=self.jitter_buffer.dtype,
-                )
-                self.jitter_buffer.copy_(jitter_buffer_value)
+        if resuming and "jitter_buffer_value" in checkpoint:
+            jitter_buffer_value = checkpoint["jitter_buffer_value"].to(
+                device=self.jitter_buffer.device,
+                dtype=self.jitter_buffer.dtype,
+            )
+            self.jitter_buffer.copy_(jitter_buffer_value)

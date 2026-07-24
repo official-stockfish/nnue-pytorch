@@ -11,7 +11,7 @@ def _find_nearest_divisor(value: int, target: int) -> int:
     return divisors[0][0]
 
 
-_num_threads_forward_cache: dict[int, int] = dict()
+_num_threads_forward_cache: dict[int, int] = {}
 
 
 def _get_num_threads_for_forward(output_size: int) -> int:
@@ -24,7 +24,7 @@ def _get_num_threads_for_forward(output_size: int) -> int:
     return _num_threads_forward_cache[output_size]
 
 
-_num_threads_backward_cache: dict[int, int] = dict()
+_num_threads_backward_cache: dict[int, int] = {}
 
 
 def _get_num_threads_for_backward(output_size: int) -> int:
@@ -44,7 +44,7 @@ def _kernel_with_threads(kernel, threads):
     return f
 
 
-_sparse_input_linear_forward_kernel_cache = dict()
+_sparse_input_linear_forward_kernel_cache = {}
 
 
 @torch.compiler.disable(recursive=False)
@@ -66,7 +66,7 @@ def make_sparse_input_linear_forward_kernel(max_active_indices: int, output_size
     key = (max_active_indices, output_size, num_threads)
     if key not in _sparse_input_linear_forward_kernel_cache:
         kernel = cp.RawKernel(
-            r"""
+            rf"""
 
 typedef unsigned int uint32_t;
 typedef int int32_t;
@@ -156,11 +156,7 @@ void sparse_input_linear_forward(
     }}
 }}
 
-""".format(
-                max_active_indices=max_active_indices,
-                output_thread_slice_size=output_thread_slice_size,
-                output_size=output_size,
-            ),
+""",
             "sparse_input_linear_forward",
         )
         kernel.compile()
@@ -170,7 +166,7 @@ void sparse_input_linear_forward(
     return _sparse_input_linear_forward_kernel_cache[key]
 
 
-_sparse_input_linear_backward_kernel_cache = dict()
+_sparse_input_linear_backward_kernel_cache = {}
 
 
 @torch.compiler.disable(recursive=False)
@@ -192,7 +188,7 @@ def make_sparse_input_linear_backward_kernel(max_active_indices: int, output_siz
     key = (max_active_indices, output_size, num_threads)
     if key not in _sparse_input_linear_backward_kernel_cache:
         kernel = cp.RawKernel(
-            r"""
+            rf"""
 
 typedef unsigned int uint32_t;
 typedef int int32_t;
@@ -291,11 +287,7 @@ void sparse_input_linear_backward(
     }}
 }}
 
-""".format(
-                max_active_indices=max_active_indices,
-                output_thread_slice_size=output_thread_slice_size,
-                output_size=output_size,
-            ),
+""",
             "sparse_input_linear_backward",
         )
         kernel.compile()

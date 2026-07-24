@@ -1,18 +1,17 @@
+import numpy as np
 import torch
 from torch import autograd
-import numpy as np
 
 _HAS_CUPY_KERNELS = False
 try:
     from .fused_ft_kernel import (
-        make_fused_double_ft_forward_kernel,
-        make_fused_double_ft_backward_kernel,
         BACKWARD_TILE_SIZE,
+        make_fused_double_ft_backward_kernel,
+        make_fused_double_ft_forward_kernel,
     )
     _HAS_CUPY_KERNELS = True
 except (ImportError, OSError, RuntimeError):
     BACKWARD_TILE_SIZE = 1
-    pass
 
 
 class FusedDoubleFtFunction(autograd.Function):

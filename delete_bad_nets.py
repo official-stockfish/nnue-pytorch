@@ -1,7 +1,7 @@
-import sys
-import re
-import os
 import itertools
+import os
+import re
+import sys
 
 
 def parse_ordo(ordo_filename):
@@ -54,8 +54,8 @@ def split_nets_by_strength(nets, split_point=16):
 
 
 def get_nets_by_directory(best_nets, worst_nets, num_best_to_keep=16):
-    binned_best_nets = dict()
-    binned_worst_nets = dict()
+    binned_best_nets = {}
+    binned_worst_nets = {}
 
     for net_name, rating, error in itertools.chain(best_nets, worst_nets):
         basedir = get_net_dir(net_name)
@@ -97,33 +97,27 @@ def delete_bad_nets(root_dir, num_best_to_keep=16):
             ]
 
             for ckpt_file in ckpt_files:
-                try:
-                    ckpt_epoch = ckpt_epoch_p.match(ckpt_file)[1]
-                    if ckpt_epoch in worst_epochs:
-                        print("Delete {}".format(ckpt_file))
-                        os.remove(ckpt_file)
-                except:
-                    pass
+                ckpt_match = ckpt_epoch_p.match(ckpt_file)
+                if ckpt_match and ckpt_match[1] in worst_epochs:
+                    print(f"Delete {ckpt_file}")
+                    os.remove(ckpt_file)
 
-                print("Keep {}".format(ckpt_file))
+                print(f"Keep {ckpt_file}")
 
             for nnue_file in nnue_files:
-                try:
-                    nnue_epoch = net_epoch_p.match(nnue_file)[1]
-                    if nnue_epoch in worst_epochs:
-                        print("Delete {}".format(nnue_file))
-                        os.remove(nnue_file)
-                except:
-                    pass
+                nnue_match = net_epoch_p.match(nnue_file)
+                if nnue_match and nnue_match[1] in worst_epochs:
+                    print(f"Delete {nnue_file}")
+                    os.remove(nnue_file)
 
-                print("Keep {}".format(nnue_file))
+                print(f"Keep {nnue_file}")
 
 
 def show_help():
     print("Usage: python delete_bad_nets.py root_dir [num_best_to_keep]")
     print('root_dir - the directory to "cleanup"')
     print("num_best_to_keep - the number of best nets to keep. Default: 16")
-    print("")
+    print()
     print("It expects to find ordo.out somewhere within root_dir.")
     print("If the ordo.out is not found nothing is deleted.")
     print("It uses the ratings from the ordo file to determine which nets are best.")
@@ -138,7 +132,7 @@ def show_help():
     print("Both ckpt and nnue files are deleted. Only nets listed in the ordo")
     print("file can be deleted. Other nets are always kept.")
     print("The .nnue and .ckpt files are matched by epoch.")
-    print("")
+    print()
     print("The directory layout can be for example:")
     print("- root_dir")
     print("  - run_0")

@@ -1,6 +1,7 @@
 import torch
+
+from .fused_ft_functions import _HAS_CUPY_KERNELS, FusedDoubleFtFunction
 from .sparse_linear_functions import SparseLinearFunction
-from .fused_ft_functions import FusedDoubleFtFunction, _HAS_CUPY_KERNELS
 
 
 def double_feature_transform(

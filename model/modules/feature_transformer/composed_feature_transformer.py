@@ -1,10 +1,10 @@
+from collections.abc import Callable
+
 import torch
 from torch import nn
 
-from typing import Callable
-
-from ..features.input_feature import InputFeature
 from ...quantize import QuantizationManager
+from ..features.input_feature import InputFeature
 from .double_ft_functions import double_feature_transform
 
 

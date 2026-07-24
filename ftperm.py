@@ -33,31 +33,32 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm^ -
 
 import copy
 import time
-
-from collections.abc import Iterable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass, field, replace
-from typing import Callable, Generator, TypeAlias, Annotated, Union, Literal, TypeVar, Optional
-
-import tyro
-
-from tyro.conf import (
-    OmitArgPrefixes,
+from typing import (
+    Annotated,
+    Literal,
+    TypeAlias,
+    TypeVar,
 )
 
 import numpy as np
 import numpy.typing as npt
 import torch
+import tyro
+from tyro.conf import (
+    OmitArgPrefixes,
+)
 
 import data_loader
 import model as M
 from model import (
     NNUE,
-    NNUEModel,
-    NNUEReader,
     FeatureConfig,
     ModelConfig,
+    NNUEModel,
+    NNUEReader,
 )
-
 
 """
 
@@ -128,27 +129,14 @@ class EvalPermConfig:
 @dataclass
 class FeaturePermutationConfig:
     subcommand: Annotated[
-        Union[
-            Annotated[
-                GatherConfig,
-                tyro.conf.subcommand("gather", prefix_name=False),
-            ],
-            Annotated[
-                FindPermConfig,
-                tyro.conf.subcommand("find_perm", prefix_name=False),
-            ],
-            Annotated[
-                EvalPermConfig,
-                tyro.conf.subcommand("eval_perm", prefix_name=False),
-            ],
-        ],
+        Annotated[GatherConfig, tyro.conf.subcommand("gather", prefix_name=False)] | Annotated[FindPermConfig, tyro.conf.subcommand("find_perm", prefix_name=False)] | Annotated[EvalPermConfig, tyro.conf.subcommand("eval_perm", prefix_name=False)],
         tyro.conf.arg(name=""),
     ]
     use_cupy: Annotated[bool, tyro.conf.arg(name="cupy")] = True
     """
     Set to False to use CPU instead of GPU. Kept for legacy CLI compatibility.
     """
-    device: Union[int, Literal["cpu", "mps"]] = 0
+    device: int | Literal["cpu", "mps"] = 0
     """
     Device to use. Can be integer (e.g. 0 for cuda:0), "mps", or "cpu"
     """
@@ -156,7 +144,7 @@ class FeaturePermutationConfig:
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
 
 
-def resolve_device(use_cupy: bool, device: Union[int, Literal["cpu", "mps"]]) -> str:
+def resolve_device(use_cupy: bool, device: int | Literal["cpu", "mps"]) -> str:
     if not use_cupy:
         return "cpu"
     if _DEVICE_OVERRIDE is not None:
@@ -435,7 +423,7 @@ def make_swaps_3(actmat: torch.Tensor) -> SwapResult:
 
 
 def find_perm_impl(
-    actmat: Union[npt.NDArray[np.bool_], torch.Tensor], device_str: str, L1: int
+    actmat: npt.NDArray[np.bool_] | torch.Tensor, device_str: str, L1: int
 ) -> npt.NDArray[np.int_]:
     if isinstance(actmat, np.ndarray):
         actmat = np.reshape(actmat, (actmat.shape[0] * 2, actmat.shape[1] // 2))
@@ -510,7 +498,7 @@ def make_sparse_batch_provider(
     batch_size: int,
     feature_set_name: str,
     loader_num_workers: int = 4,
-    loader_config: Optional[data_loader.DataloaderSkipConfig] = None
+    loader_config: data_loader.DataloaderSkipConfig | None = None
 ) -> data_loader.SparseBatchProvider:
     if loader_config is None:
         loader_config = data_loader.DataloaderSkipConfig(
@@ -520,14 +508,14 @@ def make_sparse_batch_provider(
     # overwrite defaults
     elif loader_config.random_fen_skipping == 0 or not loader_config.filtered:
         print("[ft_perm.py] WARNING: Overwriting dataloader config to ensure some level of fen skipping and filtering, which are important for performance and correctness of ft perm finding.")
-        print("[ft_perm.py]   Before overwrites: {}".format(loader_config))
+        print(f"[ft_perm.py]   Before overwrites: {loader_config}")
         random_fen_skipping = loader_config.random_fen_skipping if loader_config.random_fen_skipping != 0 else 10
         loader_config = replace(
             loader_config,
             random_fen_skipping=random_fen_skipping,
             filtered=True,
         )
-        print("[ft_perm.py]   After overwrites:  {}".format(loader_config))
+        print(f"[ft_perm.py]   After overwrites:  {loader_config}")
     return data_loader.SparseBatchProvider(
         feature_set=feature_set_name,
         filenames=[data_path],
@@ -548,8 +536,8 @@ def eval_ft(model: NNUEModel, batch: Iterable[torch.Tensor], device_str: str) ->
             them,
             white_indices,
             black_indices,
-            outcome,
-            score,
+            _outcome,
+            _score,
             piece_count,
         ) = batch_tuple
         psqt_indices, _  = model.calculate_buckets(piece_count)
@@ -571,7 +559,7 @@ def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
 
     l1_size = model.layer_stacks.l1.linear.in_features
     if l1_size != len(permutation) * 2:
-        raise Exception(
+        raise ValueError(
             f"Invalid permutation size. Expected {l1_size}. Got {len(permutation) * 2}."
         )
 
@@ -603,7 +591,7 @@ def gather_impl(
         count: int,
         device_str: str,
         loader_workers: int = 4,
-        loader_config: Optional[data_loader.DataloaderSkipConfig] = None
+        loader_config: data_loader.DataloaderSkipConfig | None = None
     ) -> npt.NDArray[np.bool_]:
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
     BATCH_SIZE = 1024
@@ -621,7 +609,7 @@ def gather_impl(
     actmats = []
 
     done = 0
-    print("Processed {} positions.".format(done))
+    print(f"Processed {done} positions.")
     while done < count:
         # checks are already filtered by sparse_batch_provider.
         s_batch = next(sparse_batch_provider)
@@ -632,7 +620,7 @@ def gather_impl(
         actmats.append(actmat)
 
         done += len(actmat)
-        print("Processed {} positions.".format(done))
+        print(f"Processed {done} positions.")
 
     return np.concatenate(actmats, axis=0)
 
@@ -728,9 +716,9 @@ def ft_optimize(
     actmat_save_path: str | None = None,
     perm_save_path: str | None = None,
     use_cupy: bool = True,
-    device: Union[int, Literal["cpu", "mps"]] = 0,
+    device: int | Literal["cpu", "mps"] = 0,
     loader_num_workers: int = 4,
-    loader_config: Optional[data_loader.DataloaderSkipConfig] = None,
+    loader_config: data_loader.DataloaderSkipConfig | None = None,
 ) -> None:
     device_str = resolve_device(use_cupy, device)
 
@@ -753,7 +741,7 @@ def ft_optimize(
     ft_permute_impl(model, perm)
 
 
-def set_cupy_device(device: Optional[int]=None) -> None:
+def set_cupy_device(device: int | None=None) -> None:
     # kept for legacy reasons.
     global _DEVICE_OVERRIDE
     _DEVICE_OVERRIDE = device

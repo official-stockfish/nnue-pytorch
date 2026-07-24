@@ -1,9 +1,15 @@
 import argparse
-import subprocess
+import os
+import shlex
 import shutil
+import subprocess
 import sys
 from pathlib import Path
-import shlex
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from model.modules.features import DEFAULT_FEATURES
+
 
 def run_command(cmd_string):
     """Executes a shell command string and halts execution if it fails."""
@@ -23,6 +29,7 @@ def main():
     parser.add_argument("--device", type=str, default='cpu', help="Compute device (integer x for cuda:x, 'mps' or 'cpu'; default: 'cpu')")
     parser.add_argument("--test-dir", type=str, default=DEFAULT_TEST_DIR_STR, help=f"Directory for test output (default: {DEFAULT_TEST_DIR_STR})")
     parser.add_argument("-y", "--yes", action="store_true", help="Automatically delete existing output directory without prompting")
+    parser.add_argument("--features", type=str, default=DEFAULT_FEATURES, help=f"Feature set to use (default: {DEFAULT_FEATURES})")
     args = parser.parse_args()
 
     # --- 1. Evaluate Device Arguments ---
@@ -68,23 +75,23 @@ def main():
     python_executable = shlex.quote(sys.executable)
     # --- 4. Define Pipeline Commands ---
     pipeline = [
-        f"{python_executable} -u train.py ./.pgo/small.binpack --batch-size 1024 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 10000 --max_epochs=2 --swa-start-epoch=1 --default_root_dir \"{test_dir_str}\" {train_device_arg} {train_workers_arg}",
+        f"{python_executable} -u train.py ./.pgo/small.binpack --batch-size 1024 --l1=1024 --features={args.features} --epoch-size 10000 --max_epochs=2 --swa-start-epoch=1 --default_root_dir \"{test_dir_str}\" {train_device_arg} {train_workers_arg}",
 
         f"{python_executable} -c \"import torch; ckpt=torch.load('{test_dir_str}/lightning_logs/version_0/checkpoints/last.ckpt', map_location='cpu', weights_only=False); print('Checkpoint keys:', list(ckpt.keys())); assert 'epoch' in ckpt and 'global_step' in ckpt and 'state_dict' in ckpt\"",
 
-        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_0/checkpoints/last.ckpt \"{test_dir_str}\"/lightning_logs/version_0/checkpoints/last.pt --features=Full_Threats+HalfKAv2_hm^ --l1=1024 {serialize_device_arg} {serialize_workers_arg}",
+        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_0/checkpoints/last.ckpt \"{test_dir_str}\"/lightning_logs/version_0/checkpoints/last.pt --features={args.features} --l1=1024 {serialize_device_arg} {serialize_workers_arg}",
 
-        f"{python_executable} -u train.py ./.pgo/small.binpack --batch-size 2048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 10000 --max_epochs=2 --swa-start-epoch=2 --default_root_dir \"{test_dir_str}\" --resume-from-model=\"{test_dir_str}\"/lightning_logs/version_0/checkpoints/last.pt --validation-size=5000 {train_device_arg} {train_workers_arg}",
+        f"{python_executable} -u train.py ./.pgo/small.binpack --batch-size 2048 --l1=1024 --features={args.features} --epoch-size 10000 --max_epochs=2 --swa-start-epoch=2 --default_root_dir \"{test_dir_str}\" --resume-from-model=\"{test_dir_str}\"/lightning_logs/version_0/checkpoints/last.pt --validation-size=5000 {train_device_arg} {train_workers_arg}",
 
-        f"{python_executable} -u train.py ./.pgo/small.binpack --batch-size 2048 --l1=1024 --features=Full_Threats+HalfKAv2_hm^ --epoch-size 10000 --max_epochs=4 --swa-start-epoch=2 --default_root_dir \"{test_dir_str}\" --resume-from-checkpoint=\"{test_dir_str}\"/lightning_logs/version_1/checkpoints/last.ckpt --validation-size=5000 {train_device_arg} {train_workers_arg}",
+        f"{python_executable} -u train.py ./.pgo/small.binpack --batch-size 2048 --l1=1024 --features={args.features} --epoch-size 10000 --max_epochs=4 --swa-start-epoch=2 --default_root_dir \"{test_dir_str}\" --resume-from-checkpoint=\"{test_dir_str}\"/lightning_logs/version_1/checkpoints/last.ckpt --validation-size=5000 {train_device_arg} {train_workers_arg}",
 
-        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.ckpt \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.pt --features=Full_Threats+HalfKAv2_hm^ --l1=1024 {serialize_device_arg} {serialize_workers_arg}",
+        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.ckpt \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.pt --features={args.features} --l1=1024 {serialize_device_arg} {serialize_workers_arg}",
 
-        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.pt \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue --features=Full_Threats+HalfKAv2_hm^ --l1=1024 {serialize_device_arg} {serialize_workers_arg}",
+        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.pt \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue --features={args.features} --l1=1024 {serialize_device_arg} {serialize_workers_arg}",
 
-        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue --ft_optimize_data=./.pgo/small.binpack --features=Full_Threats+HalfKAv2_hm^ --l1=1024 --ft_optimize --ft_optimize_count=1000 --ft_compression=leb128 {serialize_device_arg} {serialize_workers_arg}",
+        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue --ft_optimize_data=./.pgo/small.binpack --features={args.features} --l1=1024 --ft_optimize --ft_optimize_count=1000 --ft_compression=leb128 {serialize_device_arg} {serialize_workers_arg}",
 
-        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue --features=Full_Threats+HalfKAv2_hm^ --l1=1024 --ft_compression=leb128 --out-sha {serialize_device_arg} {serialize_workers_arg}"
+        f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue \"{test_dir_str}\"/lightning_logs/version_2/checkpoints/last.nnue --features={args.features} --l1=1024 --ft_compression=leb128 --out-sha {serialize_device_arg} {serialize_workers_arg}"
     ]
 
     # --- 5. Execute ---

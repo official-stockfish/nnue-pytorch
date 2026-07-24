@@ -1,12 +1,12 @@
-import threading
 import queue
+import threading
 from dataclasses import dataclass
 
 import torch
 from torch.utils.data import Dataset
 
 from . import stream
-from .config import DataloaderSkipConfig, DataloaderDDPConfig
+from .config import DataloaderDDPConfig, DataloaderSkipConfig
 
 
 def _recursive_pin(obj):
@@ -58,13 +58,15 @@ class FenBatchProvider:
         cyclic,
         num_workers,
         batch_size=None,
-        config: DataloaderSkipConfig = DataloaderSkipConfig(),
+        config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
     ):
         self.filename = filename
         self.cyclic = cyclic
         self.num_workers = num_workers
         self.batch_size = batch_size
+        if config is None:
+            config = DataloaderSkipConfig()
         self.config = config
 
         if batch_size:
@@ -115,7 +117,7 @@ class TrainingDataProvider:
         cyclic,
         num_workers,
         batch_size=None,
-        config: DataloaderSkipConfig = DataloaderSkipConfig(),
+        config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
         use_pinned_memory=False,
         device="cpu",
@@ -129,6 +131,8 @@ class TrainingDataProvider:
         self.cyclic = cyclic
         self.num_workers = num_workers
         self.batch_size = batch_size
+        if config is None:
+            config = DataloaderSkipConfig()
         self.config = config
         self.use_pinned_memory = use_pinned_memory
         self.device = device
@@ -178,7 +182,7 @@ class SparseBatchProvider(TrainingDataProvider):
         batch_size,
         cyclic=True,
         num_workers=1,
-        config: DataloaderSkipConfig = DataloaderSkipConfig(),
+        config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
         use_pinned_memory=False,
         device="cpu",
@@ -208,7 +212,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         batch_size,
         cyclic=True,
         num_workers=1,
-        config: DataloaderSkipConfig = DataloaderSkipConfig(),
+        config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
         use_pinned_memory=False,
     ):
@@ -218,6 +222,8 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         self.batch_size = batch_size
         self.cyclic = cyclic
         self.num_workers = num_workers
+        if config is None:
+            config = DataloaderSkipConfig()
         self.config = config
         self.ddp_config = ddp_config
         self.use_pinned_memory = use_pinned_memory
@@ -317,7 +323,7 @@ class FixedNumBatchesDataset(Dataset):
                 except StopIteration:
                     _safe_put(stop_event, prefetch_queue, None)
                     break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             _safe_put(stop_event, prefetch_queue, e)
 
     def _start_prefetching(self):

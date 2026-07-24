@@ -2,12 +2,12 @@ import cupy as cp
 import torch
 
 from .sparse_linear_kernel import (
-    _get_num_threads_for_forward,
     _get_num_threads_for_backward,
+    _get_num_threads_for_forward,
     _kernel_with_threads,
 )
 
-_fused_double_ft_forward_kernel_cache = dict()
+_fused_double_ft_forward_kernel_cache = {}
 
 @torch.compiler.disable(recursive=False)
 def make_fused_double_ft_forward_kernel(max_active_indices: int, l1_size: int):
@@ -126,7 +126,7 @@ void fused_double_ft_forward(
 
 BACKWARD_TILE_SIZE = 4
 
-_fused_double_ft_backward_kernel_cache = dict()
+_fused_double_ft_backward_kernel_cache = {}
 
 @torch.compiler.disable(recursive=False)
 def make_fused_double_ft_backward_kernel(max_active_indices: int, l1_size: int, tile_size: int = BACKWARD_TILE_SIZE, num_psqt_buckets: int = 8):

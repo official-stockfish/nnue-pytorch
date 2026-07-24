@@ -7,7 +7,8 @@ while keeping `model.NNUE` as a plain `torch.nn.Module`.
 from __future__ import annotations
 
 import os
-from typing import Any, Iterable, List, Optional, Union
+from collections.abc import Iterable
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -16,9 +17,9 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 def init_distributed(
-    backend: Optional[str] = None,
-    local_rank: Optional[int] = None,
-    device_type: Optional[str] = None,
+    backend: str | None = None,
+    local_rank: int | None = None,
+    device_type: str | None = None,
 ):
     """Initialize the distributed process group if multi-process training.
 
@@ -26,14 +27,14 @@ def init_distributed(
     returned values are ``(0, 1, 0)``.
     """
     if local_rank is None:
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
 
     if dist.is_available() and dist.is_initialized():
         rank = dist.get_rank()
         world_size = dist.get_world_size()
     else:
-        rank = int(os.environ.get("RANK", 0))
-        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        rank = int(os.environ.get("RANK", "0"))
+        world_size = int(os.environ.get("WORLD_SIZE", "1"))
 
         if world_size > 1 and dist.is_available():
             if backend is None:
@@ -82,15 +83,15 @@ class SimpleTrainer:
         self,
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
-        schedulers: Optional[Iterable[Any]],
+        schedulers: Iterable[Any] | None,
         max_epochs: int,
         check_val_every_n_epoch: int,
         gradient_clip_val: float,
         log_every_n_steps: int,
-        default_root_dir: Optional[str],
-        callbacks: Optional[Iterable[Any]],
-        logger: Optional[Any],
-        device: Union[str, torch.device],
+        default_root_dir: str | None,
+        callbacks: Iterable[Any] | None,
+        logger: Any | None,
+        device: str | torch.device,
         rank: int,
         world_size: int,
         local_rank: int,
@@ -102,13 +103,13 @@ class SimpleTrainer:
         self.gradient_clip_val = gradient_clip_val
         self.log_every_n_steps = log_every_n_steps
         self.default_root_dir = default_root_dir or "."
-        self.callbacks: List[Any] = list(callbacks) if callbacks is not None else []
+        self.callbacks: list[Any] = list(callbacks) if callbacks is not None else []
 
         # Accept a single logger or a list.  Expose the first logger as
         # ``self.logger`` (mirroring PyTorch Lightning) and keep the full list
         # as ``self.loggers`` so metrics can be forwarded to every logger.
         if isinstance(logger, (list, tuple)):
-            self.loggers: List[Any] = list(logger)
+            self.loggers: list[Any] = list(logger)
             self.logger = self.loggers[0] if self.loggers else None
         else:
             self.loggers = [logger] if logger is not None else []
@@ -126,13 +127,13 @@ class SimpleTrainer:
 
         self.current_epoch: int = 0
         self.global_step: int = 0
-        self.num_training_batches: Optional[int] = None
-        self.num_val_batches: Optional[int] = None
+        self.num_training_batches: int | None = None
+        self.num_val_batches: int | None = None
         self.callback_metrics: dict = {}
 
         # Normalise scheduler list: the project returns either a scheduler or a
         # dict of the form {"scheduler": scheduler, "interval": "step"}.
-        self._schedulers: List[Any] = []
+        self._schedulers: list[Any] = []
         for sch in schedulers or []:
             if isinstance(sch, dict):
                 self._schedulers.append(sch.get("scheduler", sch))
@@ -144,17 +145,17 @@ class SimpleTrainer:
         # forward pass; the loss is computed outside so callbacks can keep the
         # plain NNUE object as ``self.model``.
         self.model.to(self.device)
-        self._ddp_model: Optional[nn.Module] = None
+        self._ddp_model: nn.Module | None = None
         if self.world_size > 1:
             inner_model = _unwrap_module(self.model).model
             inner_model.to(self.device)
-            kwargs = dict(
-                gradient_as_bucket_view=True,
-                static_graph=True,
-                find_unused_parameters=False,
-                broadcast_buffers=False,
-                bucket_cap_mb=50,
-            )
+            kwargs = {
+                "gradient_as_bucket_view": True,
+                "static_graph": True,
+                "find_unused_parameters": False,
+                "broadcast_buffers": False,
+                "bucket_cap_mb": 50,
+            }
             if self.device.type == "cuda":
                 kwargs["device_ids"] = [self.local_rank]
                 kwargs["output_device"] = self.local_rank
@@ -177,7 +178,7 @@ class SimpleTrainer:
             for t in batch
         )
 
-    def _log_metrics(self, metrics: dict, step: Optional[int] = None):
+    def _log_metrics(self, metrics: dict, step: int | None = None):
         if self.rank != 0:
             return
         if not self.loggers:

@@ -1,11 +1,10 @@
 import torch
-
 from torch import Tensor, nn
 from torchmetrics import MeanMetric, MetricCollection
 
 from .config import NNUELightningConfig
-from .model import NNUEModel
 from .lambda_utils import LambdaController
+from .model import NNUEModel
 
 
 def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
@@ -310,8 +309,8 @@ class NNUE(nn.Module):
             them,
             white_indices,
             black_indices,
-            outcome,
-            score,
+            _outcome,
+            _score,
             piece_count,
         ) = batch
         scorenet = self.model(

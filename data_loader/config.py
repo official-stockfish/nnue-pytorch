@@ -1,6 +1,7 @@
 import ctypes
 from dataclasses import dataclass
 
+
 @dataclass
 class DataloaderSkipConfig:
     filtered: bool = True

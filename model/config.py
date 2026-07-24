@@ -4,9 +4,9 @@ from typing import Annotated
 import tyro
 from tyro.conf import OmitArgPrefixes
 
-from .quantize import QuantizationConfig
-from .optimizers import OptimizerConfig
 from .modules import FeatureConfig, LayerStacksConfig
+from .optimizers import OptimizerConfig
+from .quantize import QuantizationConfig
 
 
 # 3 layer fully connected network

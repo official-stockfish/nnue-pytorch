@@ -5,8 +5,8 @@ from torch import autograd
 _HAS_CUPY_KERNELS = False
 try:
     from .sparse_linear_kernel import (
-        make_sparse_input_linear_forward_kernel,
         make_sparse_input_linear_backward_kernel,
+        make_sparse_input_linear_forward_kernel,
     )
     _HAS_CUPY_KERNELS = True
 except (ImportError, OSError, RuntimeError):
@@ -108,7 +108,7 @@ class _CudaSparseLinearFunction(autograd.Function):
 
         grad_output = grad_output.contiguous()
 
-        feature_indices, weight, bias = ctx.saved_tensors
+        feature_indices, weight, _bias = ctx.saved_tensors
 
         device = feature_indices.device
         batch_size = feature_indices.shape[0]

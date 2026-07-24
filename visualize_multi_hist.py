@@ -1,7 +1,7 @@
 import argparse
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 import model as M
 
@@ -41,10 +41,10 @@ def plot_hists(
         fig.suptitle(title)
     bins = get_bins(tensors_columns, num_bins)
     for i, tensors in enumerate(tensors_columns):
-        print("Processing column {}/{}.".format(i + 1, len(tensors_columns)))
+        print(f"Processing column {i + 1}/{len(tensors_columns)}.")
         for j, tensor in enumerate(tensors):
             ax = axs[j, i]
-            print("    Processing tensor {}/{}.".format(j + 1, len(tensors)))
+            print(f"    Processing tensor {j + 1}/{len(tensors)}.")
             ax.hist(tensor, log=True, bins=bins)
             if i == 0 and row_names[j]:
                 ax.set_ylabel(row_names[j])
@@ -76,10 +76,8 @@ def main():
     labels = []
     for m in args.models:
         label = basename(m)
-        if label.startswith("nn-"):
-            label = label[3:]
-        if label.endswith(".nnue"):
-            label = label[:-5]
+        label = label.removeprefix("nn-")
+        label = label.removesuffix(".nnue")
         labels.append("\n".join(label.split("-")))
 
     config = M.ModelConfig.get_model_config(args)
@@ -131,7 +129,7 @@ def main():
             layers_l1[i].append(l1.weight.flatten().numpy())
             layers_l2[i].append(l2.weight.flatten().numpy())
             layers_l3[i].append(l3.weight.flatten().numpy())
-    col_names = ["Subnet {}".format(i) for i in range(layer_stacks[0].count)]
+    col_names = [f"Subnet {i}" for i in range(layer_stacks[0].count)]
     plot_hists(
         layers_l1,
         labels,

@@ -1,8 +1,8 @@
-import os
-import sys
-import subprocess
 import math
+import os
 import pathlib
+import subprocess
+import sys
 
 
 def _get_numa_node_robust(pci_raw: str) -> int:
@@ -66,7 +66,7 @@ def _get_numa_node_robust(pci_raw: str) -> int:
                 node_file = match / "numa_node"
                 if node_file.exists():
                     return int(node_file.read_text().strip())
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     return -1
@@ -127,7 +127,7 @@ def enforce_gpu_numa_affinity():
                 stderr=subprocess.DEVNULL,
             ).strip()
             visible_list = gpu_indices_str.split("\n") if gpu_indices_str else []
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             return _get_fallback_core_count(
                 "Failed to query nvidia-smi for GPU indices: " + str(e)
             )
@@ -161,7 +161,7 @@ def enforce_gpu_numa_affinity():
             numa_node = _get_numa_node_robust(pci_bus_id_raw)
             gpu_numa_map.append((lr, numa_node))
 
-    except Exception as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         return _get_fallback_core_count("Failed to map GPUs to NUMA nodes: " + str(e))
 
     # 3. Identify peers sharing the same NUMA node
@@ -209,14 +209,14 @@ def enforce_gpu_numa_affinity():
                         if valid_siblings:
                             siblings = valid_siblings
                     break
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
         # Store as a sorted tuple so it can be hashed and deduplicated
         physical_cores.add(tuple(sorted(siblings)))
 
     # Sort the unique physical cores deterministically
-    unique_cores = sorted(list(physical_cores))
+    unique_cores = sorted(physical_cores)
 
     # 6. Partition the physical core groups among peers
     chunk_size = len(unique_cores) // total_peers
@@ -239,7 +239,7 @@ def enforce_gpu_numa_affinity():
             f"[ddp_init] Successfully set CPU affinity to cores {my_final_cpus} for LOCAL_RANK {local_rank} (NUMA node {my_numa_node})"
         )
         return len(my_final_cpus)
-    except Exception as e:
+    except OSError as e:
         return _get_fallback_core_count("Failed to set CPU affinity: " + str(e))
 
 

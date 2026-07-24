@@ -1,82 +1,79 @@
-import os
-import sys
+from types import SimpleNamespace
+
 import pytest
-import lightning as L
 import torch
-from torch.utils.data import DataLoader, Dataset
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from train import TerminateOnNaN
+from trainer.callbacks import TerminateOnNaN
 
-class DummyDataset(Dataset):
-    def __len__(self):
-        return 10
-    def __getitem__(self, idx):
-        return torch.randn(1), torch.randn(1)
 
-class DummyModel(L.LightningModule):
-    def __init__(self, produce_nan_at_step=3, validation_nan=False):
-        super().__init__()
-        self.layer = torch.nn.Linear(1, 1)
-        self.produce_nan_at_step = produce_nan_at_step
-        self.validation_nan = validation_nan
-
-    def forward(self, x):
-        return self.layer(x)
-
-    def training_step(self, batch, batch_idx):
-        x, y = batch
-        loss = self.layer(x).sum()
-        if self.global_step == self.produce_nan_at_step and not self.validation_nan:
-            loss = loss * float('nan')
-        self.log("train_loss", loss, on_step=True)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        x, y = batch
-        loss = self.layer(x).sum()
-        if self.validation_nan:
-            loss = loss * float('nan')
-        self.log("val_loss", loss, on_epoch=True)
-        return loss
-
-    def configure_optimizers(self):
-        return torch.optim.SGD(self.parameters(), lr=0.1)
-
-@pytest.fixture
-def dummy_dataloader():
-    dataset = DummyDataset()
-    return DataLoader(dataset, batch_size=1)
-
-def test_nan_in_training(dummy_dataloader):
-    model = DummyModel(produce_nan_at_step=3, validation_nan=False)
-    
-    callback = TerminateOnNaN()
-    trainer = L.Trainer(
-        max_epochs=2,
-        callbacks=[callback],
-        enable_progress_bar=False,
-        enable_checkpointing=False,
-        logger=False,
+def _make_trainer(world_size=1, rank=0, device="cpu"):
+    return SimpleNamespace(
+        world_size=world_size,
+        rank=rank,
+        device=torch.device(device),
+        should_stop=False,
+        callback_metrics={},
     )
-    
-    trainer.fit(model, dummy_dataloader)
-    assert model.global_step < 10, "Should have stopped early due to train loss NaN"
-    assert trainer.should_stop is True
-    assert callback.nan_detected is True
 
-def test_nan_in_validation(dummy_dataloader):
-    model = DummyModel(produce_nan_at_step=999, validation_nan=True)
-    
+
+def test_finite_train_loss_does_not_stop():
+    trainer = _make_trainer()
     callback = TerminateOnNaN()
-    trainer = L.Trainer(
-        max_epochs=2,
-        callbacks=[callback],
-        enable_progress_bar=False,
-        enable_checkpointing=False,
-        logger=False,
-    )
-    
-    trainer.fit(model, dummy_dataloader, val_dataloaders=dummy_dataloader)
-    assert trainer.should_stop is True
-    assert callback.nan_detected is True
+    callback.on_train_batch_end(trainer, outputs={"loss": torch.tensor(1.23)})
+    assert not trainer.should_stop
+    assert not callback.nan_detected
+
+
+def test_nan_train_loss_stops_training():
+    trainer = _make_trainer()
+    callback = TerminateOnNaN()
+    callback.on_train_batch_end(trainer, outputs={"loss": torch.tensor(float("nan"))})
+    assert trainer.should_stop
+    assert callback.nan_detected
+
+
+def test_inf_train_loss_stops_training():
+    trainer = _make_trainer()
+    callback = TerminateOnNaN()
+    callback.on_train_batch_end(trainer, outputs={"loss": torch.tensor(float("inf"))})
+    assert trainer.should_stop
+    assert callback.nan_detected
+
+
+def test_nan_validation_loss_stops_training():
+    trainer = _make_trainer()
+    callback = TerminateOnNaN()
+    trainer.callback_metrics["val_loss_epoch"] = float("nan")
+    callback.on_validation_epoch_end(trainer)
+    assert trainer.should_stop
+    assert callback.nan_detected
+
+
+def test_missing_loss_is_ignored():
+    trainer = _make_trainer()
+    callback = TerminateOnNaN()
+    callback.on_train_batch_end(trainer, outputs={})
+    assert not trainer.should_stop
+    assert not callback.nan_detected
+
+
+def test_scalar_loss_supported():
+    trainer = _make_trainer()
+    callback = TerminateOnNaN()
+    callback.on_train_batch_end(trainer, outputs={"loss": float("nan")})
+    assert trainer.should_stop
+    assert callback.nan_detected
+
+
+@pytest.mark.skipif(
+    not torch.distributed.is_available(), reason="torch.distributed not available"
+)
+def test_distributed_nan_aggregates_across_ranks():
+    """Sanity-check the DDP aggregation helper without launching processes."""
+    # This test only exercises the local branch; real multi-rank NaN handling
+    # is covered by the GPU training pipeline.
+    trainer = _make_trainer(world_size=2, rank=0)
+    callback = TerminateOnNaN()
+    callback.on_train_batch_end(trainer, outputs={"loss": torch.tensor(float("nan"))})
+    assert trainer.should_stop
+    assert callback.nan_detected

@@ -4,7 +4,6 @@ from torch import nn
 
 from .input_feature import InputFeature
 
-
 # fmt: off
 KingBuckets = [
   -1, -1, -1, -1, 31, 30, 29, 28,

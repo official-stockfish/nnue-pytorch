@@ -1,11 +1,12 @@
-from typing import Generator
+from collections.abc import Generator
 
 import torch
 from torch import nn
 
-from .stacked_linear import FactorizedStackedLinear, StackedLinear
-from .config import LayerStacksConfig
 from ..quantize import QuantizationManager
+from .config import LayerStacksConfig
+from .stacked_linear import FactorizedStackedLinear, StackedLinear
+
 
 class LayerStacks(nn.Module):
     def __init__(self, count: int, config: LayerStacksConfig, quantization: QuantizationManager):
