@@ -47,13 +47,8 @@ class LambdaController(nn.Module):
         # Manually save the training-only buffer to the Lightning checkpoint
         checkpoint["jitter_buffer_value"] = self.jitter_buffer
 
-    def on_load_checkpoint(self, pl_module, checkpoint):
-        trainer = pl_module.__dict__.get("_trainer", None)
-        is_resuming = (
-            trainer is not None and
-            getattr(trainer, "ckpt_path", None) is not None
-        )
-        if is_resuming:
+    def on_load_checkpoint(self, pl_module, checkpoint, resuming: bool = False):
+        if resuming:
             if "jitter_buffer_value" in checkpoint:
                 jitter_buffer_value = checkpoint["jitter_buffer_value"].to(
                     device=self.jitter_buffer.device,

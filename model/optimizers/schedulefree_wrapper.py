@@ -1,6 +1,5 @@
-import lightning as L
-
 from dataclasses import dataclass
+from typing import Any
 
 try:
     import schedulefree
@@ -49,20 +48,20 @@ class ScheduleFreeWrapper:
         self.optimizer.eval()
         self.needs_train_flip = True
 
-    def on_train_epoch_start(self, pl_module: L.LightningModule):
+    def on_train_epoch_start(self, pl_module: Any):
         self.switch_to_train(True)
 
-    def on_train_batch_start(self, pl_module: L.LightningModule, batch, batch_idx):
+    def on_train_batch_start(self, pl_module: Any, batch, batch_idx):
         self.switch_to_train()
 
-    def on_validation_epoch_start(self, pl_module: L.LightningModule):
+    def on_validation_epoch_start(self, pl_module: Any):
         self.switch_to_eval()
 
-    def on_test_epoch_start(self, pl_module: L.LightningModule):
+    def on_test_epoch_start(self, pl_module: Any):
         self.switch_to_eval()
 
-    def on_train_epoch_end(self, pl_module: L.LightningModule):
+    def on_train_epoch_end(self, pl_module: Any):
         self.switch_to_eval()
 
-    def on_save_checkpoint(self, pl_module: L.LightningModule, checkpoint):
+    def on_save_checkpoint(self, pl_module: Any, checkpoint):
         self.switch_to_eval()

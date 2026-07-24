@@ -89,11 +89,11 @@ def main():
     model_description = serialize_config.description
     ft_compression = serialize_config.ft_compression
     if args.source.endswith(".ckpt"):
-        nnue = M.NNUE.load_from_checkpoint(
-            args.source,
-            config=nnue_lightning_config,
-            map_location=torch.device("cpu"),
+        checkpoint = torch.load(
+            args.source, map_location=torch.device("cpu"), weights_only=False
         )
+        nnue = M.NNUE(config=nnue_lightning_config)
+        nnue.load_state_dict(checkpoint["state_dict"])
         nnue.eval()
     elif args.source.endswith(".pt"):
         nnue = torch.load(args.source, weights_only=False)

@@ -201,16 +201,6 @@ def validate_pytorch():
         return False
 
 
-def validate_pytorchlightning():
-    pkg = PackageInfo("lightning")
-    if pkg.exists:
-        LOGGER.info(f"Found lightning version {pkg.version}. OK.")
-        return True
-    else:
-        LOGGER.error("No lightning found. Run `pip install lightning`. Exiting.")
-        return False
-
-
 def validate_cupy():
     pkg = PackageInfo("cupy")
     if pkg.exists:
@@ -240,7 +230,6 @@ def validate_imports():
     success = True
     success &= validate_asciimatics()
     success &= validate_pytorch()
-    success &= validate_pytorchlightning()
     success &= validate_cupy()
     success &= validate_gputil()
     return success

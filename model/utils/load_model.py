@@ -15,16 +15,16 @@ def load_model(
         return model.model
 
     elif filename.endswith(".ckpt"):
-        from ..lightning_module import NNUE
+        from ..nnue import NNUE
 
-        model = NNUE.load_from_checkpoint(
-            filename,
+        checkpoint = torch.load(filename, map_location="cpu", weights_only=False)
+        model = NNUE(
             config=NNUELightningConfig(
                 model_config=config,
                 features=feature_name,
             ),
-            map_location=torch.device("cpu"),
         )
+        model.load_state_dict(checkpoint["state_dict"])
         model.eval()
         return model.model
 

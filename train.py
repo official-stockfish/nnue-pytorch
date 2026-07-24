@@ -1,278 +1,34 @@
-import math
 import time
 import warnings
 import os
 import sys
+import random
+import numpy as np
 from datetime import timedelta
 
-import lightning as L
 import torch
+import torch.distributed as dist
 from torch import set_num_threads as t_set_num_threads
 from torch.utils.data import DataLoader
-from lightning.pytorch import loggers as pl_loggers
-from lightning.pytorch.callbacks import Callback, ModelCheckpoint
-from lightning.pytorch.strategies import DDPStrategy
 
 import data_loader
 import model as M
 import tyro
 
 from config import TrainingConfig
+from data_loader.config import DataloaderDDPConfig
+from trainer.engine import init_distributed, SimpleTrainer
+from trainer.callbacks import (
+    CheckpointManager,
+    ExplicitSWA,
+    SimpleLineLogger,
+    TerminateOnNaN,
+    TimeLimit,
+    WeightClipper,
+)
+from trainer.loggers import CSVLogger, TensorBoardLogger
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
-
-class TimeLimitAfterCheckpoint(Callback):
-    def __init__(self, max_time: str):
-        parts = list(map(int, max_time.strip().split(":")))
-        if len(parts) != 4:
-            raise ValueError("max_time must be in format 'DD:HH:MM:SS'")
-        days, hours, minutes, seconds = parts
-        self.max_duration = timedelta(
-            days=days, hours=hours, minutes=minutes, seconds=seconds
-        ).total_seconds()
-        self.start_time = None
-
-    def on_fit_start(self, trainer, pl_module):
-        self.start_time = time.time()
-
-    def on_train_epoch_end(self, trainer, pl_module):
-        elapsed = time.time() - self.start_time
-        if elapsed >= self.max_duration:
-            trainer.should_stop = True
-            print(
-                f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
-            )
-
-
-class TerminateOnNaN(Callback):
-    def __init__(self):
-        super().__init__()
-        self.nan_detected = False
-
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        local_stop = False
-        if outputs is not None:
-            loss = outputs.get("loss") if isinstance(outputs, dict) else outputs
-            if isinstance(loss, torch.Tensor):
-                if not torch.isfinite(loss).all():
-                    local_stop = True
-            elif not math.isfinite(loss):
-                local_stop = True
-
-        if trainer.world_size > 1:
-            import torch.distributed as dist
-            if dist.is_available() and dist.is_initialized():
-                stop_tensor = torch.tensor(1.0 if local_stop else 0.0, device=pl_module.device)
-                dist.all_reduce(stop_tensor, op=dist.ReduceOp.MAX)
-                if stop_tensor.item() > 0.5:
-                    self.nan_detected = True
-                    if local_stop:
-                        print(f"\n[TerminateOnNaN] [Rank {trainer.global_rank}] NaN/Inf detected in train loss. Aborting training...", flush=True)
-                    trainer.should_stop = True
-            else:
-                if local_stop:
-                    self.nan_detected = True
-                    print("\n[TerminateOnNaN] NaN/Inf detected in train loss. Aborting training...", flush=True)
-                    trainer.should_stop = True
-        else:
-            if local_stop:
-                self.nan_detected = True
-                print("\n[TerminateOnNaN] NaN/Inf detected in train loss. Aborting training...", flush=True)
-                trainer.should_stop = True
-
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
-        val_loss = trainer.callback_metrics.get("val_loss")
-        local_stop = False
-        if val_loss is not None:
-            if isinstance(val_loss, torch.Tensor):
-                if not torch.isfinite(val_loss).all():
-                    local_stop = True
-            elif not math.isfinite(val_loss):
-                local_stop = True
-
-        if trainer.world_size > 1:
-            import torch.distributed as dist
-            if dist.is_available() and dist.is_initialized():
-                stop_tensor = torch.tensor(1.0 if local_stop else 0.0, device=pl_module.device)
-                dist.all_reduce(stop_tensor, op=dist.ReduceOp.MAX)
-                if stop_tensor.item() > 0.5:
-                    self.nan_detected = True
-                    if local_stop:
-                        print(f"\n[TerminateOnNaN] [Rank {trainer.global_rank}] NaN/Inf detected in val loss. Aborting training...", flush=True)
-                    trainer.should_stop = True
-            else:
-                if local_stop:
-                    self.nan_detected = True
-                    print("\n[TerminateOnNaN] NaN/Inf detected in val loss. Aborting training...", flush=True)
-                    trainer.should_stop = True
-        else:
-            if local_stop:
-                self.nan_detected = True
-                print("\n[TerminateOnNaN] NaN/Inf detected in val loss. Aborting training...", flush=True)
-                trainer.should_stop = True
-
-
-
-
-class ConsolidatedCheckpoint(ModelCheckpoint):
-    def __init__(self, *args, **kwargs):
-        # We force this to True to decouple from the validation schedule
-        kwargs.setdefault("save_on_train_epoch_end", True)
-        kwargs.setdefault("monitor", None)
-        super().__init__(*args, **kwargs)
-
-    def on_train_end(self, trainer, pl_module):
-        if self.dirpath:
-            # Manually trigger a final save to last.ckpt
-            path = os.path.join(self.dirpath, "last.ckpt")
-            trainer.save_checkpoint(path)
-
-
-class SimpleLineLogger(Callback):
-    def __init__(
-        self,
-        refresh_rate=None,
-        train_metric_step="train_loss",
-        train_metric_epoch="train_loss_epoch",
-        val_metric="val_loss_epoch",
-    ):
-        super().__init__()
-        self.train_metric_step = train_metric_step
-        self.train_metric_epoch = train_metric_epoch
-        self.val_metric = val_metric
-
-        self.refresh_rate = refresh_rate
-
-        # Train tracking
-        self.train_start_time = None
-        self.train_last_time = None
-        self.train_last_step = 0
-
-        # Val tracking
-        self.val_start_time = None
-        self.val_last_time = None
-        self.val_last_step = 0
-
-    def _format_time(self, seconds):
-        m, s = divmod(int(seconds), 60)
-        h, m = divmod(m, 60)
-        return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
-
-    def _get_refresh_rate(self, trainer):
-        if self.refresh_rate is not None:
-            return self.refresh_rate
-        return trainer.log_every_n_steps
-
-    # ==========================================
-    # TRAINING LOOP
-    # ==========================================
-    @torch.compiler.disable
-    def on_train_epoch_start(self, trainer, pl_module):
-        if trainer.global_rank == 0:
-            self.train_start_time = time.time()
-            print("-" * 60)
-
-    @torch.compiler.disable
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        if trainer.global_rank != 0:
-            return
-
-        current_step = batch_idx + 1
-        total_batches = trainer.num_training_batches
-
-        if (
-            current_step % self._get_refresh_rate(trainer) == 0
-            or current_step == total_batches
-        ):
-            now = time.time()
-            elapsed_total = now - self.train_start_time
-            rate = current_step / elapsed_total if elapsed_total > 0 else 0
-
-            remaining = (total_batches - current_step) / rate if rate > 0 else 0
-            loss_val = trainer.callback_metrics.get(
-                self.train_metric_step, float("nan")
-            )
-
-            print(
-                f"Epoch {trainer.current_epoch:>2} (Train): "
-                f"{current_step / total_batches:>4.0%}| "
-                f"{current_step:>5}/{total_batches:<5} "
-                f"[{self._format_time(elapsed_total)}<{self._format_time(remaining)}, "
-                f"{rate:>6.2f}it/s, "
-                f"{self.train_metric_step}={loss_val:.5f}, ",
-                f"v_num={trainer.logger.version}]",
-                flush=True,
-            )
-
-            self.train_last_time = now
-            self.train_last_step = current_step
-
-    @torch.compiler.disable
-    def on_train_epoch_end(self, trainer, pl_module):
-        if trainer.global_rank != 0 or trainer.sanity_checking:
-            return
-
-        pl_module._log_epoch_end(self.train_metric_epoch)
-        train_loss = trainer.callback_metrics.get(self.train_metric_epoch, float("nan"))
-        print(
-            f"Epoch {trainer.current_epoch:>2} (Train): "
-            f"[{self.train_metric_epoch}={train_loss:.5f}]",
-            flush=True,
-        )
-
-    # ==========================================
-    # VALIDATION LOOP
-    # ==========================================
-    @torch.compiler.disable
-    def on_validation_epoch_start(self, trainer, pl_module):
-        if trainer.global_rank == 0 and not trainer.sanity_checking:
-            self.val_start_time = time.time()
-
-    @torch.compiler.disable
-    def on_validation_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
-    ):
-        if trainer.global_rank != 0 or trainer.sanity_checking:
-            return
-
-        current_step = batch_idx + 1
-        val_batches = trainer.num_val_batches
-        if isinstance(val_batches, int):
-            total_batches = val_batches
-        else:
-            total_batches = sum(val_batches)
-
-        if (
-            current_step % self._get_refresh_rate(trainer) == 0
-            or current_step == total_batches
-        ):
-            now = time.time()
-            elapsed_total = now - self.val_start_time
-
-            rate = current_step / elapsed_total if elapsed_total > 0 else 0
-            remaining = (total_batches - current_step) / rate if rate > 0 else 0
-
-            print(
-                f"Epoch {trainer.current_epoch:>2} (Val)  : "
-                f"{current_step / total_batches:>4.0%}| "
-                f"{current_step:>5}/{total_batches:<5} "
-                f"[{self._format_time(elapsed_total)}<{self._format_time(remaining)}, "
-                f"{rate:>6.2f}it/s]",
-                flush=True,
-            )
-
-    @torch.compiler.disable
-    def on_validation_epoch_end(self, trainer, pl_module):
-        if trainer.global_rank != 0 or trainer.sanity_checking:
-            return
-
-        pl_module._log_epoch_end(self.val_metric)
-        val_loss = trainer.callback_metrics.get(self.val_metric, float("nan"))
-        print(
-            f"Epoch {trainer.current_epoch:>2} (Val): "
-            f"[{self.val_metric}={val_loss:.5f}]",
-            flush=True,
-        )
 
 
 def make_data_loaders(
@@ -287,22 +43,27 @@ def make_data_loaders(
     pin_memory,
     queue_size_limit,
     prefetch_device=None,
+    rank=0,
+    world_size=1,
 ):
-    # Epoch and validation sizes are arbitrary
+    # Epoch and validation sizes are global; shard across DDP ranks.
     features_name = feature_name
+    effective_batch_size = batch_size * world_size
+    train_num_batches = max(1, epoch_size // effective_batch_size)
     train_infinite = data_loader.SparseBatchDataset(
         features_name,
         train_filenames,
         batch_size,
         num_workers=num_workers,
         config=config,
+        ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
     )
     # num_workers has to be 0 for sparse, and 1 for dense
     # it currently cannot work in parallel mode but it shouldn't need to
     train = DataLoader(
         data_loader.FixedNumBatchesDataset(
             train_infinite,
-            (epoch_size + batch_size - 1) // batch_size,
+            train_num_batches,
             pin_memory=pin_memory,
             queue_size_limit=queue_size_limit,
             device=prefetch_device,
@@ -317,7 +78,7 @@ def make_data_loaders(
         val = DataLoader(
             data_loader.FixedNumBatchesDataset(
                 train_infinite,
-                (val_size + batch_size - 1) // batch_size,
+                max(1, val_size // effective_batch_size),
                 pin_memory=pin_memory,
                 queue_size_limit=queue_size_limit,
                 device=prefetch_device,
@@ -332,11 +93,12 @@ def make_data_loaders(
             val_filenames,
             batch_size,
             config=config,
+            ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
         )
         val = DataLoader(
             data_loader.FixedNumBatchesDataset(
                 val_infinite,
-                (val_size + batch_size - 1) // batch_size,
+                max(1, val_size // effective_batch_size),
                 pin_memory=pin_memory,
                 queue_size_limit=queue_size_limit,
                 device=prefetch_device,
@@ -351,6 +113,35 @@ def make_data_loaders(
 def is_master_process():
     # torchrun sets 'RANK'. If not set, we assume it's a single-process run (Rank 0).
     return int(os.environ.get("RANK", 0)) == 0
+
+
+def _normalize_optimizer_and_schedulers(optimizer_and_schedulers):
+    """Normalize configure_optimizers() return value to (optimizer, schedulers_list)."""
+    if isinstance(optimizer_and_schedulers, tuple):
+        optimizer, schedulers = optimizer_and_schedulers
+    else:
+        optimizer = optimizer_and_schedulers
+        schedulers = []
+
+    if isinstance(optimizer, list):
+        if len(optimizer) != 1:
+            raise ValueError(
+                f"Expected a single optimizer, got {len(optimizer)} optimizers."
+            )
+        optimizer = optimizer[0]
+
+    if schedulers is None:
+        schedulers = []
+    elif not isinstance(schedulers, list):
+        schedulers = [schedulers]
+
+    normalized_schedulers = []
+    for sch in schedulers:
+        if isinstance(sch, dict):
+            sch = sch.get("scheduler", sch)
+        normalized_schedulers.append(sch)
+
+    return optimizer, normalized_schedulers
 
 
 def main():
@@ -388,11 +179,17 @@ def main():
             f"got accelerator='{accelerator}'. Use --compile-backend=inductor instead."
         )
 
+    rank, world_size, local_rank = init_distributed(
+        args.process_group_backend, device_type=accelerator
+    )
+
     # temporarily default to using only device 0 if user didn't specify --gpus
     # doing this so that batch size is consistent since if we rely on "auto" behavior
     # we don't know at this point in the code what the world size is.
     # TODO: refactor initialization so that we can support default behavior of "auto" with proper batch sizing
-    if accelerator == "cuda":
+    if world_size > 1:
+        n_devices = world_size
+    elif accelerator == "cuda":
         if args.gpus:
             try:
                 devices = [int(x) for x in args.gpus.rstrip(",").split(",") if x]
@@ -460,11 +257,14 @@ def main():
 
     input_feature_name = nnue.model.input_feature_name
 
-    L.seed_everything(args.seed)
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.backends.cudnn.benchmark = True
 
     logdir = args.default_root_dir if args.default_root_dir else "logs/"
-    tb_logger = pl_loggers.TensorBoardLogger(logdir)
-    csv_logger = pl_loggers.CSVLogger(logdir, version=tb_logger.version)
+    tb_logger = TensorBoardLogger(logdir)
+    csv_logger = CSVLogger(logdir, version=tb_logger.version)
     loggers = [tb_logger, csv_logger]
 
     if is_master_process():
@@ -488,23 +288,22 @@ def main():
             print("Using default torch num_threads setting.")
         print("", flush=True)
 
-    checkpoint_callback = ConsolidatedCheckpoint(
-        save_last=args.save_last_network,
-        every_n_epochs=args.network_save_period,
-        save_top_k=args.save_top_k,
-    )
-
     if accelerator == "mps":
         # On MPS, torch.compile is currently unstable
         if is_master_process():
             print("Disabling torch.compile for accelerator='mps'.")
     else:
-        # Since we compile the entire lightning module we have quite a few graph breaks
+        # Compile only the inner NNUEModel; the outer NNUE shell handles loss,
+        # lambda scheduling and checkpointing in plain Python.
         torch._dynamo.config.cache_size_limit = 64
-        nnue = torch.compile(nnue, backend=args.compile_backend)
-    # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
-    # see lightning/fabric/plugins/environments/slurm.py near line 110
-    os.environ["SLURM_JOB_NAME"] = "bash"
+        nnue.model = torch.compile(nnue.model, backend=args.compile_backend)
+
+    if accelerator == "cuda":
+        device = torch.device(f"cuda:{local_rank}")
+    elif accelerator == "mps":
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
 
     train, val = make_data_loaders(
         train_datasets,
@@ -517,89 +316,89 @@ def main():
         args.validation_size,
         pin_memory=args.pin_memory and accelerator == "cuda",
         queue_size_limit=args.data_loader_queue_size,
-        prefetch_device=torch.device("cuda") if accelerator == "cuda" else None,
+        prefetch_device=device if accelerator == "cuda" else None,
+        rank=rank,
+        world_size=world_size,
     )
+
+    optimizer_and_schedulers = nnue.configure_optimizers()
+    optimizer, schedulers = _normalize_optimizer_and_schedulers(optimizer_and_schedulers)
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
     nan_callback = TerminateOnNaN()
     trainer_callbacks = [
-            checkpoint_callback,
-            SimpleLineLogger(refresh_rate=refresh_rate),
-            TimeLimitAfterCheckpoint(args.max_time),
-            nan_callback,
-            M.WeightClippingCallback(),
-        ]
-    if 0 <= args.swa_start_epoch < args.max_epochs:
-        swa_callback = M.ExplicitSWACallback(args.swa_start_epoch, tb_logger.log_dir)
-        trainer_callbacks.append(
-            swa_callback
-        )
-
-    trainer = L.Trainer(
-        default_root_dir=logdir,
-        max_epochs=args.max_epochs,
-        accelerator=accelerator,
-        strategy=(
-            DDPStrategy(
-                process_group_backend=args.process_group_backend,
-                gradient_as_bucket_view=True,
-                static_graph=True,
-                find_unused_parameters=False,
-                bucket_cap_mb=50,
-                broadcast_buffers=False,
-            )
-            if n_devices > 1
-            else "auto"
+        CheckpointManager(
+            save_last=args.save_last_network,
+            every_n_epochs=args.network_save_period,
+            save_top_k=args.save_top_k,
+            dirpath=os.path.join(tb_logger.log_dir, "checkpoints"),
         ),
-        devices=devices,
-        logger=loggers,
-        callbacks=trainer_callbacks,
-        log_every_n_steps=refresh_rate,
-        enable_progress_bar=False,
-        enable_checkpointing=True,
-        benchmark=True,
-        num_sanity_val_steps=0 if val is None else 2,
+        SimpleLineLogger(refresh_rate=refresh_rate),
+        TimeLimit(args.max_time),
+        WeightClipper(),
+        nan_callback,
+    ]
+    if 0 <= args.swa_start_epoch < args.max_epochs:
+        swa_callback = ExplicitSWA(args.swa_start_epoch, tb_logger.log_dir)
+        trainer_callbacks.append(swa_callback)
+
+    trainer = SimpleTrainer(
+        model=nnue,
+        optimizer=optimizer,
+        schedulers=schedulers,
+        max_epochs=args.max_epochs,
         check_val_every_n_epoch=args.check_val_every_n_epoch,
         gradient_clip_val=2.0,
+        log_every_n_steps=refresh_rate,
+        default_root_dir=logdir,
+        callbacks=trainer_callbacks,
+        logger=loggers,
+        device=device,
+        rank=rank,
+        world_size=world_size,
+        local_rank=local_rank,
     )
 
     if actual_threads > 0:
         t_set_num_threads(actual_threads)
 
     if args.resume_from_checkpoint:
-        trainer.fit(nnue, train, val, ckpt_path=args.resume_from_checkpoint)
-    else:
-        trainer.fit(nnue, train, val)
+        trainer.load_checkpoint(args.resume_from_checkpoint)
 
-    # Check if we aborted due to NaN
+    trainer.fit(train, val)
+
     aborted_due_to_nan = nan_callback.nan_detected
 
     if 0 <= args.swa_start_epoch < args.max_epochs and not aborted_due_to_nan:
         nnue.eval()
         swa_callback.swap_weights(nnue, to_eval=True)
         if val is not None:
-            trainer.validate(nnue, val)
+            trainer.validate(val)
         else:
-            trainer.validate(nnue, train)
+            trainer.validate(train)
         swa_callback.swap_weights(nnue, to_eval=False)
 
-
-    if trainer.is_global_zero:
-        if not aborted_due_to_nan:
-            last_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last.ckpt")
-            swa_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last_swa.ckpt")
-            non_swa_path =  os.path.join(tb_logger.log_dir, "checkpoints", "last_non_swa.ckpt")
-            if os.path.exists(swa_savepath):
-                if os.path.exists(last_savepath):
-                    print(f"Renaming existing checkpoint at {last_savepath} to {non_swa_path} to preserve original model.")
-                    os.rename(last_savepath, non_swa_path)
-                os.rename(swa_savepath, last_savepath)
+    if rank == 0:
+        last_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last.ckpt")
+        swa_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last_swa.ckpt")
+        non_swa_path = os.path.join(tb_logger.log_dir, "checkpoints", "last_non_swa.ckpt")
+        if os.path.exists(swa_savepath):
+            if os.path.exists(last_savepath):
+                print(f"Renaming existing checkpoint at {last_savepath} to {non_swa_path} to preserve original model.")
+                os.rename(last_savepath, non_swa_path)
+            os.rename(swa_savepath, last_savepath)
 
         with open(os.path.join(logdir, "training_finished"), "w"):
             pass
 
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
     if aborted_due_to_nan:
-        print("\n[TerminateOnNaN] Exiting with non-zero status code due to NaN/Inf detection.", flush=True)
+        print(
+            "\n[TerminateOnNaN] Exiting with non-zero status code due to NaN/Inf detection.",
+            flush=True,
+        )
         sys.exit(1)
 
 
