@@ -130,6 +130,10 @@ What this document DOES NOT contain:
     + [A part of the feature transformer directly forwarded to the output.](#a-part-of-the-feature-transformer-directly-forwarded-to-the-output)
     + [Multiple PSQT outputs and multiple subnetworks](#multiple-psqt-outputs-and-multiple-subnetworks)
 * [Historical Stockfish evaluation network architectures](#historical-stockfish-evaluation-network-architectures)
+    + ["SFNNv16" architecture](#sfnnv16-architecture)
+    + ["SFNNv15" architecture](#sfnnv15-architecture)
+    + ["SFNNv14.1" architecture](#sfnnv141-architecture)
+    + ["SFNNv14" architecture](#sfnnv14-architecture)
     + ["SFNNv13" architecture](#sfnnv13-architecture)
     + ["SFNNv12" architecture](#sfnnv12-architecture)
     + ["SFNNv11" architecture](#sfnnv11-architecture)
@@ -2988,11 +2992,49 @@ y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
 ## Historical Stockfish evaluation network architectures
 
+### "SFNNv16" architecture
+
+Added PP_3Wide features.
+
+2026-07-20 - *
+
+[Commit f4bcd40409f94bd397a083c5d6243bac6dcc6d85](https://github.com/official-stockfish/Stockfish/commit/f4bcd40409f94bd397a083c5d6243bac6dcc6d85)
+
+![](img/SFNNv16_architecture_detailed_v2.svg)
+
+### "SFNNv15" architecture
+
+2026-07-03 - 2026-07-20
+
+[Commit e33bb26ee7320629dd9114a936a38e6f4d43d52a](https://github.com/official-stockfish/Stockfish/commit/e33bb26ee7320629dd9114a936a38e6f4d43d52a)
+
+![](img/SFNNv15_architecture_detailed_v2.svg)
+
+### "SFNNv14.1" architecture
+
+Same as "SFNNv14" with updated fixed-point quantization.
+
+2026-05-26 - 2026-07-03
+
+[Commit 313ea4ab0410872e99f0668c74edc7e49e9a0b6a](https://github.com/official-stockfish/Stockfish/commit/313ea4ab0410872e99f0668c74edc7e49e9a0b6a)
+
+![](img/SFNNv14.1_architecture_detailed_v2.svg)
+
+### "SFNNv14" architecture
+
+Added opposed-pawn features to FullThreats.
+
+2026-04-02 - 2026-05-26
+
+[Commit 5eeca7392ee90b7a43da69e647e3d596e42992fd](https://github.com/official-stockfish/Stockfish/commit/5eeca7392ee90b7a43da69e647e3d596e42992fd)
+
+![](img/SFNNv14_architecture_detailed_v2.svg)
+
 ### "SFNNv13" architecture
 
 Same as "SFNNv12" with L2 size increased to 32.
 
-2026-02-18 - *
+2026-02-18 - 2026-04-02
 
 [Commit a6d055d7e27ab3e29a42e8b94215102824760057](https://github.com/official-stockfish/Stockfish/commit/a6d055d7e27ab3e29a42e8b94215102824760057)
 
@@ -3000,7 +3042,7 @@ Same as "SFNNv12" with L2 size increased to 32.
 
 ### "SFNNv12" architecture
 
-Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 82672 indices.
+Removed king to piece threats from FullThreats.
 
 2026-02-12 - 2026-02-18
 
@@ -3010,7 +3052,7 @@ Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 8267
 
 ### "SFNNv11" architecture
 
-Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 89392 indices.
+Removed piece to king threats from FullThreats.
 
 2026-02-04 - 2026-02-12
 
@@ -3020,7 +3062,7 @@ Same as "SFNNv10" with FullThreats+HalfKAv2_hm input features compressed to 8939
 
 ### "SFNNv10" architecture
 
-Same as "SFNNv5" with FullThreats+HalfKAv2_hm input features, L1 size reduced to 1024, and 255 as the feature transformer quantization scale.
+Added FullThreats input features, L1 size reduced to 1024, and used 255 as the feature transformer quantization scale.
 
 2025-11-12 - 2026-02-04
 
@@ -3030,7 +3072,7 @@ Same as "SFNNv5" with FullThreats+HalfKAv2_hm input features, L1 size reduced to
 
 ### "SFNNv9" architecture
 
-Same as "SFNNv5" with L1 size increased to 3072.
+Same as "SFNNv8" with L1 size increased to 3072.
 
 2024-04-01 - 2025-11-12
 
@@ -3040,7 +3082,7 @@ Same as "SFNNv5" with L1 size increased to 3072.
 
 ### "SFNNv8" architecture
 
-Same as "SFNNv5" with L1 size increased to 2560.
+Same as "SFNNv7" with L1 size increased to 2560.
 
 2023-09-22 - 2024-04-01
 
@@ -3050,7 +3092,7 @@ Same as "SFNNv5" with L1 size increased to 2560.
 
 ### "SFNNv7" architecture
 
-Same as "SFNNv5" with L1 size increased to 2048.
+Same as "SFNNv6" with L1 size increased to 2048.
 
 2023-07-01 - 2023-09-22
 
