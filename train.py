@@ -1,3 +1,4 @@
+import math
 import time
 import warnings
 import os
@@ -18,7 +19,6 @@ import tyro
 from config import TrainingConfig
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
-
 
 class TimeLimitAfterCheckpoint(Callback):
     def __init__(self, max_time: str):
@@ -41,6 +41,76 @@ class TimeLimitAfterCheckpoint(Callback):
             print(
                 f"[TimeLimit] Time limit reached ({elapsed:.1f}s), stopping after checkpoint."
             )
+
+
+class TerminateOnNaN(Callback):
+    def __init__(self):
+        super().__init__()
+        self.nan_detected = False
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        local_stop = False
+        if outputs is not None:
+            loss = outputs.get("loss") if isinstance(outputs, dict) else outputs
+            if isinstance(loss, torch.Tensor):
+                if not torch.isfinite(loss).all():
+                    local_stop = True
+            elif not math.isfinite(loss):
+                local_stop = True
+
+        if trainer.world_size > 1:
+            import torch.distributed as dist
+            if dist.is_available() and dist.is_initialized():
+                stop_tensor = torch.tensor(1.0 if local_stop else 0.0, device=pl_module.device)
+                dist.all_reduce(stop_tensor, op=dist.ReduceOp.MAX)
+                if stop_tensor.item() > 0.5:
+                    self.nan_detected = True
+                    if local_stop:
+                        print(f"\n[TerminateOnNaN] [Rank {trainer.global_rank}] NaN/Inf detected in train loss. Aborting training...", flush=True)
+                    trainer.should_stop = True
+            else:
+                if local_stop:
+                    self.nan_detected = True
+                    print("\n[TerminateOnNaN] NaN/Inf detected in train loss. Aborting training...", flush=True)
+                    trainer.should_stop = True
+        else:
+            if local_stop:
+                self.nan_detected = True
+                print("\n[TerminateOnNaN] NaN/Inf detected in train loss. Aborting training...", flush=True)
+                trainer.should_stop = True
+
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+        val_loss = trainer.callback_metrics.get("val_loss")
+        local_stop = False
+        if val_loss is not None:
+            if isinstance(val_loss, torch.Tensor):
+                if not torch.isfinite(val_loss).all():
+                    local_stop = True
+            elif not math.isfinite(val_loss):
+                local_stop = True
+
+        if trainer.world_size > 1:
+            import torch.distributed as dist
+            if dist.is_available() and dist.is_initialized():
+                stop_tensor = torch.tensor(1.0 if local_stop else 0.0, device=pl_module.device)
+                dist.all_reduce(stop_tensor, op=dist.ReduceOp.MAX)
+                if stop_tensor.item() > 0.5:
+                    self.nan_detected = True
+                    if local_stop:
+                        print(f"\n[TerminateOnNaN] [Rank {trainer.global_rank}] NaN/Inf detected in val loss. Aborting training...", flush=True)
+                    trainer.should_stop = True
+            else:
+                if local_stop:
+                    self.nan_detected = True
+                    print("\n[TerminateOnNaN] NaN/Inf detected in val loss. Aborting training...", flush=True)
+                    trainer.should_stop = True
+        else:
+            if local_stop:
+                self.nan_detected = True
+                print("\n[TerminateOnNaN] NaN/Inf detected in val loss. Aborting training...", flush=True)
+                trainer.should_stop = True
+
+
 
 
 class ConsolidatedCheckpoint(ModelCheckpoint):
@@ -450,10 +520,12 @@ def main():
     )
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
+    nan_callback = TerminateOnNaN()
     trainer_callbacks = [
             checkpoint_callback,
             SimpleLineLogger(refresh_rate=refresh_rate),
             TimeLimitAfterCheckpoint(args.max_time),
+            nan_callback,
             M.WeightClippingCallback(),
         ]
     if 0 <= args.swa_start_epoch < args.max_epochs:
@@ -487,7 +559,10 @@ def main():
     else:
         trainer.fit(nnue, train, val)
 
-    if 0 <= args.swa_start_epoch < args.max_epochs:
+    # Check if we aborted due to NaN
+    aborted_due_to_nan = nan_callback.nan_detected
+
+    if 0 <= args.swa_start_epoch < args.max_epochs and not aborted_due_to_nan:
         nnue.eval()
         swa_callback.swap_weights(nnue, to_eval=True)
         if val is not None:
@@ -498,17 +573,22 @@ def main():
 
 
     if trainer.is_global_zero:
-        last_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last.ckpt")
-        swa_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last_swa.ckpt")
-        non_swa_path =  os.path.join(tb_logger.log_dir, "checkpoints", "last_non_swa.ckpt")
-        if os.path.exists(swa_savepath):
-            if os.path.exists(last_savepath):
-                print(f"Renaming existing checkpoint at {last_savepath} to {non_swa_path} to preserve original model.")
-                os.rename(last_savepath, non_swa_path)
-            os.rename(swa_savepath, last_savepath)
+        if not aborted_due_to_nan:
+            last_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last.ckpt")
+            swa_savepath = os.path.join(tb_logger.log_dir, "checkpoints", "last_swa.ckpt")
+            non_swa_path =  os.path.join(tb_logger.log_dir, "checkpoints", "last_non_swa.ckpt")
+            if os.path.exists(swa_savepath):
+                if os.path.exists(last_savepath):
+                    print(f"Renaming existing checkpoint at {last_savepath} to {non_swa_path} to preserve original model.")
+                    os.rename(last_savepath, non_swa_path)
+                os.rename(swa_savepath, last_savepath)
 
         with open(os.path.join(logdir, "training_finished"), "w"):
             pass
+
+    if aborted_due_to_nan:
+        print("\n[TerminateOnNaN] Exiting with non-zero status code due to NaN/Inf detection.", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
