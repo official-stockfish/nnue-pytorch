@@ -82,9 +82,26 @@ struct HalfKAv2_hmExtractor: IFeatureExtractor {
     }
 };
 
-constexpr int numvalidtargets[12] = {6, 6, 10, 10, 8, 8, 8, 8, 10, 10, 0, 0};
+// Pawn attackers no longer target pawns; those relationships are represented by PP_3Wide.
+constexpr int numvalidtargets[6] = {4, 10, 8, 8, 10, 0};
 
-using ThreatOffsetTable = std::array<std::array<int, 66>, 12>;
+constexpr int threat_piece(Piece piece) { return (int) piece.color() * 5 + (int) piece.type(); }
+
+constexpr std::uint64_t pawn_pair_mask(int sq) {
+    constexpr std::uint64_t FileA = 0x0101010101010101ULL;
+    constexpr std::uint64_t Rank1 = 0xFFULL;
+    constexpr std::uint64_t Rank8 = Rank1 << 56;
+
+    const int     f     = sq & 7;
+    std::uint64_t files = FileA << f;
+    if (f > 0)
+        files |= FileA << (f - 1);
+    if (f < 7)
+        files |= FileA << (f + 1);
+    return files & ~Rank1 & ~Rank8 & ~(1ULL << sq);
+}
+
+using ThreatOffsetTable = std::array<std::array<int, 66>, 10>;
 
 struct ThreatFeatureCalculation {
     ThreatOffsetTable table;
@@ -97,44 +114,39 @@ constexpr auto threatfeaturecalc = []() {
     constexpr auto pseudo_attacks = bb::detail::generatePseudoAttacks();
     int            pieceoffset    = 0;
 
-    Piece piecetbl[12] = {whitePawn, blackPawn, whiteKnight, blackKnight, whiteBishop, blackBishop,
-                          whiteRook, blackRook, whiteQueen,  blackQueen,  whiteKing,   blackKing};
+    Piece piecetbl[10] = {whitePawn, whiteKnight, whiteBishop, whiteRook, whiteQueen,
+                          blackPawn, blackKnight, blackBishop, blackRook, blackQueen};
 
-    for (int c = 0; c < 2; c++)
+    for (int piece = 0; piece < 10; ++piece)
     {
-        for (int pt = 0; pt < 6; pt++)
+        t[piece][65]     = pieceoffset;
+        int squareoffset = 0;
+
+        for (int from = (int) a1; from <= (int) h8; ++from)
         {
-            int piece        = 2 * pt + c;
-            t[piece][65]     = pieceoffset;
-            int squareoffset = 0;
-            for (int from = (int) a1; from <= (int) h8; from++)
+            t[piece][from] = squareoffset;
+            if (piecetbl[piece].type() == PieceType::Pawn)
             {
-                t[piece][from] = squareoffset;
-                if (piecetbl[piece].type() != PieceType::Pawn)
-                {
-                    Bitboard attacks = pseudo_attacks[piecetbl[piece].type()][Square(from)];
-                    squareoffset += attacks.count();
-                }
-                else if (from >= (int) a2 && from <= (int) h7)
-                {
-                    Bitboard attacks =
-                      bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color());
-                    int      push = piecetbl[piece].color() == Color::White ? 8 : -8;
-                    Bitboard s    = Bitboard::square(Square(from + push));
-                    attacks |= s;
-                    squareoffset += attacks.count();
-                }
+                if (from >= (int) a2 && from <= (int) h7)
+                    squareoffset +=
+                      bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color())
+                        .count();
             }
-            t[piece][64] = squareoffset;
-            pieceoffset += numvalidtargets[piece] * squareoffset;
+            else
+            {
+                squareoffset += pseudo_attacks[piecetbl[piece].type()][Square(from)].count();
+            }
         }
+
+        t[piece][64] = squareoffset;
+        pieceoffset += numvalidtargets[(int) piecetbl[piece].type()] * squareoffset;
     }
     return ThreatFeatureCalculation{t, pieceoffset};
 }();
 
 constexpr ThreatOffsetTable threatoffsets  = threatfeaturecalc.table;
 constexpr int               threatfeatures = threatfeaturecalc.totalfeatures;
-static_assert(threatfeatures == 60720);
+static_assert(threatfeatures == 59808);
 
 struct FullThreats {
     static constexpr std::string_view NAME = "Full_Threats";
@@ -145,7 +157,7 @@ struct FullThreats {
     static constexpr int PIECE_TYPE_NB       = 6;
     static constexpr int MAX_ACTIVE_FEATURES = 128;
 
-    static constexpr int INPUTS = threatfeatures;  // 60,720
+    static constexpr int INPUTS = threatfeatures;
 
     // clang-format off
     static constexpr Square OrientTBL[COLOR_NB][SQUARE_NB] = {
@@ -168,125 +180,111 @@ struct FullThreats {
     };
 
     static constexpr int map[PIECE_TYPE_NB][PIECE_TYPE_NB] = {
-      {0, 1, -1, 2, -1, -1},
-      {0, 1, 2, 3, 4, -1},
-      {0, 1, 2, 3, -1, -1},
-      {0, 1, 2, 3, -1, -1},
-      {0, 1, 2, 3, 4, -1},
-      {-1, -1, -1, -1, -1, -1}
+      {-1, 0, -1, 1, -1, -1},
+      { 0, 1,  2, 3,  4, -1},
+      { 0, 1,  2, 3, -1, -1},
+      { 0, 1,  2, 3, -1, -1},
+      { 0, 1,  2, 3,  4, -1},
+      {-1,-1, -1,-1, -1, -1}
     };
+
     // clang-format on
 
     static int
-    threat_index(Color Perspective, Piece attkr, Square from, Square to, Piece attkd, Square ksq) {
-        bool enemy = (attkr.color() != attkd.color());
-        from       = (Square) (int(from) ^ (int) OrientTBL[(int) Perspective][(int) ksq]);
-        to         = (Square) (int(to) ^ (int) OrientTBL[(int) Perspective][(int) ksq]);
-        if (Perspective == Color::Black)
+    threat_index(Color perspective, Piece attkr, Square from, Square to, Piece attkd, Square ksq) {
+        from = (Square) ((int) from ^ (int) OrientTBL[(int) perspective][(int) ksq]);
+        to   = (Square) ((int) to ^ (int) OrientTBL[(int) perspective][(int) ksq]);
+
+        if (perspective == Color::Black)
         {
             attkr = Piece::fromId((int) attkr ^ 1);
             attkd = Piece::fromId((int) attkd ^ 1);
         }
-        if ((map[(int) attkr.type()][(int) attkd.type()] < 0)
-            || (attkr.type() == attkd.type() && (enemy || attkr.type() != PieceType::Pawn)
-                && from < to))
-        {
+
+        int slot = map[(int) attkr.type()][(int) attkd.type()];
+        if (slot < 0)
             return -1;
-        }
-        Bitboard attacks = (attkr.type() == PieceType::Pawn)
-                           ? bb::pawnAttacks(Bitboard::square(Square(from)), attkr.color())
-                           : bb::detail::pseudoAttacks()[attkr.type()][Square(from)];
-        if (attkr.type() == PieceType::Pawn)
-        {
-            if (attkr.color() == Color::White)
-            {
-                attacks |= Bitboard::square(Square(int(from) + 8));
-            }
-            else
-            {
-                attacks |= Bitboard::square(Square(int(from) - 8));
-            }
-        }
-        return int(threatoffsets[(int) attkr][65]
-                   + (int(attkd.color()) * (numvalidtargets[(int) attkr] / 2)
-                      + map[(int) attkr.type()][(int) attkd.type()])
-                       * threatoffsets[(int) attkr][64]
-                   + threatoffsets[(int) attkr][(int) from]
+
+        bool enemy = attkr.color() != attkd.color();
+        if (attkr.type() == attkd.type() && (enemy || attkr.type() != PieceType::Pawn) && from < to)
+            return -1;
+
+        Bitboard attacks  = attkr.type() == PieceType::Pawn
+                            ? bb::pawnAttacks(Bitboard::square(from), attkr.color())
+                            : bb::detail::pseudoAttacks()[attkr.type()][from];
+        int      attacker = threat_piece(attkr);
+        return int(threatoffsets[attacker][65]
+                   + (int(attkd.color()) * (numvalidtargets[(int) attkr.type()] / 2) + slot)
+                       * threatoffsets[attacker][64]
+                   + threatoffsets[attacker][(int) from]
                    + (Bitboard::fromBits((1ULL << (int) to) - 1) & attacks).count());
     }
 
     static std::pair<int, int>
     fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
-        auto& pos         = e.pos;
-        auto  pieces      = pos.piecesBB();
+        auto& pos    = e.pos;
+        auto  pieces = pos.piecesBB();
+        // Kings are never targets; exclude them upfront
+        auto  piecesNoK   = pieces & ~pos.piecesBB(whiteKing) & ~pos.piecesBB(blackKing);
         auto  ksq         = pos.kingSquare(color);
         Color order[2][2] = {{Color::White, Color::Black}, {Color::Black, Color::White}};
         int   k           = 0;
+
         for (int i = (int) Color::White; i <= (int) Color::Black; i++)
         {
-            for (int j = (int) PieceType::Pawn; j <= (int) PieceType::King; j++)
+            Color c = order[(int) color][i];
+
+            // ---- Pawn attacks ----
             {
-                Color     c     = order[(int) color][i];
-                PieceType pt    = PieceType(j);
-                Piece     attkr = Piece(pt, c);
-                Bitboard  bb    = pos.piecesBB(attkr);
-                if (pt == PieceType::Pawn)
+                Piece    attkr    = Piece(PieceType::Pawn, c);
+                Bitboard bb       = pos.piecesBB(attkr);
+                auto     allPawns = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn);
+
+                // Diagonal pawn threats exclude pawn targets (those are handled by PP_3Wide)
+                auto diagTargets = piecesNoK & ~allPawns;
+
+                auto right   = (c == Color::White) ? Offset(1, 1) : Offset(-1, -1);
+                auto left    = (c == Color::White) ? Offset(-1, 1) : Offset(1, -1);
+                int  r_delta = (c == Color::White) ? 9 : -9;
+                int  l_delta = (c == Color::White) ? 7 : -7;
+
+                for (Square to : bb.shifted(right) & diagTargets)
                 {
-                    auto right         = (c == Color::White) ? Offset(1, 1) : Offset(-1, -1);
-                    auto left          = (c == Color::White) ? Offset(-1, 1) : Offset(1, -1);
-                    auto push          = (c == Color::White) ? Offset(0, 1) : Offset(0, -1);
-                    auto attacks_left  = bb.shifted(right) & pieces;
-                    auto attacks_right = bb.shifted(left) & pieces;
-                    auto attacks_forward =
-                      bb.shifted(push) & (pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn));
-                    for (Square to : attacks_left)
+                    Square from  = Square((int) to - r_delta);
+                    Piece  attkd = pos.pieceAt(to);
+                    int    index = threat_index(color, attkr, from, to, attkd, ksq);
+                    if (index >= 0)
                     {
-                        Square from  = Square((int) to - (c == Color::White ? 9 : -9));
-                        Piece  attkd = pos.pieceAt(to);
-                        int    index = threat_index(color, attkr, from, to, attkd, ksq);
-                        if (index >= 0)
-                        {
-                            features[k] = index;
-                            k++;
-                        }
-                    }
-                    for (Square to : attacks_right)
-                    {
-                        Square from  = Square((int) to - (c == Color::White ? 7 : -7));
-                        Piece  attkd = pos.pieceAt(to);
-                        int    index = threat_index(color, attkr, from, to, attkd, ksq);
-                        if (index >= 0)
-                        {
-                            features[k] = index;
-                            k++;
-                        }
-                    }
-                    for (Square to : attacks_forward)
-                    {
-                        Square from  = Square((int) to - (c == Color::White ? 8 : -8));
-                        Piece  attkd = pos.pieceAt(to);
-                        int    index = threat_index(color, attkr, from, to, attkd, ksq);
-                        if (index >= 0)
-                        {
-                            features[k] = index;
-                            k++;
-                        }
+                        features[k++] = index;
                     }
                 }
-                else
+                for (Square to : bb.shifted(left) & diagTargets)
                 {
-                    for (Square from : bb)
+                    Square from  = Square((int) to - l_delta);
+                    Piece  attkd = pos.pieceAt(to);
+                    int    index = threat_index(color, attkr, from, to, attkd, ksq);
+                    if (index >= 0)
                     {
-                        Bitboard attacks = pos.attacks(from) & pieces;
-                        for (Square to : attacks)
+                        features[k++] = index;
+                    }
+                }
+            }
+
+            for (int j = (int) PieceType::Knight; j < (int) PieceType::King; j++)
+            {
+                Piece    attkr = Piece(PieceType(j), c);
+                Bitboard bb    = pos.piecesBB(attkr);
+
+                for (Square from : bb)
+                {
+                    Bitboard attacks = pos.attacks(from) & piecesNoK;
+                    for (Square to : attacks)
+                    {
+                        Piece attkd = pos.pieceAt(to);
+                        int   index = threat_index(color, attkr, from, to, attkd, ksq);
+                        if (index >= 0)
                         {
-                            Piece attkd = pos.pieceAt(to);
-                            int   index = threat_index(color, attkr, from, to, attkd, ksq);
-                            if (index >= 0)
-                            {
-                                features[k] = index;
-                                k++;
-                            }
+                            features[k++] = index;
                         }
                     }
                 }
@@ -299,10 +297,94 @@ struct FullThreats {
 struct FullThreatsExtractor: IFeatureExtractor {
     int inputs() const override { return FullThreats::INPUTS; }
     int max_active_features() const override { return FullThreats::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return FullThreats::fill_features_sparse(e, features, color);
+    }
+};
+
+struct PP_3Wide {
+    static constexpr std::string_view NAME = "PP_3Wide";
+
+    static constexpr int PAWN_IDS            = 2 * 48;
+    static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
+    static constexpr int MAX_ACTIVE_FEATURES = 128;
+
+    static int make_pawn_id(Color color, Square square) {
+        return 48 * static_cast<int>(color) + static_cast<int>(square) - static_cast<int>(a2);
+    }
+
+    static int make_index(Color perspective,
+                          Color color,
+                          Square from,
+                          Square to,
+                          Color paired_color,
+                          Square ksq) {
+        int orient = static_cast<int>(FullThreats::OrientTBL[static_cast<int>(perspective)]
+                                                             [static_cast<int>(ksq)]);
+        Square from_oriented = static_cast<Square>(static_cast<int>(from) ^ orient);
+        Square to_oriented   = static_cast<Square>(static_cast<int>(to) ^ orient);
+
+        Color color_oriented =
+          static_cast<Color>(static_cast<int>(color) ^ static_cast<int>(perspective));
+        Color paired_color_oriented =
+          static_cast<Color>(static_cast<int>(paired_color) ^ static_cast<int>(perspective));
+
+        if (from_oriented < a2 || from_oriented > h7 || to_oriented < a2 || to_oriented > h7)
+            return INPUTS;
+
+        int id_a = make_pawn_id(color_oriented, from_oriented);
+        int id_b = make_pawn_id(paired_color_oriented, to_oriented);
+        int hi   = std::max(id_a, id_b);
+        int lo   = std::min(id_a, id_b);
+
+        return hi * (hi - 1) / 2 + lo;
+    }
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos      = e.pos;
+        auto  allPawns = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn);
+        auto  ksq      = pos.kingSquare(color);
+        Color order[2][2] = {{Color::White, Color::Black}, {Color::Black, Color::White}};
+        int   k        = 0;
+
+        for (int i = static_cast<int>(Color::White); i <= static_cast<int>(Color::Black); ++i)
+        {
+            Color c  = order[static_cast<int>(color)][i];
+            Piece p  = Piece(PieceType::Pawn, c);
+            Bitboard bb = pos.piecesBB(p);
+
+            for (Square from : bb)
+            {
+                Bitboard targets = Bitboard::fromBits(pawn_pair_mask(static_cast<int>(from))) & allPawns;
+                for (Square to : targets)
+                {
+                    if (from < to)
+                        continue;
+
+                    Color paired_color = pos.pieceAt(to).color();
+                    int   index        = make_index(color, c, from, to, paired_color, ksq);
+                    if (index < INPUTS)
+                    {
+                        features[k] = index;
+                        ++k;
+                    }
+                }
+            }
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct PP_3WideExtractor: IFeatureExtractor {
+    int inputs() const override { return PP_3Wide::INPUTS; }
+    int max_active_features() const override { return PP_3Wide::MAX_ACTIVE_FEATURES; }
     std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
                                              int*                     features,
                                              Color                    color) const override {
-        return FullThreats::fill_features_sparse(e, features, color);
+        return PP_3Wide::fill_features_sparse(e, features, color);
     }
 };
 
@@ -353,6 +435,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<HalfKAv2_hmExtractor>();
     if (name == "Full_Threats")
         return std::make_unique<FullThreatsExtractor>();
+    if (name == "PP_3Wide")
+        return std::make_unique<PP_3WideExtractor>();
     return nullptr;
 }
 

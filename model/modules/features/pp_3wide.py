@@ -4,14 +4,14 @@ from torch import nn
 from .input_feature import InputFeature
 
 
-class FullThreats(InputFeature):
-    HASH = 0x2E6B9D04
-    FEATURE_NAME = "Full_Threats"
-    INPUT_FEATURE_NAME = "Full_Threats"
+class PP3Wide(InputFeature):
+    HASH = 0x86F2B1DD
+    FEATURE_NAME = "PP_3Wide"
+    INPUT_FEATURE_NAME = "PP_3Wide"
     MAX_ACTIVE_FEATURES = 128
 
-    NUM_INPUTS = 59808
-    NUM_REAL_FEATURES = 59808
+    NUM_INPUTS = 4560
+    NUM_REAL_FEATURES = 4560
     EXPORT_WEIGHT_DTYPE = torch.int8
 
     def __init__(self, num_outputs: int):
@@ -29,15 +29,14 @@ class FullThreats(InputFeature):
 
     @torch.no_grad()
     def coalesce(self) -> None:
-        pass  # no virtual weights
+        pass
 
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
-        pass  # no virtual weights
+        pass
 
     @torch.no_grad()
     def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None:
-        """Threats have no piece values, so PSQT columns are zero."""
         L1 = self.num_outputs - num_psqt_buckets
         for i in range(num_psqt_buckets):
             self.weight[:, L1 + i] = 0.0
@@ -51,7 +50,6 @@ class FullThreats(InputFeature):
         self.weight.data.copy_(export_weight)
 
     def clip_weights(self, quantization) -> None:
-        """Clamp threat weights to quantization-safe range."""
         self.weight.data.clamp_(
             quantization.min_threat_weight, quantization.max_threat_weight
         )
