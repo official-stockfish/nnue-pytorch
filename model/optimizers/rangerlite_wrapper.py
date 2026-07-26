@@ -20,6 +20,9 @@ class RangerLiteConfig(LRSchedulerConfig):
     lookahead_steps: int = 5
     """Lookahead steps parameter. Value of 5 corresponds to ranger21 behaviour."""
 
+    ranger_stable_weight_decay: bool = True
+    """Whether to use stable weight decay (variance-normalized weight decay) or standard elementwise weight decay."""
+
 
 class RangerLiteWrapper:
     def __init__(
@@ -32,6 +35,7 @@ class RangerLiteWrapper:
         self.pnm_momentum = config.pnm_momentum
         self.lookahead_alpha = config.lookahead_alpha
         self.lookahead_steps = config.lookahead_steps
+        self.ranger_stable_weight_decay = config.ranger_stable_weight_decay
         self.legacy_mode = legacy_mode
         self.needs_train_flip = True
 
@@ -50,6 +54,7 @@ class RangerLiteWrapper:
             pnm_momentum=self.pnm_momentum,
             lookahead_blending_alpha=self.lookahead_alpha,
             lookahead_mergetime=self.lookahead_steps,
+            use_stable_weight_decay=self.ranger_stable_weight_decay,
         )
 
         scheduler = setup_lr_scheduler(self.optimizer, train_params, self.config)

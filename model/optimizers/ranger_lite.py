@@ -60,7 +60,8 @@ extern "C" __global__ void ranger_lite_update_pnm(
     float noise_norm,
     float lr_div_bc1,
     float eps,
-    int64_t step
+    int64_t step,
+    float wd_factor
 ) {
     for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
         float g = grad[i];
@@ -75,7 +76,11 @@ extern "C" __global__ void ranger_lite_update_pnm(
 
         float new_pgm = pgm * beta1_sq + g * one_minus_beta1_sq;
         float pnm_val = (new_pgm * one_plus_pnm - pngm * pnm_factor) / noise_norm;
-        float new_p = p[i] - lr_div_bc1 * (pnm_val / denom);
+        float new_p = p[i];
+        if (wd_factor != 0.0f) {
+            new_p = new_p * (1.0f - wd_factor);
+        }
+        new_p = new_p - lr_div_bc1 * (pnm_val / denom);
         p[i] = new_p;
 
         if (step & 1LL) {
@@ -98,7 +103,8 @@ extern "C" __global__ void ranger_lite_update_adam(
     float beta1,
     float one_minus_beta1,
     float lr_div_bc1,
-    float eps
+    float eps,
+    float wd_factor
 ) {
     for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
         float g = grad[i];
@@ -108,7 +114,13 @@ extern "C" __global__ void ranger_lite_update_adam(
 
         float gm = grad_ma[i] * beta1 + g * one_minus_beta1;
         grad_ma[i] = gm;
-        p[i] = p[i] - lr_div_bc1 * (gm / denom);
+
+        float new_p = p[i];
+        if (wd_factor != 0.0f) {
+            new_p = new_p * (1.0f - wd_factor);
+        }
+        new_p = new_p - lr_div_bc1 * (gm / denom);
+        p[i] = new_p;
     }
 }
 
@@ -229,6 +241,7 @@ class RangerLite(torch.optim.Optimizer):
         normloss_active=True,
         normloss_factor=1e-4,
         use_legacy_scoping_bug=False,
+        use_stable_weight_decay=True,
     ):
         defaults = {
             'lr': lr,
@@ -251,6 +264,7 @@ class RangerLite(torch.optim.Optimizer):
         self.param_size = 0
 
         self.use_legacy_scoping_bug = use_legacy_scoping_bug
+        self.use_stable_weight_decay = use_stable_weight_decay
 
         if not _HAS_CUPY and torch.cuda.is_available():
             warnings.warn(
@@ -278,10 +292,10 @@ class RangerLite(torch.optim.Optimizer):
                 state["neg_grad_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
     def _can_fuse_group_full(self, group):
-        """Full fused path requires no decay and no normloss."""
+        """Full fused path requires no stable_weight_decay and no normloss."""
         if not _HAS_CUPY or self.use_legacy_scoping_bug or self.normloss_active:
             return False
-        if group.get("weight_decay", 0.0) != 0.0:
+        if self.use_stable_weight_decay and group.get("weight_decay", 0.0) != 0.0:
             return False
         return self._can_fuse_group_phase2(group)
 
@@ -327,6 +341,7 @@ class RangerLite(torch.optim.Optimizer):
         _RangerLiteFusedKernels._compile()
         beta1, beta2 = group["betas"]
         lr = group["lr"]
+        decay = group.get("weight_decay", 0.0)
         pnm_factor = group["pnm_momentum"]
         eps = group["eps"]
         one_minus_beta2 = 1.0 - beta2
@@ -334,6 +349,8 @@ class RangerLite(torch.optim.Optimizer):
         one_minus_beta1_sq = 1.0 - beta1_sq
         one_plus_pnm = 1.0 + pnm_factor
         noise_norm = math.sqrt((1.0 + pnm_factor) ** 2 + pnm_factor ** 2)
+
+        wd_factor = decay * lr if not self.use_stable_weight_decay else 0.0
 
         for p in group["params"]:
             if p.grad is None:
@@ -377,6 +394,7 @@ class RangerLite(torch.optim.Optimizer):
                     np.float32(lr_div_bc1),
                     np.float32(eps),
                     np.int64(step),
+                    np.float32(wd_factor),
                 )
                 _RangerLiteFusedKernels._pnm_kernel(grid=(grid,), block=(block,), args=args)
             else:
@@ -395,6 +413,7 @@ class RangerLite(torch.optim.Optimizer):
                     np.float32(1.0 - beta1),
                     np.float32(lr_div_bc1),
                     np.float32(eps),
+                    np.float32(wd_factor),
                 )
                 _RangerLiteFusedKernels._adam_kernel(grid=(grid,), block=(block,), args=args)
 
@@ -415,8 +434,11 @@ class RangerLite(torch.optim.Optimizer):
         noise_norm = math.sqrt((1.0 + pnm_factor) ** 2 + pnm_factor ** 2)
 
         wd_factor = 0.0
-        if decay and variance_norm_value is not None:
-            wd_factor = decay * lr / variance_norm_value
+        if decay:
+            if self.use_stable_weight_decay and variance_norm_value is not None:
+                wd_factor = decay * lr / variance_norm_value
+            elif not self.use_stable_weight_decay:
+                wd_factor = decay * lr
 
         for p in group["params"]:
             if p.grad is None:
@@ -509,7 +531,7 @@ class RangerLite(torch.optim.Optimizer):
 
         needs_variance_sum = (
             self.normloss_active
-            or any(g.get("weight_decay", 0.0) != 0.0 for g in self.param_groups)
+            or (self.use_stable_weight_decay and any(g.get("weight_decay", 0.0) != 0.0 for g in self.param_groups))
         )
 
         # Fast path A: no variance sum needed and all groups can use the single
@@ -632,13 +654,15 @@ class RangerLite(torch.optim.Optimizer):
                 variance_ma_debiased = variance_ma / bias_correction2
                 variance_ma_sum += variance_ma_debiased.sum()
 
-        if not self.param_size:
-            if not param_size:
-                # No trainable params
-                return loss
-            self.param_size = param_size
+        variance_normalized = None
+        if self.use_stable_weight_decay and needs_variance_sum:
+            if not self.param_size:
+                if not param_size:
+                    # No trainable params
+                    return loss
+                self.param_size = param_size
 
-        variance_normalized = torch.sqrt(variance_ma_sum / self.param_size).clamp_min(self.eps)
+            variance_normalized = torch.sqrt(variance_ma_sum / self.param_size).clamp_min(self.eps)
 
         # Phase 2: Apply weight decay and update weights
         for group in self.param_groups:
@@ -653,7 +677,10 @@ class RangerLite(torch.optim.Optimizer):
             # (or the absolute last parameter of the network for Group 0)
             if self.use_legacy_scoping_bug and leaked_p is not None:
                 if decay:
-                    leaked_p.data.mul_(1 - decay * lr / variance_normalized)
+                    if self.use_stable_weight_decay and variance_normalized is not None:
+                        leaked_p.data.mul_(1 - decay * lr / variance_normalized)
+                    else:
+                        leaked_p.data.mul_(1 - decay * lr)
                 if self.normloss_active:
                     unorm = self.unit_norm(leaked_p.data)
                     corr = 2 * normloss_factor * (1 - torch.div(1, unorm + self.eps))
@@ -674,9 +701,12 @@ class RangerLite(torch.optim.Optimizer):
 
                 # --- CORRECT BEHAVIOR ---
                 if not self.use_legacy_scoping_bug:
-                    # Stable Weight Decay
+                    # Weight Decay
                     if decay:
-                        p.data.mul_(1 - decay * lr / variance_normalized)
+                        if self.use_stable_weight_decay and variance_normalized is not None:
+                            p.data.mul_(1 - decay * lr / variance_normalized)
+                        else:
+                            p.data.mul_(1 - decay * lr)
                     # Norm Loss
                     if self.normloss_active:
                         unorm = self.unit_norm(p.data)
