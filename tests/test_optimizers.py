@@ -173,3 +173,35 @@ def test_adamw_config_defaults_and_options():
     assert isinstance(adamw_opt, torch.optim.AdamW)
     assert adamw_opt.defaults["betas"] == (0.85, 0.98)
     assert adamw_opt.defaults["eps"] == 1e-7
+
+
+def test_ranger_stable_weight_decay_option():
+    # Test default value (True)
+    config_default = OptimizerConfig(optimizer_name="rangerlite")
+    assert config_default.ranger_stable_weight_decay is True
+
+    wrapper_default = config_default.get_optimizer_wrapper()
+    param = torch.nn.Parameter(torch.tensor([[1.0, 2.0], [3.0, 4.0]]))
+    train_params = [{"params": [param], "lr": 1e-3, "weight_decay": 0.01}]
+    wrapper_default.configure_optimizers(train_params)
+    assert wrapper_default.optimizer.use_stable_weight_decay is True
+
+    # Test turning off stable weight decay (False)
+    config_elementwise = OptimizerConfig(optimizer_name="rangerlite", ranger_stable_weight_decay=False)
+    assert config_elementwise.ranger_stable_weight_decay is False
+
+    wrapper_elementwise = config_elementwise.get_optimizer_wrapper()
+    param_ew = torch.nn.Parameter(torch.tensor([[1.0, 2.0], [3.0, 4.0]]))
+    param_ew.grad = torch.tensor([[0.1, 0.2], [0.3, 0.4]])
+    train_params_ew = [{"params": [param_ew], "lr": 1e-3, "weight_decay": 0.01}]
+    opts, _ = wrapper_elementwise.configure_optimizers(train_params_ew)
+    opt = opts[0]
+
+    assert opt.use_stable_weight_decay is False
+
+    # Execute optimizer step with elementwise weight decay
+    initial_p = param_ew.clone()
+    opt.step()
+    # Check that weights updated and changed from initial_p
+    assert not torch.allclose(param_ew, initial_p)
+
