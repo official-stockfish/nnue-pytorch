@@ -1,13 +1,14 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from .adamw_wrapper import AdamWConfig, AdamWWrapper
 from .rangerlite_wrapper import RangerLiteConfig, RangerLiteWrapper
 from .schedulefree_wrapper import ScheduleFreeConfig, ScheduleFreeWrapper
 
 
 @dataclass(kw_only=True)
-class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
-    optimizer_name: Literal["schedulefree", "ranger21", "rangerlite"] = "rangerlite"
+class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig, AdamWConfig):
+    optimizer_name: Literal["schedulefree", "ranger21", "rangerlite", "adamw"] = "rangerlite"
     """Which optimizer to use. Note that ranger21 is a specific configuration of rangerlite emulating ranger21 behaviour with legacy_mode=True."""
 
     ft_weight_decay: float = 0.0
@@ -30,9 +31,11 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig):
             wrapper = RangerLiteWrapper(self, legacy_mode=True)
         elif optimizer_name == "rangerlite":
             wrapper = RangerLiteWrapper(self, legacy_mode=False)
+        elif optimizer_name == "adamw":
+            wrapper = AdamWWrapper(self)
         else:
             raise ValueError(
-                f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21' or 'rangerlite'."
+                f"Unknown optimizer_name: '{optimizer_name}'. Expected 'schedulefree', 'ranger21', 'rangerlite' or 'adamw'."
             )
 
         info_str = f"[OptimizerConfig] Using {optimizer_name} optimizer with lr: {self.lr}"
