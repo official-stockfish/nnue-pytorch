@@ -201,7 +201,7 @@ class SimpleTrainer:
                 self.model.config.use_fake_weight_quantization,
             )
             loss = _unwrap_module(self.model).compute_loss_with_scorenet(
-                scorenet, batch, self.current_epoch
+                scorenet, batch, self.global_step
             )
             _unwrap_module(self.model).loss_metrics["train_loss_epoch"].update(loss.detach())
             outputs = {"loss": loss, "train_loss": loss.detach()}
