@@ -38,17 +38,8 @@ class ModelConfig(LayerStacksConfig):
     quantize_config: QuantizationConfig = field(default_factory=QuantizationConfig)
 
 
-# parameters needed for the definition of the loss
 @dataclass(kw_only=True)
-class LossParams:
-    in_offset: float = 270
-    """offset for conversion to win on input (default=270.0)"""
-    out_offset: float = 270
-    """offset for conversion to win on output (default=270.0)"""
-    in_scaling: float = 340
-    """scaling for conversion to win on input (default=340.0)"""
-    out_scaling: float = 380
-    """scaling for conversion to win on output (default=380.0)"""
+class LambdaConfig:
     start_lambda: float | None = None
     """lambda to use at first epoch."""
     end_lambda: float | None = None
@@ -59,22 +50,16 @@ class LossParams:
     """std of normal distributed per batch jitter to add to lambda (default=0.0, no jitter)."""
     jitter_decay_lambda_batch: float = 0.0
     """decay of batch jitter (0.0 means full decay -> independent jitter per batch. 1.0 = no decay, not allowed)."""
-    pow_exp: float = 2.5
-    """exponent of the power law used for the mean error (default=2.5)"""
-    qp_asymmetry: float = 0.0
-    """Adjust loss if q (prediction) > p (reference) (default=0.0)"""
-    w1: float = 0.0
-    """weight boost parameter 1 (default=0.0)"""
-    w2: float = 0.5
-    """weight boost parameter 2 (default=0.5)"""
     lambda_: Annotated[float, tyro.conf.arg(name="lambda")] = 1.0
     """1.0=train on evaluations, 0.0=train on game results, interpolates between (default=1.0)."""
-    tb_remap_base: float = 4000.0
-    """Tablebase score remapping base value"""
-    tb_remap_scale: float = 4000.0
-    """Tablebase score remapping scale value"""
-    tb_remap_decay: float = 0.85
-    """Tablebase score remapping decay parameter"""
+    lambda_schedule_steps: int = -1
+    """Number of steps for the lambda schedule (default=-1, disabled/fallback to max_steps)."""
+    lambda_cycle_warmup_pct: float = 0.3
+    """Warmup percentage of the cycle steps."""
+    lambda_cycle_delta: float = 0.0
+    """The maximum delta added to the linear lambda change during the peak of the cycle."""
+    lambda_cycle_jitter: bool = False
+    """If True, the lambda jitter (both batch and sample) will be scaled by the cosine factor (0 to 1) of the cycle."""
 
     def __post_init__(self):
         if (self.start_lambda is not None) != (self.end_lambda is not None):
@@ -90,6 +75,40 @@ class LossParams:
             raise ValueError("jitter_decay_lambda_batch must be in the range [0.0, 1.0).")
         if self.jitter_lambda_batch < 0.0 or self.jitter_lambda_sample < 0.0:
             raise ValueError("jitter_lambda_batch and jitter_lambda_sample must be non-negative.")
+        if self.lambda_schedule_steps >= 0:
+            if self.lambda_schedule_steps == 0:
+                raise ValueError("lambda_schedule_steps must be positive.")
+            if self.lambda_cycle_warmup_pct < 0.0 or self.lambda_cycle_warmup_pct > 1.0:
+                raise ValueError("lambda_cycle_warmup_pct must be in the range [0.0, 1.0].")
+
+
+# parameters needed for the definition of the loss
+@dataclass(kw_only=True)
+class LossParams:
+    in_offset: float = 270
+    """offset for conversion to win on input (default=270.0)"""
+    out_offset: float = 270
+    """offset for conversion to win on output (default=270.0)"""
+    in_scaling: float = 340
+    """scaling for conversion to win on input (default=340.0)"""
+    out_scaling: float = 380
+    """scaling for conversion to win on output (default=380.0)"""
+    lambda_config: OmitArgPrefixes[LambdaConfig] = field(default_factory=LambdaConfig)
+    """lambda configuration parameters"""
+    pow_exp: float = 2.5
+    """exponent of the power law used for the mean error (default=2.5)"""
+    qp_asymmetry: float = 0.0
+    """Adjust loss if q (prediction) > p (reference) (default=0.0)"""
+    w1: float = 0.0
+    """weight boost parameter 1 (default=0.0)"""
+    w2: float = 0.5
+    """weight boost parameter 2 (default=0.5)"""
+    tb_remap_base: float = 4000.0
+    """Tablebase score remapping base value (default=7000.0)"""
+    tb_remap_scale: float = 4000.0
+    """Tablebase score remapping scale value (default=20000.0)"""
+    tb_remap_decay: float = 0.85
+    """Tablebase score remapping decay parameter (default=0.8)"""
 
 @dataclass(kw_only=True)
 class NNUELightningConfig(FeatureConfig):
