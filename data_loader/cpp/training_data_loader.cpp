@@ -82,25 +82,26 @@ struct HalfKAv2_hmExtractor: IFeatureExtractor {
     }
 };
 
-struct K16Q2 {
-    static constexpr std::string_view NAME = "K16Q2";
+struct K32Q2 {
+    static constexpr std::string_view NAME = "K32Q2";
 
     static constexpr int NUM_SQ              = 64;
     static constexpr int NUM_PT              = 12;
     static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
-    static constexpr int INPUTS              = NUM_PLANES * NUM_SQ / 2;
-    static constexpr int MAX_ACTIVE_FEATURES = 32;
+    static constexpr int NUM_BUCKETS         = 64;
+    static constexpr int INPUTS              = NUM_PLANES * NUM_BUCKETS + 6912;
+    static constexpr int MAX_ACTIVE_FEATURES = 34;
 
     // clang-format off
     static constexpr int KingBuckets[64] = {
-       3,  2,  1,  0,  0,  1,  2,  3,
-       7,  6,  5,  4,  4,  5,  6,  7,
-      11, 10,  9,  8,  8,  9, 10, 11,
-      11, 10,  9,  8,  8,  9, 10, 11,
-      13, 13, 12, 12, 12, 12, 13, 13,
-      13, 13, 12, 12, 12, 12, 13, 13,
-      15, 15, 14, 14, 14, 14, 15, 15,
-      15, 15, 14, 14, 14, 14, 15, 15
+      -1, -1, -1, -1, 31, 30, 29, 28,
+      -1, -1, -1, -1, 27, 26, 25, 24,
+      -1, -1, -1, -1, 23, 22, 21, 20,
+      -1, -1, -1, -1, 19, 18, 17, 16,
+      -1, -1, -1, -1, 15, 14, 13, 12,
+      -1, -1, -1, -1, 11, 10, 9, 8,
+      -1, -1, -1, -1, 7, 6, 5, 4,
+      -1, -1, -1, -1, 3, 2, 1, 0
     };
     // clang-format on
 
@@ -108,6 +109,7 @@ struct K16Q2 {
         Square o_ksq = orient_flip_2(color, ksq, ksq);
         auto   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
         int    k_bucket = KingBuckets[static_cast<int>(o_ksq)];
+        if (k_bucket < 0) k_bucket = 0;
         int    combined_bucket = k_bucket * 2 + (opponent_has_queen ? 1 : 0);
         return static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
              + combined_bucket * NUM_PLANES;
@@ -133,13 +135,13 @@ struct K16Q2 {
     }
 };
 
-struct K16Q2Extractor: IFeatureExtractor {
-    int inputs() const override { return K16Q2::INPUTS; }
-    int max_active_features() const override { return K16Q2::MAX_ACTIVE_FEATURES; }
+struct K32Q2Extractor: IFeatureExtractor {
+    int inputs() const override { return K32Q2::INPUTS; }
+    int max_active_features() const override { return K32Q2::MAX_ACTIVE_FEATURES; }
     std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
                                              int*                     features,
                                              Color                    color) const override {
-        return K16Q2::fill_features_sparse(e, features, color);
+        return K32Q2::fill_features_sparse(e, features, color);
     }
 };
 
@@ -494,8 +496,8 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
 static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view name) {
     if (name == "HalfKAv2_hm")
         return std::make_unique<HalfKAv2_hmExtractor>();
-    if (name == "K16Q2")
-        return std::make_unique<K16Q2Extractor>();
+    if (name == "K32Q2")
+        return std::make_unique<K32Q2Extractor>();
     if (name == "Full_Threats")
         return std::make_unique<FullThreatsExtractor>();
     if (name == "PP_3Wide")
