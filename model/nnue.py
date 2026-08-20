@@ -198,7 +198,7 @@ class NNUE(nn.Module):
 
     @staticmethod
     def load_from_checkpoint(path, config, map_location="cpu"):
-        checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+        checkpoint = torch.load(path, map_location=map_location, weights_only=True)
         nnue = NNUE(config=config)
         nnue.load_state_dict(checkpoint["state_dict"])
         return nnue

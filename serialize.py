@@ -1,5 +1,6 @@
 import hashlib
 import os
+import pickle
 from dataclasses import dataclass, field
 from typing import Annotated, Literal
 
@@ -90,13 +91,27 @@ def main():
     ft_compression = serialize_config.ft_compression
     if args.source.endswith(".ckpt"):
         checkpoint = torch.load(
-            args.source, map_location=torch.device("cpu"), weights_only=False
+            args.source, map_location=torch.device("cpu"), weights_only=True
         )
         nnue = M.NNUE(config=nnue_lightning_config)
         nnue.load_state_dict(checkpoint["state_dict"])
         nnue.eval()
     elif args.source.endswith(".pt"):
-        nnue = torch.load(args.source, weights_only=False)
+        nnue = M.NNUE(config=nnue_lightning_config)
+        try:
+            state_dict = torch.load(
+                args.source, map_location=torch.device("cpu"), weights_only=True
+            )
+        except (pickle.UnpicklingError, RuntimeError, AttributeError, KeyError):
+            # Legacy .pt files were serialized as full NNUE objects. Load the
+            # object with the default unpickler so we can extract the model
+            # weights and discard any stale hyperparameters.
+            legacy_nnue = torch.load(
+                args.source, map_location=torch.device("cpu"), weights_only=False
+            )
+            state_dict = legacy_nnue.model.state_dict()
+        nnue.model.load_state_dict(state_dict)
+        nnue.eval()
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
             nnue = M.NNUE(
@@ -164,7 +179,7 @@ def main():
     if args.target.endswith(".ckpt"):
         raise ValueError("Cannot convert into .ckpt")
     elif args.target.endswith(".pt"):
-        torch.save(nnue, args.target)
+        torch.save(nnue.model.state_dict(), args.target)
     elif target_is_nnue:
         if os.path.isdir(args.target):
             out_dir = os.path.abspath(args.target)
