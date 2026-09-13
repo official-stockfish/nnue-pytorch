@@ -62,7 +62,7 @@ from model import (
 
 """
 
-Algorithm by Daniel Monroe. Github @Ergodice.
+Algorithm by Daniel Monroe. Github @daniel-monroe.
 
 """
 
