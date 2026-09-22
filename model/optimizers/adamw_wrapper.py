@@ -24,43 +24,21 @@ class AdamWConfig(LRSchedulerConfig):
 class AdamWWrapper:
     def __init__(self, config):
         self.config = config
-        self.lr = config.lr
-        self.adamw_beta1 = config.adamw_beta1
-        self.adamw_beta2 = config.adamw_beta2
-        self.adamw_eps = config.adamw_eps
-        self.adamw_fused = config.adamw_fused
         self.needs_train_flip = False
         self.optimizer = None
 
     def configure_optimizers(self, train_params):
-        betas = (self.adamw_beta1, self.adamw_beta2)
-        if self.adamw_fused:
-            try:
-                self.optimizer = torch.optim.AdamW(
-                    train_params,
-                    lr=self.lr,
-                    betas=betas,
-                    eps=self.adamw_eps,
-                    fused=True,
-                )
-            except (RuntimeError, TypeError, ValueError):
-                self.optimizer = torch.optim.AdamW(
-                    train_params,
-                    lr=self.lr,
-                    betas=betas,
-                    eps=self.adamw_eps,
-                    fused=False,
-                )
-        else:
-            self.optimizer = torch.optim.AdamW(
-                train_params,
-                lr=self.lr,
-                betas=betas,
-                eps=self.adamw_eps,
-                fused=False,
-            )
+        betas = (self.config.adamw_beta1, self.config.adamw_beta2)
+        self.optimizer = torch.optim.AdamW(
+            train_params,
+            lr=self.config.lr,
+            betas=betas,
+            eps=self.config.adamw_eps,
+            weight_decay=0.0,
+            fused=self.config.adamw_fused,
+        )
 
-        scheduler = setup_lr_scheduler(self.optimizer, train_params, self.config)
+        scheduler = setup_lr_scheduler(self.optimizer, self.config)
         return [self.optimizer], [scheduler]
 
     def switch_to_train(self, force=False):

@@ -30,7 +30,6 @@ class SafeOneCycleLR(torch.optim.lr_scheduler.OneCycleLR):
 
 def setup_lr_scheduler(
     optimizer: torch.optim.Optimizer,
-    train_params: list[dict[str, Any]],
     config: LRSchedulerConfig,
 ) -> torch.optim.lr_scheduler.StepLR | dict[str, Any]:
     if config.one_cycle_steps <= 0:
@@ -38,7 +37,7 @@ def setup_lr_scheduler(
             optimizer, step_size=1, gamma=config.gamma
         )
     else:
-        LRs = [group["lr"] for group in train_params]
+        LRs = [group["lr"] for group in optimizer.param_groups]
         one_cycle_scheduler = SafeOneCycleLR(
             optimizer,
             max_lr=LRs,
