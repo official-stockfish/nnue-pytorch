@@ -435,9 +435,12 @@ class RangerLite(torch.optim.Optimizer):
 
         wd_factor = 0.0
         if decay:
-            if self.use_stable_weight_decay and variance_norm_value is not None:
+            if self.use_stable_weight_decay:
+                assert variance_norm_value is not None, (
+                    "variance_norm_value must be computed when use_stable_weight_decay is True and decay > 0"
+                )
                 wd_factor = decay * lr / variance_norm_value
-            elif not self.use_stable_weight_decay:
+            else:
                 wd_factor = decay * lr
 
         for p in group["params"]:
@@ -497,6 +500,17 @@ class RangerLite(torch.optim.Optimizer):
                     np.float32(wd_factor),
                 )
                 _RangerLiteFusedKernels._adam_phase2_kernel(grid=(grid,), block=(block,), args=args)
+
+    def _apply_weight_decay(self, p, decay, lr, variance_normalized):
+        if not decay:
+            return
+        if self.use_stable_weight_decay:
+            assert variance_normalized is not None, (
+                "variance_normalized must be computed when use_stable_weight_decay is True and decay > 0"
+            )
+            p.data.mul_(1 - decay * lr / variance_normalized)
+        else:
+            p.data.mul_(1 - decay * lr)
 
     def unit_norm(self, x):
         """
@@ -651,8 +665,9 @@ class RangerLite(torch.optim.Optimizer):
                 variance_ma = state["variance_ma"]
 
                 variance_ma.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-                variance_ma_debiased = variance_ma / bias_correction2
-                variance_ma_sum += variance_ma_debiased.sum()
+                if needs_variance_sum:
+                    variance_ma_debiased = variance_ma / bias_correction2
+                    variance_ma_sum += variance_ma_debiased.sum()
 
         variance_normalized = None
         if self.use_stable_weight_decay and needs_variance_sum:
@@ -676,11 +691,7 @@ class RangerLite(torch.optim.Optimizer):
             # This correctly targets the last parameter of the PREVIOUS group
             # (or the absolute last parameter of the network for Group 0)
             if self.use_legacy_scoping_bug and leaked_p is not None:
-                if decay:
-                    if self.use_stable_weight_decay and variance_normalized is not None:
-                        leaked_p.data.mul_(1 - decay * lr / variance_normalized)
-                    else:
-                        leaked_p.data.mul_(1 - decay * lr)
+                self._apply_weight_decay(leaked_p, decay, lr, variance_normalized)
                 if self.normloss_active:
                     unorm = self.unit_norm(leaked_p.data)
                     corr = 2 * normloss_factor * (1 - torch.div(1, unorm + self.eps))
@@ -701,12 +712,7 @@ class RangerLite(torch.optim.Optimizer):
 
                 # --- CORRECT BEHAVIOR ---
                 if not self.use_legacy_scoping_bug:
-                    # Weight Decay
-                    if decay:
-                        if self.use_stable_weight_decay and variance_normalized is not None:
-                            p.data.mul_(1 - decay * lr / variance_normalized)
-                        else:
-                            p.data.mul_(1 - decay * lr)
+                    self._apply_weight_decay(p, decay, lr, variance_normalized)
                     # Norm Loss
                     if self.normloss_active:
                         unorm = self.unit_norm(p.data)

@@ -31,11 +31,6 @@ class RangerLiteWrapper:
         legacy_mode,
     ):
         self.config = config
-        self.pnm_active = config.pnm_active
-        self.pnm_momentum = config.pnm_momentum
-        self.lookahead_alpha = config.lookahead_alpha
-        self.lookahead_steps = config.lookahead_steps
-        self.ranger_stable_weight_decay = config.ranger_stable_weight_decay
         self.legacy_mode = legacy_mode
         self.needs_train_flip = True
 
@@ -50,14 +45,14 @@ class RangerLiteWrapper:
             weight_decay=0.0,
             use_legacy_scoping_bug=self.legacy_mode,
             normloss_active=self.legacy_mode,
-            pnm_activate=self.pnm_active,
-            pnm_momentum=self.pnm_momentum,
-            lookahead_blending_alpha=self.lookahead_alpha,
-            lookahead_mergetime=self.lookahead_steps,
-            use_stable_weight_decay=self.ranger_stable_weight_decay,
+            pnm_activate=self.config.pnm_active,
+            pnm_momentum=self.config.pnm_momentum,
+            lookahead_blending_alpha=self.config.lookahead_alpha,
+            lookahead_mergetime=self.config.lookahead_steps,
+            use_stable_weight_decay=self.config.ranger_stable_weight_decay,
         )
 
-        scheduler = setup_lr_scheduler(self.optimizer, train_params, self.config)
+        scheduler = setup_lr_scheduler(self.optimizer, self.config)
         return [self.optimizer], [scheduler]
 
     def switch_to_train(self, force=False):
