@@ -9,13 +9,12 @@ def double_feature_transform(
     them: torch.Tensor,
     white_indices: torch.Tensor,
     black_indices: torch.Tensor,
-    psqt_indices: torch.Tensor,
     weight: torch.Tensor,
     bias: torch.Tensor,
     max_ft_activation: float,
     l1_size: int,
     backend: str = "auto",
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     # Resolve backend
     cupy_available = _HAS_CUPY_KERNELS
     all_cuda = (
@@ -23,7 +22,6 @@ def double_feature_transform(
         and them.is_cuda
         and white_indices.is_cuda
         and black_indices.is_cuda
-        and psqt_indices.is_cuda
         and weight.is_cuda
         and bias.is_cuda
     )
@@ -44,7 +42,6 @@ def double_feature_transform(
             them,
             white_indices,
             black_indices,
-            psqt_indices,
             weight,
             bias,
             max_ft_activation,
@@ -59,15 +56,8 @@ def double_feature_transform(
 
         assert l1_size % 2 == 0
 
-        wp = SparseLinearFunction.apply(white_indices, weight, bias, backend=impl)
-        bp = SparseLinearFunction.apply(black_indices, weight, bias, backend=impl)
-
-        w, wpsqt = torch.split(wp, l1_size, dim=1)
-        b, bpsqt = torch.split(bp, l1_size, dim=1)
-
-        psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
-        wpsqt = wpsqt.gather(1, psqt_indices_unsq)
-        bpsqt = bpsqt.gather(1, psqt_indices_unsq)
+        w = SparseLinearFunction.apply(white_indices, weight, bias, backend=impl)
+        b = SparseLinearFunction.apply(black_indices, weight, bias, backend=impl)
 
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
         # do not fake quantize sum of (quantized) weights
@@ -77,6 +67,6 @@ def double_feature_transform(
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
         l0_ = torch.cat(l0_s1, dim=1)
 
-        return l0_, wpsqt, bpsqt
+        return l0_
     else:
         raise ValueError(f"Invalid double FT implementation mode: {backend}")

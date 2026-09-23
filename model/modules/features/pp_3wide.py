@@ -36,10 +36,8 @@ class PP3Wide(InputFeature):
         pass
 
     @torch.no_grad()
-    def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None:
-        L1 = self.num_outputs - num_psqt_buckets
-        for i in range(num_psqt_buckets):
-            self.weight[:, L1 + i] = 0.0
+    def init_weights(self) -> None:
+        pass
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:

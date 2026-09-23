@@ -103,7 +103,6 @@ class QuantizationManager:
         self.weight_scales_dict = {
             "ft_weight" : self.ft_quantized_one,
             "ft_bias" : self.ft_quantized_one,
-            "ft_psqt_weight" : self.nnue2score * self.weight_scale_out,
             "ls_l1_weight" : self.weight_scale_hidden[0],
             "ls_l1_bias" : self.weight_scale_hidden[0] * self.hidden_quantized_one,
             "ls_l2_weight" : self.weight_scale_hidden[1],
@@ -175,20 +174,16 @@ class QuantizationManager:
     def quantize_feature_transformer_weights(
         self,
         weight: torch.Tensor,
-        psqt_weight: torch.Tensor,
         f_weight_export_dtype: torch.dtype = torch.int16,
         callback: Callable | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         weight = weight.mul(self.weight_scales_dict["ft_weight"])
         weight = _safe_convert(weight, f_weight_export_dtype)
-        psqt_weight = psqt_weight.mul(self.weight_scales_dict["ft_psqt_weight"])
-        psqt_weight = _safe_convert(psqt_weight, torch.int32)
 
         if callback is not None:
             callback("ft_weight", weight)
-            callback("psqt_weight", psqt_weight)
 
-        return weight, psqt_weight
+        return weight
 
     def quantize_feature_transformer_bias(
         self,
@@ -207,13 +202,11 @@ class QuantizationManager:
         self,
         bias: torch.Tensor,
         weight: torch.Tensor,
-        psqt_weight: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         bias = bias.divide(self.weight_scales_dict["ft_bias"])
         weight = weight.divide(self.weight_scales_dict["ft_weight"])
-        psqt_weight = psqt_weight.divide(self.weight_scales_dict["ft_psqt_weight"])
 
-        return bias, weight, psqt_weight
+        return bias, weight
 
     def quantize_fc_layer(
         self,

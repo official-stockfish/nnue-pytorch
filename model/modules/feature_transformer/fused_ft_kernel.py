@@ -29,13 +29,10 @@ void fused_double_ft_forward(
     const float* __restrict__ them,
     const int32_t* __restrict__ white_indices,
     const int32_t* __restrict__ black_indices,
-    const int64_t* __restrict__ psqt_indices,
     const float* __restrict__ weight,
     const float* __restrict__ bias,
     const float          max_ft_act,
           float* __restrict__ l0_out,
-          float* __restrict__ wpsqt_out,
-          float* __restrict__ bpsqt_out,
           float* __restrict__ clamped_out,
     const int32_t        output_size
 ) {
@@ -50,9 +47,6 @@ void fused_double_ft_forward(
 
     const int32_t l1_size = """ + str(l1_size) + r""";
     const int32_t l1_half = """ + str(l1_half) + r""";
-    const int64_t p_idx = __ldg(&psqt_indices[block_idx]);
-    float w_psqt_val = __ldg(&bias[l1_size + p_idx]);
-    float b_psqt_val = __ldg(&bias[l1_size + p_idx]);
 
     #pragma unroll
     for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
@@ -97,23 +91,6 @@ void fused_double_ft_forward(
         clamped_out[clamp_base + 2 * l1_half + i] = l0_b0;
         clamped_out[clamp_base + 3 * l1_half + i] = l0_b1;
     }
-
-    if (threadIdx.x == 0) {
-        for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-            int w_idx = w_idx_row[k];
-            if (w_idx != -1) {
-                w_psqt_val += __ldg(&weight[w_idx * output_size + l1_size + p_idx]);
-            } else break;
-        }
-        for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-            int b_idx = b_idx_row[k];
-            if (b_idx != -1) {
-                b_psqt_val += __ldg(&weight[b_idx * output_size + l1_size + p_idx]);
-            } else break;
-        }
-        wpsqt_out[block_idx] = w_psqt_val;
-        bpsqt_out[block_idx] = b_psqt_val;
-    }
 }
 """,
             "fused_double_ft_forward",
@@ -129,13 +106,13 @@ BACKWARD_TILE_SIZE = 4
 _fused_double_ft_backward_kernel_cache = {}
 
 @torch.compiler.disable(recursive=False)
-def make_fused_double_ft_backward_kernel(max_active_indices: int, l1_size: int, tile_size: int = BACKWARD_TILE_SIZE, num_psqt_buckets: int = 8):
+def make_fused_double_ft_backward_kernel(max_active_indices: int, l1_size: int, tile_size: int = BACKWARD_TILE_SIZE):
     l1_half = l1_size // 2
     num_threads = _get_num_threads_for_backward(l1_half)
     output_thread_slice_size = l1_half // num_threads
-    output_size = l1_size + num_psqt_buckets
+    output_size = l1_size
 
-    key = (max_active_indices, l1_size, num_threads, tile_size, num_psqt_buckets)
+    key = (max_active_indices, l1_size, num_threads, tile_size)
     if key not in _fused_double_ft_backward_kernel_cache:
         kernel = cp.RawKernel(
             r"""
@@ -149,13 +126,10 @@ void fused_double_ft_backward(
     const float* __restrict__ them,
     const int32_t* __restrict__ white_indices,
     const int32_t* __restrict__ black_indices,
-    const int64_t* __restrict__ psqt_indices,
     const float* __restrict__ weight,
     const float* __restrict__ bias,
     const float          max_ft_act,
     const float* __restrict__ grad_l0,
-    const float* __restrict__ grad_wpsqt,
-    const float* __restrict__ grad_bpsqt,
     const float* __restrict__ clamped_out,
           float* __restrict__ grad_weight,
           float* __restrict__ grad_bias,
@@ -192,14 +166,7 @@ void fused_double_ft_backward(
         const int32_t* const w_idx_row = white_indices + block_idx * """ + str(max_active_indices) + r""";
         const int32_t* const b_idx_row = black_indices + block_idx * """ + str(max_active_indices) + r""";
 
-        const int64_t p_idx = __ldg(&psqt_indices[block_idx]);
-        const float gw_psqt = __ldg(&grad_wpsqt[block_idx]);
-        const float gb_psqt = __ldg(&grad_bpsqt[block_idx]);
         const uint32_t clamp_base = block_idx * 4 * l1_half;
-
-        if (threadIdx.x == 0) {
-            shared_grad_bias[l1_size + p_idx] += gw_psqt + gb_psqt;
-        }
 
         #pragma unroll
         for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
@@ -229,9 +196,6 @@ void fused_double_ft_backward(
         for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
             int w_idx = w_idx_row[k];
             if (w_idx == -1) break;
-            if (threadIdx.x == 0) {
-                atomicAdd(&grad_weight[w_idx * output_size + l1_size + p_idx], gw_psqt);
-            }
             #pragma unroll
             for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
                 uint32_t i = slice_offset + s;
@@ -243,9 +207,6 @@ void fused_double_ft_backward(
         for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
             int b_idx = b_idx_row[k];
             if (b_idx == -1) break;
-            if (threadIdx.x == 0) {
-                atomicAdd(&grad_weight[b_idx * output_size + l1_size + p_idx], gb_psqt);
-            }
             #pragma unroll
             for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
                 uint32_t i = slice_offset + s;

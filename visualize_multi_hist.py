@@ -92,11 +92,7 @@ def main():
 
     coalesced_ins = [model.input.get_export_weights() for model in models]
     input_weights = [
-        coalesced_in[:, : config.L1].flatten().numpy() for coalesced_in in coalesced_ins
-    ]
-    input_weights_psqt = [
-        (coalesced_in[:, config.L1 :] * 600).flatten().numpy()
-        for coalesced_in in coalesced_ins
+        coalesced_in.flatten().numpy() for coalesced_in in coalesced_ins
     ]
     plot_hists(
         [input_weights],
@@ -107,16 +103,6 @@ def main():
         num_bins=8 * 128,
         title="Distribution of feature transformer weights among different nets",
         filename="input_weights_hist.png",
-    )
-    plot_hists(
-        [input_weights_psqt],
-        labels,
-        [None],
-        w=10.0,
-        h=3.0,
-        num_bins=8 * 128,
-        title="Distribution of feature transformer PSQT weights among different nets (in stockfish internal units)",
-        filename="input_weights_psqt_hist.png",
     )
 
     layer_stacks = [model.layer_stacks for model in models]
