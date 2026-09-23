@@ -179,9 +179,7 @@ class NNUEWriter:
         bias = layer.bias.data[: model.L1]
 
         # Get export weights (coalesced + remapped 12→11 piece types)
-        export_weight = layer.get_export_weights()
-        weight = export_weight[:, : model.L1]
-        psqt_weight = export_weight[:, model.L1 :]
+        weight = layer.get_export_weights()
 
         # biases are exported as i16s
         biases = model.quantization.quantize_feature_transformer_bias(
@@ -198,16 +196,14 @@ class NNUEWriter:
 
             ft_histogram_callback = get_histogram_callback(f.FEATURE_NAME, self.verbose)
             segment_weight = weight[offset : offset + n]
-            segment_psqt_weight = psqt_weight[offset : offset + n]
-            segment_weight, segment_psqt_weight = model.quantization.quantize_feature_transformer_weights(
-                segment_weight, segment_psqt_weight, f_export_dtype, ft_histogram_callback
+            segment_weight = model.quantization.quantize_feature_transformer_weights(
+                segment_weight, f_export_dtype, ft_histogram_callback
             )
             # compression is only useful for types larger than 1 byte
             segment_compression = ft_compression if f_export_dtype != torch.int8 else "none"
             offset += n
 
             self.write_tensor(segment_weight, segment_compression)
-            self.write_tensor(segment_psqt_weight, ft_compression)
 
 
     def write_fc_layer(
@@ -263,7 +259,7 @@ class NNUEReader:
         )  # Feature transformer hash
         self.model.zero_virtual_weights()
 
-        self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
+        self.read_feature_transformer(self.model.input)
 
         layers = [
             self.model.layer_stacks.l1,
@@ -337,37 +333,27 @@ class NNUEReader:
         else:
             raise ValueError("Invalid compression method.")
 
-    def read_feature_transformer(self, layer, num_psqt_buckets: int) -> None:
-        num_outputs = layer.num_outputs
-        L1 = num_outputs - num_psqt_buckets
+    def read_feature_transformer(self, layer) -> None:
+        L1 = layer.num_outputs
 
         bias = self.tensor(np.int16, [L1])
         segments = []
-        segments_psqt = []
 
         for feature in layer.features:
             dtype = np.int8 if feature.EXPORT_WEIGHT_DTYPE == torch.int8 else np.int16
             s = self.tensor(dtype, [feature.NUM_REAL_FEATURES, L1])
             segments.append(s)
-            s_psqt = self.tensor(np.int32, [feature.NUM_REAL_FEATURES, num_psqt_buckets])
-            segments_psqt.append(s_psqt)
 
         weight = torch.cat(segments, dim=0)
-        psqt_weight = torch.cat(segments_psqt, dim=0)
 
-        bias, weight, psqt_weight = (
+        bias, weight = (
             self.model.quantization.dequantize_feature_transformer(
-                bias, weight, psqt_weight
+                bias, weight
             )
         )
 
-        # Combine weight and psqt_weight into export format, then expand
-        layer.bias.data = torch.cat([
-            bias.to(torch.float32),
-            torch.zeros(num_psqt_buckets, dtype=torch.float32)
-        ])
-        export_weight = torch.cat([weight.to(torch.float32), psqt_weight.to(torch.float32)], dim=1)
-        layer.load_export_weights(export_weight)
+        layer.bias.data = bias.to(torch.float32)
+        layer.load_export_weights(weight.to(torch.float32))
 
     def read_fc_layer(
         self,

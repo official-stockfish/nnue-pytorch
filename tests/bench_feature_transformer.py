@@ -33,7 +33,7 @@ def run_bench():
     feature_classes = get_feature_cls("HalfKAv2_hm^")
 
     double_ft = ComposedFeatureTransformer(
-        feature_classes, STRIDE, num_psqt_buckets=8, quantization=quantization
+        feature_classes, STRIDE, quantization=quantization
     ).to(device)
 
     if hasattr(torch, "compile"):
@@ -76,9 +76,6 @@ def run_bench():
     # 'us' and 'them' indicator floats
     us = torch.randint(0, 2, (BATCH_SIZE, 1), dtype=torch.float32, device=device)
     them = 1.0 - us
-    
-    piece_count = torch.randint(1, 32, (BATCH_SIZE,), dtype=torch.int64, device=device)
-    psqt_indices = (piece_count - 1) // 4
 
     print("Benchmarking SparseLinearFunction...")
     weight = torch.randn(
@@ -121,17 +118,16 @@ def run_bench():
                     p.grad.zero_()
 
             for _ in range(WARMUP_ITERS):
-                l0_, wpsqt, bpsqt = compiled_double_ft(
+                l0_ = compiled_double_ft(
                     us,
                     them,
                     indices0,
                     indices1,
-                    psqt_indices,
                     fake_quantize_acts=True,
                     fake_quantize_weights=True,
                     backend=mode,
                 )
-                g = l0_.sum() + wpsqt.sum() + bpsqt.sum()
+                g = l0_.sum()
                 g.backward()
 
             if device.type == "cuda":
@@ -145,17 +141,16 @@ def run_bench():
             for p in compiled_double_ft.parameters():
                 if p.grad is not None:
                     p.grad.zero_()
-            l0_, wpsqt, bpsqt = compiled_double_ft(
+            l0_ = compiled_double_ft(
                 us,
                 them,
                 indices0,
                 indices1,
-                psqt_indices,
                 fake_quantize_acts=True,
                 fake_quantize_weights=True,
                 backend=mode,
             )
-            g = l0_.sum() + wpsqt.sum() + bpsqt.sum()
+            g = l0_.sum()
             g.backward()
 
         if device.type == "cuda":

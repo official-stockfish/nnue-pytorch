@@ -538,19 +538,16 @@ def eval_ft(model: NNUEModel, batch: Iterable[torch.Tensor], device_str: str) ->
             black_indices,
             _outcome,
             _score,
-            piece_count,
+            _piece_count,
         ) = batch_tuple
-        psqt_indices, _  = model.calculate_buckets(piece_count)
-        l0_, wpsqt, bpsqt = model.forward_ft(
+        l0_ = model.forward_ft(
             us,
             them,
             white_indices,
             black_indices,
-            psqt_indices,
             fake_quantize_acts=True,
             fake_quantize_weights=True,
         )
-        _, _ = wpsqt, bpsqt
         return l0_
 
 @torch.no_grad()
@@ -566,13 +563,10 @@ def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
     # Both sides of the FT must use the same permutation.
     permutation.extend([x + l1_size // 2 for x in permutation])
 
-    # Add identity permutation for PSQT weights
-    ft_permutation = permutation + list(range(l1_size, model.input.num_outputs))
-
     # Apply the permutation in place.
     for f in model.input.features:
-        f.weight.copy_(f.weight[:, ft_permutation])
-    model.input.bias.copy_(model.input.bias[ft_permutation])
+        f.weight.copy_(f.weight[:, permutation])
+    model.input.bias.copy_(model.input.bias[permutation])
     model.layer_stacks.l1.linear.weight.copy_(model.layer_stacks.l1.linear.weight[
         :, permutation
     ])

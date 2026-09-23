@@ -1,4 +1,3 @@
-import chess
 import torch
 from torch import nn
 
@@ -27,13 +26,6 @@ for _sq, _bucket in enumerate(KingBuckets):
 def _orient(is_white_pov: bool, sq: int, ksq: int) -> int:
     kfile = ksq % 8
     return (7 * (kfile < 4)) ^ (56 * (not is_white_pov)) ^ sq
-
-
-def _halfka_idx(is_white_pov: bool, king_sq: int, sq: int, p: chess.Piece) -> int:
-    """Feature index using 12 piece types (no king merging)."""
-    p_idx = (p.piece_type - 1) * 2 + (p.color != is_white_pov)
-    o_ksq = _orient(is_white_pov, king_sq, king_sq)
-    return _orient(is_white_pov, sq, king_sq) + p_idx * 64 + KingBuckets[o_ksq] * 768
 
 
 class HalfKav2Hm(InputFeature):
@@ -78,27 +70,9 @@ class HalfKav2Hm(InputFeature):
         self.virtual_weight.zero_()
 
     @torch.no_grad()
-    def init_weights(self, num_psqt_buckets: int, nnue2score: float) -> None:
-        """Initialize virtual weights to zero and set PSQT columns."""
+    def init_weights(self) -> None:
+        """Initialize virtual weights to zero."""
         self.zero_virtual_weights()
-
-        scale = 1.0 / nnue2score
-        L1 = self.num_outputs - num_psqt_buckets
-
-        initial_values = self.halfka_psqts()
-        assert len(initial_values) == self.NUM_INPUTS
-
-        new_weights = (
-            torch.tensor(
-                initial_values,
-                device=self.weight.device,
-                dtype=self.weight.dtype,
-            )
-            * scale
-        )
-
-        for i in range(num_psqt_buckets):
-            self.weight[:, L1 + i] = new_weights
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:
@@ -168,27 +142,3 @@ class HalfKav2Hm(InputFeature):
 
         self.weight.data.copy_(expanded)
         self.zero_virtual_weights()
-
-    @staticmethod
-    def halfka_psqts() -> list[int]:
-        """PSQT initial values using 12 piece types (24,576 values)."""
-        piece_values = {
-            chess.PAWN: 126,
-            chess.KNIGHT: 781,
-            chess.BISHOP: 825,
-            chess.ROOK: 1276,
-            chess.QUEEN: 2538,
-        }
-
-        num_inputs = 768 * 32  # 24,576
-        values = [0] * num_inputs
-
-        for ksq in range(64):
-            for s in range(64):
-                for pt, val in piece_values.items():
-                    idxw = _halfka_idx(True, ksq, s, chess.Piece(pt, chess.WHITE))
-                    idxb = _halfka_idx(True, ksq, s, chess.Piece(pt, chess.BLACK))
-                    values[idxw] = val
-                    values[idxb] = -val
-
-        return values
