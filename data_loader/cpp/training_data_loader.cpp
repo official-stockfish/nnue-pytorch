@@ -563,11 +563,13 @@ FeaturedBatchStream::FeaturedBatchStream(
   bool                                          cyclic,
   std::function<bool(const TrainingDataEntry&)> skipPredicate,
   int                                           rank,
-  int                                           world_size) :
+  int                                           world_size,
+  nnue::UniquePositionCounter*                  counter) :
     BaseType(calculate_num_reader_threads(concurrency),
              filenames,
              cyclic,
              skipPredicate,
+             counter,
              rank,
              world_size),
     m_feature_set(std::move(feature_set)),
@@ -623,6 +625,8 @@ FeaturedBatchStream::~FeaturedBatchStream() {
     }
     for (auto& batch : m_batches)
         delete batch;
+    // Counter is owned by AnyStream and deleted after m_stream (and its
+    // workers) are destroyed, preventing use-after-free.
 }
 
 SparseBatch* FeaturedBatchStream::next() {
@@ -686,11 +690,13 @@ FenBatchStream::FenBatchStream(int                                           con
                                bool                                          cyclic,
                                std::function<bool(const TrainingDataEntry&)> skipPredicate,
                                int                                           rank,
-                               int                                           world_size) :
+                               int                                           world_size,
+                               nnue::UniquePositionCounter*                  counter) :
     BaseType(calculate_num_reader_threads(concurrency),
              filenames,
              cyclic,
              skipPredicate,
+             counter,
              rank,
              world_size),
     m_batch_size(batch_size),
@@ -745,6 +751,8 @@ FenBatchStream::~FenBatchStream() {
     }
     for (auto& batch : m_batches)
         delete batch;
+    // Counter is owned by AnyStream and deleted after m_stream (and its
+    // workers) are destroyed, preventing use-after-free.
 }
 
 FenBatch* FenBatchStream::next() {

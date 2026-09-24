@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 struct DataloaderSkipConfig {
     bool   filtered;
     int    random_fen_skipping;
@@ -16,4 +19,11 @@ struct DataloaderSkipConfig {
 struct DataloaderDDPConfig {
     int rank;
     int world_size;
+};
+
+struct DataloaderHllConfig {
+    const std::uint8_t* initial_hll;      // may be nullptr
+    std::size_t        initial_hll_size;  // bytes, 0 if no initial state
+    std::uint64_t      initial_total;     // total count at restart
+    std::uint64_t      initial_preskip;   // preskip count at restart
 };

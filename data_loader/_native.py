@@ -5,7 +5,7 @@ import os
 import numpy as np
 import torch
 
-from .config import CDataloaderDDPConfig, CDataloaderSkipConfig
+from .config import CDataloaderDDPConfig, CDataloaderHllConfig, CDataloaderSkipConfig
 
 
 def _pin_and_move(t: torch.Tensor, device, use_pinned_memory=False, dtype=None) -> torch.Tensor:
@@ -120,6 +120,8 @@ class CDataLoaderAPI:
         for pattern in (
             "./build/**/*training_data_loader.*",
             "./build/*training_data_loader.*",
+            os.path.join(os.path.dirname(__file__), "cpp", "build", "**", "*training_data_loader.*"),
+            os.path.join(os.path.dirname(__file__), "cpp", "build", "*training_data_loader.*"),
         ):
             for lib in glob.glob(pattern, recursive=True):
                 if lib.endswith((".so", ".dll", ".dylib")):
@@ -144,7 +146,8 @@ class CDataLoaderAPI:
         #     int batch_size,
         #     bool cyclic,
         #     DataloaderSkipConfig config,
-        #     DataloaderDDPConfig ddp_config
+        #     DataloaderDDPConfig ddp_config,
+        #     DataloaderHllConfig hll_config
         # )
         self.dll.create_fen_batch_stream.restype = ctypes.c_void_p
         self.dll.create_fen_batch_stream.argtypes = [
@@ -155,6 +158,7 @@ class CDataLoaderAPI:
             ctypes.c_bool,
             CDataloaderSkipConfig,
             CDataloaderDDPConfig,
+            CDataloaderHllConfig,
         ]
 
         # EXPORT void CDECL destroy_fen_batch_stream(FenBatchStream* stream)
@@ -172,7 +176,8 @@ class CDataLoaderAPI:
         #     int batch_size,
         #     bool cyclic,
         #     DataloaderSkipConfig config,
-        #     DataloaderDDPConfig ddp_config
+        #     DataloaderDDPConfig ddp_config,
+        #     DataloaderHllConfig hll_config
         # )
         self.dll.create_sparse_batch_stream.restype = ctypes.c_void_p
         self.dll.create_sparse_batch_stream.argtypes = [
@@ -184,6 +189,7 @@ class CDataLoaderAPI:
             ctypes.c_bool,
             CDataloaderSkipConfig,
             CDataloaderDDPConfig,
+            CDataloaderHllConfig,
         ]
 
         # EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream)
@@ -209,6 +215,35 @@ class CDataLoaderAPI:
             ctypes.POINTER(ctypes.c_int),
             ctypes.POINTER(ctypes.c_int),
             ctypes.POINTER(ctypes.c_int),
+        ]
+
+        # EXPORT void CDECL get_unique_position_stats(SparseBatchStream*, uint64_t*, uint64_t*, uint64_t*)
+        self.dll.get_unique_position_stats.restype = None
+        self.dll.get_unique_position_stats.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_uint64),
+        ]
+
+        # EXPORT size_t CDECL get_hll_state(SparseBatchStream*, uint8_t*, size_t)
+        self.dll.get_hll_state.restype = ctypes.c_size_t
+        self.dll.get_hll_state.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_size_t,
+        ]
+
+        # EXPORT size_t CDECL get_hll_state_size(SparseBatchStream*)
+        self.dll.get_hll_state_size.restype = ctypes.c_size_t
+        self.dll.get_hll_state_size.argtypes = [ctypes.c_void_p]
+
+        # EXPORT void CDECL hll_count_from_state(const uint8_t*, size_t, uint64_t*)
+        self.dll.hll_count_from_state.restype = None
+        self.dll.hll_count_from_state.argtypes = [
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
         ]
 
 
