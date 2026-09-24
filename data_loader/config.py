@@ -111,3 +111,40 @@ class CDataloaderDDPConfig(ctypes.Structure):
             rank=config.rank,
             world_size=config.world_size,
         )
+
+
+@dataclass
+class DataloaderHllConfig:
+    """Configuration for HyperLogLog unique position counting.
+
+    initial_hll: serialized HLL state for restart from checkpoint (bytes or None)
+    initial_total: total position count (after filtering) at restart
+    initial_preskip: preskip position count (before filtering) at restart
+    """
+    initial_hll: bytes | None = None
+    initial_total: int = 0
+    initial_preskip: int = 0
+
+
+class CDataloaderHllConfig(ctypes.Structure):
+    _fields_ = [
+        ("initial_hll", ctypes.c_void_p),
+        ("initial_hll_size", ctypes.c_size_t),
+        ("initial_total", ctypes.c_uint64),
+        ("initial_preskip", ctypes.c_uint64),
+    ]
+
+    def __init__(self, config: DataloaderHllConfig):
+        self._hll_buf = None
+        ptr = None
+        if config.initial_hll is not None:
+            self._hll_buf = (ctypes.c_uint8 * len(config.initial_hll)).from_buffer_copy(
+                config.initial_hll
+            )
+            ptr = ctypes.cast(self._hll_buf, ctypes.c_void_p)
+        super().__init__(
+            initial_hll=ptr,
+            initial_hll_size=len(config.initial_hll) if config.initial_hll is not None else 0,
+            initial_total=config.initial_total,
+            initial_preskip=config.initial_preskip,
+        )

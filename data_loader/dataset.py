@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import Dataset
 
 from . import stream
-from .config import DataloaderDDPConfig, DataloaderSkipConfig
+from .config import DataloaderDDPConfig, DataloaderHllConfig, DataloaderSkipConfig
 
 
 def _recursive_pin(obj):
@@ -119,6 +119,7 @@ class TrainingDataProvider:
         batch_size=None,
         config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
+        hll_config: DataloaderHllConfig | None = None,
         use_pinned_memory=False,
         device="cpu",
     ):
@@ -134,6 +135,9 @@ class TrainingDataProvider:
         if config is None:
             config = DataloaderSkipConfig()
         self.config = config
+        if hll_config is None:
+            hll_config = DataloaderHllConfig()
+        self.hll_config = hll_config
         self.use_pinned_memory = use_pinned_memory
         self.device = device
 
@@ -146,6 +150,7 @@ class TrainingDataProvider:
                 cyclic,
                 config,
                 ddp_config,
+                hll_config,
             )
         else:
             self.stream = self.create_stream(
@@ -155,6 +160,7 @@ class TrainingDataProvider:
                 cyclic,
                 config,
                 ddp_config,
+                hll_config,
             )
 
     def __iter__(self):
@@ -170,6 +176,14 @@ class TrainingDataProvider:
         else:
             raise StopIteration
 
+    def get_unique_stats(self) -> tuple[int, int, int]:
+        """Return (preskip, total, unique)."""
+        return stream.get_unique_position_stats(self.stream)
+
+    def get_hll_state(self) -> bytes:
+        """Serialize the HLL state for checkpoint storage."""
+        return stream.get_hll_state(self.stream)
+
     def __del__(self):
         self.destroy_stream(self.stream)
 
@@ -184,6 +198,7 @@ class SparseBatchProvider(TrainingDataProvider):
         num_workers=1,
         config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
+        hll_config: DataloaderHllConfig | None = None,
         use_pinned_memory=False,
         device="cpu",
     ):
@@ -199,6 +214,7 @@ class SparseBatchProvider(TrainingDataProvider):
             batch_size,
             config,
             ddp_config,
+            hll_config,
             use_pinned_memory,
             device,
         )
@@ -214,6 +230,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         num_workers=1,
         config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
+        hll_config: DataloaderHllConfig | None = None,
         use_pinned_memory=False,
     ):
         super().__init__()
@@ -226,11 +243,14 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             config = DataloaderSkipConfig()
         self.config = config
         self.ddp_config = ddp_config
+        if hll_config is None:
+            hll_config = DataloaderHllConfig()
+        self.hll_config = hll_config
         self.use_pinned_memory = use_pinned_memory
         self.device = "cpu"
 
     def __iter__(self):
-        return SparseBatchProvider(
+        provider = SparseBatchProvider(
             self.feature_set,
             self.filenames,
             self.batch_size,
@@ -238,9 +258,11 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             num_workers=self.num_workers,
             config=self.config,
             ddp_config=self.ddp_config,
+            hll_config=self.hll_config,
             use_pinned_memory=self.use_pinned_memory,
             device=self.device,
         )
+        return provider
 
 
 def _safe_put(stop_event, q, item):
@@ -374,6 +396,33 @@ class FixedNumBatchesDataset(Dataset):
 
         except queue.Empty:
             raise RuntimeError("Prefetch timeout - no data available")
+
+    def get_unique_stats(self) -> tuple[int, int, int]:
+        """Return (preskip, total, unique) from the underlying data provider.
+        Available after prefetching has started (i.e. after the first batch)."""
+        if self.iter is not None and hasattr(self.iter, "get_unique_stats"):
+            return self.iter.get_unique_stats()
+        return 0, 0, 0
+
+    def get_hll_state(self) -> bytes:
+        """Serialize the HLL state for checkpoint storage.
+        Available after prefetching has started."""
+        if self.iter is not None and hasattr(self.iter, "get_hll_state"):
+            return self.iter.get_hll_state()
+        return b""
+
+    def set_initial_hll(self, hll_bytes: bytes, total: int, preskip: int = 0) -> None:
+        """Set the initial HLL state, total count, and preskip count for
+        restart from checkpoint.  Must be called before the first
+        __getitem__ (before prefetching starts)."""
+        if self._prefetch_started:
+            raise RuntimeError("Cannot set initial HLL after prefetching has started")
+        # FixedNumBatchesDataset wraps an inner SparseBatchDataset (self.dataset).
+        # Only the inner dataset has hll_config; propagate there.
+        if hasattr(self.dataset, "hll_config"):
+            self.dataset.hll_config.initial_hll = hll_bytes if hll_bytes else None
+            self.dataset.hll_config.initial_total = total
+            self.dataset.hll_config.initial_preskip = preskip
 
     def __del__(self):
         if hasattr(self, "_stop_prefetching"):

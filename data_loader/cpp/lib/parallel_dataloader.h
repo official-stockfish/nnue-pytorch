@@ -54,6 +54,8 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "thread_safe_types.h"
 #include "binpack.h"
 #include "training_data_entry.h"
+#include "unique_counter.h"
+#include "compressed_hash.h"
 
 
 namespace binpack
@@ -72,6 +74,7 @@ namespace binpack
             std::ios_base::openmode om = std::ios_base::app,
             bool cyclic = false,
             std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr,
+            nnue::UniquePositionCounter* counter = nullptr,
             int rank = 0,
             int world_size = 1
         ) :
@@ -79,6 +82,7 @@ namespace binpack
             m_numRunningWorkers(concurrency),
             m_cyclic(cyclic),
             m_skipPredicate(std::move(skipPredicate)),
+            m_counter(counter),
             m_rank(rank),
             m_world_size(world_size)
         {
@@ -311,6 +315,25 @@ namespace binpack
                 std::vector<TrainingDataEntry> m_localBuffer;
                 m_localBuffer.reserve(threadBufferSize);
 
+                constexpr std::size_t keyFlushThreshold = 4096;
+                std::vector<std::uint64_t> keyBuffer;
+                std::uint64_t preskip_count = 0;
+                if (m_counter) keyBuffer.reserve(keyFlushThreshold);
+
+                auto flushAll = [&]() {
+                    if (m_counter) {
+                        if (!keyBuffer.empty()) {
+                            m_counter->addBatch(std::move(keyBuffer));
+                            keyBuffer.clear();
+                            keyBuffer.reserve(keyFlushThreshold);
+                        }
+                        if (preskip_count > 0) {
+                            m_counter->addPreskip(preskip_count);
+                            preskip_count = 0;
+                        }
+                    }
+                };
+
                 bool isEnd = fetchNextChunkFromSharedQueue(m_chunkReader, m_chunk);
 
                 while(!isEnd && !m_stopFlag.load())
@@ -318,6 +341,7 @@ namespace binpack
                     while (m_localBuffer.size() < threadBufferSize)
                     {
                         const auto e = m_chunkReader.next(m_chunk);
+                        if (m_counter) ++preskip_count;
 
                         if (!m_chunkReader.hasNext(m_chunk))
                         {
@@ -325,7 +349,15 @@ namespace binpack
                         }
 
                         if (!m_skipPredicate || !m_skipPredicate(e))
+                        {
                             m_localBuffer.emplace_back(e);
+                            if (m_counter)
+                            {
+                                keyBuffer.push_back(nnue::hash::hash(e.pos));
+                                if (keyBuffer.size() >= keyFlushThreshold)
+                                    flushAll();
+                            }
+                        }
 
                         if (isEnd || m_stopFlag.load())
                         {
@@ -341,12 +373,13 @@ namespace binpack
                         bool success = m_ringBuffer.put(m_localBuffer, [this]() {
                             return this->should_stop_producer();
                         });
-                        if (!success) break; // Ring and workers exhausted
+                        if (!success) { flushAll(); break; } // Ring and workers exhausted
 
                         m_localBuffer.clear();
                         m_localBuffer.reserve(threadBufferSize);
                     }
                 }
+                flushAll();
                 m_numRunningWorkers.fetch_sub(1);
                 m_ringBuffer.signal_stop(false);
             };
@@ -443,6 +476,7 @@ namespace binpack
         std::vector<std::unique_ptr<std::timed_mutex>> m_fileMutexes;
         std::vector<double> m_distribution_weights;
         std::function<bool(const TrainingDataEntry&)> m_skipPredicate;
+        nnue::UniquePositionCounter* m_counter = nullptr;
 
         // Avoid blocking too long on a contended per-file mutex; if locking times out,
         // the worker can retry by selecting a different file, and warnings are rate-limited.

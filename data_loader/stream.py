@@ -4,8 +4,10 @@ import os  # noqa: F401
 from ._native import FenBatchPtr, SparseBatchPtr, c_lib
 from .config import (
     CDataloaderDDPConfig,
+    CDataloaderHllConfig,
     CDataloaderSkipConfig,
     DataloaderDDPConfig,
+    DataloaderHllConfig,
     DataloaderSkipConfig,
 )
 
@@ -38,10 +40,13 @@ def create_fen_batch_stream(
     cyclic,
     config: DataloaderSkipConfig,
     ddp_config: DataloaderDDPConfig = None,
+    hll_config: DataloaderHllConfig | None = None,
 ) -> ctypes.c_void_p:
     if ddp_config is None:
         rank, world_size = _get_ddp_rank_and_world_size()
         ddp_config = DataloaderDDPConfig(rank=rank, world_size=world_size)
+    if hll_config is None:
+        hll_config = DataloaderHllConfig()
 
     return c_lib.dll.create_fen_batch_stream(
         concurrency,
@@ -51,6 +56,7 @@ def create_fen_batch_stream(
         cyclic,
         CDataloaderSkipConfig(config),
         CDataloaderDDPConfig(ddp_config),
+        CDataloaderHllConfig(hll_config),
     )
 
 
@@ -74,10 +80,13 @@ def create_sparse_batch_stream(
     cyclic,
     config: DataloaderSkipConfig,
     ddp_config: DataloaderDDPConfig = None,
+    hll_config: DataloaderHllConfig | None = None,
 ) -> ctypes.c_void_p:
     if ddp_config is None:
         rank, world_size = _get_ddp_rank_and_world_size()
         ddp_config = DataloaderDDPConfig(rank=rank, world_size=world_size)
+    if hll_config is None:
+        hll_config = DataloaderHllConfig()
 
     return c_lib.dll.create_sparse_batch_stream(
         feature_set,
@@ -88,6 +97,7 @@ def create_sparse_batch_stream(
         cyclic,
         CDataloaderSkipConfig(config),
         CDataloaderDDPConfig(ddp_config),
+        CDataloaderHllConfig(hll_config),
     )
 
 
@@ -119,3 +129,47 @@ def fetch_next_sparse_batch(stream: ctypes.c_void_p) -> SparseBatchPtr:
 
 def destroy_sparse_batch(batch: SparseBatchPtr):
     c_lib.dll.destroy_sparse_batch(batch)
+
+
+# --- Unique position counting (HLL) ---
+
+def get_unique_position_stats(stream: ctypes.c_void_p) -> tuple[int, int, int]:
+    """Return (preskip, total, unique) where preskip is the exact count
+    of all positions read (before filtering), total is the exact count
+    of positions that passed filtering, and unique is the approximate
+    count of distinct positions (HLL, ~0.1% SE). Race-free; may be
+    called while the stream is producing batches."""
+    preskip = ctypes.c_uint64(0)
+    total = ctypes.c_uint64(0)
+    unique = ctypes.c_uint64(0)
+    c_lib.dll.get_unique_position_stats(stream, ctypes.byref(preskip), ctypes.byref(total), ctypes.byref(unique))
+    return preskip.value, total.value, unique.value
+
+
+def get_hll_state_size(stream: ctypes.c_void_p) -> int:
+    """Return the number of bytes needed to serialize the HLL state."""
+    return c_lib.dll.get_hll_state_size(stream)
+
+
+def get_hll_state(stream: ctypes.c_void_p) -> bytes:
+    """Serialize the current HLL state for checkpoint storage."""
+    size = get_hll_state_size(stream)
+    if size == 0:
+        return b""
+    buf = (ctypes.c_uint8 * size)()
+    written = c_lib.dll.get_hll_state(stream, buf, size)
+    if written == 0:
+        return b""
+    return bytes(buf[:written])
+
+
+def hll_count_from_state(data: bytes) -> int:
+    """Compute the approximate unique count from serialized HLL state.
+    Used for DDP cross-rank merge: after all_reduce MAX of registers,
+    this function computes the global count from the merged state."""
+    if not data:
+        return 0
+    buf = (ctypes.c_uint8 * len(data)).from_buffer_copy(data)
+    count = ctypes.c_uint64(0)
+    c_lib.dll.hll_count_from_state(buf, len(data), ctypes.byref(count))
+    return count.value

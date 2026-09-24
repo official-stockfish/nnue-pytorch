@@ -20,6 +20,7 @@ from trainer.callbacks import (
     SimpleLineLogger,
     TerminateOnNaN,
     TimeLimit,
+    UniquePositionLogger,
     WeightClipper,
 )
 from trainer.engine import SimpleTrainer, init_distributed
@@ -324,6 +325,11 @@ def main():
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
     nan_callback = TerminateOnNaN()
     trainer_callbacks = [
+        UniquePositionLogger(
+            train_dataset=train.dataset,
+            rank=rank,
+            world_size=world_size,
+        ),
         CheckpointManager(
             save_last=args.save_last_network,
             every_n_epochs=args.network_save_period,

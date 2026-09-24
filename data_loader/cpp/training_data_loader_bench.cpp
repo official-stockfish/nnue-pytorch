@@ -40,6 +40,7 @@ struct SparseBatchStreamDeleter {
 struct CliConfig {
     DataloaderSkipConfig skip_config;
     DataloaderDDPConfig  ddp_config;
+    DataloaderHllConfig  hll_config;
     int                  batch_size;
     bool                 cyclic;
 };
@@ -49,26 +50,27 @@ const CliConfig default_cli_config = {
         .filtered                = true,
         .random_fen_skipping     = 10,
         .wld_filtered            = true,
-        .early_fen_skipping      = 20,
-        .soft_early_fen_skipping = 30,
+        .early_fen_skipping      = 18,
+        .soft_early_fen_skipping = 32,
         .simple_eval_skipping    = 0,
         .param_index             = 0,
-        .pc_y0                   = 0.1,
-        .pc_y1                   = 0.5,
+        .pc_y0                   = -0.2,
+        .pc_y1                   = 0.45,
         .pc_y2                   = 1.0,
-        .pc_y3                   = 1.0,
+        .pc_y3                   = 0.95,
         .pc_y4                   = 0.75,
         .ply_x1                  = 0.0,
-        .ply_y1                  = 0.1,
-        .ply_x2                  = 18.0,
-        .ply_y2                  = 0.15,
-        .ply_x3                  = 22.0,
-        .ply_y3                  = 0.25,
-        .ply_x4                  = 26.0,
-        .ply_y4                  = 0.5,
+        .ply_y1                  = 0.025,
+        .ply_x2                  = 22.0,
+        .ply_y2                  = 0.05,
+        .ply_x3                  = 25.5,
+        .ply_y3                  = 0.20,
+        .ply_x4                  = 29.5,
+        .ply_y4                  = 0.80,
     },
     .ddp_config = {.rank = 0, .world_size = 1},
-    .batch_size = 65536,
+    .hll_config = {.initial_hll = nullptr, .initial_hll_size = 0, .initial_total = 0},
+    .batch_size = 131072,
     .cyclic     = true
 };
 
@@ -158,6 +160,11 @@ CliConfig build_config_from_map(const std::map<std::string, std::string>& m) {
             .rank       = std::stoi(m.at("ddp_config.rank")),
             .world_size = std::stoi(m.at("ddp_config.world_size"))
         },
+        .hll_config = {
+            .initial_hll     = nullptr,
+            .initial_hll_size = 0,
+            .initial_total   = 0
+        },
         .batch_size = std::stoi(m.at("batch_size")),
         .cyclic     = parse_bool(m.at("cyclic"))
     };
@@ -234,6 +241,7 @@ struct DistributionReport {
 void run_report(int concurrency, size_t iteration_count, size_t max_plies, int file_count, const char** files, CliConfig cli_config) {
     auto skip_config = cli_config.skip_config;
     auto ddp_config = cli_config.ddp_config;
+    auto hll_config = cli_config.hll_config;
     int batch_size = cli_config.batch_size;
     bool cyclic = cli_config.cyclic;
 
@@ -241,7 +249,7 @@ void run_report(int concurrency, size_t iteration_count, size_t max_plies, int f
 
     std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(
         create_sparse_batch_stream("Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files,
-            batch_size, cyclic, skip_config, ddp_config));
+            batch_size, cyclic, skip_config, ddp_config, hll_config));
 
     DistributionReport report(max_plies);
 
@@ -319,6 +327,7 @@ long long get_rchar_self() {
 void run_bench(int concurrency, size_t iteration_count, int do_cache_files, int file_count, const char** files, CliConfig cli_config) {
     auto skip_config = cli_config.skip_config;
     auto ddp_config = cli_config.ddp_config;
+    auto hll_config = cli_config.hll_config;
     int batch_size = cli_config.batch_size;
     bool cyclic = cli_config.cyclic;
 
@@ -340,12 +349,7 @@ void run_bench(int concurrency, size_t iteration_count, int do_cache_files, int 
 
     std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(
         create_sparse_batch_stream("Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files,
-            batch_size, cyclic, skip_config, ddp_config));
-
-    size_t warmup_iterations = 5;
-    for (size_t i = 1; i <= warmup_iterations; ++i) {
-        std::unique_ptr<SparseBatch, SparseBatchDeleter> b(fetch_next_sparse_batch(stream.get()));
-    }
+            batch_size, cyclic, skip_config, ddp_config, hll_config));
 
     long long bytes_before = get_rchar_self();
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -374,6 +378,18 @@ void run_bench(int concurrency, size_t iteration_count, int do_cache_files, int 
         }
     }
     std::cout << std::endl;
+
+    std::uint64_t preskip = 0, total = 0, unique = 0;
+    get_unique_position_stats(stream.get(), &preskip, &total, &unique);
+    std::cout << "Unique positions: ~" << unique
+              << " (HLL, p=20, ~0.1% SE) from a total of "
+              << total;
+    if (preskip > total)
+        std::cout << " (preskip: " << preskip
+                  << ", skip rate: " << std::fixed << std::setprecision(2)
+                  << (1.0 - static_cast<double>(total) / static_cast<double>(preskip)) * 100.0
+                  << "%)";
+    std::cout << std::endl;
 }
 
 #endif
@@ -386,7 +402,7 @@ int main(int argc, char** argv) {
     int concurrency = std::thread::hardware_concurrency();
     size_t iteration_count = 1000;
     size_t max_plies = 100;
-    int do_cache_files = 1;
+    int do_cache_files = 0;
     std::string cli_settings_path = "";
 
     int i = 1;

@@ -15,6 +15,7 @@
 
 #include "lib/parallel_dataloader.h"
 #include "lib/nnue_training_data_stream.h"
+#include "lib/unique_counter.h"
 #include "training_data_loader_structs.h"
 
 struct IFeatureExtractor {
@@ -63,6 +64,16 @@ private:
 
 struct AnyStream {
     virtual ~AnyStream() = default;
+
+    nnue::UniquePositionCounter* unique_counter() { return m_unique_counter.get(); }
+    const nnue::UniquePositionCounter* unique_counter() const { return m_unique_counter.get(); }
+
+protected:
+    // Owned here (not in FeaturedBatchStream/FenBatchStream) so that it is
+    // destroyed AFTER m_stream (C++ base-class destruction order): the
+    // CompressedTrainingDataEntryParallelReader workers, which hold a raw
+    // pointer to the counter, are joined when m_stream is destroyed.
+    std::unique_ptr<nnue::UniquePositionCounter> m_unique_counter;
 };
 
 template<typename StorageT>
@@ -73,10 +84,14 @@ struct Stream: AnyStream {
            const std::vector<std::string>& filenames,
            bool cyclic,
            std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
+           nnue::UniquePositionCounter* counter = nullptr,
            int rank = 0,
            int world_size = 1) :
         m_stream(training_data::open_sfen_input_file_parallel(
-          concurrency, filenames, cyclic, skipPredicate, rank, world_size)) {}
+          concurrency, filenames, cyclic, skipPredicate, counter, rank, world_size))
+    {
+        if (counter) m_unique_counter.reset(counter);
+    }
 
     virtual StorageT* next() = 0;
 
@@ -95,7 +110,8 @@ struct FeaturedBatchStream final : Stream<SparseBatch> {
                         bool cyclic,
                         std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
                         int rank = 0,
-                        int world_size = 1);
+                        int world_size = 1,
+                        nnue::UniquePositionCounter* counter = nullptr);
     ~FeaturedBatchStream() final;
 
     SparseBatch* next() override;
@@ -146,7 +162,8 @@ struct FenBatchStream final : Stream<FenBatch> {
                    bool cyclic,
                    std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
                    int rank = 0,
-                   int world_size = 1);
+                   int world_size = 1,
+                   nnue::UniquePositionCounter* counter = nullptr);
     ~FenBatchStream() final;
 
     FenBatch* next() override;
