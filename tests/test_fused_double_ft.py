@@ -16,7 +16,7 @@ from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNE
     not torch.cuda.is_available() or not _HAS_CUPY_KERNELS,
     reason="CUDA and CuPy required for custom kernel",
 )
-@pytest.mark.parametrize("l1", [32, 2048])
+@pytest.mark.parametrize("l1", [32, 2048, 4096])
 def test_fused_double_ft(l1):
     torch.manual_seed(0)
     torch.cuda.manual_seed_all(0)
