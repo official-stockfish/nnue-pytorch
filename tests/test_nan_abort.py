@@ -13,6 +13,8 @@ def _make_trainer(world_size=1, rank=0, device="cpu"):
         device=torch.device(device),
         should_stop=False,
         callback_metrics={},
+        log_every_n_steps=1,
+        num_training_batches=1,
     )
 
 

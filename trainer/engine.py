@@ -319,12 +319,17 @@ class SimpleTrainer:
 
             self.global_step += 1
 
-            self.callback_metrics["train_loss"] = float(outputs["train_loss"])
+            # Store the raw loss tensor (GPU).  Only convert to float
+            # when logging is due or when a callback needs the scalar.
+            self.callback_metrics["train_loss"] = outputs["train_loss"].detach()
 
             if (
                 (batch_idx + 1) % self.log_every_n_steps == 0
                 or (batch_idx + 1) == self.num_training_batches
             ):
+                self.callback_metrics["train_loss"] = float(
+                    self.callback_metrics["train_loss"]
+                )
                 self._log_metrics(
                     {"train_loss": self.callback_metrics["train_loss"]},
                     step=self.global_step,

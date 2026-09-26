@@ -216,23 +216,50 @@ class TimeLimit(Callback):
 
 
 class TerminateOnNaN(Callback):
-    """Stop training if a non-finite train or validation loss is detected."""
+    """Stop training if a non-finite train or validation loss is detected.
+
+    The NaN check is deferred to the same cadence as logging
+    (``log_every_n_steps``) to avoid a per-step GPU→CPU sync.
+    Between checks, a GPU-side flag tensor accumulates
+    ``torch.isfinite(loss).all()`` via ``logical_and``.
+    """
 
     def __init__(self):
         super().__init__()
         self.nan_detected = False
+        self._finite_flag = None  # GPU tensor, initialized lazily
 
-    @staticmethod
-    def _is_finite(value):
-        if value is None:
-            return True
-        if isinstance(value, torch.Tensor):
-            return bool(torch.isfinite(value).all().item())
-        return bool(math.isfinite(value))
+    def _ensure_flag(self, device):
+        if self._finite_flag is None:
+            self._finite_flag = torch.tensor(
+                True, device=device, dtype=torch.bool
+            )
+
+    @torch.compiler.disable
+    def on_train_batch_end(self, trainer, batch=None, batch_idx=None, outputs=None):
+        _ = batch, batch_idx
+        loss = outputs.get("loss") if isinstance(outputs, dict) else outputs
+        if loss is None:
+            return
+
+        # Accumulate finiteness on GPU without syncing.
+        self._ensure_flag(trainer.device)
+        if isinstance(loss, torch.Tensor):
+            self._finite_flag &= torch.isfinite(loss).all()
+        else:
+            self._finite_flag &= torch.tensor(
+                math.isfinite(loss), device=trainer.device, dtype=torch.bool
+            )
+
+        # Only sync to CPU when logging is due or at the last batch.
+        current_step = (batch_idx or 0) + 1
+        if current_step % trainer.log_every_n_steps == 0 or current_step == trainer.num_training_batches:
+            if not self._finite_flag.item():
+                self._check_and_stop(trainer, loss, "train")
+            # Reset for the next window.
+            self._finite_flag.fill_(True)
 
     def _check_and_stop(self, trainer, loss, phase: str):
-        if self._is_finite(loss):
-            return
         local_stop = True
         if trainer.world_size > 1 and dist.is_available() and dist.is_initialized():
             stop_tensor = torch.tensor(
@@ -250,14 +277,14 @@ class TerminateOnNaN(Callback):
             )
             trainer.should_stop = True
 
-    def on_train_batch_end(self, trainer, batch=None, batch_idx=None, outputs=None):
-        _ = batch, batch_idx
-        loss = outputs.get("loss") if isinstance(outputs, dict) else outputs
-        self._check_and_stop(trainer, loss, "train")
-
     def on_validation_epoch_end(self, trainer):
         val_loss = trainer.callback_metrics.get("val_loss_epoch")
-        self._check_and_stop(trainer, val_loss, "validation")
+        if val_loss is not None:
+            if isinstance(val_loss, torch.Tensor):
+                if not torch.isfinite(val_loss).all().item():
+                    self._check_and_stop(trainer, val_loss, "validation")
+            elif not math.isfinite(val_loss):
+                self._check_and_stop(trainer, val_loss, "validation")
 
 
 class CheckpointManager(Callback):
