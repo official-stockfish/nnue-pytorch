@@ -61,7 +61,6 @@ void fused_double_ft_forward(
     const int32_t l1_size = """ + str(l1_size) + r""";
     const int32_t l1_half = """ + str(l1_half) + r""";
     const int32_t n_threads = """ + str(num_threads) + r""";
-    const int32_t slice_size = """ + str(output_thread_slice_size) + r""";
     const int64_t p_idx = __ldg(&psqt_indices[block_idx]);
     float w_psqt_val = __ldg(&bias[l1_size + p_idx]);
     float b_psqt_val = __ldg(&bias[l1_size + p_idx]);
@@ -161,7 +160,9 @@ def make_fused_double_ft_backward_kernel(max_active_indices: int, l1_size: int, 
     l1_half = l1_size // 2
     # One thread per column; backward is atomicAdd-contended, not
     # latency-limited, so scalar form with full thread count is best.
-    num_threads = _num_threads(l1_half, l1_half)
+    # Cap at 1024 (CUDA max threads per block); use a stride loop
+    # when l1_half exceeds it.
+    num_threads = _num_threads(l1_half, min(l1_half, 1024))
     output_size = l1_size + num_psqt_buckets
 
     key = (max_active_indices, l1_size, num_threads, tile_size, num_psqt_buckets)
@@ -196,10 +197,11 @@ void fused_double_ft_backward(
 
     const int32_t l1_size = """ + str(l1_size) + r""";
     const int32_t l1_half = """ + str(l1_half) + r""";
+    const int32_t n_threads = """ + str(num_threads) + r""";
     const int32_t tile_size = """ + str(tile_size) + r""";
 
     __shared__ float shared_grad_bias[""" + str(output_size) + r"""];
-    for (int i = tid; i < output_size; i += blockDim.x) {
+    for (int i = tid; i < output_size; i += n_threads) {
         shared_grad_bias[i] = 0.0f;
     }
     __syncthreads();
@@ -223,50 +225,52 @@ void fused_double_ft_backward(
             shared_grad_bias[l1_size + p_idx] += gw_psqt + gb_psqt;
         }
 
-        float clamped_w0 = __ldg(&clamped_out[clamp_base + 0 * l1_half + tid]);
-        float clamped_w1 = __ldg(&clamped_out[clamp_base + 1 * l1_half + tid]);
-        float clamped_b0 = __ldg(&clamped_out[clamp_base + 2 * l1_half + tid]);
-        float clamped_b1 = __ldg(&clamped_out[clamp_base + 3 * l1_half + tid]);
+        for (int col = tid; col < l1_half; col += n_threads) {
+            float clamped_w0 = __ldg(&clamped_out[clamp_base + 0 * l1_half + col]);
+            float clamped_w1 = __ldg(&clamped_out[clamp_base + 1 * l1_half + col]);
+            float clamped_b0 = __ldg(&clamped_out[clamp_base + 2 * l1_half + col]);
+            float clamped_b1 = __ldg(&clamped_out[clamp_base + 3 * l1_half + col]);
 
-        float gl0_i   = __ldg(&grad_l0[block_idx * l1_size + tid]);
-        float gl0_i_h = __ldg(&grad_l0[block_idx * l1_size + l1_half + tid]);
+            float gl0_i   = __ldg(&grad_l0[block_idx * l1_size + col]);
+            float gl0_i_h = __ldg(&grad_l0[block_idx * l1_size + l1_half + col]);
 
-        float dw0 = (clamped_w0 == 0.0f || clamped_w0 == max_ft_act) ? 0.0f : gl0_i   * clamped_w1;
-        float dw1 = (clamped_w1 == 0.0f || clamped_w1 == max_ft_act) ? 0.0f : gl0_i   * clamped_w0;
-        float db0 = (clamped_b0 == 0.0f || clamped_b0 == max_ft_act) ? 0.0f : gl0_i_h * clamped_b1;
-        float db1 = (clamped_b1 == 0.0f || clamped_b1 == max_ft_act) ? 0.0f : gl0_i_h * clamped_b0;
+            float dw0 = (clamped_w0 == 0.0f || clamped_w0 == max_ft_act) ? 0.0f : gl0_i   * clamped_w1;
+            float dw1 = (clamped_w1 == 0.0f || clamped_w1 == max_ft_act) ? 0.0f : gl0_i   * clamped_w0;
+            float db0 = (clamped_b0 == 0.0f || clamped_b0 == max_ft_act) ? 0.0f : gl0_i_h * clamped_b1;
+            float db1 = (clamped_b1 == 0.0f || clamped_b1 == max_ft_act) ? 0.0f : gl0_i_h * clamped_b0;
 
-        float g_w0 = us_val * dw0 + them_val * db0;
-        float g_w1 = us_val * dw1 + them_val * db1;
-        float g_b0 = them_val * dw0 + us_val * db0;
-        float g_b1 = them_val * dw1 + us_val * db1;
+            float g_w0 = us_val * dw0 + them_val * db0;
+            float g_w1 = us_val * dw1 + them_val * db1;
+            float g_b0 = them_val * dw0 + us_val * db0;
+            float g_b1 = them_val * dw1 + us_val * db1;
 
-        for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-            int w_idx = w_idx_row[k];
-            if (w_idx == -1) break;
-            if (tid == 0) {
-                atomicAdd(&grad_weight[w_idx * output_size + l1_size + p_idx], gw_psqt);
+            for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
+                int w_idx = w_idx_row[k];
+                if (w_idx == -1) break;
+                if (col == 0) {
+                    atomicAdd(&grad_weight[w_idx * output_size + l1_size + p_idx], gw_psqt);
+                }
+                atomicAdd(&grad_weight[w_idx * output_size + col],           g_w0);
+                atomicAdd(&grad_weight[w_idx * output_size + col + l1_half], g_w1);
             }
-            atomicAdd(&grad_weight[w_idx * output_size + tid],           g_w0);
-            atomicAdd(&grad_weight[w_idx * output_size + tid + l1_half], g_w1);
-        }
 
-        for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-            int b_idx = b_idx_row[k];
-            if (b_idx == -1) break;
-            if (tid == 0) {
-                atomicAdd(&grad_weight[b_idx * output_size + l1_size + p_idx], gb_psqt);
+            for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
+                int b_idx = b_idx_row[k];
+                if (b_idx == -1) break;
+                if (col == 0) {
+                    atomicAdd(&grad_weight[b_idx * output_size + l1_size + p_idx], gb_psqt);
+                }
+                atomicAdd(&grad_weight[b_idx * output_size + col],           g_b0);
+                atomicAdd(&grad_weight[b_idx * output_size + col + l1_half], g_b1);
             }
-            atomicAdd(&grad_weight[b_idx * output_size + tid],           g_b0);
-            atomicAdd(&grad_weight[b_idx * output_size + tid + l1_half], g_b1);
-        }
 
-        shared_grad_bias[tid]           += g_w0 + g_b0;
-        shared_grad_bias[tid + l1_half] += g_w1 + g_b1;
+            shared_grad_bias[col]           += g_w0 + g_b0;
+            shared_grad_bias[col + l1_half] += g_w1 + g_b1;
+        }
     }
 
     __syncthreads();
-    for (int i = tid; i < output_size; i += blockDim.x) {
+    for (int i = tid; i < output_size; i += n_threads) {
         const float val = shared_grad_bias[i];
         if (val != 0.0f) {
             atomicAdd(&grad_bias[i], val);
