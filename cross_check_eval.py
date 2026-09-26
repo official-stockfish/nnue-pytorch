@@ -296,7 +296,7 @@ def main():
     ckpt_model = None
     if cross_check_config.checkpoint:
         checkpoint = torch.load(
-            cross_check_config.checkpoint, map_location="cpu", weights_only=False
+            cross_check_config.checkpoint, map_location="cpu", weights_only=True
         )
         ckpt = M.NNUE(config=nnue_lightning_config)
         ckpt.load_state_dict(checkpoint["state_dict"])
