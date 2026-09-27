@@ -5,6 +5,11 @@ from torch import nn
 
 from ..quantize import QuantizationManager
 
+try:
+    from .grouped_linear import grouped_l1
+except (ImportError, OSError, RuntimeError):
+    grouped_l1 = None
+
 
 class StackedLinear(nn.Module):
     def __init__(
@@ -96,6 +101,26 @@ class FactorizedStackedLinear(StackedLinear):
                 raise RuntimeError("self.quantization and self.layer_key are required to use fake quantize weights.")
             merged_weight = self.quantization.fake_quantize_weights(merged_weight, f"{self.layer_key}_weight")
             merged_bias = self.quantization.fake_quantize_weights(merged_bias, f"{self.layer_key}_bias")
+
+        # The custom kernels specialize FP32 K->N, N <= 128. The router uses
+        # one of its 256 threads per bucket for initialization/reservation.
+        # Keep the standard path for missing dependencies and other workloads.
+        if (
+            grouped_l1 is not None
+            and x.is_cuda
+            and torch.version.hip is None
+            and x.dtype == merged_weight.dtype == merged_bias.dtype == torch.float32
+            and not torch.is_autocast_enabled()
+            and 128 <= self.in_features <= 4096
+            and self.in_features % 128 == 0
+            and 1 <= self.out_features <= 128
+            and 1 <= self.count <= 256
+            and x.ndim == 2
+            and x.shape[0] > 0
+            and x.shape[1] == self.in_features
+            and torch.cuda.get_device_capability(x.device)[0] >= 8
+        ):
+            return grouped_l1(x, merged_weight, merged_bias, ls_indices, self.count)
 
         stacked_output = F.linear(x, merged_weight, merged_bias)
 
