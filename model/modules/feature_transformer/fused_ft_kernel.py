@@ -3,10 +3,8 @@ import torch
 
 from .sparse_linear_kernel import _kernel_with_threads
 
-# Thread target for the forward kernel: largest divisor of l1_half
-# that is <= 128 is used. Fewer threads gives each warp more
-# independent accumulator chains; the backward uses one thread per
-# column (l1_half) since it is atomicAdd-contended.
+# General forward target; the measured H100 master-net launch uses 256.
+# Backward has its own launch geometry.
 _FORWARD_THREADS = 128
 
 
@@ -22,7 +20,8 @@ _fused_double_ft_forward_kernel_cache = {}
 @torch.compiler.disable(recursive=False)
 def make_fused_double_ft_forward_kernel(max_active_indices: int, l1_size: int):
     l1_half = l1_size // 2
-    num_threads = _num_threads(l1_half, _FORWARD_THREADS)
+    target = 256 if l1_size % 128 == 0 and torch.cuda.get_device_capability() == (9, 0) else _FORWARD_THREADS
+    num_threads = _num_threads(l1_half, target)
     output_thread_slice_size = l1_half // num_threads
 
     key = (max_active_indices, l1_size, num_threads)
@@ -73,27 +72,22 @@ void fused_double_ft_forward(
         b1[s] = __ldg(&bias[i + l1_half]);
     }
 
-    for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-        int w_idx = w_idx_row[k];
-        if (w_idx == -1) break;
-
+    // Interleave independent perspectives without changing either sum's order.
+    // Widen row offsets before multiplying by the compile-time weight stride.
+    for (int k = 0; k < """ + str(max_active_indices) + r"""; ++k) {
+        int wi = w_idx_row[k], bi = b_idx_row[k];
+        if (wi == -1 && bi == -1) break;
         #pragma unroll
         for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
             uint32_t i = s * n_threads + tid;
-            w0[s] += __ldg(&weight[w_idx * output_size + i]);
-            w1[s] += __ldg(&weight[w_idx * output_size + i + l1_half]);
-        }
-    }
-
-    for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-        int b_idx = b_idx_row[k];
-        if (b_idx == -1) break;
-
-        #pragma unroll
-        for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
-            uint32_t i = s * n_threads + tid;
-            b0[s] += __ldg(&weight[b_idx * output_size + i]);
-            b1[s] += __ldg(&weight[b_idx * output_size + i + l1_half]);
+            if (wi >= 0) {
+                w0[s] += __ldg(&weight[(size_t)(unsigned)wi * l1_size + i]);
+                w1[s] += __ldg(&weight[(size_t)(unsigned)wi * l1_size + i + l1_half]);
+            }
+            if (bi >= 0) {
+                b0[s] += __ldg(&weight[(size_t)(unsigned)bi * l1_size + i]);
+                b1[s] += __ldg(&weight[(size_t)(unsigned)bi * l1_size + i + l1_half]);
+            }
         }
     }
 
@@ -138,14 +132,17 @@ _fused_double_ft_backward_kernel_cache = {}
 @torch.compiler.disable(recursive=False)
 def make_fused_double_ft_backward_kernel(max_active_indices: int, l1_size: int, tile_size: int = BACKWARD_TILE_SIZE):
     l1_half = l1_size // 2
-    # One thread per column; backward is atomicAdd-contended, not
-    # latency-limited, so scalar form with full thread count is best.
-    # Cap at 1024 (CUDA max threads per block); use a stride loop
-    # when l1_half exceeds it.
-    num_threads = _num_threads(l1_half, min(l1_half, 1024))
+    # On H100, four 128-thread blocks per position tile outperform a single
+    # 512-thread block for the master net. Each block owns disjoint columns;
+    # FP32 atomics and the number of gradient contributions are unchanged.
+    # Keep the existing launch for other devices and unaligned widths.
+    split_columns = l1_size % 128 == 0 and torch.cuda.get_device_capability() == (9, 0)
+    num_threads = _num_threads(l1_half, 128 if split_columns else min(l1_half, 1024))
+    column_tiles = l1_half // num_threads if split_columns else 1
+    column_stride = num_threads * column_tiles
     output_size = l1_size
 
-    key = (max_active_indices, l1_size, num_threads, tile_size)
+    key = (max_active_indices, l1_size, num_threads, tile_size, column_tiles)
     if key not in _fused_double_ft_backward_kernel_cache:
         kernel = cp.RawKernel(
             r"""
@@ -170,11 +167,11 @@ void fused_double_ft_backward(
     const int32_t        output_size
 ) {
     const uint32_t tile_idx = blockIdx.x;
-    const uint32_t tid = threadIdx.x;
+    const uint32_t tid = threadIdx.x + blockIdx.y * blockDim.x;
 
     const int32_t l1_size = """ + str(l1_size) + r""";
     const int32_t l1_half = """ + str(l1_half) + r""";
-    const int32_t n_threads = """ + str(num_threads) + r""";
+    const int32_t n_threads = """ + str(column_stride) + r""";
     const int32_t tile_size = """ + str(tile_size) + r""";
 
     __shared__ float shared_grad_bias[""" + str(output_size) + r"""];
@@ -217,14 +214,14 @@ void fused_double_ft_backward(
             for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
                 int w_idx = w_idx_row[k];
                 if (w_idx == -1) break;
-                atomicAdd(&grad_weight[w_idx * output_size + col],           g_w0);
+                atomicAdd(&grad_weight[w_idx * output_size + col], g_w0);
                 atomicAdd(&grad_weight[w_idx * output_size + col + l1_half], g_w1);
             }
 
             for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
                 int b_idx = b_idx_row[k];
                 if (b_idx == -1) break;
-                atomicAdd(&grad_weight[b_idx * output_size + col],           g_b0);
+                atomicAdd(&grad_weight[b_idx * output_size + col], g_b0);
                 atomicAdd(&grad_weight[b_idx * output_size + col + l1_half], g_b1);
             }
 
@@ -245,7 +242,9 @@ void fused_double_ft_backward(
             "fused_double_ft_backward",
         )
         kernel.compile()
-        _fused_double_ft_backward_kernel_cache[key] = _kernel_with_threads(
-            kernel, (num_threads,)
-        )
+        def launch(grid, args):
+            stream = cp.cuda.ExternalStream(torch.cuda.current_stream().cuda_stream)
+            kernel(grid=(grid[0], column_tiles), block=(num_threads,), args=args, stream=stream)
+
+        _fused_double_ft_backward_kernel_cache[key] = launch
     return _fused_double_ft_backward_kernel_cache[key]
