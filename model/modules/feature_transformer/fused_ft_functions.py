@@ -4,6 +4,7 @@ from torch import autograd
 
 _HAS_CUPY_KERNELS = False
 try:
+    from .aggregated_ft_kernel import aggregated_ft_backward
     from .fused_ft_kernel import (
         BACKWARD_TILE_SIZE,
         make_fused_double_ft_backward_kernel,
@@ -83,6 +84,17 @@ class FusedDoubleFtFunction(autograd.Function):
 
         grad_weight = torch.zeros(weight.shape[0], output_size, dtype=torch.float32, device=us.device)
         grad_bias = torch.zeros(output_size, dtype=torch.float32, device=us.device)
+
+        # Aggregation pays for its feature-union pass on large master-net batches.
+        # Keep direct scatter for unsupported widths/devices and small batches.
+        if (512 <= l1_size <= 4096 and l1_size % 128 == 0 and batch_size >= 1024
+                and 0 < max_active_features <= 288
+                and torch.cuda.get_device_capability(us.device) == (9, 0)):
+            aggregated_ft_backward(
+                us, them, white_indices, black_indices, grad_l0, clamped_out,
+                grad_weight, grad_bias, max_ft_activation,
+            )
+            return None, None, None, None, grad_weight, grad_bias, None, None
 
         kernel = make_fused_double_ft_backward_kernel(max_active_features, l1_size)
         grid_size = (batch_size + BACKWARD_TILE_SIZE - 1) // BACKWARD_TILE_SIZE

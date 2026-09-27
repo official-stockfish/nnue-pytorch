@@ -16,13 +16,13 @@ from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNE
     not torch.cuda.is_available() or not _HAS_CUPY_KERNELS,
     reason="CUDA and CuPy required for custom kernel",
 )
-@pytest.mark.parametrize("l1", [32, 2048, 4096])
-def test_fused_double_ft(l1):
+@pytest.mark.parametrize("l1", [32, 64, 96, 264, 1024, 1152, 1280, 2048, 4096])
+@pytest.mark.parametrize("batch_size", [1, 9])
+def test_fused_double_ft(l1, batch_size):
     torch.manual_seed(0)
     torch.cuda.manual_seed_all(0)
 
-    batch_size = 4
-    max_active = 32
+    max_active = 96
     num_inputs = 100
     output_size = l1
 
@@ -38,6 +38,10 @@ def test_fused_double_ft(l1):
         0, num_inputs, (batch_size, max_active), dtype=torch.int32, device="cuda"
     )
     black_indices[:, -2:] = -1
+    # Empty rows, unequal perspective lengths and a partial backward tile.
+    for row in range(batch_size):
+        white_indices[row, (row * 17) % max_active :] = -1
+        black_indices[row, (row * 23 + 1) % max_active :] = -1
 
     weight = torch.randn(
         num_inputs,
@@ -63,7 +67,9 @@ def test_fused_double_ft(l1):
         "fused",
     )
 
-    loss_fused = l0_fused.sum()
+    # Distinct upstream gradients catch column-routing errors in tiled kernels.
+    grad_output = torch.randn_like(l0_fused)
+    loss_fused = (l0_fused * grad_output).sum()
     loss_fused.backward()
 
     grad_weight_fused = weight.grad.clone()
@@ -85,11 +91,11 @@ def test_fused_double_ft(l1):
         "torch",
     )
 
-    loss_fallback = l0_fallback.sum()
+    loss_fallback = (l0_fallback * grad_output).sum()
     loss_fallback.backward()
 
     # Compare
-    torch.testing.assert_close(l0_fused, l0_fallback, atol=1e-4, rtol=1e-3)
+    torch.testing.assert_close(l0_fused, l0_fallback, atol=1e-3, rtol=1e-4)
 
     torch.testing.assert_close(grad_weight_fused, weight.grad, atol=1e-4, rtol=1e-3)
     torch.testing.assert_close(grad_bias_fused, bias.grad, atol=1e-4, rtol=1e-3)

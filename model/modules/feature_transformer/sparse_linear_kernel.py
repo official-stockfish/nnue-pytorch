@@ -39,7 +39,8 @@ def _get_num_threads_for_backward(output_size: int) -> int:
 
 def _kernel_with_threads(kernel, threads):
     def f(grid, args):
-        kernel(grid=grid, block=threads, args=args)
+        stream = cp.cuda.ExternalStream(torch.cuda.current_stream().cuda_stream)
+        kernel(grid=grid, block=threads, args=args, stream=stream)
 
     return f
 
