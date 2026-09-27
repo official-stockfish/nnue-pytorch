@@ -11,6 +11,6 @@ tyro
 ruff==0.16.0
 pytest
 schedulefree
-torchmetrics
+torchmetrics>=1.8.2
 tqdm
 scipy
