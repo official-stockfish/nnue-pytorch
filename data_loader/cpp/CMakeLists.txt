@@ -65,7 +65,9 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 execute_process(
-    COMMAND bash -c "grep -m1 -o 'bmi2' /proc/cpuinfo"
+    # Match the complete flag: AVX-512 CPUs also advertise avx512_vbmi2.
+    # A substring match returns two lines and fails the equality check below.
+    COMMAND bash -c "grep -m1 -ow 'bmi2' /proc/cpuinfo"
     OUTPUT_VARIABLE CPU_BMI2
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
