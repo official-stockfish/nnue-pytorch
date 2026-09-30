@@ -13,7 +13,7 @@ What this document DOES contain:
 - quantization math and implementation
 - almost-production-ready optimized code
 - pytorch trainer implementation (+ important CUDA kernels)
-- architectural considerations and history
+- architectural considerations
 
 What this document DOES NOT contain:
 
@@ -127,26 +127,10 @@ What this document DOES NOT contain:
     + [Full_Threats feature set.](#full_threats-feature-set)
         - [Deduplicating features](#deduplicating-features)
         - [I8 quantization for threat feature weights](#i8-quantization-for-threat-feature-weights)
-    + [A part of the feature transformer directly forwarded to the output.](#a-part-of-the-feature-transformer-directly-forwarded-to-the-output)
-    + [Multiple PSQT outputs and multiple subnetworks](#multiple-psqt-outputs-and-multiple-subnetworks)
-* [Historical Stockfish evaluation network architectures](#historical-stockfish-evaluation-network-architectures)
-    + ["SFNNv16" architecture](#sfnnv16-architecture)
-    + ["SFNNv15" architecture](#sfnnv15-architecture)
-    + ["SFNNv14.1" architecture](#sfnnv141-architecture)
-    + ["SFNNv14" architecture](#sfnnv14-architecture)
-    + ["SFNNv13" architecture](#sfnnv13-architecture)
-    + ["SFNNv12" architecture](#sfnnv12-architecture)
-    + ["SFNNv11" architecture](#sfnnv11-architecture)
-    + ["SFNNv10" architecture](#sfnnv10-architecture)
-    + ["SFNNv9" architecture](#sfnnv9-architecture)
-    + ["SFNNv8" architecture](#sfnnv8-architecture)
-    + ["SFNNv7" architecture](#sfnnv7-architecture)
-    + ["SFNNv6" architecture](#sfnnv6-architecture)
-    + ["SFNNv5" architecture](#sfnnv5-architecture)
-    + ["SFNNv4" architecture](#sfnnv4-architecture)
-    + ["SFNNv3" architecture](#sfnnv3-architecture)
-    + ["SFNNv2" architecture](#sfnnv2-architecture)
-    + ["SFNNv1" architecture](#sfnnv1-architecture)
+    + [PP_3Wide feature set.](#pp_3wide-feature-set)
+        - [Indexing and perspectives](#indexing-and-perspectives)
+    + [Multiple subnetworks](#multiple-subnetworks)
+* [Historical Stockfish evaluation network architectures](nnue_architecture_history.md)
 
 ## Basics
 
@@ -2226,7 +2210,7 @@ def _clip_weights(self):
 
 ##### Accounting for virtual layers (factorization)
 
-Sometimes more complex architectures make some layers' parameters be a sum of two layers during training. Just like feature factorization but for whole layers (see for example [this](#multiple-psqt-outputs-and-multiple-subnetworks)). We can account for example like this:
+Sometimes more complex architectures make some layers' parameters be a sum of two layers during training. Just like feature factorization but for whole layers (see for example [this](#multiple-subnetworks)). We can account for example like this:
 
 ```python
 # The min/max constants are specific to the Stockfish quantization scheme.
@@ -2894,28 +2878,26 @@ Since evaluation is not called in check, attacks to a king are also redundant, t
 
 The number of active and changing threat features depends on the position, but is typically higher when more pieces (especially the queens) are on the board. In a typical midgame position, there might be 3-4x as many changing threat features as piece features, and memory bandwidth becomes a bottleneck for accumulation speed. We thus store threat features as i8 and convert them to i16 on the fly during accumulation. This process seems to increase speed much more on ARM architectures (+10%) compared to x86 (+5%). Because threat feature weights are typically not high in absolute value (see our earlier comment regarding the separation between threat and piece features), we can clip them during training with negligible loss in evaluation quality.
 
-### A part of the feature transformer directly forwarded to the output.
+### PP_3Wide feature set.
 
-Normally the nets have a hard time learning high material imbalance, or even representing high evaluations at all. But we can help it with that. We already accumulate some 256 values for each piece on the board, does this ring a bell? What if we added one more and designated it to mean "PSQT"? That's what we will do. We will simply make the feature transformer weight row have 257 values, and use the last one as "PSQT". We can help it during training by initializing it to something that resembles good PSQT values (but remember to scale it according to quantization!). But we have two perspectives? What about that? Right, we do, but we can average them, like `(our - their) / 2` (keeping in mind that their must be negated). Handling it in the trainer is quite easy.
+PP_3Wide describes unordered pairs of pawns on the same or adjacent files (hence the name "3Wide"). These inputs generalize pawn to pawn attacks, so those are removed from Full_Threats when PP_3Wide is active. As with Full_Threats, the weights are stored in i8.
+
+#### Indexing
+
+Current indexing utilizes the whole space of possible pawn pairs for faster SIMD indexing. However, pairs more than one file apart are never active, and their corresponding weights are never trained.
+
+After accounting for perspective and mirroring, the index is computed as follows (`a1 = 0`, friendly color = 0, opposing color = 1):
 
 ```python
-wp = self.ft(w_in)
-bp = self.ft(b_in)
-w, wpsqt = torch.split(wp, wp.shape[1]-1, dim=1)
-b, bpsqt = torch.split(bp, bp.shape[1]-1, dim=1)
-[...]
-y = self.output(l2_) + (wpsqt - bpsqt) * (us - 0.5)
+id_a = 48 * color_a + square_a - 8
+id_b = 48 * color_b + square_b - 8
+hi, lo = max(id_a, id_b), min(id_a, id_b)
+index = hi * (hi - 1) // 2 + lo
 ```
 
-We should also use a feature set that includes king features, as it provides additional PSQT values that may be important. So we will use HalfKAv2.
+### Multiple subnetworks
 
-![](img/HalfKAv2-45056-256x2P1x2-32-32-1.svg)
-
-### Multiple PSQT outputs and multiple subnetworks
-
-Until now all networks have been using one PSQT output and one layer stack (that -32-32-1 part in the Stockfish's network; whatever comes after the feature transformer). But what if we could use more? We need to find some easy-to-compute discriminator to choose the outputs/layer stacks by. One such good discriminator is the piece count, as it's cheap to compute, fairly well-behaved during the game, and the number of pieces can dramatically change how we look at the position. So let's try 8 buckets for both, based on `(piece_count - 1) / 4`.
-
-![](img/HalfKAv2-45056-256x2P8x2[-32-32-1]x8.svg)
+A network can use multiple subnetworks (also called layer stacks) after the feature transformer, selecting one for each position. We need an easy-to-compute discriminator to choose the layer stack. One such discriminator is the piece count, as it is cheap to compute, fairly well-behaved during the game, and the number of pieces can dramatically change how we look at the position. So let's use 8 buckets, based on the integer quotient `(piece_count - 1) / 4`.
 
 But how to implement it in the trainer? "Choosing stuff" is not very GPU-friendly, and we're doing batching too, right? It's not indeed, but thankfully the layers are very small, so we can just evaluate all of them and only choose the results! Moreover, multiple `N` linear layers can just be emulated by a single one with `N` times as many outputs. Let's see how it could be implemented in PyTorch:
 
@@ -2976,179 +2958,6 @@ class LayerStacks(nn.Module):
         return l3y_
 ```
 
-Handling of the PSQT outputs is easier since the is in fact, a simple way of gathering individual values (we couldn't use it above because we were gathering whole rows):
-
-```python
-wp = self.input(w_in)
-bp = self.input(b_in)
-w, wpsqt = torch.split(wp, wp.shape[1]-8, dim=1)
-b, bpsqt = torch.split(bp, bp.shape[1]-8, dim=1)
-[...]
-psqt_indices_unsq = psqt_indices.unsqueeze(dim=1)
-wpsqt = wpsqt.gather(1, psqt_indices_unsq)
-bpsqt = bpsqt.gather(1, psqt_indices_unsq)
-y = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
-```
-
 ## Historical Stockfish evaluation network architectures
 
-### "SFNNv16" architecture
-
-Added PP_3Wide features.
-
-2026-07-20 - *
-
-[Commit f4bcd40409f94bd397a083c5d6243bac6dcc6d85](https://github.com/official-stockfish/Stockfish/commit/f4bcd40409f94bd397a083c5d6243bac6dcc6d85)
-
-![](img/SFNNv16_architecture_detailed_v2.svg)
-
-### "SFNNv15" architecture
-
-2026-07-03 - 2026-07-20
-
-[Commit e33bb26ee7320629dd9114a936a38e6f4d43d52a](https://github.com/official-stockfish/Stockfish/commit/e33bb26ee7320629dd9114a936a38e6f4d43d52a)
-
-![](img/SFNNv15_architecture_detailed_v2.svg)
-
-### "SFNNv14.1" architecture
-
-Same as "SFNNv14" with updated fixed-point quantization.
-
-2026-05-26 - 2026-07-03
-
-[Commit 313ea4ab0410872e99f0668c74edc7e49e9a0b6a](https://github.com/official-stockfish/Stockfish/commit/313ea4ab0410872e99f0668c74edc7e49e9a0b6a)
-
-![](img/SFNNv14.1_architecture_detailed_v2.svg)
-
-### "SFNNv14" architecture
-
-Added opposed-pawn features to FullThreats.
-
-2026-04-02 - 2026-05-26
-
-[Commit 5eeca7392ee90b7a43da69e647e3d596e42992fd](https://github.com/official-stockfish/Stockfish/commit/5eeca7392ee90b7a43da69e647e3d596e42992fd)
-
-![](img/SFNNv14_architecture_detailed_v2.svg)
-
-### "SFNNv13" architecture
-
-Same as "SFNNv12" with L2 size increased to 32.
-
-2026-02-18 - 2026-04-02
-
-[Commit a6d055d7e27ab3e29a42e8b94215102824760057](https://github.com/official-stockfish/Stockfish/commit/a6d055d7e27ab3e29a42e8b94215102824760057)
-
-![](img/SFNNv13_architecture_detailed_v2.svg)
-
-### "SFNNv12" architecture
-
-Removed king to piece threats from FullThreats.
-
-2026-02-12 - 2026-02-18
-
-[Commit 83e42045a62c3690a6ee29862679403ea1644728](https://github.com/official-stockfish/Stockfish/commit/83e42045a62c3690a6ee29862679403ea1644728)
-
-![](img/SFNNv12_architecture_detailed_v2.svg)
-
-### "SFNNv11" architecture
-
-Removed piece to king threats from FullThreats.
-
-2026-02-04 - 2026-02-12
-
-[Commit fac506bdf3f0ed46fd0823ff1ed592824f91aa5a](https://github.com/official-stockfish/Stockfish/commit/fac506bdf3f0ed46fd0823ff1ed592824f91aa5a)
-
-![](img/SFNNv11_architecture_detailed_v2.svg)
-
-### "SFNNv10" architecture
-
-Added FullThreats input features, L1 size reduced to 1024, and used 255 as the feature transformer quantization scale.
-
-2025-11-12 - 2026-02-04
-
-[Commit 8e5392d79a36aba5b997cf6fb590937e3e624e80](https://github.com/official-stockfish/Stockfish/commit/8e5392d79a36aba5b997cf6fb590937e3e624e80)
-
-![](img/SFNNv10_architecture_detailed_v2.svg)
-
-### "SFNNv9" architecture
-
-Same as "SFNNv8" with L1 size increased to 3072.
-
-2024-04-01 - 2025-11-12
-
-[Commit 0716b845fdef8a20102b07eaec074b8da8162523](https://github.com/official-stockfish/Stockfish/commit/0716b845fdef8a20102b07eaec074b8da8162523)
-
-![](img/SFNNv9_architecture_detailed_v2.svg)
-
-### "SFNNv8" architecture
-
-Same as "SFNNv7" with L1 size increased to 2560.
-
-2023-09-22 - 2024-04-01
-
-[Commit 782c32223583d7774770fc56e50bd88aae35cd1a](https://github.com/official-stockfish/Stockfish/commit/70ba9de85cddc5460b1ec53e0a99bee271e26ece)
-
-![](img/SFNNv8_architecture_detailed_v2.svg)
-
-### "SFNNv7" architecture
-
-Same as "SFNNv6" with L1 size increased to 2048.
-
-2023-07-01 - 2023-09-22
-
-[Commit 915532181f11812c80ef0b57bc018de4ea2155ec](https://github.com/official-stockfish/Stockfish/commit/915532181f11812c80ef0b57bc018de4ea2155ec)
-
-![](img/SFNNv7_architecture_detailed_v2.svg)
-
-### "SFNNv6" architecture
-
-Same as "SFNNv5" with L1 size increased from 1024 to 1536.
-
-2023-05-31 - 2023-07-01
-
-[Commit c1fff71650e2f8bf5a2d63bdc043161cdfe8e460](https://github.com/official-stockfish/Stockfish/commit/c1fff71650e2f8bf5a2d63bdc043161cdfe8e460)
-
-![](img/SFNNv6_architecture_detailed_v2.svg)
-
-### "SFNNv5" architecture
-
-2022-05-14 - 2023-05-31
-
-[Commit c079acc26f93acc2eda08c7218c60559854f52f0](https://github.com/official-stockfish/Stockfish/commit/c079acc26f93acc2eda08c7218c60559854f52f0)
-
-![](img/SFNNv5_architecture_detailed_v2.svg)
-
-### "SFNNv4" architecture
-
-2022-02-10 - 2022-05-14
-
-[Commit cb9c2594fcedc881ae8f8bfbfdf130cf89840e4c](https://github.com/official-stockfish/Stockfish/commit/cb9c2594fcedc881ae8f8bfbfdf130cf89840e4c)
-
-![](img/SFNNv4_architecture_detailed_v2.svg)
-
-### "SFNNv3" architecture
-
-2021-08-15 - 2022-02-10
-
-[Commit d61d38586ee35fd4d93445eb547e4af27cc86e6b](https://github.com/official-stockfish/Stockfish/commit/d61d38586ee35fd4d93445eb547e4af27cc86e6b)
-
-![](img/SFNNv3_architecture_detailed_v2.svg)
-
-### "SFNNv2" architecture
-
-2021-05-18 - 2021-08-15
-
-[Commit e8d64af1230fdac65bb0da246df3e7abe82e0838](https://github.com/official-stockfish/Stockfish/commit/e8d64af1230fdac65bb0da246df3e7abe82e0838)
-
-![](img/SFNNv2_architecture_detailed_v2.svg)
-
-### "SFNNv1" architecture
-
-Also known as "Stockfish 12 architecture".
-
-2020-08-06 - 2021-05-18
-
-[Commit 84f3e867903f62480c33243dd0ecbffd342796fc](https://github.com/official-stockfish/Stockfish/commit/84f3e867903f62480c33243dd0ecbffd342796fc)
-
-![](img/SFNNv1_architecture_detailed_v2.svg)
-
+Version descriptions, dates, commit links, and diagrams are documented separately in [Stockfish evaluation network architecture history](nnue_architecture_history.md).
