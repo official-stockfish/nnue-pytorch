@@ -1,7 +1,12 @@
 """Aggregation parity with unique row indices, cross-row overlap and streams."""
 
+import os
+import sys
+
 import pytest
 import torch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNELS
 
