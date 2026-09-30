@@ -8,6 +8,8 @@ gradients remain dense: fake quantization uses STE, so a quantized zero can have
 a nonzero derivative.
 """
 
+import os
+
 import cupy as cp
 import torch
 import triton as tr
@@ -328,6 +330,26 @@ class _GroupedLinear(torch.autograd.Function):
         grad_input = _input_gradient(grad_output, weight, rows, counts, x.shape[1], 64, 64)
         grad_weight, grad_bias = _weight_and_bias_gradient(x, grad_output, rows, counts, 16, 32, 32)
         return grad_input, grad_weight, grad_bias, None, None
+
+
+# Measured on GH200 (batch 32768, l2 32, widths 1024/1152, fwd+bwd): the dense
+# all-buckets cuBLAS path is fastest through 16 stacks (~0.62 ms/step vs ~0.80
+# at count 8); the bucketed kernels win from 32 stacks (~0.94 vs ~1.00) and
+# scale far better (count 128: ~1.6 vs ~3.4).
+_GROUPED_L1_MIN_COUNT = 32
+
+
+def grouped_l1_preferred(count: int) -> bool:
+    """Whether the bucketed kernels should replace the dense path at this count.
+
+    NNUE_GROUPED_L1=1|0 forces the bucketed or dense path regardless of count.
+    """
+    override = os.environ.get("NNUE_GROUPED_L1", "")
+    if override == "1":
+        return True
+    if override == "0":
+        return False
+    return count >= _GROUPED_L1_MIN_COUNT
 
 
 @torch.compiler.disable

@@ -6,7 +6,7 @@ from torch import nn
 from ..quantize import QuantizationManager
 
 try:
-    from .grouped_linear import grouped_l1
+    from .grouped_linear import grouped_l1, grouped_l1_preferred
 except (ImportError, OSError, RuntimeError):
     grouped_l1 = None
 
@@ -104,7 +104,9 @@ class FactorizedStackedLinear(StackedLinear):
 
         # The custom kernels specialize FP32 K->N, N <= 128. The router uses
         # one of its 256 threads per bucket for initialization/reservation.
-        # Keep the standard path for missing dependencies and other workloads.
+        # They only outperform the dense path with enough stacks (measured
+        # crossover: 32; NNUE_GROUPED_L1=1|0 overrides). Keep the standard
+        # path for missing dependencies and other workloads.
         if (
             grouped_l1 is not None
             and x.is_cuda
@@ -115,6 +117,7 @@ class FactorizedStackedLinear(StackedLinear):
             and self.in_features % 128 == 0
             and 1 <= self.out_features <= 128
             and 1 <= self.count <= 256
+            and grouped_l1_preferred(self.count)
             and x.ndim == 2
             and x.shape[0] > 0
             and x.shape[1] == self.in_features
