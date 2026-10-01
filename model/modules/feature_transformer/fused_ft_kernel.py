@@ -20,7 +20,7 @@ _fused_double_ft_forward_kernel_cache = {}
 @torch.compiler.disable(recursive=False)
 def make_fused_double_ft_forward_kernel(max_active_indices: int, l1_size: int):
     l1_half = l1_size // 2
-    target = 256 if l1_size % 128 == 0 and torch.cuda.get_device_capability() == (9, 0) else _FORWARD_THREADS
+    target = 256 if l1_size % 128 == 0 and torch.version.hip is None and torch.cuda.get_device_capability() == (9, 0) else _FORWARD_THREADS
     num_threads = _num_threads(l1_half, target)
     output_thread_slice_size = l1_half // num_threads
 
@@ -136,7 +136,7 @@ def make_fused_double_ft_backward_kernel(max_active_indices: int, l1_size: int, 
     # 512-thread block for the master net. Each block owns disjoint columns;
     # FP32 atomics and the number of gradient contributions are unchanged.
     # Keep the existing launch for other devices and unaligned widths.
-    split_columns = l1_size % 128 == 0 and torch.cuda.get_device_capability() == (9, 0)
+    split_columns = l1_size % 128 == 0 and torch.version.hip is None and torch.cuda.get_device_capability() == (9, 0)
     num_threads = _num_threads(l1_half, 128 if split_columns else min(l1_half, 1024))
     column_tiles = l1_half // num_threads if split_columns else 1
     column_stride = num_threads * column_tiles

@@ -89,6 +89,7 @@ class FusedDoubleFtFunction(autograd.Function):
         # Keep direct scatter for unsupported widths/devices and small batches.
         if (512 <= l1_size <= 4096 and l1_size % 128 == 0 and batch_size >= 1024
                 and 0 < max_active_features <= 288
+                and torch.version.hip is None
                 and torch.cuda.get_device_capability(us.device) == (9, 0)):
             aggregated_ft_backward(
                 us, them, white_indices, black_indices, grad_l0, clamped_out,
