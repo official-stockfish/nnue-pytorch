@@ -1,4 +1,5 @@
 import os
+import pickle
 import random
 import sys
 import warnings
@@ -237,21 +238,31 @@ def main():
         )
     else:
         assert os.path.exists(args.resume_from_model)
+        nnue = M.NNUE(
+            config=args.nnue_lightning_config,
+            max_epoch=max_epoch,
+            num_batches_per_epoch=args.num_batches_per_epoch,
+            param_index=args.dataloader_config.param_index,
+        )
         try:
-            nnue = torch.load(
-                args.resume_from_model, weights_only=False, map_location="cpu"
+            state_dict = torch.load(
+                args.resume_from_model, map_location="cpu", weights_only=True
             )
-            nnue.train()
-        except ModuleNotFoundError as e:
-            raise RuntimeError(
-                f"Could not load checkpoint: {e}. The model to be resumed was probably saved with a different version of the code."
-            )
-        # we can set the following here just like that because when resuming
-        # from .pt the optimizer is only created after the training is started
-        nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch = args.num_batches_per_epoch
-        nnue.config = args.nnue_lightning_config
-        nnue.param_index = args.dataloader_config.param_index
+        except (pickle.UnpicklingError, RuntimeError, AttributeError, KeyError):
+            # Legacy .pt files were serialized as full NNUE objects. If that
+            # fails too, surface the original failure with a helpful message.
+            try:
+                legacy_nnue = torch.load(
+                    args.resume_from_model, map_location="cpu", weights_only=False
+                )
+            except ModuleNotFoundError as e:
+                raise RuntimeError(
+                    f"Could not load checkpoint: {e}. The model to be resumed "
+                    "was probably saved with a different version of the code."
+                ) from e
+            state_dict = legacy_nnue.model.state_dict()
+        nnue.model.load_state_dict(state_dict)
+        nnue.train()
 
     input_feature_name = nnue.model.input_feature_name
 

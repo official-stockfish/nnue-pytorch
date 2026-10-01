@@ -77,7 +77,7 @@ def main():
     pipeline = [
         f"{python_executable} -u train.py ./.pgo/small.binpack --batch-size 1024 --l1=1024 --features={args.features} --epoch-size 10000 --max_epochs=2 --swa-start-epoch=1 --default_root_dir \"{test_dir_str}\" {train_device_arg} {train_workers_arg}",
 
-        f"{python_executable} -c \"import torch; ckpt=torch.load('{test_dir_str}/lightning_logs/version_0/checkpoints/last.ckpt', map_location='cpu', weights_only=False); print('Checkpoint keys:', list(ckpt.keys())); assert 'epoch' in ckpt and 'global_step' in ckpt and 'state_dict' in ckpt\"",
+        f"{python_executable} -c \"import torch; ckpt=torch.load('{test_dir_str}/lightning_logs/version_0/checkpoints/last.ckpt', map_location='cpu', weights_only=True); print('Checkpoint keys:', list(ckpt.keys())); assert 'epoch' in ckpt and 'global_step' in ckpt and 'state_dict' in ckpt\"",
 
         f"{python_executable} -u serialize.py \"{test_dir_str}\"/lightning_logs/version_0/checkpoints/last.ckpt \"{test_dir_str}\"/lightning_logs/version_0/checkpoints/last.pt --features={args.features} --l1=1024 {serialize_device_arg} {serialize_workers_arg}",
 

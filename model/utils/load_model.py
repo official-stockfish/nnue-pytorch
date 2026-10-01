@@ -1,3 +1,5 @@
+import pickle
+
 import torch
 
 from ..config import ModelConfig, NNUELightningConfig
@@ -11,14 +13,21 @@ def load_model(
     config: ModelConfig,
 ) -> NNUEModel:
     if filename.endswith(".pt"):
-        model = torch.load(filename, weights_only=False)
+        model = NNUEModel(feature_name, config)
+        try:
+            state_dict = torch.load(filename, map_location="cpu", weights_only=True)
+        except (pickle.UnpicklingError, RuntimeError, AttributeError, KeyError):
+            # Legacy .pt files were serialized as full NNUE objects.
+            legacy_nnue = torch.load(filename, map_location="cpu", weights_only=False)
+            state_dict = legacy_nnue.model.state_dict()
+        model.load_state_dict(state_dict)
         model.eval()
-        return model.model
+        return model
 
     elif filename.endswith(".ckpt"):
         from ..nnue import NNUE
 
-        checkpoint = torch.load(filename, map_location="cpu", weights_only=False)
+        checkpoint = torch.load(filename, map_location="cpu", weights_only=True)
         model = NNUE(
             config=NNUELightningConfig(
                 model_config=config,

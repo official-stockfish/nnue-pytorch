@@ -244,7 +244,7 @@ class SimpleTrainer:
 
     def load_checkpoint(self, path: str):
         """Load a checkpoint and return the raw dictionary."""
-        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
 
         unwrapped = _unwrap_module(self.model)
         unwrapped.load_state_dict(checkpoint["state_dict"])
