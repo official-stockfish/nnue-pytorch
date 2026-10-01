@@ -1,6 +1,6 @@
 import torch
 
-from ..config import ModelConfig, NNUELightningConfig
+from ..config import ModelConfig, NNUEConfig
 from ..model import NNUEModel
 from .serialize import NNUEReader
 
@@ -20,7 +20,7 @@ def load_model(
 
         checkpoint = torch.load(filename, map_location="cpu", weights_only=False)
         model = NNUE(
-            config=NNUELightningConfig(
+            config=NNUEConfig(
                 model_config=config,
                 features=feature_name,
             ),

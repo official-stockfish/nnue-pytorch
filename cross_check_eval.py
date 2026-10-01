@@ -38,12 +38,12 @@ class CrossCheckConfig:
 @dataclass(frozen=True)
 class CliConfig:
     cross_check_config: OmitArgPrefixes[CrossCheckConfig]
-    nnue_lightning_config: OmitArgPrefixes[M.NNUELightningConfig]
+    nnue_config: OmitArgPrefixes[M.NNUEConfig]
 
 
 def read_model(
     nnue_path,
-    config: M.NNUELightningConfig,
+    config: M.NNUEConfig,
 ):
     with open(nnue_path, "rb") as f:
         reader = M.NNUEReader(f, config.features, config.model_config)
@@ -289,7 +289,7 @@ def main():
     args = tyro.cli(CliConfig)
 
     cross_check_config = args.cross_check_config
-    nnue_lightning_config = args.nnue_lightning_config
+    nnue_config = args.nnue_config
 
     batch_size = 1024
 
@@ -298,7 +298,7 @@ def main():
         checkpoint = torch.load(
             cross_check_config.checkpoint, map_location="cpu", weights_only=False
         )
-        ckpt = M.NNUE(config=nnue_lightning_config)
+        ckpt = M.NNUE(config=nnue_config)
         ckpt.load_state_dict(checkpoint["state_dict"])
         ckpt.to(cross_check_config.device)
         ckpt.eval()
@@ -307,7 +307,7 @@ def main():
 
     nnue = read_model(
         cross_check_config.net,
-        config=nnue_lightning_config,
+        config=nnue_config,
     )
     nnue.to(cross_check_config.device)
     nnue.eval()

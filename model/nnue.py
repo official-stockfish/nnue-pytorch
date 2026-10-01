@@ -2,7 +2,7 @@ import torch
 from torch import Tensor, nn
 from torchmetrics import MeanMetric, MetricCollection
 
-from .config import NNUELightningConfig
+from .config import NNUEConfig
 from .lambda_utils import LambdaController
 from .model import NNUEModel
 
@@ -74,7 +74,7 @@ class NNUE(nn.Module):
 
     def __init__(
         self,
-        config: NNUELightningConfig,
+        config: NNUEConfig,
         max_epoch=None,
         num_batches_per_epoch=None,
         param_index=0,

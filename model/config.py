@@ -111,7 +111,7 @@ class LossParams:
     """Tablebase score remapping decay parameter (default=0.8)"""
 
 @dataclass(kw_only=True)
-class NNUELightningConfig(FeatureConfig):
+class NNUEConfig(FeatureConfig):
     use_fake_act_quantization: bool = True
     """Whether to use fake quantization with STE for activations during training."""
     use_fake_weight_quantization: bool = True

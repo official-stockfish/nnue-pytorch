@@ -1,6 +1,6 @@
-"""Lightning-free training engine for NNUE.
+"""Training engine for NNUE.
 
-`SimpleTrainer` mirrors the parts of `lightning.Trainer` used by the project,
+`SimpleTrainer` provides the training loop used by the project,
 while keeping `model.NNUE` as a plain `torch.nn.Module`.
 """
 
@@ -73,7 +73,7 @@ def _unwrap_module(module: nn.Module) -> nn.Module:
 
 
 class SimpleTrainer:
-    """Minimal replacement for ``lightning.Trainer``.
+    """Training loop for NNUE.
 
     The trainer owns the loop, callbacks, logging, checkpointing and basic
     distributed-data-parallel handling.
@@ -106,7 +106,7 @@ class SimpleTrainer:
         self.callbacks: list[Any] = list(callbacks) if callbacks is not None else []
 
         # Accept a single logger or a list.  Expose the first logger as
-        # ``self.logger`` (mirroring PyTorch Lightning) and keep the full list
+        # ``self.logger`` (matching the trainer interface) and keep the full list
         # as ``self.loggers`` so metrics can be forwarded to every logger.
         if isinstance(logger, (list, tuple)):
             self.loggers: list[Any] = list(logger)

@@ -311,7 +311,7 @@ class CheckpointManager(Callback):
             return self.dirpath
         return os.path.join(
             trainer.default_root_dir,
-            "lightning_logs",
+            "training_logs",
             f"version_{trainer.logger.version}",
             "checkpoints",
         )
