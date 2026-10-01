@@ -9,7 +9,7 @@ on:
       - "data_loader/**"
       - "setup_script.sh"
       - "compile_data_loader.bat"
-      - "compile_data_loader.sh"
+      - "scripts/compile_data_loader.sh"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Compile using cmake
-        run: ./compile_data_loader.sh
+        run: ./scripts/compile_data_loader.sh
 
       - name: Run cmake compiled benchmark (100 iterations)
         run: ./build/training_data_loader_bench -i 100 ./.pgo/small.binpack
