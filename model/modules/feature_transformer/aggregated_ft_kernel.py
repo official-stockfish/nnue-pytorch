@@ -13,12 +13,14 @@ import cupy as cp
 import numpy as np
 import torch
 
+from .fused_ft_kernel import _num_threads
+
 
 @cache
 def _kernels(active: int, width: int):
     A = active
     half = width // 2
-    threads = next(n for n in range(min(128, half), 0, -1) if half % n == 0)
+    threads = _num_threads(half, 128)
     tile = 8
     maxids = 2 * tile * A
     h = 1 << (maxids - 1).bit_length()

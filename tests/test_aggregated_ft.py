@@ -20,7 +20,7 @@ from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNE
 @pytest.mark.parametrize("kind", ["empty", "unique", "overlap"])
 @pytest.mark.parametrize("separate_stream", [False, True])
 def test_aggregated_ft(width, batch, active, kind, separate_stream):
-    if torch.cuda.get_device_capability() != (9, 0):
+    if torch.version.hip is not None or torch.cuda.get_device_capability() != (9, 0):
         pytest.skip("H100 specialization")
     from model.modules.feature_transformer.aggregated_ft_kernel import (
         aggregated_ft_backward,
