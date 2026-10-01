@@ -7,4 +7,5 @@
 
 # 2. Explicitly allow only the required files
 !requirements.txt
-!docker_entrypoint.sh
+!docker/
+!docker/docker_entrypoint.sh

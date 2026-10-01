@@ -9,10 +9,11 @@ set -euo pipefail
 # 3. Reconfigure and build the shared library with the collected profile data (PGO_Use).
 #
 # Usage:
-#   ./compile_data_loader.sh [path/to/pgo_input]
+#   ./scripts/compile_data_loader.sh [path/to/pgo_input]
 # If no argument is provided the default is `.pgo/small.binpack` in the repo root.
 
-ROOT_DIR=$(pwd)
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
 SRC_DIR=${SRC_DIR:-data_loader/cpp/}
 BUILD_DIR=${BUILD_DIR:-build}
 PGO_DIR=${PGO_DIR:-pgo_data}

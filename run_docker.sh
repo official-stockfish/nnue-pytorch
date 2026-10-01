@@ -4,6 +4,11 @@
 # Usage: ./run_docker.sh <ACCELERATOR: NVIDIA/AMD/CPU> <data_path_to_be_mounted> [--skip-setup] [--non-interactive] [--exec <command_to_run_inside_container> ...]
 set -e
 
+# Keep the build context and mounted workspace rooted at the repository even
+# when this script is launched from another directory.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_ROOT"
+
 IMAGE_BASE_NAME="nnue-pytorch"
 
 GPU_INPUT=""
@@ -80,21 +85,21 @@ fi
 case "$GPU_INPUT" in
   NVIDIA )
     GPU_TYPE="nvidia"
-    DOCKERFILE="Dockerfile.NVIDIA"
+    DOCKERFILE="docker/Dockerfile.NVIDIA"
     IMAGE_TAG="${IMAGE_BASE_NAME}:nvidia"
     GPU_FLAGS="--gpus all"
     echo "Selected NVIDIA build."
     ;;
   AMD )
     GPU_TYPE="amd"
-    DOCKERFILE="Dockerfile.AMD"
+    DOCKERFILE="docker/Dockerfile.AMD"
     IMAGE_TAG="${IMAGE_BASE_NAME}:amd"
     GPU_FLAGS="--device /dev/kfd --device /dev/dri"
     echo "Selected AMD build."
     ;;
   CPU )
     GPU_TYPE="none"
-    DOCKERFILE="Dockerfile.CPU"
+    DOCKERFILE="docker/Dockerfile.CPU"
     IMAGE_TAG="${IMAGE_BASE_NAME}:cpu"
     GPU_FLAGS=""
     echo "Selected CPU build."

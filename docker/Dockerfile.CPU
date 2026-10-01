@@ -33,7 +33,7 @@ WORKDIR /workspace/nnue-pytorch
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
+COPY docker/docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
 RUN chmod +x /usr/local/bin/docker_entrypoint.sh
 
 # Set the entrypoint to handle UID mapping before executing the main command
