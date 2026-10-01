@@ -1,5 +1,5 @@
 #!/bin/bash
 
-bash compile_data_loader.sh
+bash scripts/compile_data_loader.sh
 
 exec "$@"
