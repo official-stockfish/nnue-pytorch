@@ -6,8 +6,8 @@ from typing import Any
 
 
 def _make_version(root_dir: str | Path) -> str:
-    """Return the next version_N string by scanning root_dir/lightning_logs."""
-    log_root = Path(root_dir) / "lightning_logs"
+    """Return the next version_N string by scanning root_dir/training_logs."""
+    log_root = Path(root_dir) / "training_logs"
     max_version = -1
     if log_root.exists():
         for entry in log_root.iterdir():
@@ -24,7 +24,7 @@ class _Logger(ABC):
     def __init__(self, root_dir: str | Path, version: str | None = None):
         self._root_dir = Path(root_dir)
         self._version = version if version is not None else _make_version(self._root_dir)
-        self._log_dir = self._root_dir / "lightning_logs" / self._version
+        self._log_dir = self._root_dir / "training_logs" / self._version
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -46,11 +46,11 @@ class _Logger(ABC):
         """Flush and close any underlying writers."""
 
     def save(self) -> None:
-        """No-op for parity with PyTorch Lightning logger API."""
+        """No-op hook for logger lifecycle compatibility."""
 
 
 class CSVLogger(_Logger):
-    """Plain CSV logger that mirrors PyTorch Lightning's CSVLogger layout."""
+    """Plain CSV logger that writes CSV metrics for training runs."""
 
     def __init__(self, root_dir: str | Path, version: str | None = None):
         super().__init__(root_dir, version)

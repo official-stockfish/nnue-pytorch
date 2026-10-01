@@ -225,12 +225,12 @@ def main():
             msg += f" Got --gpus={args.gpus or '0'}."
         raise ValueError(msg)
     per_gpu_batch_size = global_batch_size_requested // n_devices
-    feature_name = args.nnue_lightning_config.features
+    feature_name = args.nnue_config.features
 
     max_epoch = args.max_epochs or 800
     if args.resume_from_model is None:
         nnue = M.NNUE(
-            config=args.nnue_lightning_config,
+            config=args.nnue_config,
             max_epoch=max_epoch,
             num_batches_per_epoch=args.num_batches_per_epoch,
             param_index=args.dataloader_config.param_index,
@@ -250,7 +250,7 @@ def main():
         # from .pt the optimizer is only created after the training is started
         nnue.max_epoch = max_epoch
         nnue.num_batches_per_epoch = args.num_batches_per_epoch
-        nnue.config = args.nnue_lightning_config
+        nnue.config = args.nnue_config
         nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
@@ -270,7 +270,7 @@ def main():
             f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}"
         )
         print("Loss parameters:")
-        print(args.nnue_lightning_config.loss_params)
+        print(args.nnue_config.loss_params)
         print(f"Feature set: {feature_name}")
         print(f"Num inputs: {nnue.model.input.NUM_INPUTS}")
 

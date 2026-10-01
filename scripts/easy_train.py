@@ -696,7 +696,7 @@ class TrainingRun(Thread):
     Runs as a separate thread and must be stopped before exiting.
     """
 
-    # The regex pattern for extracting information from the pytorch lightning's tqdm process bar output
+    # The regex pattern for extracting information from the the training progress bar's tqdm process bar output
     ITERATION_PATTERN = re.compile(
         f"Epoch (\\d+).*?(\\d+)/(\\d+).*?({NUMERIC_CONST_PATTERN})it/s, loss=({NUMERIC_CONST_PATTERN})"
     )
@@ -878,7 +878,7 @@ class TrainingRun(Thread):
                         self._current_step_in_epoch = int(matches.group(2))
                         self._num_steps_in_epoch = int(matches.group(3))
 
-                        # There appears to be a pytorch lightning bug where it displays
+                        # There appears to be a the training progress bar bug where it displays
                         # negative speed when running from checkpoint. So we work around this
                         # by computing our own speed.
                         # Only update every 10 steps to avoid the it/s to blow up.
@@ -2091,7 +2091,7 @@ def parse_cli_args():
     )
     parser.add_argument(
         "--max_epoch",
-        "--num-epochs",  # --max_epoch kept to match pytorch-lightning's name
+        "--num-epochs",  # --max_epoch kept to match the old option name's name
         default=400,
         type=int,
         metavar="INTEGER",

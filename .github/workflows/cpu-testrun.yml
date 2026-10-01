@@ -52,5 +52,5 @@ jobs:
       - name: Perform Cross-Check Evaluation
         run: |
           ./run_docker.sh CPU ${{ github.workspace }} --skip-build --skip-setup --non-interactive --exec \
-            python -u cross_check_eval.py --net /data/logs/training/runs/unittests_train_pipeline_cpu/lightning_logs/version_2/checkpoints/last.nnue --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device='cpu' \
-            --checkpoint /data/logs/training/runs/unittests_train_pipeline_cpu/lightning_logs/version_2/checkpoints/last.ckpt
+            python -u cross_check_eval.py --net /data/logs/training/runs/unittests_train_pipeline_cpu/training_logs/version_2/checkpoints/last.nnue --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device='cpu' \
+            --checkpoint /data/logs/training/runs/unittests_train_pipeline_cpu/training_logs/version_2/checkpoints/last.ckpt

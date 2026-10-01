@@ -70,16 +70,16 @@ class CliConfig:
     serialize_config: OmitArgPrefixes[SerializeConfig] = field(
         default_factory=SerializeConfig
     )
-    nnue_lightning_config: OmitArgPrefixes[M.NNUELightningConfig] = field(
-        default_factory=M.NNUELightningConfig
+    nnue_config: OmitArgPrefixes[M.NNUEConfig] = field(
+        default_factory=M.NNUEConfig
     )
 
 
 def main():
     args = tyro.cli(CliConfig)
     serialize_config = args.serialize_config
-    nnue_lightning_config = args.nnue_lightning_config
-    feature_name = nnue_lightning_config.features
+    nnue_config = args.nnue_config
+    feature_name = nnue_config.features
 
     print(f"Converting {args.source} to {args.target}")
 
@@ -92,7 +92,7 @@ def main():
         checkpoint = torch.load(
             args.source, map_location=torch.device("cpu"), weights_only=False
         )
-        nnue = M.NNUE(config=nnue_lightning_config)
+        nnue = M.NNUE(config=nnue_config)
         nnue.load_state_dict(checkpoint["state_dict"])
         nnue.eval()
     elif args.source.endswith(".pt"):
@@ -100,12 +100,12 @@ def main():
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
             nnue = M.NNUE(
-                config=nnue_lightning_config,
+                config=nnue_config,
             )
             reader = M.NNUEReader(
                 f,
                 feature_name,
-                config=nnue_lightning_config.model_config,
+                config=nnue_config.model_config,
             )
             nnue.model = reader.model
             if serialize_config.description is None:

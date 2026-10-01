@@ -7,7 +7,7 @@ import pytest
 import torch
 from torch.optim.lr_scheduler import StepLR
 
-from model import NNUE, NNUELightningConfig
+from model import NNUE, NNUEConfig
 from model.optimizers import (
     AdamWConfig,
     AdamWWrapper,
@@ -93,7 +93,7 @@ def test_wrapper_hooks_and_state_flips(optimizer_name):
 
 @pytest.mark.parametrize("optimizer_name", ALL_OPTIMIZERS)
 def test_nnue_integration_all_optimizers(optimizer_name):
-    config = NNUELightningConfig()
+    config = NNUEConfig()
     config.optimizer_config.optimizer_name = optimizer_name
 
     model = NNUE(config=config)

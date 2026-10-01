@@ -1,4 +1,4 @@
-from .config import LossParams, ModelConfig, NNUELightningConfig
+from .config import LossParams, ModelConfig, NNUEConfig
 from .model import NNUEModel
 from .modules import (
     FeatureConfig,
@@ -35,7 +35,7 @@ __all__ = [
     "LayerStacksConfig",
     "LossParams",
     "ModelConfig",
-    "NNUELightningConfig",
+    "NNUEConfig",
     "NNUEModel",
     "NNUEReader",
     "NNUEWriter",

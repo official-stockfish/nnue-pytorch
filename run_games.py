@@ -78,12 +78,12 @@ def convert_ckpt(root_dir, features):
     for ckpt in ckpts:
         nnue_file_name = re.sub(
             "default[/\\\\]version_[0-9]+[/\\\\]checkpoints[/\\\\]", "", ckpt
-        )  # for older pytorch lightning
+        )  # for older run layouts
         nnue_file_name = re.sub(
-            "lightning_logs[/\\\\]version_[0-9]+[/\\\\]checkpoints[/\\\\]",
+            "training_logs[/\\\\]version_[0-9]+[/\\\\]checkpoints[/\\\\]",
             "",
             nnue_file_name,
-        )  # for newer pytorch lightning
+        )  # for current run layouts
         nnue_file_name = re.sub(
             r"epoch\=([0-9]+).*\.ckpt", r"nn-epoch\1.nnue", nnue_file_name
         )
