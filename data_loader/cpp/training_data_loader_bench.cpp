@@ -41,6 +41,7 @@ struct CliConfig {
     DataloaderSkipConfig skip_config;
     DataloaderDDPConfig  ddp_config;
     DataloaderHllConfig  hll_config;
+    DataloaderIOConfig   io_config;
     int                  batch_size;
     bool                 cyclic;
 };
@@ -70,6 +71,7 @@ const CliConfig default_cli_config = {
     },
     .ddp_config = {.rank = 0, .world_size = 1},
     .hll_config = {.initial_hll = nullptr, .initial_hll_size = 0, .initial_total = 0},
+    .io_config = {.balance_window_mb = 400},
     .batch_size = 131072,
     .cyclic     = true
 };
@@ -165,6 +167,11 @@ CliConfig build_config_from_map(const std::map<std::string, std::string>& m) {
             .initial_hll_size = 0,
             .initial_total   = 0
         },
+        .io_config = {
+            .balance_window_mb = m.count("io.balance_window_mb")
+                ? std::stoi(m.at("io.balance_window_mb"))
+                : 400
+        },
         .batch_size = std::stoi(m.at("batch_size")),
         .cyclic     = parse_bool(m.at("cyclic"))
     };
@@ -249,7 +256,7 @@ void run_report(int concurrency, size_t iteration_count, size_t max_plies, int f
 
     std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(
         create_sparse_batch_stream("Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files,
-            batch_size, cyclic, skip_config, ddp_config, hll_config));
+            batch_size, cyclic, skip_config, ddp_config, hll_config, cli_config.io_config));
 
     DistributionReport report(max_plies);
 
@@ -349,7 +356,7 @@ void run_bench(int concurrency, size_t iteration_count, int do_cache_files, int 
 
     std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(
         create_sparse_batch_stream("Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files,
-            batch_size, cyclic, skip_config, ddp_config, hll_config));
+            batch_size, cyclic, skip_config, ddp_config, hll_config, cli_config.io_config));
 
     long long bytes_before = get_rchar_self();
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -390,6 +397,88 @@ void run_bench(int concurrency, size_t iteration_count, int do_cache_files, int 
                   << (1.0 - static_cast<double>(total) / static_cast<double>(preskip)) * 100.0
                   << "%)";
     std::cout << std::endl;
+
+    // Per-file I/O statistics (read balancing).
+    {
+        const std::size_t n = get_io_stats(stream.get(), nullptr, 0);
+        if (n > 0)
+        {
+            std::vector<DataloaderFileStats> stats(n);
+            get_io_stats(stream.get(), stats.data(), n);
+
+            std::uint64_t windowTotal = 0;
+            std::uint64_t bytesTotal  = 0;
+            std::uint64_t chunksTotal = 0;
+            std::uint64_t nsTotal     = 0;
+            std::uint64_t nsMax       = 0;
+            std::size_t  maxFile      = 0;
+            int exhaustedCount        = 0;
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                windowTotal += stats[i].window_bytes;
+                bytesTotal  += stats[i].bytes_read;
+                chunksTotal += stats[i].chunks_read;
+                nsTotal     += stats[i].read_ns_total;
+                if (stats[i].read_ns_max > nsMax)
+                {
+                    nsMax    = stats[i].read_ns_max;
+                    maxFile  = i;
+                }
+                if (stats[i].exhausted)
+                    ++exhaustedCount;
+            }
+
+            std::cout << "\n=== Per-file I/O stats ===" << std::endl;
+            std::cout << std::left  << std::setw(46) << "file"
+                      << std::right << std::setw(9)  << "chunks"
+                      << std::setw(9)  << "MiB"
+                      << std::setw(11) << "rd_mean_ms"
+                      << std::setw(11) << "rd_max_ms"
+                      << std::setw(10) << "inflight_ms"
+                      << std::setw(9)  << "win_MiB"
+                      << std::setw(8)  << "share%"
+                      << "  state" << std::endl;
+            std::cout << std::string(118, '-') << std::endl;
+
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                const auto& s = stats[i];
+                const double meanMs =
+                    s.chunks_read ? static_cast<double>(s.read_ns_total) / s.chunks_read / 1e6 : 0.0;
+                const double winShare =
+                    windowTotal ? 100.0 * static_cast<double>(s.window_bytes) / windowTotal : 0.0;
+                const std::string state =
+                    s.exhausted ? std::string("exhausted")
+                                : (s.claimed ? "reading" : "idle");
+                std::string name = fs::path(files[i]).filename().string();
+                if (name.size() > 45)
+                    name = name.substr(0, 42) + "...";
+
+                std::cout << std::left  << std::setw(46) << name
+                          << std::right << std::setw(9)  << s.chunks_read
+                          << std::fixed << std::setprecision(1)
+                          << std::setw(9)  << static_cast<double>(s.bytes_read) / (1024.0 * 1024.0)
+                          << std::setprecision(2)
+                          << std::setw(11) << meanMs
+                          << std::setw(11) << static_cast<double>(s.read_ns_max) / 1e6
+                          << std::setw(10) << (s.claimed ? s.read_started_ms_ago : 0)
+                          << std::setprecision(1)
+                          << std::setw(9)  << static_cast<double>(s.window_bytes) / (1024.0 * 1024.0)
+                          << std::setprecision(2)
+                          << std::setw(8)  << winShare
+                          << "  " << state << std::endl;
+            }
+
+            std::cout << std::string(118, '-') << std::endl;
+            std::cout << "Total: " << n << " files (" << exhaustedCount << " exhausted), "
+                      << chunksTotal << " chunks, "
+                      << std::fixed << std::setprecision(1)
+                      << static_cast<double>(bytesTotal) / (1024.0 * 1024.0) << " MiB read, "
+                      << "slowest read " << std::setprecision(2)
+                      << static_cast<double>(nsMax) / 1e6 << " ms ("
+                      << fs::path(files[maxFile]).filename().string() << ")" << std::endl;
+        }
+    }
 }
 
 #endif
@@ -428,7 +517,9 @@ int main(int argc, char** argv) {
     }
 
     if (i >= argc) {
-        std::cerr << "Usage: " << argv[0] << " [-i iterations] [-p concurrency] [-c do_cache_files] [-m max_plies] [-s config.ini] file1 [file2 ...]\n";
+        std::cerr << "Usage: " << argv[0] << " [-i iterations] [-p concurrency] [-c do_cache_files] [-m max_plies] [-s config.ini] file1 [file2 ...]\n"
+                  << "\nEnv NNUE_LOADER_SIM_SLOW=\"idx:delay_ms[,idx:delay_ms...]\" adds an artificial\n"
+                  << "per-chunk read delay to the given file indices (fault injection, testing only).\n";
         return 1;
     }
 

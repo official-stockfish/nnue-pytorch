@@ -4,10 +4,13 @@ import os  # noqa: F401
 from ._native import FenBatchPtr, SparseBatchPtr, c_lib
 from .config import (
     CDataloaderDDPConfig,
+    CDataloaderFileStats,
     CDataloaderHllConfig,
+    CDataloaderIOConfig,
     CDataloaderSkipConfig,
     DataloaderDDPConfig,
     DataloaderHllConfig,
+    DataloaderIOConfig,
     DataloaderSkipConfig,
 )
 
@@ -41,12 +44,15 @@ def create_fen_batch_stream(
     config: DataloaderSkipConfig,
     ddp_config: DataloaderDDPConfig = None,
     hll_config: DataloaderHllConfig | None = None,
+    io_config: DataloaderIOConfig | None = None,
 ) -> ctypes.c_void_p:
     if ddp_config is None:
         rank, world_size = _get_ddp_rank_and_world_size()
         ddp_config = DataloaderDDPConfig(rank=rank, world_size=world_size)
     if hll_config is None:
         hll_config = DataloaderHllConfig()
+    if io_config is None:
+        io_config = DataloaderIOConfig()
 
     return c_lib.dll.create_fen_batch_stream(
         concurrency,
@@ -57,6 +63,7 @@ def create_fen_batch_stream(
         CDataloaderSkipConfig(config),
         CDataloaderDDPConfig(ddp_config),
         CDataloaderHllConfig(hll_config),
+        CDataloaderIOConfig(io_config),
     )
 
 
@@ -81,12 +88,15 @@ def create_sparse_batch_stream(
     config: DataloaderSkipConfig,
     ddp_config: DataloaderDDPConfig = None,
     hll_config: DataloaderHllConfig | None = None,
+    io_config: DataloaderIOConfig | None = None,
 ) -> ctypes.c_void_p:
     if ddp_config is None:
         rank, world_size = _get_ddp_rank_and_world_size()
         ddp_config = DataloaderDDPConfig(rank=rank, world_size=world_size)
     if hll_config is None:
         hll_config = DataloaderHllConfig()
+    if io_config is None:
+        io_config = DataloaderIOConfig()
 
     return c_lib.dll.create_sparse_batch_stream(
         feature_set,
@@ -98,6 +108,7 @@ def create_sparse_batch_stream(
         CDataloaderSkipConfig(config),
         CDataloaderDDPConfig(ddp_config),
         CDataloaderHllConfig(hll_config),
+        CDataloaderIOConfig(io_config),
     )
 
 
@@ -173,3 +184,34 @@ def hll_count_from_state(data: bytes) -> int:
     count = ctypes.c_uint64(0)
     c_lib.dll.hll_count_from_state(buf, len(data), ctypes.byref(count))
     return count.value
+
+
+# --- Per-file I/O statistics (read balancing) ---
+
+
+def get_io_stats(stream: ctypes.c_void_p) -> list[dict]:
+    """Return per-file I/O statistics for the stream's input files.
+
+    Each entry is a dict with keys: chunks_read, bytes_read, read_ns_total,
+    read_ns_max, last_read_ns, read_started_ms_ago, window_bytes, claimed,
+    exhausted. Race-free; may be called while the stream is producing
+    batches."""
+    n = c_lib.dll.get_io_stats(stream, None, 0)
+    if n == 0:
+        return []
+    arr = (CDataloaderFileStats * n)()
+    got = c_lib.dll.get_io_stats(stream, arr, n)
+    return [
+        {
+            "chunks_read": arr[i].chunks_read,
+            "bytes_read": arr[i].bytes_read,
+            "read_ns_total": arr[i].read_ns_total,
+            "read_ns_max": arr[i].read_ns_max,
+            "last_read_ns": arr[i].last_read_ns,
+            "read_started_ms_ago": arr[i].read_started_ms_ago,
+            "window_bytes": arr[i].window_bytes,
+            "claimed": arr[i].claimed,
+            "exhausted": arr[i].exhausted,
+        }
+        for i in range(got)
+    ]

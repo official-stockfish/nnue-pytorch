@@ -41,13 +41,14 @@ NNUE_API FenBatchStream* NNUE_CDECL create_fen_batch_stream(int                 
                                                      bool                 cyclic,
                                                      DataloaderSkipConfig config,
                                                      DataloaderDDPConfig  ddp_config,
-                                                     DataloaderHllConfig  hll_config) {
+                                                     DataloaderHllConfig  hll_config,
+                                                     DataloaderIOConfig   io_config) {
     (void)hll_config;
     auto skipPredicate = make_skip_predicate(config);
     auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
     return new FenBatchStream(concurrency, filenames_vec, batch_size, cyclic, skipPredicate,
-                              ddp_config.rank, ddp_config.world_size, nullptr);
+                              ddp_config.rank, ddp_config.world_size, nullptr, io_config);
 }
 
 NNUE_API NNUE_COLD void NNUE_CDECL destroy_fen_batch_stream(FenBatchStream* stream) {
@@ -55,14 +56,15 @@ NNUE_API NNUE_COLD void NNUE_CDECL destroy_fen_batch_stream(FenBatchStream* stre
 }
 
 NNUE_API SparseBatchStream* NNUE_CDECL create_sparse_batch_stream(const char* feature_set_c,
-                                                             int                  concurrency,
-                                                             int                  num_files,
-                                                             const char* const* filenames,
-                                                             int                  batch_size,
-                                                             bool                 cyclic,
-                                                             DataloaderSkipConfig config,
-                                                             DataloaderDDPConfig  ddp_config,
-                                                             DataloaderHllConfig  hll_config) {
+                                                              int                  concurrency,
+                                                              int                  num_files,
+                                                              const char* const* filenames,
+                                                              int                  batch_size,
+                                                              bool                 cyclic,
+                                                              DataloaderSkipConfig config,
+                                                              DataloaderDDPConfig  ddp_config,
+                                                              DataloaderHllConfig  hll_config,
+                                                              DataloaderIOConfig   io_config) {
     auto skipPredicate = make_skip_predicate(config);
     auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
@@ -74,7 +76,7 @@ NNUE_API SparseBatchStream* NNUE_CDECL create_sparse_batch_stream(const char* fe
         hll_config.initial_hll, hll_config.initial_hll_size, hll_config.initial_total, hll_config.initial_preskip);
 
     auto stream = new FeaturedBatchStream(std::move(feature), concurrency, filenames_vec, batch_size,
-                                   cyclic, skipPredicate, ddp_config.rank, ddp_config.world_size, counter.release());
+                                   cyclic, skipPredicate, ddp_config.rank, ddp_config.world_size, counter.release(), io_config);
     return reinterpret_cast<SparseBatchStream*>(stream);
 }
 
@@ -142,4 +144,12 @@ NNUE_API void NNUE_CDECL hll_count_from_state(const std::uint8_t* data,
     } catch (...) {
         *out_count = 0;
     }
+}
+
+// read balancing / I/O statistics
+NNUE_API std::size_t NNUE_CDECL get_io_stats(SparseBatchStream*    stream,
+                                             DataloaderFileStats* out,
+                                             std::size_t          max_files) {
+    auto* s = reinterpret_cast<FeaturedBatchStream*>(stream);
+    return s->get_io_stats(out, max_files);
 }

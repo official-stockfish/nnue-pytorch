@@ -86,14 +86,20 @@ struct Stream: AnyStream {
            std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
            nnue::UniquePositionCounter* counter = nullptr,
            int rank = 0,
-           int world_size = 1) :
+           int world_size = 1,
+           DataloaderIOConfig io_config = {}) :
         m_stream(training_data::open_sfen_input_file_parallel(
-          concurrency, filenames, cyclic, skipPredicate, counter, rank, world_size))
+          concurrency, filenames, cyclic, skipPredicate, counter, rank, world_size, io_config))
     {
         if (counter) m_unique_counter.reset(counter);
     }
 
     virtual StorageT* next() = 0;
+
+    std::size_t get_io_stats(DataloaderFileStats* out, std::size_t max_files)
+    {
+        return m_stream->get_io_stats(out, max_files);
+    }
 
 protected:
     std::unique_ptr<training_data::BasicSfenInputStream> m_stream;
@@ -111,7 +117,8 @@ struct FeaturedBatchStream final : Stream<SparseBatch> {
                         std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
                         int rank = 0,
                         int world_size = 1,
-                        nnue::UniquePositionCounter* counter = nullptr);
+                        nnue::UniquePositionCounter* counter = nullptr,
+                        DataloaderIOConfig io_config = {});
     ~FeaturedBatchStream() final;
 
     SparseBatch* next() override;
@@ -163,7 +170,8 @@ struct FenBatchStream final : Stream<FenBatch> {
                    std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
                    int rank = 0,
                    int world_size = 1,
-                   nnue::UniquePositionCounter* counter = nullptr);
+                   nnue::UniquePositionCounter* counter = nullptr,
+                   DataloaderIOConfig io_config = {});
     ~FenBatchStream() final;
 
     FenBatch* next() override;

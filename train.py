@@ -36,6 +36,7 @@ def make_data_loaders(
     num_workers,
     batch_size,
     config: data_loader.DataloaderSkipConfig,
+    io_config: data_loader.DataloaderIOConfig,
     epoch_size,
     val_size,
     pin_memory,
@@ -55,6 +56,7 @@ def make_data_loaders(
         num_workers=num_workers,
         config=config,
         ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
+        io_config=io_config,
     )
     # num_workers has to be 0 for sparse, and 1 for dense
     # it currently cannot work in parallel mode but it shouldn't need to
@@ -90,8 +92,10 @@ def make_data_loaders(
             features_name,
             val_filenames,
             batch_size,
+            num_workers=num_workers,
             config=config,
             ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
+            io_config=io_config,
         )
         val = DataLoader(
             data_loader.FixedNumBatchesDataset(
@@ -328,6 +332,7 @@ def main():
         actual_workers,
         per_gpu_batch_size,
         args.dataloader_config,
+        args.dataloader_io_config,
         args.epoch_size,
         args.validation_size,
         pin_memory=args.pin_memory and accelerator == "cuda",
