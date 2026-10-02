@@ -269,8 +269,8 @@ def main():
         # container images exporting TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1, which
         # is worth ~9% at the production shapes. Unquantized runs keep fp32.
         quantized = (
-            args.nnue_lightning_config.use_fake_act_quantization
-            and args.nnue_lightning_config.use_fake_weight_quantization
+            args.nnue_config.use_fake_act_quantization
+            and args.nnue_config.use_fake_weight_quantization
         )
         override = os.environ.get("NNUE_TF32", "")
         enable_tf32 = (override == "1") if override else quantized

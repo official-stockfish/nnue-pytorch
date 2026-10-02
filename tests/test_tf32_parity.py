@@ -16,9 +16,21 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model.modules.layer_stacks import LayerStacks
 from model.modules.config import LayerStacksConfig
+from model.modules.layer_stacks import LayerStacks
 from model.quantize import QuantizationConfig, QuantizationManager
+
+
+def _tf32_supported():
+    # TF32 matmuls need an NVIDIA GPU with compute capability >= 8 (Ampere).
+    return (
+        torch.cuda.is_available()
+        and torch.version.hip is None
+        and torch.cuda.get_device_capability()[0] >= 8
+    )
+
+
+_TF32_REASON = "requires an NVIDIA GPU with compute capability >= 8 (Ampere)"
 
 
 def _make_layer_stacks(count):
@@ -35,7 +47,7 @@ def _quantized_input(batch):
     return (torch.randint(0, 128, (batch, 1024), device="cuda") / 128.0).float()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available() or torch.version.hip is not None, reason="NVIDIA GPU required")
+@pytest.mark.skipif(not _tf32_supported(), reason=_TF32_REASON)
 @pytest.mark.parametrize("count", [8, 64])
 @pytest.mark.parametrize("batch", [17, 32768])
 def test_dense_forward_bit_identical_under_quantization(count, batch):
@@ -53,7 +65,7 @@ def test_dense_forward_bit_identical_under_quantization(count, batch):
     assert torch.equal(actual, expected)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available() or torch.version.hip is not None, reason="NVIDIA GPU required")
+@pytest.mark.skipif(not _tf32_supported(), reason=_TF32_REASON)
 def test_quantized_gemm_matches_fp64_reference():
     # Raw L1-shaped GEMM with grid inputs: k/128 acts, k/128 weights, k/16384
     # bias, as after fake quantization. Products are exact in both precisions,
@@ -70,7 +82,7 @@ def test_quantized_gemm_matches_fp64_reference():
     torch.testing.assert_close(actual, expected.float(), atol=1e-4, rtol=1e-4)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available() or torch.version.hip is not None, reason="NVIDIA GPU required")
+@pytest.mark.skipif(not _tf32_supported(), reason=_TF32_REASON)
 def test_tf32_changes_forward_without_quantization():
     layer = _make_layer_stacks(8)
     batch = 4096
