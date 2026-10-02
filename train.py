@@ -260,6 +260,24 @@ def main():
     np.random.seed(args.seed)
     torch.backends.cudnn.benchmark = True
 
+    if accelerator == "cuda":
+        # With act and weight fake-quantization on, every dense GEMM input is
+        # k/128 (k <= 127) and every weight k/128 or k/64, all exact in TF32's
+        # 11-bit significand, and products are exact in the fp32 accumulator:
+        # the forward is bit-identical and only backward matmuls round (~5e-4
+        # relative). Set the flag explicitly so training no longer depends on
+        # container images exporting TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1, which
+        # is worth ~9% at the production shapes. Unquantized runs keep fp32.
+        quantized = (
+            args.nnue_lightning_config.use_fake_act_quantization
+            and args.nnue_lightning_config.use_fake_weight_quantization
+        )
+        override = os.environ.get("NNUE_TF32", "")
+        enable_tf32 = (override == "1") if override else quantized
+        torch.backends.cuda.matmul.allow_tf32 = enable_tf32
+        if is_master_process():
+            print(f"cuBLAS TF32 matmul: {enable_tf32} (quantized={quantized})")
+
     logdir = args.default_root_dir if args.default_root_dir else "logs/"
     tb_logger = TensorBoardLogger(logdir)
     csv_logger = CSVLogger(logdir, version=tb_logger.version)
