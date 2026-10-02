@@ -50,6 +50,17 @@ namespace training_data {
         }
 
         virtual bool eof() const = 0;
+
+        // Per-file I/O statistics for read balancing. Returns the number of
+        // files; fills at most max_files entries if out is non-null.
+        // Only the parallel binpack stream provides real data.
+        virtual std::size_t get_io_stats(DataloaderFileStats* out, std::size_t max_files) const
+        {
+            (void)out;
+            (void)max_files;
+            return 0;
+        }
+
         virtual ~BasicSfenInputStream() {}
 
     private:
@@ -195,8 +206,8 @@ namespace training_data {
         static constexpr auto openmode = std::ios::in | std::ios::binary;
         static inline const std::string extension = "binpack";
 
-        BinpackSfenInputParallelStream(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate, nnue::UniquePositionCounter* counter = nullptr, int rank = 0, int world_size = 1) :
-            m_stream(std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(concurrency, filenames, openmode, cyclic, skipPredicate, counter, rank, world_size)),
+        BinpackSfenInputParallelStream(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate, nnue::UniquePositionCounter* counter = nullptr, int rank = 0, int world_size = 1, DataloaderIOConfig io_config = {}) :
+            m_stream(std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(concurrency, filenames, openmode, cyclic, skipPredicate, counter, rank, world_size, io_config)),
             m_filenames(filenames),
             m_eof(false),
             m_concurrency(concurrency),
@@ -237,6 +248,11 @@ namespace training_data {
             return m_eof.load();
         }
 
+        std::size_t get_io_stats(DataloaderFileStats* out, std::size_t max_files) const override
+        {
+            return m_stream->get_io_stats(out, max_files);
+        }
+
         ~BinpackSfenInputParallelStream() override {}
 
     private:
@@ -258,13 +274,13 @@ namespace training_data {
         return nullptr;
     }
 
-    inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file_parallel(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr, nnue::UniquePositionCounter* counter = nullptr, int rank = 0, int world_size = 1)
+    inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file_parallel(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr, nnue::UniquePositionCounter* counter = nullptr, int rank = 0, int world_size = 1, DataloaderIOConfig io_config = {})
     {
         // TODO (low priority): optimize and parallelize .bin reading.
         if (has_extension(filenames[0], BinSfenInputStream::extension))
             return std::make_unique<BinSfenInputStream>(filenames[0], cyclic, std::move(skipPredicate), counter);
         else if (has_extension(filenames[0], BinpackSfenInputParallelStream::extension))
-            return std::make_unique<BinpackSfenInputParallelStream>(concurrency, filenames, cyclic, std::move(skipPredicate), counter, rank, world_size);
+            return std::make_unique<BinpackSfenInputParallelStream>(concurrency, filenames, cyclic, std::move(skipPredicate), counter, rank, world_size, io_config);
 
         return nullptr;
     }

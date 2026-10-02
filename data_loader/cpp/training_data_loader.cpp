@@ -564,14 +564,16 @@ FeaturedBatchStream::FeaturedBatchStream(
   std::function<bool(const TrainingDataEntry&)> skipPredicate,
   int                                           rank,
   int                                           world_size,
-  nnue::UniquePositionCounter*                  counter) :
+  nnue::UniquePositionCounter*                  counter,
+  DataloaderIOConfig                            io_config) :
     BaseType(calculate_num_reader_threads(concurrency),
              filenames,
              cyclic,
              skipPredicate,
              counter,
              rank,
-             world_size),
+             world_size,
+             io_config),
     m_feature_set(std::move(feature_set)),
     m_batch_size(batch_size),
     m_concurrency(concurrency),
@@ -691,14 +693,16 @@ FenBatchStream::FenBatchStream(int                                           con
                                std::function<bool(const TrainingDataEntry&)> skipPredicate,
                                int                                           rank,
                                int                                           world_size,
-                               nnue::UniquePositionCounter*                  counter) :
+                               nnue::UniquePositionCounter*                  counter,
+                               DataloaderIOConfig                            io_config) :
     BaseType(calculate_num_reader_threads(concurrency),
              filenames,
              cyclic,
              skipPredicate,
              counter,
              rank,
-             world_size),
+             world_size,
+             io_config),
     m_batch_size(batch_size),
     m_concurrency(concurrency),
     m_num_workers(calculate_num_worker_threads(concurrency)) {

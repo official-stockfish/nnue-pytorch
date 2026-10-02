@@ -31,7 +31,8 @@ NNUE_API FenBatchStream* NNUE_CDECL create_fen_batch_stream(int                 
                                         bool                 cyclic,
                                         DataloaderSkipConfig config,
                                         DataloaderDDPConfig  ddp_config,
-                                        DataloaderHllConfig  hll_config);
+                                        DataloaderHllConfig  hll_config,
+                                        DataloaderIOConfig   io_config);
 
 NNUE_API void      NNUE_CDECL destroy_fen_batch_stream(FenBatchStream* stream);
 NNUE_API FenBatch* NNUE_CDECL fetch_next_fen_batch(FenBatchStream* stream);
@@ -45,7 +46,8 @@ NNUE_API SparseBatchStream* NNUE_CDECL create_sparse_batch_stream(const char*   
                                               bool                 cyclic,
                                               DataloaderSkipConfig config,
                                               DataloaderDDPConfig  ddp_config,
-                                              DataloaderHllConfig  hll_config);
+                                              DataloaderHllConfig  hll_config,
+                                              DataloaderIOConfig   io_config);
 
 NNUE_API void         NNUE_CDECL destroy_sparse_batch_stream(SparseBatchStream* stream);
 NNUE_API SparseBatch* NNUE_CDECL fetch_next_sparse_batch(SparseBatchStream* stream);
@@ -75,3 +77,11 @@ NNUE_API std::size_t NNUE_CDECL get_hll_state_size(SparseBatchStream* stream);
 NNUE_API void NNUE_CDECL hll_count_from_state(const std::uint8_t* data,
                                                std::size_t         size,
                                                std::uint64_t*      out_count);
+
+// Per-file I/O statistics for read balancing. If out is null or max_files is
+// 0, returns only the number of files. Otherwise fills up to max_files
+// entries and returns the total file count. Race-free; may be called while
+// the stream is producing batches.
+NNUE_API std::size_t NNUE_CDECL get_io_stats(SparseBatchStream*     stream,
+                                             DataloaderFileStats*  out,
+                                             std::size_t           max_files);

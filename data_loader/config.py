@@ -51,6 +51,47 @@ class DataloaderDDPConfig:
     rank: int = 0
     world_size: int = 1
 
+
+@dataclass
+class DataloaderIOConfig:
+    """Configuration for read balancing across input files.
+
+    Reads are balanced on a sliding window of recently read bytes: a file is
+    picked when it is furthest below its size-proportional share of the window.
+    A file whose reads are slow (e.g. its storage server is degraded) stops
+    contributing without blocking reads of the other files.
+    """
+
+    balance_window_mb: int = 400
+    """Sliding window size in MiB for read balancing. <= 0 selects the default."""
+
+
+class CDataloaderIOConfig(ctypes.Structure):
+    _fields_ = [
+        ("balance_window_mb", ctypes.c_int),
+    ]
+
+    def __init__(self, config: DataloaderIOConfig):
+        super().__init__(
+            balance_window_mb=config.balance_window_mb,
+        )
+
+
+class CDataloaderFileStats(ctypes.Structure):
+    """Mirror of the C DataloaderFileStats (per-file I/O statistics)."""
+
+    _fields_ = [
+        ("chunks_read", ctypes.c_uint64),
+        ("bytes_read", ctypes.c_uint64),
+        ("read_ns_total", ctypes.c_uint64),
+        ("read_ns_max", ctypes.c_uint64),
+        ("last_read_ns", ctypes.c_uint64),
+        ("read_started_ms_ago", ctypes.c_int64),
+        ("window_bytes", ctypes.c_uint64),
+        ("claimed", ctypes.c_int),
+        ("exhausted", ctypes.c_int),
+    ]
+
 class CDataloaderSkipConfig(ctypes.Structure):
     _fields_ = [
         ("filtered", ctypes.c_bool),

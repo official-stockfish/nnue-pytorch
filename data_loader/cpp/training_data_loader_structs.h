@@ -27,3 +27,19 @@ struct DataloaderHllConfig {
     std::uint64_t      initial_total;     // total count at restart
     std::uint64_t      initial_preskip;   // preskip count at restart
 };
+
+struct DataloaderIOConfig {
+    int balance_window_mb;   // sliding window (MiB) for read balancing; <= 0 selects the default
+};
+
+struct DataloaderFileStats {
+    std::uint64_t chunks_read;
+    std::uint64_t bytes_read;
+    std::uint64_t read_ns_total;
+    std::uint64_t read_ns_max;
+    std::uint64_t last_read_ns;
+    std::int64_t  read_started_ms_ago;   // ms since the in-flight read started; 0 if idle
+    std::uint64_t window_bytes;          // bytes read from this file within the balance window
+    int           claimed;               // a read is currently in flight for this file
+    int           exhausted;
+};

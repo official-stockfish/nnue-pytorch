@@ -5,7 +5,13 @@ import os
 import numpy as np
 import torch
 
-from .config import CDataloaderDDPConfig, CDataloaderHllConfig, CDataloaderSkipConfig
+from .config import (
+    CDataloaderDDPConfig,
+    CDataloaderFileStats,
+    CDataloaderHllConfig,
+    CDataloaderIOConfig,
+    CDataloaderSkipConfig,
+)
 
 
 def _pin_and_move(t: torch.Tensor, device, use_pinned_memory=False, dtype=None) -> torch.Tensor:
@@ -147,7 +153,8 @@ class CDataLoaderAPI:
         #     bool cyclic,
         #     DataloaderSkipConfig config,
         #     DataloaderDDPConfig ddp_config,
-        #     DataloaderHllConfig hll_config
+        #     DataloaderHllConfig hll_config,
+        #     DataloaderIOConfig io_config
         # )
         self.dll.create_fen_batch_stream.restype = ctypes.c_void_p
         self.dll.create_fen_batch_stream.argtypes = [
@@ -159,6 +166,7 @@ class CDataLoaderAPI:
             CDataloaderSkipConfig,
             CDataloaderDDPConfig,
             CDataloaderHllConfig,
+            CDataloaderIOConfig,
         ]
 
         # EXPORT void CDECL destroy_fen_batch_stream(FenBatchStream* stream)
@@ -177,7 +185,8 @@ class CDataLoaderAPI:
         #     bool cyclic,
         #     DataloaderSkipConfig config,
         #     DataloaderDDPConfig ddp_config,
-        #     DataloaderHllConfig hll_config
+        #     DataloaderHllConfig hll_config,
+        #     DataloaderIOConfig io_config
         # )
         self.dll.create_sparse_batch_stream.restype = ctypes.c_void_p
         self.dll.create_sparse_batch_stream.argtypes = [
@@ -190,6 +199,7 @@ class CDataLoaderAPI:
             CDataloaderSkipConfig,
             CDataloaderDDPConfig,
             CDataloaderHllConfig,
+            CDataloaderIOConfig,
         ]
 
         # EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream)
@@ -244,6 +254,14 @@ class CDataLoaderAPI:
             ctypes.POINTER(ctypes.c_uint8),
             ctypes.c_size_t,
             ctypes.POINTER(ctypes.c_uint64),
+        ]
+
+        # EXPORT size_t CDECL get_io_stats(SparseBatchStream*, DataloaderFileStats*, size_t)
+        self.dll.get_io_stats.restype = ctypes.c_size_t
+        self.dll.get_io_stats.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(CDataloaderFileStats),
+            ctypes.c_size_t,
         ]
 
 

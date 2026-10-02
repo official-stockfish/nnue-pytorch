@@ -6,7 +6,12 @@ import torch
 from torch.utils.data import Dataset
 
 from . import stream
-from .config import DataloaderDDPConfig, DataloaderHllConfig, DataloaderSkipConfig
+from .config import (
+    DataloaderDDPConfig,
+    DataloaderHllConfig,
+    DataloaderIOConfig,
+    DataloaderSkipConfig,
+)
 
 
 def _recursive_pin(obj):
@@ -60,6 +65,7 @@ class FenBatchProvider:
         batch_size=None,
         config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
+        io_config: DataloaderIOConfig | None = None,
     ):
         self.filename = filename
         self.cyclic = cyclic
@@ -68,6 +74,8 @@ class FenBatchProvider:
         if config is None:
             config = DataloaderSkipConfig()
         self.config = config
+        if io_config is None:
+            io_config = DataloaderIOConfig()
 
         if batch_size:
             self.stream = stream.create_fen_batch_stream(
@@ -77,6 +85,8 @@ class FenBatchProvider:
                 cyclic,
                 config,
                 ddp_config,
+                None,
+                io_config,
             )
         else:
             # doesnt work yet
@@ -120,6 +130,7 @@ class TrainingDataProvider:
         config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
         hll_config: DataloaderHllConfig | None = None,
+        io_config: DataloaderIOConfig | None = None,
         use_pinned_memory=False,
         device="cpu",
     ):
@@ -138,6 +149,9 @@ class TrainingDataProvider:
         if hll_config is None:
             hll_config = DataloaderHllConfig()
         self.hll_config = hll_config
+        if io_config is None:
+            io_config = DataloaderIOConfig()
+        self.io_config = io_config
         self.use_pinned_memory = use_pinned_memory
         self.device = device
 
@@ -151,6 +165,7 @@ class TrainingDataProvider:
                 config,
                 ddp_config,
                 hll_config,
+                io_config,
             )
         else:
             self.stream = self.create_stream(
@@ -161,6 +176,7 @@ class TrainingDataProvider:
                 config,
                 ddp_config,
                 hll_config,
+                io_config,
             )
 
     def __iter__(self):
@@ -184,6 +200,10 @@ class TrainingDataProvider:
         """Serialize the HLL state for checkpoint storage."""
         return stream.get_hll_state(self.stream)
 
+    def get_io_stats(self) -> list[dict]:
+        """Return per-file I/O statistics (read balancing)."""
+        return stream.get_io_stats(self.stream)
+
     def __del__(self):
         self.destroy_stream(self.stream)
 
@@ -199,6 +219,7 @@ class SparseBatchProvider(TrainingDataProvider):
         config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
         hll_config: DataloaderHllConfig | None = None,
+        io_config: DataloaderIOConfig | None = None,
         use_pinned_memory=False,
         device="cpu",
     ):
@@ -215,6 +236,7 @@ class SparseBatchProvider(TrainingDataProvider):
             config,
             ddp_config,
             hll_config,
+            io_config,
             use_pinned_memory,
             device,
         )
@@ -231,6 +253,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         config: DataloaderSkipConfig | None = None,
         ddp_config: DataloaderDDPConfig = None,
         hll_config: DataloaderHllConfig | None = None,
+        io_config: DataloaderIOConfig | None = None,
         use_pinned_memory=False,
     ):
         super().__init__()
@@ -246,6 +269,9 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         if hll_config is None:
             hll_config = DataloaderHllConfig()
         self.hll_config = hll_config
+        if io_config is None:
+            io_config = DataloaderIOConfig()
+        self.io_config = io_config
         self.use_pinned_memory = use_pinned_memory
         self.device = "cpu"
 
@@ -259,6 +285,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             config=self.config,
             ddp_config=self.ddp_config,
             hll_config=self.hll_config,
+            io_config=self.io_config,
             use_pinned_memory=self.use_pinned_memory,
             device=self.device,
         )
@@ -410,6 +437,13 @@ class FixedNumBatchesDataset(Dataset):
         if self.iter is not None and hasattr(self.iter, "get_hll_state"):
             return self.iter.get_hll_state()
         return b""
+
+    def get_io_stats(self) -> list[dict]:
+        """Return per-file I/O statistics (read balancing).
+        Available after prefetching has started (i.e. after the first batch)."""
+        if self.iter is not None and hasattr(self.iter, "get_io_stats"):
+            return self.iter.get_io_stats()
+        return []
 
     def set_initial_hll(self, hll_bytes: bytes, total: int, preskip: int = 0) -> None:
         """Set the initial HLL state, total count, and preskip count for

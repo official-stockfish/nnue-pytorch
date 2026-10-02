@@ -9,7 +9,7 @@ from tyro.conf import (
     UseAppendAction,
 )
 
-from data_loader.config import DataloaderSkipConfig
+from data_loader.config import DataloaderIOConfig, DataloaderSkipConfig
 from model.config import NNUEConfig
 
 
@@ -89,6 +89,10 @@ class TrainingConfig:
 
     dataloader_config: OmitArgPrefixes[DataloaderSkipConfig] = field(
         default_factory=DataloaderSkipConfig
+    )
+
+    dataloader_io_config: OmitArgPrefixes[DataloaderIOConfig] = field(
+        default_factory=DataloaderIOConfig
     )
 
     nnue_config: OmitArgPrefixes[NNUEConfig] = field(
