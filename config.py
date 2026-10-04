@@ -36,8 +36,9 @@ class TrainingConfig:
     pin_memory: bool = True
     """Whether to use pin memory in the data pipeline. Should generally be left on unless you encounter issues with too much RAM usage."""
 
-    data_loader_queue_size: int = 16
-    """Size of the prefetching queue. Should be conservative if pin_memory is active."""
+    data_loader_queue_size: int = 2
+    """Size of the device-side prefetching queue. Each slot costs ~300 MiB of
+    GPU memory at batch size 131072, scaling with batch size."""
 
     max_epochs: int = 800
     """Maximum number of epochs to train for."""
