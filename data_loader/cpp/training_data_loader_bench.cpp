@@ -49,7 +49,7 @@ struct CliConfig {
 const CliConfig default_cli_config = {
     .skip_config = {
         .filtered                = true,
-        .random_fen_skipping     = 10,
+        .random_fen_skipping     = 3,
         .wld_filtered            = true,
         .early_fen_skipping      = 18,
         .soft_early_fen_skipping = 32,

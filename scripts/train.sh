@@ -8,7 +8,7 @@ python train.py \
  --batch-size 8096 \
  --progress_bar_refresh_rate 20 \
  --smart-fen-skipping \
- --random-fen-skipping 10 \
+ --random-fen-skipping 3 \
  --features=HalfKP^ \
  --lambda=1.0 \
  --max_epochs=300
