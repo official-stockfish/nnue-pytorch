@@ -26,6 +26,95 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
+/*
+ * Data loader pipeline map (one rank; numbers at --num-workers=32
+ * with 43 input files).
+ *
+ *           binpack files on storage: 43 files / 655 GiB (Lustre)
+ *           chunk = ~1 MiB blob + 8 B "BINP" header ~= 440k positions
+ *           (~2.3 bytes/position on disk)
+ *                                  |
+ *                                  |  14 readers
+ *                                  |  one chunk per claim; files picked by
+ *                                  |  the read-balance window (inset below)
+ *                                  v
+ *         +-------------------------------------------------+
+ *         |             SHARED CHUNK QUEUE                  |
+ *         |             256 chunks        ~  256 MiB        |
+ *         +-------------------------------------------------+
+ *                                  |
+ *                                  |  28 decode workers
+ *                                  |  decode; skip predicate (rfs, ply, wld,
+ *                                  |  piece count) keeps ~3% at production;
+ *                                  |  zobrist keys update the HLL counters
+ *                                  |  inline; kept entries fill a 16k-entry
+ *                                  |  scratch (3.5 MiB per worker)
+ *                                  v
+ *         +-------------------------------------------------+
+ *         |              SHUFFLE WINDOW POOL                |
+ *         |    12 windows x 2^20 entries  ~  2.6 GiB        |
+ *         |                                                 |
+ *         |     workers --append(16k bulk, one short mutex) |
+ *         |                    |                            |
+ *         |                    v                            |
+ *         |              [ OPEN WINDOW ]                    |
+ *         |                    |  seal at 2^20 entries      |
+ *         |                    v                            |
+ *         |               [ SHUFFLING ]                     |
+ *         |          (sealing worker, outside               |
+ *         |           the pool lock)                        |
+ *         |                    |                            |
+ *         |                    v                            |
+ *         |            [ READY (FIFO) queue ]               |
+ *         |                                                 |
+ *         |     taken by the builders; drained windows      |
+ *         |     are returned to the pool and reused         |
+ *         +-------------------------------------------------+
+ *                                  |
+ *                                  |  4 feature builders
+ *                                  |  each holds one window, slices batch_size
+ *                                  |  (131072) entries per batch, extracts
+ *                                  |  features into a SparseBatch (~304 MB)
+ *                                  v
+ *         +-------------------------------------------------+
+ *         |             FINISHED BATCH DEQUE                |
+ *         |             8 batches          ~  2.4 GiB       |
+ *         +-------------------------------------------------+
+ *                                  |
+ *                                  |  1 python consumer thread
+ *                                  |  fetch_next_sparse_batch -> get_tensors
+ *                                  |  -> pinned host memory
+ *                                  v
+ *         +-------------------------------------------------+
+ *         |             PYTHON PREFETCH QUEUE               |
+ *         |             2 items (data_loader_queue_size)    |
+ *         |                          ~  0.6 GiB             |
+ *         +-------------------------------------------------+
+ *                                  |
+ *                                  v  async H2D
+ *                              [ GPU ]
+ *
+ *       read balance (how the 14 readers pick files):
+ *
+ *       W = 400 MiB sliding window of recent read bytes per file
+ *       (exponentially weighted, kernel exp(-bytes/W)); each file's
+ *       target share is its size / total size:
+ *
+ *         file A (20 GiB)    target |||||||    recent |||      -> deficit, PICK
+ *         file B ( 3 GiB)    target |          recent |||      -> satisfied
+ *         file C ( 1 GiB)    read in flight                    -> never picked
+ *
+ *       pick   = idle file with the largest deficit (target - recent share);
+ *       claim  = exclusive per file: read ONE ~1 MiB chunk, record its
+ *                bytes in the window, release the claim, re-pick
+ *       effect = reads spread size-proportionally over all files; a slow
+ *                or stuck OST drops out of the rotation automatically and
+ *                costs at most one reader thread, never blocking the rest
+ *
+ *       DDP: every rank seeks to its rank-th chunk and then reads every
+ *       world_size-th chunk of each file (chunk-level partitioning).
+ */
+
 #include <atomic>
 #include <algorithm>
 #include <cstdio>
@@ -67,6 +156,203 @@ namespace binpack
 {
     using namespace std::literals;
 
+    // Shared shuffle window pool.
+    //
+    // Decode workers cooperatively fill ONE open window with filtered
+    // entries; when it reaches capacity it is sealed, shuffled (by the
+    // sealing worker, outside the pool lock) and handed to consumers via a
+    // FIFO ready queue. Consumers return drained windows to the free list
+    // for reuse.
+    //
+    // This decouples the shuffle window size (which sets the mixing quality
+    // of every batch) from the number of decode workers: instead of every
+    // worker holding its own full window, only a small pool of windows
+    // exists (num_consumer_threads + 4 slots), cutting pipeline host memory
+    // by roughly the worker count at unchanged per-batch mixing.
+    class ShuffleWindowPool
+    {
+    public:
+        struct Window
+        {
+            std::vector<TrainingDataEntry> entries;
+        };
+
+        ShuffleWindowPool(std::size_t capacity, std::size_t maxWindows) :
+            m_capacity(capacity),
+            m_maxWindows(maxWindows)
+        {
+        }
+
+        ShuffleWindowPool(const ShuffleWindowPool&) = delete;
+        ShuffleWindowPool& operator=(const ShuffleWindowPool&) = delete;
+
+        // Append entries from scratch (which is consumed). Returns false if
+        // the pool was stopped (the caller should abort). A single append
+        // may seal multiple windows when the scratch is larger than the
+        // capacity.
+        bool append(std::vector<TrainingDataEntry>& scratch)
+        {
+            std::size_t offset = 0;
+            while (offset < scratch.size())
+            {
+                Window* sealed = nullptr;
+                {
+                    std::unique_lock lock(m_mutex);
+                    if (!acquireOpenLocked(lock))
+                    {
+                        return false;
+                    }
+                    const std::size_t space = m_capacity - m_open->entries.size();
+                    const std::size_t n = std::min(space, scratch.size() - offset);
+                    m_open->entries.insert(
+                        m_open->entries.end(),
+                        std::make_move_iterator(scratch.begin() + offset),
+                        std::make_move_iterator(scratch.begin() + offset + n));
+                    offset += n;
+                    if (m_open->entries.size() >= m_capacity)
+                    {
+                        sealed = m_open;
+                        m_open = nullptr;
+                    }
+                }
+
+                // Shuffle and deliver outside the pool lock so that other
+                // workers can keep filling the next window meanwhile.
+                if (sealed != nullptr)
+                {
+                    auto& prng = rng::get_thread_local_rng();
+                    std::shuffle(sealed->entries.begin(), sealed->entries.end(), prng);
+                    {
+                        std::lock_guard lock(m_mutex);
+                        m_ready.push_back(sealed);
+                    }
+                    m_readyAvailable.notify_one();
+                }
+            }
+            scratch.clear();
+            return true;
+        }
+
+        // Take the next sealed window for consumption. Returns nullptr once
+        // the producers are finished and the ready queue has drained.
+        Window* take()
+        {
+            std::unique_lock lock(m_mutex);
+            m_readyAvailable.wait(lock, [this]() {
+                return !m_ready.empty() || m_producersDone || m_stopped;
+            });
+            if (m_ready.empty())
+            {
+                return nullptr;
+            }
+            Window* w = m_ready.front();
+            m_ready.pop_front();
+            return w;
+        }
+
+        // Return a fully drained window to the free list.
+        void returnWindow(Window* w)
+        {
+            {
+                std::lock_guard lock(m_mutex);
+                w->entries.clear();
+                m_free.push_back(w);
+            }
+            m_slotAvailable.notify_one();
+        }
+
+        // Called by the last producer: seal the partial open window (if
+        // any), hand it to consumers, and mark the pool as finished.
+        void finalize()
+        {
+            Window* sealed = nullptr;
+            {
+                std::lock_guard lock(m_mutex);
+                if (m_open != nullptr && !m_open->entries.empty())
+                {
+                    sealed = m_open;
+                    m_open = nullptr;
+                }
+            }
+            if (sealed != nullptr)
+            {
+                auto& prng = rng::get_thread_local_rng();
+                std::shuffle(sealed->entries.begin(), sealed->entries.end(), prng);
+                {
+                    std::lock_guard lock(m_mutex);
+                    m_ready.push_back(sealed);
+                }
+            }
+            {
+                std::lock_guard lock(m_mutex);
+                m_producersDone = true;
+            }
+            m_readyAvailable.notify_all();
+        }
+
+        // Wake all blocked producers and consumers (shutdown).
+        void signal_stop()
+        {
+            {
+                std::lock_guard lock(m_mutex);
+                m_stopped = true;
+            }
+            m_slotAvailable.notify_all();
+            m_readyAvailable.notify_all();
+        }
+
+
+    private:
+        // Must hold m_mutex. Ensures m_open refers to an empty window with
+        // capacity reserved, waiting for a free slot if the pool is
+        // exhausted (backpressure). Returns false on stop. Co-waiting
+        // workers share the window opened by whichever of them wakes
+        // first, so m_open must be re-checked after every wait.
+        bool acquireOpenLocked(std::unique_lock<std::mutex>& lock)
+        {
+            while (m_open == nullptr)
+            {
+                if (!m_free.empty())
+                {
+                    m_open = m_free.back();
+                    m_free.pop_back();
+                    m_open->entries.clear();
+                    m_slotAvailable.notify_all();
+                    return true;
+                }
+                if (m_windows.size() < m_maxWindows)
+                {
+                    m_windows.push_back(std::make_unique<Window>());
+                    m_open = m_windows.back().get();
+                    m_open->entries.reserve(m_capacity);
+                    m_slotAvailable.notify_all();
+                    return true;
+                }
+                m_slotAvailable.wait(lock, [this]() {
+                    return m_open != nullptr || !m_free.empty() || m_stopped;
+                });
+                if (m_stopped)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        std::mutex m_mutex;
+        std::condition_variable m_slotAvailable;  // a window became free (producers)
+        std::condition_variable m_readyAvailable; // a window became ready (consumers)
+
+        std::vector<std::unique_ptr<Window>> m_windows; // owns all windows
+        std::vector<Window*> m_free;                    // drained, reusable
+        std::deque<Window*> m_ready;                    // sealed + shuffled, FIFO
+        Window* m_open = nullptr;                       // current fill target
+        std::size_t m_capacity;
+        std::size_t m_maxWindows;
+        bool m_producersDone = false;
+        bool m_stopped = false;
+    };
+
     struct CompressedTrainingDataEntryParallelReader
     {
         static constexpr std::size_t chunkSize = suggestedChunkSize;
@@ -82,7 +368,8 @@ namespace binpack
             nnue::UniquePositionCounter* counter = nullptr,
             int rank = 0,
             int world_size = 1,
-            DataloaderIOConfig io_config = {}
+            DataloaderIOConfig io_config = {},
+            int num_consumer_threads = 4
         ) :
             m_concurrency(concurrency),
             m_numRunningWorkers(concurrency),
@@ -109,7 +396,24 @@ namespace binpack
             {
                 m_fileMutexes.push_back(std::make_unique<std::timed_mutex>());
             }
-            m_ringBuffer.reserve_internal(threadBufferSize);
+
+            {
+                const long long requested = io_config.shuffle_buffer_entries;
+                m_threadBufferSize =
+                    requested <= 0
+                        ? static_cast<std::size_t>(threadBufferSize)
+                        : static_cast<std::size_t>(
+                              std::clamp<long long>(requested, 1024, 1ll << 24));
+            }
+            // Shared shuffle windows: capacity = the mixing window (same
+            // per-batch mixing as the old per-worker buffers of this size),
+            // count = consumers + slack for the open window, in-transit
+            // shuffles (a 2^20-entry shuffle takes ~0.1s, so at high
+            // consumption several windows are permanently in transit) and
+            // the ready backlog.
+            m_pool = std::make_unique<ShuffleWindowPool>(
+                m_threadBufferSize,
+                static_cast<std::size_t>(std::max(1, num_consumer_threads)) + 8);
 
             // --- Read balancing init ---
             // Reads are balanced on a sliding window of recently read bytes:
@@ -380,8 +684,10 @@ namespace binpack
             {
                 std::vector<unsigned char> m_chunk{};
                 ChunkReader m_chunkReader{};
-                std::vector<TrainingDataEntry> m_localBuffer;
-                m_localBuffer.reserve(threadBufferSize);
+                // Small decode scratch; filtered entries are appended to
+                // the shared shuffle window pool in bulk.
+                std::vector<TrainingDataEntry> scratch;
+                scratch.reserve(kWorkerScratchEntries);
 
                 constexpr std::size_t keyFlushThreshold = 4096;
                 std::vector<std::uint64_t> keyBuffer;
@@ -402,54 +708,60 @@ namespace binpack
                     }
                 };
 
+                // Finalizes producer accounting on every exit path (also on
+                // exceptions), so consumers can never hang on a lost
+                // producer. The last worker to exit seals the final partial
+                // window and marks the pool as finished.
+                struct WorkerExit
+                {
+                    CompressedTrainingDataEntryParallelReader* self;
+                    ~WorkerExit()
+                    {
+                        if (self->m_numRunningWorkers.fetch_sub(1) == 1)
+                        {
+                            self->m_pool->finalize();
+                        }
+                    }
+                } workerExit{this};
+
                 bool isEnd = fetchNextChunkFromSharedQueue(m_chunkReader, m_chunk);
 
                 while(!isEnd && !m_stopFlag.load())
                 {
-                    while (m_localBuffer.size() < threadBufferSize)
+                    const auto e = m_chunkReader.next(m_chunk);
+                    if (m_counter) ++preskip_count;
+
+                    if (!m_chunkReader.hasNext(m_chunk))
                     {
-                        const auto e = m_chunkReader.next(m_chunk);
-                        if (m_counter) ++preskip_count;
+                        isEnd = fetchNextChunkFromSharedQueue(m_chunkReader, m_chunk);
+                    }
 
-                        if (!m_chunkReader.hasNext(m_chunk))
+                    if (!m_skipPredicate || !m_skipPredicate(e))
+                    {
+                        scratch.emplace_back(e);
+                        if (m_counter)
                         {
-                            isEnd = fetchNextChunkFromSharedQueue(m_chunkReader, m_chunk);
+                            keyBuffer.push_back(nnue::hash::hash(e.pos));
+                            if (keyBuffer.size() >= keyFlushThreshold)
+                                flushAll();
                         }
-
-                        if (!m_skipPredicate || !m_skipPredicate(e))
+                        if (scratch.size() >= kWorkerScratchEntries)
                         {
-                            m_localBuffer.emplace_back(e);
-                            if (m_counter)
+                            if (!m_pool->append(scratch))
                             {
-                                keyBuffer.push_back(nnue::hash::hash(e.pos));
-                                if (keyBuffer.size() >= keyFlushThreshold)
-                                    flushAll();
+                                flushAll();
+                                return; // stopped
                             }
                         }
-
-                        if (isEnd || m_stopFlag.load())
-                        {
-                            break;
-                        }
-                    }
-
-                    if (!m_localBuffer.empty())
-                    {
-                        auto& prng = rng::get_thread_local_rng();
-                        std::shuffle(m_localBuffer.begin(), m_localBuffer.end(), prng);
-
-                        bool success = m_ringBuffer.put(m_localBuffer, [this]() {
-                            return this->should_stop_producer();
-                        });
-                        if (!success) { flushAll(); break; } // Ring and workers exhausted
-
-                        m_localBuffer.clear();
-                        m_localBuffer.reserve(threadBufferSize);
                     }
                 }
+
+                if (!scratch.empty() && !m_stopFlag.load())
+                {
+                    m_pool->append(scratch);
+                }
+
                 flushAll();
-                m_numRunningWorkers.fetch_sub(1);
-                m_ringBuffer.signal_stop(false);
             };
 
             for (int i = 0; i < concurrency; ++i)
@@ -461,21 +773,25 @@ namespace binpack
         [[nodiscard]] std::optional<TrainingDataEntry> next()
         {
             LocalBuffer& local = m_bufferRegistry.get();
-            if (local.offset < local.entries.size()) [[likely]]
+            if (local.window != nullptr && local.offset < local.window->entries.size()) [[likely]]
             {
-                return std::move(local.entries[local.offset++]);
+                return std::move(local.window->entries[local.offset++]);
             }
 
-            if (local.offset >= local.entries.size())
+            if (local.window != nullptr)
             {
-                bool success = m_ringBuffer.take(local.entries, [this]() {
-                    return this->should_stop_consumer();
-                });
-                if (!success) return std::nullopt;
-                local.offset = 0;
+                m_pool->returnWindow(local.window);
+                local.window = nullptr;
             }
 
-            return std::move(local.entries[local.offset++]);
+            local.window = m_pool->take();
+            if (local.window == nullptr)
+            {
+                return std::nullopt;
+            }
+            local.offset = 0;
+
+            return std::move(local.window->entries[local.offset++]);
         }
 
         int fill(std::vector<TrainingDataEntry>& vec, std::size_t n)
@@ -484,22 +800,25 @@ namespace binpack
             std::size_t total_filled = 0;
 
             while (total_filled < n) {
-                if (local.offset >= local.entries.size()) [[unlikely]]
+                if (local.window == nullptr || local.offset >= local.window->entries.size()) [[unlikely]]
                 {
-                    bool success = m_ringBuffer.take(local.entries, [this]() {
-                        return this->should_stop_consumer();
-                    });
-                    if (!success) break; // Ring and workers exhausted
+                    if (local.window != nullptr)
+                    {
+                        m_pool->returnWindow(local.window);
+                        local.window = nullptr;
+                    }
+                    local.window = m_pool->take();
+                    if (local.window == nullptr) break; // Pool and workers exhausted
                     local.offset = 0;
                 }
 
-                const std::size_t available = local.entries.size() - local.offset;
+                const std::size_t available = local.window->entries.size() - local.offset;
                 const std::size_t to_copy = std::min(n - total_filled, available);
 
                 vec.insert(
                     vec.end(),
-                    std::make_move_iterator(local.entries.begin() + local.offset),
-                    std::make_move_iterator(local.entries.begin() + local.offset + to_copy)
+                    std::make_move_iterator(local.window->entries.begin() + local.offset),
+                    std::make_move_iterator(local.window->entries.begin() + local.offset + to_copy)
                 );
 
                 local.offset += to_copy;
@@ -548,7 +867,7 @@ namespace binpack
         {
             m_stopFlag.store(true);
             m_sharedChunkQueue.signal_stop();
-            m_ringBuffer.signal_stop();
+            m_pool->signal_stop();
             for (auto& reader : m_readerThreads)
             {
                 if (reader.joinable())
@@ -572,6 +891,20 @@ namespace binpack
         bool m_cyclic;
 
         static constexpr int threadBufferSize = 256 * 256 * 16;
+
+        // Capacity of one shared shuffle window, in entries (post-filter).
+        // The static value above is the default. A window of this many
+        // entries defines the mixing window every batch is drawn from; only
+        // a small pool of them exists (consumers + 4), instead of one per
+        // decode worker as before.
+        std::size_t m_threadBufferSize;
+
+        // Per-worker decode scratch that is appended to the shared shuffle
+        // window pool in bulk (16k entries = 3.5 MiB per worker).
+        static constexpr std::size_t kWorkerScratchEntries = 1 << 14;
+
+        // Shared shuffle window pool (owns all windows).
+        std::unique_ptr<ShuffleWindowPool> m_pool;
 
         std::atomic_bool m_stopFlag;
         std::vector<std::thread> m_workers;
@@ -629,27 +962,14 @@ namespace binpack
         std::vector<std::uint8_t> m_files_seeked_for_ddp;  // Track which files have been seeked for DDP
         std::vector<std::size_t> m_ddp_chunks_to_skip_after_read;
 
-        // thread local data buffers
-        using TrainingDataEntries = std::vector<TrainingDataEntry>;
+        // thread local consumer buffers: each consumer thread drains at
+        // most one pool window at a time.
         struct alignas(128) LocalBuffer {
-            TrainingDataEntries entries;
+            ShuffleWindowPool::Window* window = nullptr;
             size_t offset = 0;
         };
 
-        // Constant Size Ring Buffer
-        static constexpr int ringCapacity = 1;
         thread_safe_types::ThreadLocalRegistry<LocalBuffer> m_bufferRegistry;
-        thread_safe_types::ThreadSafeRingBuffer<TrainingDataEntries, ringCapacity> m_ringBuffer;
-
-        bool should_stop_producer()
-        {
-            return m_stopFlag.load();
-        }
-
-        bool should_stop_consumer()
-        {
-            return m_numRunningWorkers.load() <= 0;
-        }
 
         bool fetchNextChunkFromSharedQueue(ChunkReader& m_chunkReader, std::vector<unsigned char>& m_chunk)
         {

@@ -274,9 +274,11 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         self.io_config = io_config
         self.use_pinned_memory = use_pinned_memory
         self.device = "cpu"
+        self._cached_iter = None
+        self._iter_lock = threading.Lock()
 
-    def __iter__(self):
-        provider = SparseBatchProvider(
+    def _new_provider(self):
+        return SparseBatchProvider(
             self.feature_set,
             self.filenames,
             self.batch_size,
@@ -289,7 +291,27 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             use_pinned_memory=self.use_pinned_memory,
             device=self.device,
         )
-        return provider
+
+    def __iter__(self):
+        # A cyclic dataset can serve any number of (concurrent) consumers from
+        # a single C++ stream: FeaturedBatchStream::next() is thread-safe.
+        # Reusing the stream matters because every provider owns a complete
+        # decoder pipeline (per-worker shuffle buffers, chunk queue, batch
+        # deque), so e.g. a validation loader drawing from the training data
+        # would otherwise duplicate the whole pipeline at full memory cost for
+        # the rest of the run. Non-cyclic (finite) streams are one-shot and
+        # get a fresh provider per iteration.
+        if not self.cyclic:
+            return self._new_provider()
+        with self._iter_lock:
+            if self._cached_iter is None:
+                self._cached_iter = self._new_provider()
+            else:
+                # Align the shared stream with the dataset's current transport
+                # settings (a fresh provider would pick these up on creation).
+                self._cached_iter.use_pinned_memory = self.use_pinned_memory
+                self._cached_iter.device = self.device
+            return self._cached_iter
 
 
 def _safe_put(stop_event, q, item):

@@ -71,7 +71,7 @@ const CliConfig default_cli_config = {
     },
     .ddp_config = {.rank = 0, .world_size = 1},
     .hll_config = {.initial_hll = nullptr, .initial_hll_size = 0, .initial_total = 0},
-    .io_config = {.balance_window_mb = 400},
+    .io_config = {.balance_window_mb = 400, .shuffle_buffer_entries = 0},
     .batch_size = 131072,
     .cyclic     = true
 };
@@ -170,7 +170,10 @@ CliConfig build_config_from_map(const std::map<std::string, std::string>& m) {
         .io_config = {
             .balance_window_mb = m.count("io.balance_window_mb")
                 ? std::stoi(m.at("io.balance_window_mb"))
-                : 400
+                : 400,
+            .shuffle_buffer_entries = m.count("io.shuffle_buffer_entries")
+                ? std::stoi(m.at("io.shuffle_buffer_entries"))
+                : 0
         },
         .batch_size = std::stoi(m.at("batch_size")),
         .cyclic     = parse_bool(m.at("cyclic"))

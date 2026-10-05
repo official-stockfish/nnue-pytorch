@@ -206,8 +206,8 @@ namespace training_data {
         static constexpr auto openmode = std::ios::in | std::ios::binary;
         static inline const std::string extension = "binpack";
 
-        BinpackSfenInputParallelStream(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate, nnue::UniquePositionCounter* counter = nullptr, int rank = 0, int world_size = 1, DataloaderIOConfig io_config = {}) :
-            m_stream(std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(concurrency, filenames, openmode, cyclic, skipPredicate, counter, rank, world_size, io_config)),
+        BinpackSfenInputParallelStream(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate, nnue::UniquePositionCounter* counter = nullptr, int rank = 0, int world_size = 1, DataloaderIOConfig io_config = {}, int num_consumer_threads = 4) :
+            m_stream(std::make_unique<binpack::CompressedTrainingDataEntryParallelReader>(concurrency, filenames, openmode, cyclic, skipPredicate, counter, rank, world_size, io_config, num_consumer_threads)),
             m_filenames(filenames),
             m_eof(false),
             m_concurrency(concurrency),
@@ -274,13 +274,13 @@ namespace training_data {
         return nullptr;
     }
 
-    inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file_parallel(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr, nnue::UniquePositionCounter* counter = nullptr, int rank = 0, int world_size = 1, DataloaderIOConfig io_config = {})
+    inline std::unique_ptr<BasicSfenInputStream> open_sfen_input_file_parallel(int concurrency, const std::vector<std::string>& filenames, bool cyclic, std::function<bool(const TrainingDataEntry&)> skipPredicate = nullptr, nnue::UniquePositionCounter* counter = nullptr, int rank = 0, int world_size = 1, DataloaderIOConfig io_config = {}, int num_consumer_threads = 4)
     {
         // TODO (low priority): optimize and parallelize .bin reading.
         if (has_extension(filenames[0], BinSfenInputStream::extension))
             return std::make_unique<BinSfenInputStream>(filenames[0], cyclic, std::move(skipPredicate), counter);
         else if (has_extension(filenames[0], BinpackSfenInputParallelStream::extension))
-            return std::make_unique<BinpackSfenInputParallelStream>(concurrency, filenames, cyclic, std::move(skipPredicate), counter, rank, world_size, io_config);
+            return std::make_unique<BinpackSfenInputParallelStream>(concurrency, filenames, cyclic, std::move(skipPredicate), counter, rank, world_size, io_config, num_consumer_threads);
 
         return nullptr;
     }
