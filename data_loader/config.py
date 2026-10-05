@@ -65,15 +65,24 @@ class DataloaderIOConfig:
     balance_window_mb: int = 400
     """Sliding window size in MiB for read balancing. <= 0 selects the default."""
 
+    shuffle_buffer_entries: int = 1048576
+    """Capacity of one shared shuffle window, in entries (224 B each,
+    post-filter). A window of this size defines the mixing window every
+    batch is drawn from; only a small pool of windows exists instead of one
+    per decode worker, so this no longer dominates host memory. Smaller
+    values trade mixing depth for memory. <= 0 selects the default."""
+
 
 class CDataloaderIOConfig(ctypes.Structure):
     _fields_ = [
         ("balance_window_mb", ctypes.c_int),
+        ("shuffle_buffer_entries", ctypes.c_int),
     ]
 
     def __init__(self, config: DataloaderIOConfig):
         super().__init__(
             balance_window_mb=config.balance_window_mb,
+            shuffle_buffer_entries=config.shuffle_buffer_entries,
         )
 
 

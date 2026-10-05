@@ -242,7 +242,13 @@ class TestReadBalance(unittest.TestCase):
                 subprocess.run([generator, path, "20000", str(200 + i)], check=True)
             files.append(path)
 
-        for _ in range(3):
+        # Also run with smaller shared shuffle windows: smaller windows
+        # seal more often and span batch boundaries, but must still deliver
+        # exactly the same data. 1024 is the minimum window size and is
+        # smaller than both the worker scratch and the batch size, stressing
+        # the seal-split and window-spanning paths.
+        for shuffle_buffer_entries in (0, 1024, 65536):
+          for _ in range(3):
             st = stream.create_sparse_batch_stream(
                 b"HalfKAv2_hm",
                 CONCURRENCY,
@@ -252,7 +258,10 @@ class TestReadBalance(unittest.TestCase):
                 SKIP_ALL_OFF,
                 DataloaderDDPConfig(0, 1),
                 None,
-                DataloaderIOConfig(balance_window_mb=32),
+                DataloaderIOConfig(
+                    balance_window_mb=32,
+                    shuffle_buffer_entries=shuffle_buffer_entries,
+                ),
             )
             result = {}
 
@@ -286,6 +295,169 @@ class TestReadBalance(unittest.TestCase):
         finally:
             del os.environ["NNUE_LOADER_SIM_SLOW"]
         self.assertLess(elapsed, 15.0, f"destroy took {elapsed:.1f}s")
+
+
+@unittest.skipUnless(
+    os.path.exists(os.path.join(REPO_ROOT, "data_loader", "cpp", "build", "libtraining_data_loader.so")),
+    "libtraining_data_loader.so not built",
+)
+class TestSharedCyclicStream(unittest.TestCase):
+    """Cyclic SparseBatchDataset must serve all consumers from one C++ stream.
+
+    Every provider owns a complete decoder pipeline (per-worker shuffle
+    buffers, chunk queue, batch deque), so a second stream for e.g. a
+    validation loader over the training data would duplicate the pipeline
+    at full memory cost.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.files = _fixtures()
+
+    def _make_dataset(self, cyclic=True):
+        from data_loader.dataset import SparseBatchDataset
+
+        return SparseBatchDataset(
+            "HalfKAv2_hm",
+            self.files,
+            BATCH_SIZE,
+            cyclic=cyclic,
+            num_workers=2,
+            config=SKIP_ALL_OFF,
+            ddp_config=DataloaderDDPConfig(0, 1),
+            io_config=DataloaderIOConfig(balance_window_mb=32),
+        )
+
+    def test_cyclic_dataset_reuses_provider(self):
+        ds = self._make_dataset(cyclic=True)
+        self.assertIs(iter(ds), iter(ds))
+
+    def test_noncyclic_dataset_creates_fresh_provider(self):
+        ds = self._make_dataset(cyclic=False)
+        self.assertIsNot(iter(ds), iter(ds))
+
+    def test_concurrent_consumers_share_stream(self):
+        from torch.utils.data import DataLoader
+
+        from data_loader.dataset import FixedNumBatchesDataset
+
+        ds = self._make_dataset(cyclic=True)
+        loaders = [
+            DataLoader(
+                FixedNumBatchesDataset(ds, num_batches=4, queue_size_limit=2),
+                batch_size=None,
+                num_workers=0,
+            )
+            for _ in range(2)
+        ]
+        got = []
+        for loader in loaders:
+            got.append(sum(1 for _ in loader))
+        self.assertEqual(got, [4, 4])
+
+    def test_shared_stream_is_single_pipeline(self):
+        """The two consumers of one dataset must draw from the same stream."""
+        from data_loader.dataset import FixedNumBatchesDataset
+
+        ds = self._make_dataset(cyclic=True)
+        c1 = FixedNumBatchesDataset(ds, num_batches=1, queue_size_limit=2)
+        c2 = FixedNumBatchesDataset(ds, num_batches=1, queue_size_limit=2)
+        c1.__getitem__(0)  # starts prefetching, creates the shared provider
+        c2.__getitem__(0)
+        self.assertIs(c1.iter, c2.iter)
+
+
+@unittest.skipUnless(
+    os.path.exists(os.path.join(REPO_ROOT, "data_loader", "cpp", "build", "libtraining_data_loader.so")),
+    "libtraining_data_loader.so not built",
+)
+class TestSharedShuffleWindow(unittest.TestCase):
+    """The shared shuffle window pool must preserve exact data delivery."""
+
+    @classmethod
+    def setUpClass(cls):
+        generator = _build_generator()
+        fixture_dir = _fixture_dir()
+        cls.files = []
+        for i in range(4):
+            path = os.path.join(fixture_dir, f"tiny_{i}.binpack")
+            if not os.path.exists(path) or os.path.getsize(path) < 1024:
+                if os.path.exists(path):
+                    os.remove(path)
+                subprocess.run([generator, path, "20000", str(200 + i)], check=True)
+            cls.files.append(path)
+
+    def test_tiny_windows_concurrent_consumers(self):
+        """Concurrent consumers with minimum-size windows keep flowing."""
+        from torch.utils.data import DataLoader
+
+        from data_loader.dataset import FixedNumBatchesDataset, SparseBatchDataset
+
+        ds = SparseBatchDataset(
+            "HalfKAv2_hm",
+            self.files,
+            4096,
+            cyclic=True,
+            num_workers=4,
+            config=SKIP_ALL_OFF,
+            ddp_config=DataloaderDDPConfig(0, 1),
+            io_config=DataloaderIOConfig(
+                balance_window_mb=32, shuffle_buffer_entries=1024
+            ),
+        )
+        loaders = [
+            DataLoader(
+                FixedNumBatchesDataset(ds, num_batches=16, queue_size_limit=2),
+                batch_size=None,
+                num_workers=0,
+            )
+            for _ in range(2)
+        ]
+        # 16 batches x 4096 entries each span many 1024-entry windows;
+        # both consumers must receive all their batches.
+        got = [sum(1 for _ in loader) for loader in loaders]
+        self.assertEqual(got, [16, 16])
+
+    def test_ddp_partition_counts(self):
+        """DDP ranks must jointly deliver exactly the single-stream data."""
+        def consume(rank):
+            st = stream.create_sparse_batch_stream(
+                b"HalfKAv2_hm",
+                CONCURRENCY,
+                self.files,
+                4096,
+                False,
+                SKIP_ALL_OFF,
+                DataloaderDDPConfig(rank, 2),
+                None,
+                DataloaderIOConfig(
+                    balance_window_mb=32, shuffle_buffer_entries=4096
+                ),
+            )
+            positions = 0
+            while True:
+                b = stream.fetch_next_sparse_batch(st)
+                if not b:
+                    break
+                positions += b.contents.size
+                stream.destroy_sparse_batch(b)
+            stream.destroy_sparse_batch_stream(st)
+            return positions
+
+        results = {}
+        threads = [
+            threading.Thread(target=lambda r=r: results.__setitem__(r, consume(r)), daemon=True)
+            for r in (0, 1)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=60.0)
+        self.assertTrue(all(not t.is_alive() for t in threads), "DDP stream did not terminate (deadlock?)")
+        # No skipping: both ranks together must deliver every position
+        # exactly once (chunk-level partitioning is reader-side and must be
+        # unaffected by the shared window pool).
+        self.assertEqual(sum(results.values()), 4 * 20000)
 
 
 if __name__ == "__main__":

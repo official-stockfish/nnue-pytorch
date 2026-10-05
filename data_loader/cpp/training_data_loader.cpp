@@ -573,11 +573,13 @@ FeaturedBatchStream::FeaturedBatchStream(
              counter,
              rank,
              world_size,
-             io_config),
+             io_config,
+             calculate_num_worker_threads(concurrency)),
     m_feature_set(std::move(feature_set)),
     m_batch_size(batch_size),
     m_concurrency(concurrency),
-    m_num_workers(calculate_num_worker_threads(concurrency)) {
+    m_num_workers(calculate_num_worker_threads(concurrency)),
+    m_batch_queue_capacity(calculate_num_worker_threads(concurrency) + 4) {
 
     m_stop_flag.store(false);
 
@@ -599,7 +601,7 @@ FeaturedBatchStream::FeaturedBatchStream(
             {
                 std::unique_lock lock(m_batch_mutex);
                 m_batches_not_full.wait(lock, [this]() {
-                    return m_batches.size() < static_cast<size_t>(m_concurrency) + 1 || m_stop_flag.load();
+                    return m_batches.size() < static_cast<size_t>(m_batch_queue_capacity) || m_stop_flag.load();
                 });
                 m_batches.emplace_back(batch);
                 lock.unlock();
@@ -702,10 +704,12 @@ FenBatchStream::FenBatchStream(int                                           con
              counter,
              rank,
              world_size,
-             io_config),
+             io_config,
+             calculate_num_worker_threads(concurrency)),
     m_batch_size(batch_size),
     m_concurrency(concurrency),
-    m_num_workers(calculate_num_worker_threads(concurrency)) {
+    m_num_workers(calculate_num_worker_threads(concurrency)),
+    m_batch_queue_capacity(calculate_num_worker_threads(concurrency) + 4) {
 
     m_stop_flag.store(false);
 
@@ -727,7 +731,7 @@ FenBatchStream::FenBatchStream(int                                           con
             {
                 std::unique_lock lock(m_batch_mutex);
                 m_batches_not_full.wait(lock, [this]() {
-                    return m_batches.size() < static_cast<size_t>(m_concurrency) + 1 || m_stop_flag.load();
+                    return m_batches.size() < static_cast<size_t>(m_batch_queue_capacity) || m_stop_flag.load();
                 });
                 m_batches.emplace_back(batch);
                 lock.unlock();

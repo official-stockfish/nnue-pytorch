@@ -29,7 +29,8 @@ struct DataloaderHllConfig {
 };
 
 struct DataloaderIOConfig {
-    int balance_window_mb;   // sliding window (MiB) for read balancing; <= 0 selects the default
+    int balance_window_mb;      // sliding window (MiB) for read balancing; <= 0 selects the default
+    int shuffle_buffer_entries; // per-worker decode+shuffle buffer (entries); <= 0 selects the default
 };
 
 struct DataloaderFileStats {

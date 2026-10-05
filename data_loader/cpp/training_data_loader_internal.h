@@ -87,9 +87,10 @@ struct Stream: AnyStream {
            nnue::UniquePositionCounter* counter = nullptr,
            int rank = 0,
            int world_size = 1,
-           DataloaderIOConfig io_config = {}) :
+           DataloaderIOConfig io_config = {},
+           int num_consumer_threads = 4) :
         m_stream(training_data::open_sfen_input_file_parallel(
-          concurrency, filenames, cyclic, skipPredicate, counter, rank, world_size, io_config))
+          concurrency, filenames, cyclic, skipPredicate, counter, rank, world_size, io_config, num_consumer_threads))
     {
         if (counter) m_unique_counter.reset(counter);
     }
@@ -105,6 +106,8 @@ protected:
     std::unique_ptr<training_data::BasicSfenInputStream> m_stream;
 };
 
+// Feature-extraction builders and the finished-batch deque live here;
+// see lib/parallel_dataloader.h (top) for the full pipeline map.
 struct FeaturedBatchStream final : Stream<SparseBatch> {
     using BaseType = Stream<SparseBatch>;
     static constexpr double worker_thread_ratio = 0.14;
@@ -133,6 +136,11 @@ private:
     std::condition_variable m_batches_any;
     std::atomic_bool m_stop_flag;
     std::atomic_int m_num_workers;
+    // Finished batches queued for the consumer. Decoupled from the worker
+    // count: every queued batch costs batch_size*max_active_features*4
+    // bytes (~300 MiB at production settings), so a large worker count must
+    // not translate into a large queue.
+    int m_batch_queue_capacity;
     std::vector<std::thread> m_workers;
 
     static int calculate_num_reader_threads(int concurrency);
@@ -185,6 +193,7 @@ private:
     std::condition_variable m_batches_any;
     std::atomic_bool m_stop_flag;
     std::atomic_int m_num_workers;
+    int m_batch_queue_capacity;
     std::vector<std::thread> m_workers;
 
     static int calculate_num_reader_threads(int concurrency);
