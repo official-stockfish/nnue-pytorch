@@ -95,6 +95,7 @@ class SimpleTrainer:
         rank: int,
         world_size: int,
         local_rank: int,
+        checkpoint_writer: Any | None = None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -119,6 +120,7 @@ class SimpleTrainer:
         self.rank = rank
         self.world_size = world_size
         self.local_rank = local_rank
+        self.checkpoint_writer = checkpoint_writer
 
         # Parity aliases used by callbacks and future train.py code.
         self.is_global_zero = self.rank == 0
@@ -240,7 +242,18 @@ class SimpleTrainer:
             parent = os.path.dirname(path)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-            torch.save(checkpoint, path)
+            if self.checkpoint_writer is not None:
+                # Snapshot into the writer's persistent host buffers and
+                # serialize on the background thread (training keeps
+                # mutating GPU state).
+                self.checkpoint_writer.submit(checkpoint, path)
+            else:
+                torch.save(checkpoint, path)
+
+    def flush_checkpoints(self) -> None:
+        """Block until every asynchronous checkpoint write is on disk."""
+        if self.checkpoint_writer is not None:
+            self.checkpoint_writer.flush()
 
     def load_checkpoint(self, path: str):
         """Load a checkpoint and return the raw dictionary."""
