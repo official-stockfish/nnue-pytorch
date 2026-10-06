@@ -31,12 +31,12 @@ jobs:
           cache-from: type=gha,scope=cpu-cache
           cache-to: type=gha,mode=max,scope=cpu-cache
 
-      - name: Checkout Stockfish Master
+      - name: Checkout Compatible Stockfish
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: TonyCongqianWang/Stockfish
+          repository: sscg13/Stockfish
           path: Stockfish
-          ref: 3e572e81a396df462892b808a026b27b8432bd1a
+          ref: 109fb72852ef99b12288b62172f259a130faf2dc # compress-pp-indexing
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
