@@ -9,6 +9,16 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
+
+
+def _tensor_to_bytes(t: torch.Tensor) -> bytes:
+    """Fast uint8 tensor -> bytes conversion.
+
+    bytes(tensor) iterates one Python scalar tensor per element (~1 s
+    for the 2^20-register HLL state); numpy().tobytes() is a zero-copy
+    view (sub-millisecond).
+    """
+    return t.detach().cpu().numpy().tobytes()
 from torch.optim.swa_utils import AveragedModel
 
 
@@ -305,6 +315,7 @@ class CheckpointManager(Callback):
         self.save_top_k = save_top_k
         self.dirpath = dirpath
         self._saved_checkpoints = []
+        self._last_save_epoch: int | None = None
 
     def _get_dirpath(self, trainer):
         if self.dirpath is not None:
@@ -342,6 +353,7 @@ class CheckpointManager(Callback):
             last_path = os.path.join(dirpath, "last.ckpt")
             trainer.save_checkpoint(last_path)
             saved.append(last_path)
+            self._last_save_epoch = trainer.current_epoch
 
         self._saved_checkpoints.extend(saved)
         self._enforce_save_top_k()
@@ -374,8 +386,11 @@ class CheckpointManager(Callback):
         os.makedirs(dirpath, exist_ok=True)
 
         last_path = os.path.join(dirpath, "last.ckpt")
-        if not os.path.exists(last_path):
+        if self.save_last and self._last_save_epoch != trainer.current_epoch:
             trainer.save_checkpoint(last_path)
+        # Wait for asynchronous writes so post-training code (e.g. the
+        # SWA checkpoint renames in train.py) sees complete files.
+        trainer.flush_checkpoints()
 
 
 class UniquePositionLogger(Callback):
@@ -446,7 +461,7 @@ class UniquePositionLogger(Callback):
             reg_tensor = torch.frombuffer(bytearray(registers), dtype=torch.uint8).clone()
             reg_tensor = reg_tensor.cuda() if torch.cuda.is_available() else reg_tensor
             dist.all_reduce(reg_tensor, op=dist.ReduceOp.MAX)
-            merged_regs = bytes(reg_tensor.cpu())
+            merged_regs = _tensor_to_bytes(reg_tensor)
 
             global_unique = hll_count_from_state(
                 bytes(hll_bytes[:self.HLL_HEADER_SIZE]) + merged_regs

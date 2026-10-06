@@ -23,6 +23,7 @@ from trainer.callbacks import (
     UniquePositionLogger,
     WeightClipper,
 )
+from trainer.checkpoint_writer import AsyncCheckpointWriter
 from trainer.engine import SimpleTrainer, init_distributed
 from trainer.loggers import CSVLogger, TensorBoardLogger
 
@@ -368,6 +369,11 @@ def main():
         swa_callback = ExplicitSWA(args.swa_start_epoch, tb_logger.log_dir)
         trainer_callbacks.append(swa_callback)
 
+    if rank == 0 and args.async_checkpoint_save:
+        checkpoint_writer = AsyncCheckpointWriter()
+    else:
+        checkpoint_writer = None
+
     trainer = SimpleTrainer(
         model=nnue,
         optimizer=optimizer,
@@ -383,6 +389,7 @@ def main():
         rank=rank,
         world_size=world_size,
         local_rank=local_rank,
+        checkpoint_writer=checkpoint_writer,
     )
 
     if actual_threads > 0:
@@ -392,6 +399,9 @@ def main():
         trainer.load_checkpoint(args.resume_from_checkpoint)
 
     trainer.fit(train, val)
+
+    if checkpoint_writer is not None:
+        checkpoint_writer.flush()
 
     aborted_due_to_nan = nan_callback.nan_detected
 

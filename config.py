@@ -85,6 +85,12 @@ class TrainingConfig:
     save_top_k: int = -1
     """Number of networks to save as a history"""
 
+    async_checkpoint_save: FlagConversionOff[bool] = True
+    """Save checkpoints on a background thread. Writes are atomic
+    (tmp + rename); a not-yet-started last.ckpt write is replaced by a
+    newer one, so last.ckpt always holds the newest fully-written
+    epoch."""
+
     epoch_size: int = 100_000_000
     """Number of positions per epoch."""
 
