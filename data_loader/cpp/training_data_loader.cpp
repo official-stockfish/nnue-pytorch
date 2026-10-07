@@ -484,12 +484,48 @@ struct BumpAllocator {
     }
 };
 
+SparseBatchBufferPool::SparseBatchBufferPool(std::size_t floats,
+                                            std::size_t ints,
+                                            std::size_t capacity) :
+    m_floats(floats), m_ints(ints), m_capacity(capacity) {
+    m_free.reserve(capacity);
+}
+
+SparseBatchBufferPool::Buffers SparseBatchBufferPool::acquire(std::size_t floats,
+                                                             std::size_t ints) {
+    if (floats == m_floats && ints == m_ints)
+    {
+        std::lock_guard lock(m_mutex);
+        if (!m_free.empty())
+        {
+            auto buffers = std::move(m_free.back());
+            m_free.pop_back();
+            return buffers;
+        }
+    }
+    return {std::unique_ptr<float[]>(new float[floats]),
+            std::unique_ptr<int[]>(new int[ints])};
+}
+
+void SparseBatchBufferPool::release(Buffers buffers, std::size_t floats, std::size_t ints) {
+    if (floats == m_floats && ints == m_ints)
+    {
+        std::lock_guard lock(m_mutex);
+        if (m_free.size() < m_capacity)
+            m_free.push_back(std::move(buffers));
+    }
+    // Partial final batches and excess buffers are freed normally. The cache
+    // never retains storage with a different layout or beyond its capacity.
+}
+
 SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
-                         const std::vector<TrainingDataEntry>& entries)
-#ifdef NNUE_LOADER_STATISTICS
+                         const std::vector<TrainingDataEntry>& entries,
+                         std::shared_ptr<SparseBatchBufferPool> buffer_pool)
     :
-    entries_copy(entries)
+#ifdef NNUE_LOADER_STATISTICS
+    entries_copy(entries),
 #endif
+    m_buffer_pool(std::move(buffer_pool))
 {
     num_inputs          = feature_set.inputs();
     size                = entries.size();
@@ -497,8 +533,17 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
     const size_t total_floats = size * 3;
     const size_t total_ints   = size + size * max_active_features * 2;
 
-    m_float_block = new float[total_floats];
-    m_int_block   = new int[total_ints];
+    if (m_buffer_pool)
+    {
+        auto buffers = m_buffer_pool->acquire(total_floats, total_ints);
+        m_float_block = buffers.first.release();
+        m_int_block = buffers.second.release();
+    }
+    else
+    {
+        m_float_block = new float[total_floats];
+        m_int_block   = new int[total_ints];
+    }
 
     BumpAllocator<float> float_alloc(m_float_block);
     is_white     = float_alloc.alloc(size);
@@ -523,8 +568,15 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
 }
 
 SparseBatch::~SparseBatch() {
-    delete[] m_float_block;
-    delete[] m_int_block;
+    if (m_buffer_pool)
+        m_buffer_pool->release(
+            {std::unique_ptr<float[]>(m_float_block), std::unique_ptr<int[]>(m_int_block)},
+            std::size_t(size) * 3, std::size_t(size) * (2 * max_active_features + 1));
+    else
+    {
+        delete[] m_float_block;
+        delete[] m_int_block;
+    }
 }
 
 void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
@@ -581,6 +633,13 @@ FeaturedBatchStream::FeaturedBatchStream(
     m_num_workers(calculate_num_worker_threads(concurrency)),
     m_batch_queue_capacity(calculate_num_worker_threads(concurrency) + 4) {
 
+    // At most one fetched batch, the finished deque, and one batch per builder
+    // normally exist at a time. Recycle that working set without growing a
+    // process-global cache or keeping buffers alive after the stream closes.
+    m_buffer_pool = std::make_shared<SparseBatchBufferPool>(
+        std::size_t(batch_size) * 3,
+        std::size_t(batch_size) * (2 * m_feature_set->max_active_features() + 1),
+        std::size_t(m_batch_queue_capacity) + m_num_workers.load() + 1);
     m_stop_flag.store(false);
 
     auto worker = [this]() {
@@ -596,7 +655,7 @@ FeaturedBatchStream::FeaturedBatchStream(
                     break;
             }
 
-            auto batch = new SparseBatch(*m_feature_set, entries);
+            auto batch = new SparseBatch(*m_feature_set, entries, m_buffer_pool);
 
             {
                 std::unique_lock lock(m_batch_mutex);

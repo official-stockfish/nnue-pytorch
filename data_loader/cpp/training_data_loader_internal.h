@@ -30,12 +30,32 @@ struct IFeatureExtractor {
 std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name);
 std::function<bool(const struct binpack::TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config);
 
+// Keep large feature buffers resident between batches. Returning ~300 MiB to
+// the system allocator on every batch can stall the Python prefetch thread.
+// Each stream owns a bounded cache; outstanding batches share its lifetime.
+class SparseBatchBufferPool final {
+public:
+    using Buffers = std::pair<std::unique_ptr<float[]>, std::unique_ptr<int[]>>;
+
+    SparseBatchBufferPool(std::size_t floats, std::size_t ints, std::size_t capacity);
+    Buffers acquire(std::size_t floats, std::size_t ints);
+    void release(Buffers buffers, std::size_t floats, std::size_t ints);
+
+private:
+    const std::size_t m_floats;
+    const std::size_t m_ints;
+    const std::size_t m_capacity;
+    std::mutex m_mutex;
+    std::vector<Buffers> m_free;
+};
+
 struct SparseBatch final {
     static constexpr bool IS_BATCH = true;
 
     SparseBatch(
         const IFeatureExtractor& feature_set,
-        const std::vector<struct binpack::TrainingDataEntry>& entries);
+        const std::vector<struct binpack::TrainingDataEntry>& entries,
+        std::shared_ptr<SparseBatchBufferPool> buffer_pool = nullptr);
     ~SparseBatch();
 
     int num_inputs;
@@ -58,6 +78,7 @@ struct SparseBatch final {
 private:
     float* m_float_block = nullptr;
     int*   m_int_block = nullptr;
+    std::shared_ptr<SparseBatchBufferPool> m_buffer_pool;
     void fill_entry(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
     void fill_features(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
 };
@@ -141,6 +162,7 @@ private:
     // bytes (~300 MiB at production settings), so a large worker count must
     // not translate into a large queue.
     int m_batch_queue_capacity;
+    std::shared_ptr<SparseBatchBufferPool> m_buffer_pool;
     std::vector<std::thread> m_workers;
 
     static int calculate_num_reader_threads(int concurrency);
@@ -199,4 +221,3 @@ private:
     static int calculate_num_reader_threads(int concurrency);
     static int calculate_num_worker_threads(int concurrency);
 };
-
