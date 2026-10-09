@@ -131,7 +131,10 @@ protected:
 // see lib/parallel_dataloader.h (top) for the full pipeline map.
 struct FeaturedBatchStream final : Stream<SparseBatch> {
     using BaseType = Stream<SparseBatch>;
-    static constexpr double worker_thread_ratio = 0.14;
+    // Builders set the pipeline's throughput (measured 8.05 batches/s per
+    // builder at batch_size 131072); decode keeps up with ~3 workers per
+    // builder. 1/4 of the worker budget balances the two stages.
+    static constexpr double worker_thread_ratio = 0.25;
 
     FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
                         int concurrency,
