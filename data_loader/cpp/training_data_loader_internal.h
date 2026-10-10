@@ -19,43 +19,43 @@
 #include "training_data_loader_structs.h"
 
 struct IFeatureExtractor {
-    virtual ~IFeatureExtractor() = default;
-    virtual int inputs() const = 0;
-    virtual int max_active_features() const = 0;
+    virtual ~IFeatureExtractor()                                               = default;
+    virtual int                 inputs() const                                 = 0;
+    virtual int                 max_active_features() const                    = 0;
     virtual std::pair<int, int> fill_features_sparse(const struct binpack::TrainingDataEntry& e,
-                                                     int* features,
+                                                     int*         features,
                                                      chess::Color color) const = 0;
 };
 
 std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name);
-std::function<bool(const struct binpack::TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config);
+std::function<bool(const struct binpack::TrainingDataEntry&)>
+make_skip_predicate(DataloaderSkipConfig config);
 
 // Keep large feature buffers resident between batches. Returning ~300 MiB to
 // the system allocator on every batch can stall the Python prefetch thread.
 // Each stream owns a bounded cache; outstanding batches share its lifetime.
 class SparseBatchBufferPool final {
-public:
+   public:
     using Buffers = std::pair<std::unique_ptr<float[]>, std::unique_ptr<int[]>>;
 
     SparseBatchBufferPool(std::size_t floats, std::size_t ints, std::size_t capacity);
     Buffers acquire(std::size_t floats, std::size_t ints);
-    void release(Buffers buffers, std::size_t floats, std::size_t ints);
+    void    release(Buffers buffers, std::size_t floats, std::size_t ints);
 
-private:
-    const std::size_t m_floats;
-    const std::size_t m_ints;
-    const std::size_t m_capacity;
-    std::mutex m_mutex;
+   private:
+    const std::size_t    m_floats;
+    const std::size_t    m_ints;
+    const std::size_t    m_capacity;
+    std::mutex           m_mutex;
     std::vector<Buffers> m_free;
 };
 
 struct SparseBatch final {
     static constexpr bool IS_BATCH = true;
 
-    SparseBatch(
-        const IFeatureExtractor& feature_set,
-        const std::vector<struct binpack::TrainingDataEntry>& entries,
-        std::shared_ptr<SparseBatchBufferPool> buffer_pool = nullptr);
+    SparseBatch(const IFeatureExtractor&                              feature_set,
+                const std::vector<struct binpack::TrainingDataEntry>& entries,
+                std::shared_ptr<SparseBatchBufferPool>                buffer_pool = nullptr);
     ~SparseBatch();
 
     int num_inputs;
@@ -67,29 +67,30 @@ struct SparseBatch final {
     int    num_active_white_features;
     int    num_active_black_features;
     int    max_active_features;
-    int* white;
-    int* black;
-    int* piece_count;
+    int*   white;
+    int*   black;
+    int*   piece_count;
 
 #ifdef NNUE_LOADER_STATISTICS
     std::vector<struct binpack::TrainingDataEntry> entries_copy;
 #endif
 
-private:
-    float* m_float_block = nullptr;
-    int*   m_int_block = nullptr;
+   private:
+    float*                                 m_float_block = nullptr;
+    int*                                   m_int_block   = nullptr;
     std::shared_ptr<SparseBatchBufferPool> m_buffer_pool;
     void fill_entry(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
-    void fill_features(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
+    void
+    fill_features(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
 };
 
 struct AnyStream {
     virtual ~AnyStream() = default;
 
-    nnue::UniquePositionCounter* unique_counter() { return m_unique_counter.get(); }
+    nnue::UniquePositionCounter*       unique_counter() { return m_unique_counter.get(); }
     const nnue::UniquePositionCounter* unique_counter() const { return m_unique_counter.get(); }
 
-protected:
+   protected:
     // Owned here (not in FeaturedBatchStream/FenBatchStream) so that it is
     // destroyed AFTER m_stream (C++ base-class destruction order): the
     // CompressedTrainingDataEntryParallelReader workers, which hold a raw
@@ -101,72 +102,78 @@ template<typename StorageT>
 struct Stream: AnyStream {
     using StorageType = StorageT;
 
-    Stream(int concurrency,
-           const std::vector<std::string>& filenames,
-           bool cyclic,
+    Stream(int                                                           concurrency,
+           const std::vector<std::string>&                               filenames,
+           bool                                                          cyclic,
            std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
-           nnue::UniquePositionCounter* counter = nullptr,
-           int rank = 0,
-           int world_size = 1,
-           DataloaderIOConfig io_config = {},
-           int num_consumer_threads = 4) :
-        m_stream(training_data::open_sfen_input_file_parallel(
-          concurrency, filenames, cyclic, skipPredicate, counter, rank, world_size, io_config, num_consumer_threads))
-    {
-        if (counter) m_unique_counter.reset(counter);
+           nnue::UniquePositionCounter*                                  counter    = nullptr,
+           int                                                           rank       = 0,
+           int                                                           world_size = 1,
+           DataloaderIOConfig                                            io_config  = {},
+           int                                                           num_consumer_threads = 4) :
+        m_stream(training_data::open_sfen_input_file_parallel(concurrency,
+                                                              filenames,
+                                                              cyclic,
+                                                              skipPredicate,
+                                                              counter,
+                                                              rank,
+                                                              world_size,
+                                                              io_config,
+                                                              num_consumer_threads)) {
+        if (counter)
+            m_unique_counter.reset(counter);
     }
 
     virtual StorageT* next() = 0;
 
-    std::size_t get_io_stats(DataloaderFileStats* out, std::size_t max_files)
-    {
+    std::size_t get_io_stats(DataloaderFileStats* out, std::size_t max_files) {
         return m_stream->get_io_stats(out, max_files);
     }
 
-protected:
+   protected:
     std::unique_ptr<training_data::BasicSfenInputStream> m_stream;
 };
 
 // Feature-extraction builders and the finished-batch deque live here;
 // see lib/parallel_dataloader.h (top) for the full pipeline map.
-struct FeaturedBatchStream final : Stream<SparseBatch> {
+struct FeaturedBatchStream final: Stream<SparseBatch> {
     using BaseType = Stream<SparseBatch>;
     // Builders set the pipeline's throughput (measured 8.05 batches/s per
     // builder at batch_size 131072); decode keeps up with ~3 workers per
     // builder. 1/4 of the worker budget balances the two stages.
     static constexpr double worker_thread_ratio = 0.25;
 
-    FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
-                        int concurrency,
-                        const std::vector<std::string>& filenames,
-                        int batch_size,
-                        bool cyclic,
+    FeaturedBatchStream(std::shared_ptr<IFeatureExtractor>                            feature_set,
+                        int                                                           concurrency,
+                        const std::vector<std::string>&                               filenames,
+                        int                                                           batch_size,
+                        bool                                                          cyclic,
                         std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
-                        int rank = 0,
-                        int world_size = 1,
-                        nnue::UniquePositionCounter* counter = nullptr,
-                        DataloaderIOConfig io_config = {});
+                        int                                                           rank = 0,
+                        int                          world_size                            = 1,
+                        nnue::UniquePositionCounter* counter   = nullptr,
+                        DataloaderIOConfig           io_config = {});
     ~FeaturedBatchStream() final;
 
     SparseBatch* next() override;
 
-private:
+   private:
     std::shared_ptr<IFeatureExtractor> m_feature_set;
-    int m_batch_size;
-    int m_concurrency;
-    std::deque<SparseBatch*> m_batches;
-    std::mutex m_batch_mutex;
-    std::condition_variable m_batches_not_full;
-    std::condition_variable m_batches_any;
-    std::atomic_bool m_stop_flag;
-    std::atomic_int m_num_workers;
+    int                                m_batch_size;
+    int                                m_concurrency;
+    std::deque<SparseBatch*>           m_batches;
+    std::mutex                         m_batch_mutex;
+    std::condition_variable            m_batches_not_full;
+    std::condition_variable            m_batches_any;
+    std::atomic_bool                   m_stop_flag;
+    std::atomic_int                    m_num_workers;
     // Finished batches queued for the consumer. Decoupled from the worker
     // count: every queued batch costs batch_size*max_active_features*4
     // bytes (~300 MiB at production settings), so a large worker count must
     // not translate into a large queue.
-    int m_batch_queue_capacity;
+    int                                    m_batch_queue_capacity;
     std::shared_ptr<SparseBatchBufferPool> m_buffer_pool;
-    std::vector<std::thread> m_workers;
+    std::vector<std::thread>               m_workers;
 
     static int calculate_num_reader_threads(int concurrency);
     static int calculate_num_worker_threads(int concurrency);
@@ -178,8 +185,8 @@ struct Fen final {
     Fen& operator=(const std::string& fen);
     ~Fen();
 
-private:
-    int m_size;
+   private:
+    int   m_size;
     char* m_fen;
 };
 
@@ -187,38 +194,38 @@ struct FenBatch final {
     FenBatch(const std::vector<struct binpack::TrainingDataEntry>& entries);
     ~FenBatch();
 
-private:
-    int m_size;
+   private:
+    int  m_size;
     Fen* m_fens;
 };
 
-struct FenBatchStream final : Stream<FenBatch> {
-    using BaseType = Stream<FenBatch>;
+struct FenBatchStream final: Stream<FenBatch> {
+    using BaseType                              = Stream<FenBatch>;
     static constexpr double worker_thread_ratio = 0.5;
 
-    FenBatchStream(int concurrency,
-                   const std::vector<std::string>& filenames,
-                   int batch_size,
-                   bool cyclic,
+    FenBatchStream(int                                                           concurrency,
+                   const std::vector<std::string>&                               filenames,
+                   int                                                           batch_size,
+                   bool                                                          cyclic,
                    std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
-                   int rank = 0,
-                   int world_size = 1,
-                   nnue::UniquePositionCounter* counter = nullptr,
-                   DataloaderIOConfig io_config = {});
+                   int                                                           rank       = 0,
+                   int                                                           world_size = 1,
+                   nnue::UniquePositionCounter*                                  counter = nullptr,
+                   DataloaderIOConfig                                            io_config = {});
     ~FenBatchStream() final;
 
     FenBatch* next() override;
 
-private:
-    int m_batch_size;
-    int m_concurrency;
-    std::deque<FenBatch*> m_batches;
-    std::mutex m_batch_mutex;
-    std::condition_variable m_batches_not_full;
-    std::condition_variable m_batches_any;
-    std::atomic_bool m_stop_flag;
-    std::atomic_int m_num_workers;
-    int m_batch_queue_capacity;
+   private:
+    int                      m_batch_size;
+    int                      m_concurrency;
+    std::deque<FenBatch*>    m_batches;
+    std::mutex               m_batch_mutex;
+    std::condition_variable  m_batches_not_full;
+    std::condition_variable  m_batches_any;
+    std::atomic_bool         m_stop_flag;
+    std::atomic_int          m_num_workers;
+    int                      m_batch_queue_capacity;
     std::vector<std::thread> m_workers;
 
     static int calculate_num_reader_threads(int concurrency);
