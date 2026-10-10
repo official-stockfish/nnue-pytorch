@@ -1,4 +1,4 @@
-"""H100 master-net FT backward with tile-local feature aggregation.
+"""NVIDIA FT backward with tile-local feature aggregation.
 
 Pack the union of features in eight positions with a position/perspective mask.
 Each column block sums those contributions before issuing global atomics.
