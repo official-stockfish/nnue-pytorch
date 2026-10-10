@@ -424,8 +424,10 @@ def main():
                 os.rename(last_savepath, non_swa_path)
             os.rename(swa_savepath, last_savepath)
 
-        with open(os.path.join(logdir, "training_finished"), "w"):
-            pass
+        # Record how many epochs this run was asked for, so that a later run with a larger
+        # --max_epoch is not mistaken for a finished one (easy_train reads this back).
+        with open(os.path.join(logdir, "training_finished"), "w") as finished_file:
+            finished_file.write(str(args.max_epochs))
 
     if dist.is_initialized():
         dist.destroy_process_group()

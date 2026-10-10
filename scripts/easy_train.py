@@ -12,6 +12,7 @@ import sys
 import time
 
 import psutil
+from training_marker import is_training_finished
 
 EXITCODE_OK = 0
 EXITCODE_MISSING_DEPENDENCIES = 2
@@ -838,8 +839,8 @@ class TrainingRun(Thread):
         return args
 
     def run(self):
-        if self._resume_training and os.path.exists(
-            os.path.join(self._root_dir, "training_finished")
+        if self._resume_training and is_training_finished(
+            self._root_dir, self._num_epochs
         ):
             self._has_started = True
             self._has_finished = True
