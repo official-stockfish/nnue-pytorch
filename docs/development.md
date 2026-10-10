@@ -23,7 +23,7 @@ pytest
 ```
 
 Use the trainer's help for the current options. For complete recipe-based
-training and engine testing, see [training with Nettest](training.md).
+training and engine testing, see [training workflows](training.md).
 
 ## Run checks without a shell
 
@@ -72,8 +72,7 @@ at `Stockfish/src/stockfish` in this checkout and run:
 ```
 
 See `.github/workflows/cpu-testrun.yml` for the compatible engine revision used
-by CI. Nettest recipes also support cross-checks and fastchess matches for full
-network testing.
+by CI. For full network testing, see [the training and testing workflow guide](https://github.com/vondele/nettest#execution-of-a-recipe).
 
 ## Logging
 

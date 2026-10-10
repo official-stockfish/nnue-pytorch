@@ -77,13 +77,13 @@ _Building the container will take it's time and disk space (~30-60GB)_
 
 ## Network training and testing
 
-Use [Nettest](https://github.com/vondele/nettest) to run reproducible YAML
-recipes covering dataset downloads, staged training, network conversion and
-optimization, and engine testing. See [Training with Nettest](docs/training.md)
-for local execution and selecting trainer revisions.
+For reproducible training and engine testing, follow the
+[local training workflow guide](https://github.com/vondele/nettest#local-execution).
+See [Network training](docs/training.md) for hardware requirements and links to
+workflow configuration and CI instructions.
 
 GPU training needs at least 16 GB system RAM and 8 GB VRAM, with 8 GB VRAM
-being tight. The full dataset set in Nettest's `threats.yaml` requires 800+ GB
+being tight. The full dataset set in [the threats training recipe](https://github.com/vondele/nettest/blob/master/threats.yaml) requires 800+ GB
 of storage; a single small binpack can be used with much less storage, but
 produces weaker networks.
 
