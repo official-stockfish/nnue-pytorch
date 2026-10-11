@@ -5,13 +5,13 @@ from .input_feature import InputFeature
 
 
 class PP3Wide(InputFeature):
-    HASH = 0x86F2B1DD
+    HASH = 0x19C262B9
     FEATURE_NAME = "PP_3Wide"
     INPUT_FEATURE_NAME = "PP_3Wide"
     MAX_ACTIVE_FEATURES = 128
 
-    NUM_INPUTS = 4560
-    NUM_REAL_FEATURES = 4560
+    NUM_INPUTS = 2163
+    NUM_REAL_FEATURES = 2163
     EXPORT_WEIGHT_DTYPE = torch.int8
 
     def __init__(self, num_outputs: int):
