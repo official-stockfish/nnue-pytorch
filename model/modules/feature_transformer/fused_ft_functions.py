@@ -33,11 +33,28 @@ def _use_aggregated_backward(
         return False
     if mode == "aggregated":
         return True
-    # H100 retains its existing threshold. RTX 4090 measurements show a
-    # benefit from 4096 positions; smaller batches keep direct scatter.
-    return (capability == (9, 0) and batch_size >= 1024) or (
-        capability == (8, 9) and batch_size >= 4096
+    # H100 retains its existing threshold. RTX 4090 and A100 measurements show
+    # a benefit from 4096 positions; smaller batches keep direct scatter.
+    return (
+        (capability == (9, 0) and batch_size >= 1024)
+        or (capability == (8, 9) and batch_size >= 4096)
+        or (capability == (8, 0) and batch_size >= 4096)
     )
+
+
+def _aggregated_tile_size(l1_size, batch_size, max_active_features, capability):
+    """Position-tile size for the aggregation kernel, per measured device.
+
+    A larger tile removes more repeated feature atomics on the production net.
+    The tile must stay at or below 16 positions: rows are tracked in a 32-bit
+    mask (two rows per position, one per perspective).
+    """
+    if l1_size == 1024 and max_active_features == 288:
+        if capability == (8, 9) and batch_size >= 32768:
+            return 14
+        if capability == (8, 0) and batch_size >= 8192:
+            return 12
+    return 8
 
 
 class FusedDoubleFtFunction(autograd.Function):
@@ -140,17 +157,11 @@ class FusedDoubleFtFunction(autograd.Function):
         if _use_aggregated_backward(
             l1_size, batch_size, max_active_features, us.device
         ):
-            # A larger tile removes more repeated feature atomics on the RTX 4090
-            # production net; retain the existing geometry for other workloads.
-            tile_size = (
-                14
-                if (
-                    l1_size == 1024
-                    and max_active_features == 288
-                    and batch_size >= 32768
-                    and torch.cuda.get_device_capability(us.device) == (8, 9)
-                )
-                else 8
+            tile_size = _aggregated_tile_size(
+                l1_size,
+                batch_size,
+                max_active_features,
+                torch.cuda.get_device_capability(us.device),
             )
             aggregated_ft_backward(
                 us,
