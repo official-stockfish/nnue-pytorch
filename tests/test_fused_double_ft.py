@@ -18,11 +18,11 @@ from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNE
 )
 @pytest.mark.parametrize("l1", [32, 64, 96, 264, 1024, 1152, 1280, 2048, 4096])
 @pytest.mark.parametrize("batch_size", [1, 9])
-def test_fused_double_ft(l1, batch_size):
+@pytest.mark.parametrize("max_active", [96, 288])
+def test_fused_double_ft(l1, batch_size, max_active):
     torch.manual_seed(0)
     torch.cuda.manual_seed_all(0)
 
-    max_active = 96
     num_inputs = 100
     output_size = l1
 
