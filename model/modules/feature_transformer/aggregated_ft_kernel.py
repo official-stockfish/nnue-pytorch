@@ -1,6 +1,6 @@
 """NVIDIA FT backward with tile-local feature aggregation.
 
-Pack the union of features in eight positions with a position/perspective mask.
+Pack the union of features in a position tile with a position/perspective mask.
 Each column block sums those contributions before issuing global atomics.
 Feature indices must be unique within each position/perspective, as guaranteed
 by the feature extractors. Repeated indices across rows are aggregated exactly
@@ -17,11 +17,10 @@ from .fused_ft_kernel import _num_threads
 
 
 @cache
-def _kernels(active: int, width: int):
+def _kernels(active: int, width: int, tile: int = 8):
     A = active
     half = width // 2
     threads = _num_threads(half, 128)
-    tile = 8
     maxids = 2 * tile * A
     h = 1 << (maxids - 1).bit_length()
     code = (
@@ -142,7 +141,17 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
 
 @torch.compiler.disable
 def aggregated_ft_backward(
-    us, them, white, black, grad, clamped, grad_weight, grad_bias, maxact
+    us,
+    them,
+    white,
+    black,
+    grad,
+    clamped,
+    grad_weight,
+    grad_bias,
+    maxact,
+    *,
+    tile_size=8,
 ):
     """Accumulate on the current stream.
 
@@ -150,10 +159,10 @@ def aggregated_ft_backward(
     unique within each white/black row.
     """
     batch_size, active = white.shape
-    tiles = (batch_size + 7) // 8
+    tiles = (batch_size + tile_size - 1) // tile_size
     with cp.cuda.Device(us.device.index):
         pack, aggregate, capacity, shared_bytes, threads = _kernels(
-            active, grad.shape[1]
+            active, grad.shape[1], tile_size
         )
         ids = torch.empty((tiles, capacity), device=us.device, dtype=torch.int32)
         masks = torch.empty_like(ids)
