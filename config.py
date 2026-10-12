@@ -94,6 +94,9 @@ class TrainingConfig:
     epoch_size: int = 100_000_000
     """Number of positions per epoch."""
 
+    input_clipping_interval: int = 0
+    """Clipping interval for input feature-transformer weights in iterations/steps. If > 0, clips every N steps instead of at the end of each epoch (default: 0, epoch-based)."""
+
     dataloader_config: OmitArgPrefixes[DataloaderSkipConfig] = field(
         default_factory=DataloaderSkipConfig
     )

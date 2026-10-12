@@ -7,12 +7,18 @@ from .lambda_utils import LambdaController
 from .model import NNUEModel
 
 
-def _get_parameters(layers: list[nn.Module], get_biases: bool = False):
+def _get_parameters(
+    layers: list[nn.Module],
+    get_biases: bool = False,
+    get_virtual: bool | None = False,
+):
     return [
         p
         for layer in layers
         for name, p in layer.named_parameters()
-        if ("bias" in name) == get_biases and p.requires_grad
+        if ("bias" in name) == get_biases
+        and (get_biases or get_virtual is None or ("virtual" in name) == get_virtual)
+        and p.requires_grad
     ]
 
 
@@ -122,15 +128,21 @@ class NNUE(nn.Module):
         LRs = [optimizer_config.lr] * 10
 
         ft_wd = optimizer_config.ft_weight_decay
+        virtual_ft_wd = optimizer_config.virtual_ft_weight_decay
         dense_wd = optimizer_config.dense_weight_decay
         factorized_wd = optimizer_config.factorized_weight_decay
 
         train_params = [
             # Feature Transformer
             {
-                "params": _get_parameters([self.model.input], get_biases=False),
+                "params": _get_parameters([self.model.input], get_biases=False, get_virtual=False),
                 "lr": LRs[0],
                 "weight_decay": ft_wd,
+            },
+            {
+                "params": _get_parameters([self.model.input], get_biases=False, get_virtual=True),
+                "lr": LRs[0],
+                "weight_decay": virtual_ft_wd,
             },
             {
                 "params": _get_parameters([self.model.input], get_biases=True),
@@ -179,6 +191,8 @@ class NNUE(nn.Module):
                 "weight_decay": 0.0,
             },
         ]
+
+        train_params = [group for group in train_params if len(group["params"]) > 0]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
 

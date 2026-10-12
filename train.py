@@ -354,7 +354,7 @@ def main():
             rank=rank,
             world_size=world_size,
         ),
-        WeightClipper(),
+        WeightClipper(input_clipping_interval=args.input_clipping_interval),
         CheckpointManager(
             save_last=args.save_last_network,
             every_n_epochs=args.network_save_period,

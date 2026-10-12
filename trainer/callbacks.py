@@ -77,16 +77,24 @@ class Callback:
 class WeightClipper(Callback):
     """Clip feature-transformer weights during training."""
 
+    def __init__(self, input_clipping_interval: int = 0):
+        super().__init__()
+        self.input_clipping_interval = input_clipping_interval
+
     @torch.no_grad()
     @torch.compiler.disable
     def on_train_batch_end(self, trainer, batch=None, batch_idx=None, outputs=None):
         _, _, _ = batch, batch_idx, outputs  # Unused
-        trainer.model.model.clip_weights(include_input=False)
+        if self.input_clipping_interval > 0 and trainer.global_step % self.input_clipping_interval == 0:
+            trainer.model.model.clip_weights(include_input=True)
+        else:
+            trainer.model.model.clip_weights(include_input=False)
 
     @torch.no_grad()
     @torch.compiler.disable
     def on_train_epoch_end(self, trainer):
-        trainer.model.model.clip_weights(include_input=True)
+        if self.input_clipping_interval <= 0:
+            trainer.model.model.clip_weights(include_input=True)
 
     @torch.no_grad()
     @torch.compiler.disable
@@ -188,6 +196,7 @@ class ExplicitSWA(Callback):
         # not supported.
         trainer.model.eval()
         self.swap_weights(trainer.model, to_eval=True)
+        trainer.model.model.clip_weights(include_input=True)
 
         # NOTE: If BN is used, it has to be updated here. Be careful when using
         # DDP.
