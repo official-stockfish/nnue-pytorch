@@ -107,8 +107,8 @@ struct K32Q2 {
     // clang-format on
 
     static int feature_index(Color color, Square ksq, bool opp_queen, Square sq, Piece p) {
-        Square o_ksq = orient_flip_2(color, ksq, ksq);
-        auto   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+        Square o_ksq  = orient_flip_2(color, ksq, ksq);
+        auto   p_idx  = static_cast<int>(p.type()) * 2 + (p.color() != color);
         int    bucket = KingBuckets[static_cast<int>(o_ksq)] * 2 + (opp_queen ? 1 : 0);
         return static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
              + bucket * NUM_PLANES;
@@ -135,9 +135,8 @@ struct K32Q2 {
 struct K32Q2Extractor: IFeatureExtractor {
     int inputs() const override { return K32Q2::INPUTS; }
     int max_active_features() const override { return K32Q2::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
-                                             int*                     features,
-                                             Color                    color) const override {
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
         return K32Q2::fill_features_sparse(e, features, color);
     }
 };
