@@ -15,12 +15,20 @@ def _num_threads(l1_half: int, target: int) -> int:
             return i
     return 1
 
+
 _fused_double_ft_forward_kernel_cache = {}
+
 
 @torch.compiler.disable(recursive=False)
 def make_fused_double_ft_forward_kernel(max_active_indices: int, l1_size: int):
     l1_half = l1_size // 2
-    target = 256 if l1_size % 128 == 0 and torch.version.hip is None and torch.cuda.get_device_capability() == (9, 0) else _FORWARD_THREADS
+    target = (
+        256
+        if l1_size % 128 == 0
+        and torch.version.hip is None
+        and torch.cuda.get_device_capability() == (9, 0)
+        else _FORWARD_THREADS
+    )
     num_threads = _num_threads(l1_half, target)
     output_thread_slice_size = l1_half // num_threads
 
@@ -51,20 +59,40 @@ void fused_double_ft_forward(
     const float us_val = __ldg(&us[block_idx]);
     const float them_val = __ldg(&them[block_idx]);
 
-    const int32_t* const w_idx_row = white_indices + block_idx * """ + str(max_active_indices) + r""";
-    const int32_t* const b_idx_row = black_indices + block_idx * """ + str(max_active_indices) + r""";
+    const int32_t* const w_idx_row = white_indices + block_idx * """
+            + str(max_active_indices)
+            + r""";
+    const int32_t* const b_idx_row = black_indices + block_idx * """
+            + str(max_active_indices)
+            + r""";
 
-    const int32_t l1_size = """ + str(l1_size) + r""";
-    const int32_t l1_half = """ + str(l1_half) + r""";
-    const int32_t n_threads = """ + str(num_threads) + r""";
+    const int32_t l1_size = """
+            + str(l1_size)
+            + r""";
+    const int32_t l1_half = """
+            + str(l1_half)
+            + r""";
+    const int32_t n_threads = """
+            + str(num_threads)
+            + r""";
 
-    float w0[""" + str(output_thread_slice_size) + r"""];
-    float w1[""" + str(output_thread_slice_size) + r"""];
-    float b0[""" + str(output_thread_slice_size) + r"""];
-    float b1[""" + str(output_thread_slice_size) + r"""];
+    float w0["""
+            + str(output_thread_slice_size)
+            + r"""];
+    float w1["""
+            + str(output_thread_slice_size)
+            + r"""];
+    float b0["""
+            + str(output_thread_slice_size)
+            + r"""];
+    float b1["""
+            + str(output_thread_slice_size)
+            + r"""];
 
     #pragma unroll
-    for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
+    for (uint32_t s = 0; s < """
+            + str(output_thread_slice_size)
+            + r"""; ++s) {
         uint32_t i = s * n_threads + tid;
         w0[s] = __ldg(&bias[i]);
         w1[s] = __ldg(&bias[i + l1_half]);
@@ -74,11 +102,15 @@ void fused_double_ft_forward(
 
     // Interleave independent perspectives without changing either sum's order.
     // Widen row offsets before multiplying by the compile-time weight stride.
-    for (int k = 0; k < """ + str(max_active_indices) + r"""; ++k) {
+    for (int k = 0; k < """
+            + str(max_active_indices)
+            + r"""; ++k) {
         int wi = w_idx_row[k], bi = b_idx_row[k];
         if (wi == -1 && bi == -1) break;
         #pragma unroll
-        for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
+        for (uint32_t s = 0; s < """
+            + str(output_thread_slice_size)
+            + r"""; ++s) {
             uint32_t i = s * n_threads + tid;
             if (wi >= 0) {
                 w0[s] += __ldg(&weight[(size_t)(unsigned)wi * l1_size + i]);
@@ -92,7 +124,9 @@ void fused_double_ft_forward(
     }
 
     #pragma unroll
-    for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
+    for (uint32_t s = 0; s < """
+            + str(output_thread_slice_size)
+            + r"""; ++s) {
         uint32_t i = s * n_threads + tid;
 
         float l0_w0 = us_val * w0[s] + them_val * b0[s];
@@ -125,18 +159,26 @@ void fused_double_ft_forward(
         )
     return _fused_double_ft_forward_kernel_cache[key]
 
+
 BACKWARD_TILE_SIZE = 4
 
 _fused_double_ft_backward_kernel_cache = {}
 
+
 @torch.compiler.disable(recursive=False)
-def make_fused_double_ft_backward_kernel(max_active_indices: int, l1_size: int, tile_size: int = BACKWARD_TILE_SIZE):
+def make_fused_double_ft_backward_kernel(
+    max_active_indices: int, l1_size: int, tile_size: int = BACKWARD_TILE_SIZE
+):
     l1_half = l1_size // 2
     # On H100, four 128-thread blocks per position tile outperform a single
     # 512-thread block for the master net. Each block owns disjoint columns;
     # FP32 atomics and the number of gradient contributions are unchanged.
     # Keep the existing launch for other devices and unaligned widths.
-    split_columns = l1_size % 128 == 0 and torch.version.hip is None and torch.cuda.get_device_capability() == (9, 0)
+    split_columns = (
+        l1_size % 128 == 0
+        and torch.version.hip is None
+        and torch.cuda.get_device_capability() == (9, 0)
+    )
     num_threads = _num_threads(l1_half, 128 if split_columns else min(l1_half, 1024))
     column_tiles = l1_half // num_threads if split_columns else 1
     column_stride = num_threads * column_tiles
@@ -169,12 +211,22 @@ void fused_double_ft_backward(
     const uint32_t tile_idx = blockIdx.x;
     const uint32_t tid = threadIdx.x + blockIdx.y * blockDim.x;
 
-    const int32_t l1_size = """ + str(l1_size) + r""";
-    const int32_t l1_half = """ + str(l1_half) + r""";
-    const int32_t n_threads = """ + str(column_stride) + r""";
-    const int32_t tile_size = """ + str(tile_size) + r""";
+    const int32_t l1_size = """
+            + str(l1_size)
+            + r""";
+    const int32_t l1_half = """
+            + str(l1_half)
+            + r""";
+    const int32_t n_threads = """
+            + str(column_stride)
+            + r""";
+    const int32_t tile_size = """
+            + str(tile_size)
+            + r""";
 
-    __shared__ float shared_grad_bias[""" + str(output_size) + r"""];
+    __shared__ float shared_grad_bias["""
+            + str(output_size)
+            + r"""];
     for (int i = tid; i < output_size; i += n_threads) {
         shared_grad_bias[i] = 0.0f;
     }
@@ -187,8 +239,12 @@ void fused_double_ft_backward(
         const float us_val = __ldg(&us[block_idx]);
         const float them_val = __ldg(&them[block_idx]);
 
-        const int32_t* const w_idx_row = white_indices + block_idx * """ + str(max_active_indices) + r""";
-        const int32_t* const b_idx_row = black_indices + block_idx * """ + str(max_active_indices) + r""";
+        const int32_t* const w_idx_row = white_indices + block_idx * """
+            + str(max_active_indices)
+            + r""";
+        const int32_t* const b_idx_row = black_indices + block_idx * """
+            + str(max_active_indices)
+            + r""";
 
         const uint32_t clamp_base = block_idx * 4 * l1_half;
 
@@ -211,14 +267,18 @@ void fused_double_ft_backward(
             float g_b0 = them_val * dw0 + us_val * db0;
             float g_b1 = them_val * dw1 + us_val * db1;
 
-            for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
+            for(int k=0; k<"""
+            + str(max_active_indices)
+            + r"""; ++k) {
                 int w_idx = w_idx_row[k];
                 if (w_idx == -1) break;
                 atomicAdd(&grad_weight[w_idx * output_size + col], g_w0);
                 atomicAdd(&grad_weight[w_idx * output_size + col + l1_half], g_w1);
             }
 
-            for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
+            for(int k=0; k<"""
+            + str(max_active_indices)
+            + r"""; ++k) {
                 int b_idx = b_idx_row[k];
                 if (b_idx == -1) break;
                 atomicAdd(&grad_weight[b_idx * output_size + col], g_b0);
@@ -242,9 +302,15 @@ void fused_double_ft_backward(
             "fused_double_ft_backward",
         )
         kernel.compile()
+
         def launch(grid, args):
             stream = cp.cuda.ExternalStream(torch.cuda.current_stream().cuda_stream)
-            kernel(grid=(grid[0], column_tiles), block=(num_threads,), args=args, stream=stream)
+            kernel(
+                grid=(grid[0], column_tiles),
+                block=(num_threads,),
+                args=args,
+                stream=stream,
+            )
 
         _fused_double_ft_backward_kernel_cache[key] = launch
     return _fused_double_ft_backward_kernel_cache[key]

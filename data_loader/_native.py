@@ -23,13 +23,12 @@ def _pin_and_move(
     # Must copy off SparseBatch-backed memory before it is freed
     if torch.cuda.is_available() and use_pinned_memory:
         if copy_mode not in ("memcpy", "torch"):
-            raise ValueError(
-                "copy_mode must be memcpy or torch, "
-                f"got {copy_mode!r}"
-            )
+            raise ValueError(f"copy_mode must be memcpy or torch, got {copy_mode!r}")
         # Allocate a pinned CPU tensor and copy the data directly into it.
         # This is much faster than t.clone().pin_memory() which does two copies/allocations.
-        out = torch.empty(t.shape, dtype=dtype, layout=t.layout, device="cpu", pin_memory=True)
+        out = torch.empty(
+            t.shape, dtype=dtype, layout=t.layout, device="cpu", pin_memory=True
+        )
         if (
             copy_mode == "memcpy"
             and t.device.type == "cpu"
@@ -44,10 +43,12 @@ def _pin_and_move(
             ctypes.memmove(out.data_ptr(), t.data_ptr(), t.numel() * t.element_size())
         else:
             out.copy_(t)
-        if device == "cpu" or (isinstance(device, torch.device) and device.type == "cpu"):
+        if device == "cpu" or (
+            isinstance(device, torch.device) and device.type == "cpu"
+        ):
             return out
         return out.to(device=device, non_blocking=True)
-    
+
     # If not using pinned memory, just copy to standard CPU storage
     out = torch.empty(t.shape, dtype=dtype, layout=t.layout, device="cpu")
     out.copy_(t)
@@ -92,14 +93,20 @@ class SparseBatch(ctypes.Structure):
         float_block_gpu = _pin_and_move(float_block_cpu, device, use_pinned_memory)
         int_block_gpu = _pin_and_move(int_block_cpu, device, use_pinned_memory)
 
-        us = float_block_gpu[0 : size].view(size, 1)
+        us = float_block_gpu[0:size].view(size, 1)
         outcome = float_block_gpu[size : 2 * size].view(size, 1)
         score = float_block_gpu[2 * size : 3 * size].view(size, 1)
 
         white_indices = int_block_gpu[0 : size * max_active].view(size, max_active)
-        black_indices = int_block_gpu[size * max_active : 2 * size * max_active].view(size, max_active)
-        piece_count_i32 = int_block_gpu[2 * size * max_active : 2 * size * max_active + size].view(size)
-        queen_bucket_i32 = int_block_gpu[2 * size * max_active + size : 2 * size * max_active + 2 * size].view(size)
+        black_indices = int_block_gpu[size * max_active : 2 * size * max_active].view(
+            size, max_active
+        )
+        piece_count_i32 = int_block_gpu[
+            2 * size * max_active : 2 * size * max_active + size
+        ].view(size)
+        queen_bucket_i32 = int_block_gpu[
+            2 * size * max_active + size : 2 * size * max_active + 2 * size
+        ].view(size)
 
         # Keep piece counts and queen buckets as int64 so callers can derive buckets on the target device.
         if not us.is_cuda and use_pinned_memory:
@@ -107,10 +114,14 @@ class SparseBatch(ctypes.Structure):
             them.fill_(1.0)
             them.sub_(us)
 
-            piece_count = torch.empty(size, dtype=torch.int64, device="cpu", pin_memory=True)
+            piece_count = torch.empty(
+                size, dtype=torch.int64, device="cpu", pin_memory=True
+            )
             piece_count.copy_(piece_count_i32)
 
-            queen_bucket = torch.empty(size, dtype=torch.int64, device="cpu", pin_memory=True)
+            queen_bucket = torch.empty(
+                size, dtype=torch.int64, device="cpu", pin_memory=True
+            )
             queen_bucket.copy_(queen_bucket_i32)
         else:
             them = 1.0 - us
@@ -153,8 +164,16 @@ class CDataLoaderAPI:
         for pattern in (
             "./build/**/*training_data_loader.*",
             "./build/*training_data_loader.*",
-            os.path.join(os.path.dirname(__file__), "cpp", "build", "**", "*training_data_loader.*"),
-            os.path.join(os.path.dirname(__file__), "cpp", "build", "*training_data_loader.*"),
+            os.path.join(
+                os.path.dirname(__file__),
+                "cpp",
+                "build",
+                "**",
+                "*training_data_loader.*",
+            ),
+            os.path.join(
+                os.path.dirname(__file__), "cpp", "build", "*training_data_loader.*"
+            ),
         ):
             for lib in glob.glob(pattern, recursive=True):
                 if lib.endswith((".so", ".dll", ".dylib")):
@@ -168,7 +187,9 @@ class CDataLoaderAPI:
                 last_error = e
 
         if last_error is not None:
-            raise OSError("Found data_loader shared libraries but failed to load any of them.") from last_error
+            raise OSError(
+                "Found data_loader shared libraries but failed to load any of them."
+            ) from last_error
         raise FileNotFoundError("Cannot find data_loader shared library.")
 
     def _define_prototypes(self):

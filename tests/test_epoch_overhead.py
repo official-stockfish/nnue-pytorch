@@ -18,7 +18,7 @@ class TestTensorToBytes(unittest.TestCase):
             _tensor_to_bytes(t)
         dt = (time.perf_counter() - t0) / 3
         # bytes(tensor) takes ~900 ms; allow generous CI headroom.
-        self.assertLess(dt, 0.1, f"tensor->bytes took {dt*1e3:.1f} ms")
+        self.assertLess(dt, 0.1, f"tensor->bytes took {dt * 1e3:.1f} ms")
 
 
 if __name__ == "__main__":

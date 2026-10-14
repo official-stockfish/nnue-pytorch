@@ -35,7 +35,11 @@ _TF32_REASON = "requires an NVIDIA GPU with compute capability >= 8 (Ampere)"
 
 def _make_layer_stacks(count):
     torch.manual_seed(1234)
-    layer = LayerStacks(count, LayerStacksConfig(L1=1024, L2=32, L3=32), QuantizationManager(QuantizationConfig())).cuda()
+    layer = LayerStacks(
+        count,
+        LayerStacksConfig(L1=1024, L2=32, L3=32),
+        QuantizationManager(QuantizationConfig()),
+    ).cuda()
     with torch.no_grad():
         for p in layer.parameters():
             p.copy_(torch.randn_like(p) * 0.5)
@@ -53,7 +57,9 @@ def _quantized_input(batch):
 def test_dense_forward_bit_identical_under_quantization(count, batch):
     layer = _make_layer_stacks(count)
     x = _quantized_input(batch)
-    ls_indices = ((torch.randint(1, 33, (batch,), device="cuda", dtype=torch.int64) - 1) // 4)
+    ls_indices = (
+        torch.randint(1, 33, (batch,), device="cuda", dtype=torch.int64) - 1
+    ) // 4
 
     torch.backends.cuda.matmul.allow_tf32 = False
     expected = layer(x, ls_indices, True, True)
@@ -87,7 +93,9 @@ def test_tf32_changes_forward_without_quantization():
     layer = _make_layer_stacks(8)
     batch = 4096
     x = torch.randn(batch, 1024, device="cuda")
-    ls_indices = ((torch.randint(1, 33, (batch,), device="cuda", dtype=torch.int64) - 1) // 4)
+    ls_indices = (
+        torch.randint(1, 33, (batch,), device="cuda", dtype=torch.int64) - 1
+    ) // 4
 
     torch.backends.cuda.matmul.allow_tf32 = False
     expected = layer(x, ls_indices, False, False)

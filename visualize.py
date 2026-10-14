@@ -672,9 +672,7 @@ def main():
             M.ModelConfig.get_model_config(args),
         )
 
-        print(
-            f"Visualizing difference between {args.model} and {args.ref_model}"
-        )
+        print(f"Visualizing difference between {args.model} and {args.ref_model}")
 
         from os.path import basename
 

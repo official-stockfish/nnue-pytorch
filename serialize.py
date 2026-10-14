@@ -58,7 +58,9 @@ class SerializeConfig:
     """Number of workers to use for data loading during FT optimization."""
 
     dataloader_config: OmitArgPrefixes[DataloaderSkipConfig] = field(
-        default_factory=DataloaderSkipConfig if DataloaderSkipConfig is not None else lambda: None
+        default_factory=DataloaderSkipConfig
+        if DataloaderSkipConfig is not None
+        else lambda: None
     )
 
 
@@ -73,9 +75,7 @@ class CliConfig:
     serialize_config: OmitArgPrefixes[SerializeConfig] = field(
         default_factory=SerializeConfig
     )
-    nnue_config: OmitArgPrefixes[M.NNUEConfig] = field(
-        default_factory=M.NNUEConfig
-    )
+    nnue_config: OmitArgPrefixes[M.NNUEConfig] = field(default_factory=M.NNUEConfig)
 
 
 def main():
@@ -179,9 +179,7 @@ def main():
             out_dir = os.path.abspath(os.path.dirname(args.target) or os.getcwd())
         os.makedirs(out_dir, exist_ok=True)
 
-        writer = M.NNUEWriter(
-            nnue.model, model_description
-        )
+        writer = M.NNUEWriter(nnue.model, model_description)
         buf = writer.buf
 
         if serialize_config.out_sha:

@@ -186,7 +186,9 @@ class TrainingDataProvider:
         v = self.fetch_next(self.stream)
 
         if v:
-            tensors = v.contents.get_tensors(self.device, use_pinned_memory=self.use_pinned_memory)
+            tensors = v.contents.get_tensors(
+                self.device, use_pinned_memory=self.use_pinned_memory
+            )
             self.destroy_part(v)
             return tensors
         else:
@@ -405,7 +407,10 @@ class FixedNumBatchesDataset(Dataset):
                 self._prefetch_device = self._resolve_prefetch_device()
                 if hasattr(self.dataset, "use_pinned_memory"):
                     self.dataset.use_pinned_memory = self.pin_memory
-                if hasattr(self.dataset, "device") and self._prefetch_device is not None:
+                if (
+                    hasattr(self.dataset, "device")
+                    and self._prefetch_device is not None
+                ):
                     self.dataset.device = self._prefetch_device
                 self.iter = iter(self.dataset)
                 self._prefetch_thread = threading.Thread(

@@ -40,7 +40,7 @@ class _RangerLiteFusedKernels:
     def _compile(cls):
         if cls._compiled or not _HAS_CUPY:
             return
-        source = r'''
+        source = r"""
 typedef long long int64_t;
 
 extern "C" __global__ void ranger_lite_update_pnm(
@@ -211,12 +211,12 @@ extern "C" __global__ void ranger_lite_update_adam_phase2(
         p[i] = new_p;
     }
 }
-'''
-        cls._pnm_kernel = cp.RawKernel(source, 'ranger_lite_update_pnm')
-        cls._adam_kernel = cp.RawKernel(source, 'ranger_lite_update_adam')
-        cls._variance_kernel = cp.RawKernel(source, 'ranger_lite_update_variance')
-        cls._pnm_phase2_kernel = cp.RawKernel(source, 'ranger_lite_update_pnm_phase2')
-        cls._adam_phase2_kernel = cp.RawKernel(source, 'ranger_lite_update_adam_phase2')
+"""
+        cls._pnm_kernel = cp.RawKernel(source, "ranger_lite_update_pnm")
+        cls._adam_kernel = cp.RawKernel(source, "ranger_lite_update_adam")
+        cls._variance_kernel = cp.RawKernel(source, "ranger_lite_update_variance")
+        cls._pnm_phase2_kernel = cp.RawKernel(source, "ranger_lite_update_pnm_phase2")
+        cls._adam_phase2_kernel = cp.RawKernel(source, "ranger_lite_update_adam_phase2")
         cls._pnm_kernel.compile()
         cls._adam_kernel.compile()
         cls._variance_kernel.compile()
@@ -244,12 +244,12 @@ class RangerLite(torch.optim.Optimizer):
         use_stable_weight_decay=True,
     ):
         defaults = {
-            'lr': lr,
-            'weight_decay': weight_decay,
-            'betas': betas,
-            'eps': eps,
-            'pnm_momentum': pnm_momentum,
-            'normloss_factor': normloss_factor,
+            "lr": lr,
+            "weight_decay": weight_decay,
+            "betas": betas,
+            "eps": eps,
+            "pnm_momentum": pnm_momentum,
+            "normloss_factor": normloss_factor,
         }
         super().__init__(params, defaults)
 
@@ -285,11 +285,15 @@ class RangerLite(torch.optim.Optimizer):
         if len(state) == 0:
             state["step"] = 0
             state["grad_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
-            state["variance_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+            state["variance_ma"] = torch.zeros_like(
+                p, memory_format=torch.preserve_format
+            )
             if self.lookahead_active:
                 state["lookahead_params"] = torch.clone(p.data)
             if self.pnm_active:
-                state["neg_grad_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                state["neg_grad_ma"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
 
     def _can_fuse_group_full(self, group):
         """Full fused path requires no stable_weight_decay and no normloss."""
@@ -348,7 +352,7 @@ class RangerLite(torch.optim.Optimizer):
         beta1_sq = beta1 * beta1
         one_minus_beta1_sq = 1.0 - beta1_sq
         one_plus_pnm = 1.0 + pnm_factor
-        noise_norm = math.sqrt((1.0 + pnm_factor) ** 2 + pnm_factor ** 2)
+        noise_norm = math.sqrt((1.0 + pnm_factor) ** 2 + pnm_factor**2)
 
         wd_factor = decay * lr if not self.use_stable_weight_decay else 0.0
 
@@ -361,7 +365,7 @@ class RangerLite(torch.optim.Optimizer):
 
             state["step"] += 1
             step = state["step"]
-            bias_correction2 = 1.0 - beta2 ** step
+            bias_correction2 = 1.0 - beta2**step
 
             p_arr = cp.from_dlpack(torch.to_dlpack(p.detach()))
             g_arr = cp.from_dlpack(torch.to_dlpack(grad))
@@ -373,7 +377,7 @@ class RangerLite(torch.optim.Optimizer):
 
             if self.pnm_active:
                 effective_step = ((step + 1) // 2) * 2
-                bias_correction1 = 1.0 - beta1 ** effective_step
+                bias_correction1 = 1.0 - beta1**effective_step
                 lr_div_bc1 = lr / bias_correction1
                 ngm_arr = cp.from_dlpack(torch.to_dlpack(state["neg_grad_ma"]))
                 args = (
@@ -396,9 +400,11 @@ class RangerLite(torch.optim.Optimizer):
                     np.int64(step),
                     np.float32(wd_factor),
                 )
-                _RangerLiteFusedKernels._pnm_kernel(grid=(grid,), block=(block,), args=args)
+                _RangerLiteFusedKernels._pnm_kernel(
+                    grid=(grid,), block=(block,), args=args
+                )
             else:
-                bias_correction1 = 1.0 - beta1 ** step
+                bias_correction1 = 1.0 - beta1**step
                 lr_div_bc1 = lr / bias_correction1
                 args = (
                     p_arr,
@@ -415,7 +421,9 @@ class RangerLite(torch.optim.Optimizer):
                     np.float32(eps),
                     np.float32(wd_factor),
                 )
-                _RangerLiteFusedKernels._adam_kernel(grid=(grid,), block=(block,), args=args)
+                _RangerLiteFusedKernels._adam_kernel(
+                    grid=(grid,), block=(block,), args=args
+                )
 
     def _fused_update_group_phase2(self, group, variance_norm_value=None):
         """Apply the fused phase-2 update kernel (moment + optional decay + param).
@@ -431,7 +439,7 @@ class RangerLite(torch.optim.Optimizer):
         beta1_sq = beta1 * beta1
         one_minus_beta1_sq = 1.0 - beta1_sq
         one_plus_pnm = 1.0 + pnm_factor
-        noise_norm = math.sqrt((1.0 + pnm_factor) ** 2 + pnm_factor ** 2)
+        noise_norm = math.sqrt((1.0 + pnm_factor) ** 2 + pnm_factor**2)
 
         wd_factor = 0.0
         if decay:
@@ -449,7 +457,7 @@ class RangerLite(torch.optim.Optimizer):
             grad = p.grad
             state = self.state[p]
             step = state["step"]
-            bias_correction2 = 1.0 - beta2 ** step
+            bias_correction2 = 1.0 - beta2**step
 
             p_arr = cp.from_dlpack(torch.to_dlpack(p.detach()))
             g_arr = cp.from_dlpack(torch.to_dlpack(grad))
@@ -461,7 +469,7 @@ class RangerLite(torch.optim.Optimizer):
 
             if self.pnm_active:
                 effective_step = ((step + 1) // 2) * 2
-                bias_correction1 = 1.0 - beta1 ** effective_step
+                bias_correction1 = 1.0 - beta1**effective_step
                 lr_div_bc1 = lr / bias_correction1
                 ngm_arr = cp.from_dlpack(torch.to_dlpack(state["neg_grad_ma"]))
                 args = (
@@ -482,9 +490,11 @@ class RangerLite(torch.optim.Optimizer):
                     np.int64(step),
                     np.float32(wd_factor),
                 )
-                _RangerLiteFusedKernels._pnm_phase2_kernel(grid=(grid,), block=(block,), args=args)
+                _RangerLiteFusedKernels._pnm_phase2_kernel(
+                    grid=(grid,), block=(block,), args=args
+                )
             else:
-                bias_correction1 = 1.0 - beta1 ** step
+                bias_correction1 = 1.0 - beta1**step
                 lr_div_bc1 = lr / bias_correction1
                 args = (
                     p_arr,
@@ -499,7 +509,9 @@ class RangerLite(torch.optim.Optimizer):
                     np.float32(eps),
                     np.float32(wd_factor),
                 )
-                _RangerLiteFusedKernels._adam_phase2_kernel(grid=(grid,), block=(block,), args=args)
+                _RangerLiteFusedKernels._adam_phase2_kernel(
+                    grid=(grid,), block=(block,), args=args
+                )
 
     def _apply_weight_decay(self, p, decay, lr, variance_normalized):
         if not decay:
@@ -536,16 +548,21 @@ class RangerLite(torch.optim.Optimizer):
                 loss = closure()
 
         first_param = next(
-            (p for group in self.param_groups for p in group['params'] if p.grad is not None),
+            (
+                p
+                for group in self.param_groups
+                for p in group["params"]
+                if p.grad is not None
+            ),
             None,
         )
 
         if first_param is None:
-            return loss # No grads to process
+            return loss  # No grads to process
 
-        needs_variance_sum = (
-            self.normloss_active
-            or (self.use_stable_weight_decay and any(g.get("weight_decay", 0.0) != 0.0 for g in self.param_groups))
+        needs_variance_sum = self.normloss_active or (
+            self.use_stable_weight_decay
+            and any(g.get("weight_decay", 0.0) != 0.0 for g in self.param_groups)
         )
 
         # Fast path A: no variance sum needed and all groups can use the single
@@ -599,7 +616,9 @@ class RangerLite(torch.optim.Optimizer):
                     np.float32(beta2),
                     np.float32(1.0 - beta2),
                 )
-                _RangerLiteFusedKernels._variance_kernel(grid=(grid,), block=(block,), args=args)
+                _RangerLiteFusedKernels._variance_kernel(
+                    grid=(grid,), block=(block,), args=args
+                )
 
             variance_norm_value = None
             if needs_variance_sum:
@@ -615,7 +634,9 @@ class RangerLite(torch.optim.Optimizer):
                         variance_ma_sum += partial
                 if not self.param_size:
                     self.param_size = param_size
-                variance_normalized = torch.sqrt(variance_ma_sum / self.param_size).clamp_min(self.eps)
+                variance_normalized = torch.sqrt(
+                    variance_ma_sum / self.param_size
+                ).clamp_min(self.eps)
                 variance_norm_value = variance_normalized.item()
 
             for group in self.param_groups:
@@ -647,15 +668,21 @@ class RangerLite(torch.optim.Optimizer):
                 # State initialization
                 if len(state) == 0:
                     state["step"] = 0
-                    state["grad_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state["variance_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state["grad_ma"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
+                    state["variance_ma"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
 
                     if self.lookahead_active:
                         state["lookahead_params"] = torch.clone(p.data)
 
                     if self.pnm_active:
                         # PNM components
-                        state["neg_grad_ma"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                        state["neg_grad_ma"] = torch.zeros_like(
+                            p, memory_format=torch.preserve_format
+                        )
 
                 state["step"] += 1
                 beta1, beta2 = group["betas"]
@@ -677,7 +704,9 @@ class RangerLite(torch.optim.Optimizer):
                     return loss
                 self.param_size = param_size
 
-            variance_normalized = torch.sqrt(variance_ma_sum / self.param_size).clamp_min(self.eps)
+            variance_normalized = torch.sqrt(
+                variance_ma_sum / self.param_size
+            ).clamp_min(self.eps)
 
         # Phase 2: Apply weight decay and update weights
         for group in self.param_groups:
@@ -716,7 +745,9 @@ class RangerLite(torch.optim.Optimizer):
                     # Norm Loss
                     if self.normloss_active:
                         unorm = self.unit_norm(p.data)
-                        corr = 2 * normloss_factor * (1 - torch.div(1, unorm + self.eps))
+                        corr = (
+                            2 * normloss_factor * (1 - torch.div(1, unorm + self.eps))
+                        )
                         p.data.mul_(1 - lr * corr)
                 # ------------------------
 
@@ -726,32 +757,40 @@ class RangerLite(torch.optim.Optimizer):
                 grad_ma = state["grad_ma"]
                 variance_ma = state["variance_ma"]
 
-                bias_correction2 = 1 - beta2 ** step
+                bias_correction2 = 1 - beta2**step
 
                 # Despite the comment. Ranger21 doesnt actually use variance_ma_max for denominator
-                denom = (variance_ma.sqrt() / math.sqrt(bias_correction2)).add_(group["eps"])
+                denom = (variance_ma.sqrt() / math.sqrt(bias_correction2)).add_(
+                    group["eps"]
+                )
 
                 if self.pnm_active:
                     # PNM Adam Core Setup
                     if step % 2 == 1:
-                        pnm_grad_ma, pnm_neg_grad_ma = state["grad_ma"], state["neg_grad_ma"]
+                        pnm_grad_ma, pnm_neg_grad_ma = (
+                            state["grad_ma"],
+                            state["neg_grad_ma"],
+                        )
                     else:
-                        pnm_grad_ma, pnm_neg_grad_ma = state["neg_grad_ma"], state["grad_ma"]
+                        pnm_grad_ma, pnm_neg_grad_ma = (
+                            state["neg_grad_ma"],
+                            state["grad_ma"],
+                        )
 
                     # Update neg_grad_ma
-                    pnm_grad_ma.mul_(beta1 ** 2).add_(grad, alpha=(1 - beta1 ** 2))
+                    pnm_grad_ma.mul_(beta1**2).add_(grad, alpha=(1 - beta1**2))
 
                     if self.use_legacy_scoping_bug:
                         # Legacy calculation
-                        bias_correction1 = 1 - beta1 ** step
-                        noise_norm = math.sqrt((1 + beta2) ** 2 + beta2 ** 2)
+                        bias_correction1 = 1 - beta1**step
+                        noise_norm = math.sqrt((1 + beta2) ** 2 + beta2**2)
 
                     else:
                         # Corrected: Bias updated with exact number of effective steps
                         effective_step = ((step + 1) // 2) * 2
-                        bias_correction1 = 1 - beta1 ** effective_step
+                        bias_correction1 = 1 - beta1**effective_step
                         # Corrected: Normalization calculated from pnm_factor like in original paper. However lr tuning is likely still required.
-                        noise_norm = math.sqrt((1 + pnm_factor) ** 2 + pnm_factor ** 2)
+                        noise_norm = math.sqrt((1 + pnm_factor) ** 2 + pnm_factor**2)
 
                     pnm_val = (
                         pnm_grad_ma.mul(1 + pnm_factor)
@@ -764,7 +803,7 @@ class RangerLite(torch.optim.Optimizer):
 
                 else:
                     # Standard Adam update
-                    bias_correction1 = 1 - beta1 ** step
+                    bias_correction1 = 1 - beta1**step
 
                     # Standard EMA for the first moment
                     grad_ma.mul_(beta1).add_(grad, alpha=1 - beta1)
@@ -776,7 +815,6 @@ class RangerLite(torch.optim.Optimizer):
             self.lookahead_process_step()
 
         return loss
-
 
     #   Lookahead merge process
     def lookahead_process_step(self):

@@ -74,7 +74,9 @@ class K32Q2(InputFeature):
 
     def clip_weights(self, quantization) -> None:
         p_data_fp32 = self.weight.data
-        min_weight, max_weight = quantization.get_ft_weight_bounds(self.EXPORT_WEIGHT_DTYPE)
+        min_weight, max_weight = quantization.get_ft_weight_bounds(
+            self.EXPORT_WEIGHT_DTYPE
+        )
 
         virtual_params = self.virtual_weight.data
 

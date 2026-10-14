@@ -9,11 +9,13 @@ if TYPE_CHECKING:
 
 FAKE_QUANTIZE_EPS = 1e-5
 
+
 class WeightClippingConfig(TypedDict):
     params: list[torch.Tensor]
     min_weight: float
     max_weight: float
     virtual_params: NotRequired[torch.Tensor]
+
 
 def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
     _info = torch.iinfo(target_dtype)
@@ -29,20 +31,26 @@ def _safe_convert(value: torch.Tensor, target_dtype: torch.dtype):
         num_clipped_int = int(num_clipped.item())
         min = rounded_value.min().item()
         max = rounded_value.max().item()
-        raise RuntimeError(f"Found {num_clipped_int} out of bounds values when converting to target dtype {target_dtype}. Min: {min}, max: {max}.")
+        raise RuntimeError(
+            f"Found {num_clipped_int} out of bounds values when converting to target dtype {target_dtype}. Min: {min}, max: {max}."
+        )
 
     return quantized_value
+
 
 def _fake_quantize_acts(value, act_scale):
     # Fake quantization with STE
     # Inference uses bitshift which is equivalent to rounding down (floor).
     # act_scale is in nnue-pytorch is `> 1`, inverted compared to normal literature.
     # will be slightly inaccurate unless all corrections factors are 1.0.
-    value_hard = value.mul(act_scale).add(FAKE_QUANTIZE_EPS).floor().div(act_scale).detach()
+    value_hard = (
+        value.mul(act_scale).add(FAKE_QUANTIZE_EPS).floor().div(act_scale).detach()
+    )
     value_soft = value.detach()
     value = value_hard + (value - value_soft)
 
     return value
+
 
 def _fake_quantize_weights(value, weight_scale):
     # Fake quantization with STE
@@ -54,6 +62,7 @@ def _fake_quantize_weights(value, weight_scale):
     value = value_hard + (value - value_soft)
 
     return value
+
 
 @dataclass
 class QuantizationConfig:
@@ -89,19 +98,27 @@ class QuantizationManager:
         i8_max = float(torch.iinfo(torch.int8).max)
         self.max_hidden_weight = [i8_max / scale for scale in self.weight_scale_hidden]
 
-        self.l0_correction_factor = config.ft_quantized_one ** 2 / config.inference_l0_division_factor / self.hidden_quantized_one
-        self.sqr_crelu_correction_factor = config.hidden_quantized_one / config.inference_sqr_crelu_division_factor
+        self.l0_correction_factor = (
+            config.ft_quantized_one**2
+            / config.inference_l0_division_factor
+            / self.hidden_quantized_one
+        )
+        self.sqr_crelu_correction_factor = (
+            config.hidden_quantized_one / config.inference_sqr_crelu_division_factor
+        )
         self.max_ft_activation = config.ft_quantized_max / config.ft_quantized_one
-        self.max_hidden_activation = config.hidden_quantized_max / config.hidden_quantized_one
+        self.max_hidden_activation = (
+            config.hidden_quantized_max / config.hidden_quantized_one
+        )
         self.weight_scales_dict = {
-            "ft_weight" : self.ft_quantized_one,
-            "ft_bias" : self.ft_quantized_one,
-            "ls_l1_weight" : self.weight_scale_hidden[0],
-            "ls_l1_bias" : self.weight_scale_hidden[0] * self.hidden_quantized_one,
-            "ls_l2_weight" : self.weight_scale_hidden[1],
-            "ls_l2_bias" : self.weight_scale_hidden[1] * self.hidden_quantized_one,
-            "ls_output_weight" : self.weight_scale_hidden[2],
-            "ls_output_bias" : self.weight_scale_hidden[2] * self.hidden_quantized_one,
+            "ft_weight": self.ft_quantized_one,
+            "ft_bias": self.ft_quantized_one,
+            "ls_l1_weight": self.weight_scale_hidden[0],
+            "ls_l1_bias": self.weight_scale_hidden[0] * self.hidden_quantized_one,
+            "ls_l2_weight": self.weight_scale_hidden[1],
+            "ls_l2_bias": self.weight_scale_hidden[1] * self.hidden_quantized_one,
+            "ls_output_weight": self.weight_scale_hidden[2],
+            "ls_output_bias": self.weight_scale_hidden[2] * self.hidden_quantized_one,
         }
 
     def get_ft_weight_bounds(self, dtype: torch.dtype) -> tuple[float, float]:
@@ -128,14 +145,14 @@ class QuantizationManager:
 
     def fake_quantize_output(self, preact: torch.Tensor) -> torch.Tensor:
         multiplier_int = int(self.config.nnue2score * self.config.weight_scale_out)
-        denominator_int = int(self.config.hidden_quantized_one * self.config.weight_scale_l_out * 2.0)
+        denominator_int = int(
+            self.config.hidden_quantized_one * self.config.weight_scale_l_out * 2.0
+        )
 
         fwd_out_int = torch.round(preact * denominator_int).to(torch.int64)
 
         output_value_int = torch.div(
-            fwd_out_int * multiplier_int,
-            denominator_int,
-            rounding_mode='trunc'
+            fwd_out_int * multiplier_int, denominator_int, rounding_mode="trunc"
         )
 
         quantized_out = output_value_int.to(preact.dtype) / float(multiplier_int)
@@ -216,7 +233,9 @@ class QuantizationManager:
         bias_key = f"{layer_key}_bias"
 
         bias = _safe_convert(bias.mul(self.weight_scales_dict[bias_key]), torch.int32)
-        weight = _safe_convert(weight.mul(self.weight_scales_dict[weight_key]), torch.int8)
+        weight = _safe_convert(
+            weight.mul(self.weight_scales_dict[weight_key]), torch.int8
+        )
 
         if callback is not None:
             callback(bias_key, bias)

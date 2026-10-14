@@ -9,7 +9,9 @@ from .stacked_linear import FactorizedStackedLinear, StackedLinear
 
 
 class LayerStacks(nn.Module):
-    def __init__(self, count: int, config: LayerStacksConfig, quantization: QuantizationManager):
+    def __init__(
+        self, count: int, config: LayerStacksConfig, quantization: QuantizationManager
+    ):
         super().__init__()
 
         self.count = count
@@ -22,19 +24,24 @@ class LayerStacks(nn.Module):
         # there's a non-linearity and factorization breaks.
         # This is by design. The weights in the further layers should be
         # able to diverge a lot.
-        self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2, count, quantization, "ls_l1")
+        self.l1 = FactorizedStackedLinear(
+            2 * self.L1 // 2, self.L2, count, quantization, "ls_l1"
+        )
         self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
 
-        self.output = StackedLinear(self.L2 * 2 + self.L3 * 2, 1, count, quantization, "ls_output")
+        self.output = StackedLinear(
+            self.L2 * 2 + self.L3 * 2, 1, count, quantization, "ls_output"
+        )
 
         with torch.no_grad():
             self.output.linear.bias.zero_()
 
     def forward(
-        self, x: torch.Tensor,
+        self,
+        x: torch.Tensor,
         ls_indices: torch.Tensor,
-        fake_quantize_acts: bool=True,
-        fake_quantize_weights: bool=True,
+        fake_quantize_acts: bool = True,
+        fake_quantize_weights: bool = True,
     ):
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
 
@@ -80,7 +87,9 @@ class LayerStacks(nn.Module):
         if fake_quantize_acts:
             l3x_ = self.quantization.fake_quantize_output(l3x_)
 
-        assert l3x_.shape[1] == 1, f"Expected output shape (batch_size, 1), got {l3x_.shape}"
+        assert l3x_.shape[1] == 1, (
+            f"Expected output shape (batch_size, 1), got {l3x_.shape}"
+        )
         return l3x_
 
     @torch.no_grad()

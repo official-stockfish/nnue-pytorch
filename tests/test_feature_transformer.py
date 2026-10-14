@@ -52,12 +52,8 @@ def _run_test(device: torch.device):
         dtype=torch.int32
     )
 
-    output00 = SparseLinearFunctionEmulate(
-        indices0.clone(), weight0, bias0
-    )
-    output01 = SparseLinearFunctionEmulate(
-        indices1.clone(), weight0, bias0
-    )
+    output00 = SparseLinearFunctionEmulate(indices0.clone(), weight0, bias0)
+    output01 = SparseLinearFunctionEmulate(indices1.clone(), weight0, bias0)
     output10 = SparseLinearFunction.apply(
         indices0.clone().to(device),
         weight1.to(device),
@@ -98,13 +94,9 @@ def _run_padding_test(device: torch.device):
         (BATCH_SIZE, N_PADDING), -1, dtype=torch.int32, device=device
     )
 
-    out_unpadded = SparseLinearFunction.apply(
-        active_indices, weight, bias
-    )
+    out_unpadded = SparseLinearFunction.apply(active_indices, weight, bias)
     indices_padded = torch.cat([active_indices, padding_indices], dim=1)
-    out_padded = SparseLinearFunction.apply(
-        indices_padded, weight, bias
-    )
+    out_padded = SparseLinearFunction.apply(indices_padded, weight, bias)
 
     assert torch.max(torch.abs(out_unpadded - out_padded)) < MAX_ERROR
     print(f"Padding test passed on {device}.")
@@ -121,9 +113,7 @@ def test_cuda():
     _run_padding_test(torch.device("cuda"))
 
 
-@pytest.mark.skipif(
-    not torch.backends.mps.is_available(), reason="MPS not available"
-)
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS not available")
 def test_mps():
     _run_test(torch.device("mps"))
     _run_padding_test(torch.device("mps"))
@@ -138,4 +128,3 @@ if __name__ == "__main__":
     if torch.backends.mps.is_available():
         _run_test(torch.device("mps"))
         _run_padding_test(torch.device("mps"))
-

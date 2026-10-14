@@ -174,9 +174,7 @@ class SimpleTrainer:
 
     def _move_batch_to_device(self, batch):
         return tuple(
-            t.to(self.device, non_blocking=True)
-            if isinstance(t, torch.Tensor)
-            else t
+            t.to(self.device, non_blocking=True) if isinstance(t, torch.Tensor) else t
             for t in batch
         )
 
@@ -192,7 +190,16 @@ class SimpleTrainer:
         if self._ddp_model is not None:
             # DDP wraps the inner NNUEModel; run its forward to get scorenet,
             # then compute the loss on the plain NNUE object.
-            us, them, white_indices, black_indices, _outcome, _score, piece_count, queen_bucket = batch
+            (
+                us,
+                them,
+                white_indices,
+                black_indices,
+                _outcome,
+                _score,
+                piece_count,
+                queen_bucket,
+            ) = batch
             scorenet = self._ddp_model(
                 us,
                 them,
@@ -206,7 +213,9 @@ class SimpleTrainer:
             loss = _unwrap_module(self.model).compute_loss_with_scorenet(
                 scorenet, batch, self.global_step
             )
-            _unwrap_module(self.model).loss_metrics["train_loss_epoch"].update(loss.detach())
+            _unwrap_module(self.model).loss_metrics["train_loss_epoch"].update(
+                loss.detach()
+            )
             outputs = {"loss": loss, "train_loss": loss.detach()}
         else:
             outputs = self.model.train_step(batch, self.current_epoch, self.global_step)
@@ -281,7 +290,9 @@ class SimpleTrainer:
     # Training loop
     # ------------------------------------------------------------------
     def fit(self, train_loader, val_loader=None):
-        self.num_training_batches = len(train_loader) if hasattr(train_loader, "__len__") else None
+        self.num_training_batches = (
+            len(train_loader) if hasattr(train_loader, "__len__") else None
+        )
 
         self._call_callbacks("on_fit_start", self)
         self._call_callbacks("on_train_start", self)
@@ -290,7 +301,10 @@ class SimpleTrainer:
             self.current_epoch = epoch
             self._train_epoch(train_loader)
 
-            if val_loader is not None and (self.current_epoch + 1) % self.check_val_every_n_epoch == 0:
+            if (
+                val_loader is not None
+                and (self.current_epoch + 1) % self.check_val_every_n_epoch == 0
+            ):
                 self.validate(val_loader)
 
             if self.should_stop:
@@ -337,10 +351,9 @@ class SimpleTrainer:
             # when logging is due or when a callback needs the scalar.
             self.callback_metrics["train_loss"] = outputs["train_loss"].detach()
 
-            if (
-                (batch_idx + 1) % self.log_every_n_steps == 0
-                or (batch_idx + 1) == self.num_training_batches
-            ):
+            if (batch_idx + 1) % self.log_every_n_steps == 0 or (
+                batch_idx + 1
+            ) == self.num_training_batches:
                 self.callback_metrics["train_loss"] = float(
                     self.callback_metrics["train_loss"]
                 )
@@ -375,7 +388,9 @@ class SimpleTrainer:
         if val_loader is None:
             return
 
-        self.num_val_batches = len(val_loader) if hasattr(val_loader, "__len__") else None
+        self.num_val_batches = (
+            len(val_loader) if hasattr(val_loader, "__len__") else None
+        )
 
         self._call_callbacks("on_validation_start", self)
         self.model.eval()
@@ -391,13 +406,19 @@ class SimpleTrainer:
             for batch_idx, batch in enumerate(val_loader):
                 batch = self._move_batch_to_device(batch)
 
-                self._call_callbacks("on_validation_batch_start", self, batch, batch_idx)
+                self._call_callbacks(
+                    "on_validation_batch_start", self, batch, batch_idx
+                )
 
-                outputs = self.model.val_step(batch, self.current_epoch, self.global_step)
+                outputs = self.model.val_step(
+                    batch, self.current_epoch, self.global_step
+                )
                 total_val_loss += float(outputs["val_loss"])
                 num_val_batches += 1
 
-                self._call_callbacks("on_validation_batch_end", self, batch, batch_idx, outputs)
+                self._call_callbacks(
+                    "on_validation_batch_end", self, batch, batch_idx, outputs
+                )
 
         mean_val_loss = (
             total_val_loss / num_val_batches if num_val_batches > 0 else float("nan")

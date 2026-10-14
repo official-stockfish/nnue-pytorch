@@ -152,7 +152,9 @@ def aggregated_ft_backward(
     batch_size, active = white.shape
     tiles = (batch_size + 7) // 8
     with cp.cuda.Device(us.device.index):
-        pack, aggregate, capacity, shared_bytes, threads = _kernels(active, grad.shape[1])
+        pack, aggregate, capacity, shared_bytes, threads = _kernels(
+            active, grad.shape[1]
+        )
         ids = torch.empty((tiles, capacity), device=us.device, dtype=torch.int32)
         masks = torch.empty_like(ids)
         counts = torch.empty(tiles, device=us.device, dtype=torch.int32)
@@ -179,4 +181,6 @@ def aggregated_ft_backward(
         )
         with cp.cuda.ExternalStream(torch.cuda.current_stream(us.device).cuda_stream):
             pack((tiles,), (512,), pack_args, shared_mem=shared_bytes)
-            aggregate((tiles, grad.shape[1] // (2 * threads)), (threads,), backward_args)
+            aggregate(
+                (tiles, grad.shape[1] // (2 * threads)), (threads,), backward_args
+            )

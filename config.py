@@ -105,9 +105,7 @@ class TrainingConfig:
         default_factory=DataloaderIOConfig
     )
 
-    nnue_config: OmitArgPrefixes[NNUEConfig] = field(
-        default_factory=NNUEConfig
-    )
+    nnue_config: OmitArgPrefixes[NNUEConfig] = field(default_factory=NNUEConfig)
 
     @property
     def num_batches_per_epoch(self) -> int:

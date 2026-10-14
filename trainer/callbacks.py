@@ -19,6 +19,8 @@ def _tensor_to_bytes(t: torch.Tensor) -> bytes:
     view (sub-millisecond).
     """
     return t.detach().cpu().numpy().tobytes()
+
+
 from torch.optim.swa_utils import AveragedModel
 
 
@@ -85,7 +87,10 @@ class WeightClipper(Callback):
     @torch.compiler.disable
     def on_train_batch_end(self, trainer, batch=None, batch_idx=None, outputs=None):
         _, _, _ = batch, batch_idx, outputs  # Unused
-        if self.input_clipping_interval > 0 and trainer.global_step % self.input_clipping_interval == 0:
+        if (
+            self.input_clipping_interval > 0
+            and trainer.global_step % self.input_clipping_interval == 0
+        ):
             trainer.model.model.clip_weights(include_input=True)
         else:
             trainer.model.model.clip_weights(include_input=False)
@@ -244,9 +249,7 @@ class TerminateOnNaN(Callback):
 
     def _ensure_flag(self, device):
         if self._finite_flag is None:
-            self._finite_flag = torch.tensor(
-                True, device=device, dtype=torch.bool
-            )
+            self._finite_flag = torch.tensor(True, device=device, dtype=torch.bool)
 
     @torch.compiler.disable
     def on_train_batch_end(self, trainer, batch=None, batch_idx=None, outputs=None):
@@ -266,7 +269,10 @@ class TerminateOnNaN(Callback):
 
         # Only sync to CPU when logging is due or at the last batch.
         current_step = (batch_idx or 0) + 1
-        if current_step % trainer.log_every_n_steps == 0 or current_step == trainer.num_training_batches:
+        if (
+            current_step % trainer.log_every_n_steps == 0
+            or current_step == trainer.num_training_batches
+        ):
             # Every rank must enter the collective, even if only one rank
             # saw a non-finite loss. Otherwise the failing rank deadlocks.
             if trainer.world_size > 1 and dist.is_available() and dist.is_initialized():
@@ -364,7 +370,9 @@ class CheckpointManager(Callback):
         if self.save_top_k < 0:
             return
 
-        periodic = [p for p in self._saved_checkpoints if os.path.basename(p) != "last.ckpt"]
+        periodic = [
+            p for p in self._saved_checkpoints if os.path.basename(p) != "last.ckpt"
+        ]
         if len(periodic) <= self.save_top_k:
             return
 
@@ -448,28 +456,34 @@ class UniquePositionLogger(Callback):
 
         if not hll_bytes or len(hll_bytes) < self.HLL_STATE_SIZE:
             if self._ddp:
-                print(f"  [Warning] Rank {self.rank}: empty HLL state at epoch end, "
-                      f"skipping global merge.", flush=True)
+                print(
+                    f"  [Warning] Rank {self.rank}: empty HLL state at epoch end, "
+                    f"skipping global merge.",
+                    flush=True,
+                )
             self._merged_hll_state = None
             self._merged_per_rank_totals = None
             self._merged_per_rank_preskips = None
             return
 
         # Extract registers (skip 16-byte header)
-        registers = bytearray(hll_bytes[self.HLL_HEADER_SIZE:self.HLL_STATE_SIZE])
+        registers = bytearray(hll_bytes[self.HLL_HEADER_SIZE : self.HLL_STATE_SIZE])
 
         if self._ddp:
-            reg_tensor = torch.frombuffer(bytearray(registers), dtype=torch.uint8).clone()
+            reg_tensor = torch.frombuffer(
+                bytearray(registers), dtype=torch.uint8
+            ).clone()
             reg_tensor = reg_tensor.cuda() if torch.cuda.is_available() else reg_tensor
             dist.all_reduce(reg_tensor, op=dist.ReduceOp.MAX)
             merged_regs = _tensor_to_bytes(reg_tensor)
 
             global_unique = hll_count_from_state(
-                bytes(hll_bytes[:self.HLL_HEADER_SIZE]) + merged_regs
+                bytes(hll_bytes[: self.HLL_HEADER_SIZE]) + merged_regs
             )
 
             val_tensor = torch.tensor(
-                [local_total], dtype=torch.int64,
+                [local_total],
+                dtype=torch.int64,
                 device="cuda" if torch.cuda.is_available() else "cpu",
             )
             gathered = [torch.zeros_like(val_tensor) for _ in range(self.world_size)]
@@ -478,25 +492,40 @@ class UniquePositionLogger(Callback):
             global_total = sum(per_rank_totals)
 
             preskip_tensor = torch.tensor(
-                [local_preskip], dtype=torch.int64,
+                [local_preskip],
+                dtype=torch.int64,
                 device="cuda" if torch.cuda.is_available() else "cpu",
             )
-            gathered_preskip = [torch.zeros_like(preskip_tensor) for _ in range(self.world_size)]
+            gathered_preskip = [
+                torch.zeros_like(preskip_tensor) for _ in range(self.world_size)
+            ]
             dist.all_gather(gathered_preskip, preskip_tensor)
             per_rank_preskips = [int(t.item()) for t in gathered_preskip]
             global_preskip = sum(per_rank_preskips)
         else:
             global_unique = hll_count_from_state(hll_bytes)
-            global_total = local_total * self.world_size if self.world_size > 1 else local_total
-            per_rank_totals = [local_total] if self.world_size == 1 else \
-                              [local_total] * self.world_size
-            global_preskip = local_preskip * self.world_size if self.world_size > 1 else local_preskip
-            per_rank_preskips = [local_preskip] if self.world_size == 1 else \
-                                [local_preskip] * self.world_size
+            global_total = (
+                local_total * self.world_size if self.world_size > 1 else local_total
+            )
+            per_rank_totals = (
+                [local_total]
+                if self.world_size == 1
+                else [local_total] * self.world_size
+            )
+            global_preskip = (
+                local_preskip * self.world_size
+                if self.world_size > 1
+                else local_preskip
+            )
+            per_rank_preskips = (
+                [local_preskip]
+                if self.world_size == 1
+                else [local_preskip] * self.world_size
+            )
             merged_regs = bytes(registers)
 
         # Stash for on_save_checkpoint (non-collective).
-        self._merged_hll_state = bytes(hll_bytes[:self.HLL_HEADER_SIZE]) + merged_regs
+        self._merged_hll_state = bytes(hll_bytes[: self.HLL_HEADER_SIZE]) + merged_regs
         self._merged_per_rank_totals = per_rank_totals
         self._merged_per_rank_preskips = per_rank_preskips
 
@@ -509,8 +538,11 @@ class UniquePositionLogger(Callback):
         trainer.callback_metrics["total_global"] = float(global_total)
         trainer.callback_metrics["preskip_global"] = float(global_preskip)
         trainer._log_metrics(
-            {"unique_global": global_unique, "total_global": global_total,
-             "preskip_global": global_preskip},
+            {
+                "unique_global": global_unique,
+                "total_global": global_total,
+                "preskip_global": global_preskip,
+            },
             step=trainer.global_step,
         )
 
@@ -673,7 +705,9 @@ class SimpleLineLogger(Callback):
             self.val_start_time = time.time()
 
     @torch.compiler.disable
-    def on_validation_batch_end(self, trainer, batch=None, batch_idx=None, outputs=None):
+    def on_validation_batch_end(
+        self, trainer, batch=None, batch_idx=None, outputs=None
+    ):
         _ = batch, outputs  # Unused
         if trainer.rank != 0 or trainer.sanity_checking:
             return

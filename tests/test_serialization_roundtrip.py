@@ -37,7 +37,9 @@ def test_random_weights_roundtrip():
     writer2 = NNUEWriter(model2, description=reader1.description, verbose=False)
     bytes2 = bytes(writer2.buf)
 
-    assert bytes1 == bytes2, f"Round-trip 1 mismatch: {len(bytes1)} vs {len(bytes2)} bytes"
+    assert bytes1 == bytes2, (
+        f"Round-trip 1 mismatch: {len(bytes1)} vs {len(bytes2)} bytes"
+    )
 
     # 4. Read back into model3
     reader2 = NNUEReader(io.BytesIO(bytes2), DEFAULT_FEATURES, config)
@@ -47,10 +49,10 @@ def test_random_weights_roundtrip():
     writer3 = NNUEWriter(model3, description=reader2.description, verbose=False)
     bytes3 = bytes(writer3.buf)
 
-    assert bytes2 == bytes3, f"Round-trip 2 mismatch: {len(bytes2)} vs {len(bytes3)} bytes"
+    assert bytes2 == bytes3, (
+        f"Round-trip 2 mismatch: {len(bytes2)} vs {len(bytes3)} bytes"
+    )
 
     # Verify model parameters match between model2 and model3
-    for (n2, p2), (n3, p3) in zip(
-        model2.named_parameters(), model3.named_parameters()
-    ):
+    for (n2, p2), (n3, p3) in zip(model2.named_parameters(), model3.named_parameters()):
         assert torch.equal(p2, p3), f"Parameter {n2} mismatch between model2 and model3"

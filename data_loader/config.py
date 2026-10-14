@@ -101,6 +101,7 @@ class CDataloaderFileStats(ctypes.Structure):
         ("exhausted", ctypes.c_int),
     ]
 
+
 class CDataloaderSkipConfig(ctypes.Structure):
     _fields_ = [
         ("filtered", ctypes.c_bool),
@@ -171,6 +172,7 @@ class DataloaderHllConfig:
     initial_total: total position count (after filtering) at restart
     initial_preskip: preskip position count (before filtering) at restart
     """
+
     initial_hll: bytes | None = None
     initial_total: int = 0
     initial_preskip: int = 0
@@ -194,7 +196,9 @@ class CDataloaderHllConfig(ctypes.Structure):
             ptr = ctypes.cast(self._hll_buf, ctypes.c_void_p)
         super().__init__(
             initial_hll=ptr,
-            initial_hll_size=len(config.initial_hll) if config.initial_hll is not None else 0,
+            initial_hll_size=len(config.initial_hll)
+            if config.initial_hll is not None
+            else 0,
             initial_total=config.initial_total,
             initial_preskip=config.initial_preskip,
         )

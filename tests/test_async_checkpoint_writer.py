@@ -91,13 +91,17 @@ class TestAsyncCheckpointWriter(unittest.TestCase):
         finally:
             cw._atomic_save = _ORIG_ATOMIC
         self.assertEqual(
-            torch.load(self.path, weights_only=False)["epoch"], 2,
+            torch.load(self.path, weights_only=False)["epoch"],
+            2,
             "the newest checkpoint must win",
         )
         last_writes = [p for p in writes if p.startswith("last")]
-        self.assertLessEqual(len(last_writes), 2, f"too many last.ckpt writes: {writes}")
+        self.assertLessEqual(
+            len(last_writes), 2, f"too many last.ckpt writes: {writes}"
+        )
         self.assertEqual(
-            torch.load(other, weights_only=False)["epoch"], 19,
+            torch.load(other, weights_only=False)["epoch"],
+            19,
             "distinct paths must not be dropped by coalescing",
         )
         self.assertLessEqual(len(w._pool), 2, "pool must stay bounded")

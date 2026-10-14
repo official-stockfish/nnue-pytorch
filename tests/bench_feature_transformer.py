@@ -49,41 +49,41 @@ def run_bench():
     # Extract the exact hardware-allocated feature bounds
     ACTUAL_INPUT_SIZE = double_ft.NUM_INPUTS
     ACTUAL_MAX_ACTIVE = double_ft.MAX_ACTIVE_FEATURES
-        
+
     print(f"Detected internal feature size limit: {ACTUAL_INPUT_SIZE}")
     print(f"Detected max active features: {ACTUAL_MAX_ACTIVE}")
 
     # 2) Generate indices strictly bounded to ACTUAL_INPUT_SIZE
     def get_fake_indices():
         random_indices = torch.randint(
-            0, ACTUAL_INPUT_SIZE, 
-            (BATCH_SIZE, ACTUAL_MAX_ACTIVE * 3 // 4), 
-            dtype=torch.int32, 
-            device=device
+            0,
+            ACTUAL_INPUT_SIZE,
+            (BATCH_SIZE, ACTUAL_MAX_ACTIVE * 3 // 4),
+            dtype=torch.int32,
+            device=device,
         )
         sorted_indices, _ = torch.sort(random_indices, dim=1)
         padding = torch.full(
-            (BATCH_SIZE, ACTUAL_MAX_ACTIVE // 4), 
-            -1, 
-            dtype=torch.int32, 
-            device=device
+            (BATCH_SIZE, ACTUAL_MAX_ACTIVE // 4), -1, dtype=torch.int32, device=device
         )
         return torch.cat([sorted_indices, padding], dim=1)
 
     indices0 = get_fake_indices()
     indices1 = get_fake_indices()
-    
+
     # 'us' and 'them' indicator floats
     us = torch.randint(0, 2, (BATCH_SIZE, 1), dtype=torch.float32, device=device)
     them = 1.0 - us
 
     print("Benchmarking SparseLinearFunction...")
     weight = torch.randn(
-        ACTUAL_INPUT_SIZE, STRIDE, dtype=torch.float32, device=device, requires_grad=True
+        ACTUAL_INPUT_SIZE,
+        STRIDE,
+        dtype=torch.float32,
+        device=device,
+        requires_grad=True,
     )
-    bias = torch.randn(
-        STRIDE, dtype=torch.float32, device=device, requires_grad=True
-    )
+    bias = torch.randn(STRIDE, dtype=torch.float32, device=device, requires_grad=True)
 
     for _ in range(WARMUP_ITERS):
         output0 = SparseLinearFunction.apply(indices0, weight, bias)
@@ -104,9 +104,7 @@ def run_bench():
     if device.type == "cuda":
         torch.cuda.synchronize()
     end = time.time()
-    print(
-        f"Direct SparseLinearFunction: {(ITERS * BATCH_SIZE) / (end - start)} pos/s"
-    )
+    print(f"Direct SparseLinearFunction: {(ITERS * BATCH_SIZE) / (end - start)} pos/s")
 
     for mode in ["torch", "sparse", "fused"]:
         mode_str = mode.capitalize()
@@ -157,7 +155,7 @@ def run_bench():
             torch.cuda.synchronize()
         end = time.time()
         print(
-            f"ComposedFeatureTransformer ({mode_str}): { (ITERS * BATCH_SIZE) / (end - start) } pos/s"
+            f"ComposedFeatureTransformer ({mode_str}): {(ITERS * BATCH_SIZE) / (end - start)} pos/s"
         )
 
 
