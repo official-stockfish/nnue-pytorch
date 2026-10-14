@@ -15,6 +15,33 @@ except (ImportError, OSError, RuntimeError):
     BACKWARD_TILE_SIZE = 1
 
 
+def _use_aggregated_backward(l1_size, batch_size, max_active_features, device, *, mode="auto"):
+    """Select measured defaults; allow other NVIDIA GPUs to be benchmarked."""
+    if mode not in ("auto", "scatter", "aggregated"):
+        raise ValueError(
+            "mode must be auto, scatter, or aggregated, "
+            f"got {mode!r}"
+        )
+    if mode == "scatter" or torch.version.hip is not None:
+        return False
+    if not (
+        512 <= l1_size <= 4096
+        and l1_size % 128 == 0
+        and 0 < max_active_features <= 288
+    ):
+        return False
+    capability = torch.cuda.get_device_capability(device)
+    if capability[0] < 8:
+        return False
+    if mode == "aggregated":
+        return True
+    # H100 retains its existing threshold. RTX 4090 measurements show a
+    # benefit from 4096 positions; smaller batches keep direct scatter.
+    return (capability == (9, 0) and batch_size >= 1024) or (
+        capability == (8, 9) and batch_size >= 4096
+    )
+
+
 class FusedDoubleFtFunction(autograd.Function):
     @staticmethod
     def forward(ctx, us, them, white_indices, black_indices, weight, bias, max_ft_activation, l1_size):
@@ -85,12 +112,9 @@ class FusedDoubleFtFunction(autograd.Function):
         grad_weight = torch.zeros(weight.shape[0], output_size, dtype=torch.float32, device=us.device)
         grad_bias = torch.zeros(output_size, dtype=torch.float32, device=us.device)
 
-        # Aggregation pays for its feature-union pass on large master-net batches.
-        # Keep direct scatter for unsupported widths/devices and small batches.
-        if (512 <= l1_size <= 4096 and l1_size % 128 == 0 and batch_size >= 1024
-                and 0 < max_active_features <= 288
-                and torch.version.hip is None
-                and torch.cuda.get_device_capability(us.device) == (9, 0)):
+        # Feature extractors guarantee unique IDs within each perspective.
+        # Keep direct scatter for unsupported shapes/devices and small batches.
+        if _use_aggregated_backward(l1_size, batch_size, max_active_features, us.device):
             aggregated_ft_backward(
                 us, them, white_indices, black_indices, grad_l0, clamped_out,
                 grad_weight, grad_bias, max_ft_activation,

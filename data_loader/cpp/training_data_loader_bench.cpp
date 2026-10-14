@@ -22,15 +22,11 @@ namespace fs = std::filesystem;
 // -----------------------------------------------------------------------------
 
 struct SparseBatchDeleter {
-    void operator()(SparseBatch* b) const {
-        destroy_sparse_batch(b);
-    }
+    void operator()(SparseBatch* b) const { destroy_sparse_batch(b); }
 };
 
 struct SparseBatchStreamDeleter {
-    void operator()(SparseBatchStream* s) const {
-        destroy_sparse_batch_stream(s);
-    }
+    void operator()(SparseBatchStream* s) const { destroy_sparse_batch_stream(s); }
 };
 
 // -----------------------------------------------------------------------------
@@ -47,48 +43,50 @@ struct CliConfig {
 };
 
 const CliConfig default_cli_config = {
-    .skip_config = {
-        .filtered                = true,
-        .random_fen_skipping     = 3,
-        .wld_filtered            = true,
-        .early_fen_skipping      = 18,
-        .soft_early_fen_skipping = 32,
-        .simple_eval_skipping    = 0,
-        .param_index             = 0,
-        .pc_y0                   = -0.2,
-        .pc_y1                   = 0.45,
-        .pc_y2                   = 1.0,
-        .pc_y3                   = 0.95,
-        .pc_y4                   = 0.75,
-        .ply_x1                  = 0.0,
-        .ply_y1                  = 0.025,
-        .ply_x2                  = 22.0,
-        .ply_y2                  = 0.05,
-        .ply_x3                  = 25.5,
-        .ply_y3                  = 0.20,
-        .ply_x4                  = 29.5,
-        .ply_y4                  = 0.80,
+  .skip_config =
+    {
+      .filtered                = true,
+      .random_fen_skipping     = 3,
+      .wld_filtered            = true,
+      .early_fen_skipping      = 18,
+      .soft_early_fen_skipping = 32,
+      .simple_eval_skipping    = 0,
+      .param_index             = 0,
+      .pc_y0                   = -0.2,
+      .pc_y1                   = 0.45,
+      .pc_y2                   = 1.0,
+      .pc_y3                   = 0.95,
+      .pc_y4                   = 0.75,
+      .ply_x1                  = 0.0,
+      .ply_y1                  = 0.025,
+      .ply_x2                  = 22.0,
+      .ply_y2                  = 0.05,
+      .ply_x3                  = 25.5,
+      .ply_y3                  = 0.20,
+      .ply_x4                  = 29.5,
+      .ply_y4                  = 0.80,
     },
-    .ddp_config = {.rank = 0, .world_size = 1},
-    .hll_config = {.initial_hll = nullptr, .initial_hll_size = 0, .initial_total = 0},
-    .io_config = {.balance_window_mb = 400, .shuffle_buffer_entries = 0},
-    .batch_size = 131072,
-    .cyclic     = true
-};
+  .ddp_config = {.rank = 0, .world_size = 1},
+  .hll_config = {.initial_hll = nullptr, .initial_hll_size = 0, .initial_total = 0},
+  .io_config  = {.balance_window_mb = 400, .shuffle_buffer_entries = 0},
+  .batch_size = 131072,
+  .cyclic     = true};
 
 // Robustly get the directory containing the current executable (Linux specific)
 fs::path get_executable_dir() {
     std::error_code ec;
-    fs::path exe_path = fs::read_symlink("/proc/self/exe", ec);
-    if (!ec) {
+    fs::path        exe_path = fs::read_symlink("/proc/self/exe", ec);
+    if (!ec)
+    {
         return exe_path.parent_path();
     }
-    return fs::current_path(); // Fallback if /proc/self/exe is somehow unavailable
+    return fs::current_path();  // Fallback if /proc/self/exe is somehow unavailable
 }
 
 std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\r\n");
-    if (std::string::npos == first) return "";
+    if (std::string::npos == first)
+        return "";
     size_t last = str.find_last_not_of(" \t\r\n");
     return str.substr(first, (last - first + 1));
 }
@@ -96,16 +94,21 @@ std::string trim(const std::string& str) {
 // Parses a simple key=value INI file. Ignores comments (#) and sections ([]).
 bool parse_ini(const fs::path& filepath, std::map<std::string, std::string>& config_map) {
     std::ifstream file(filepath);
-    if (!file.is_open()) return false;
+    if (!file.is_open())
+        return false;
 
     std::string line;
-    while (std::getline(file, line)) {
+    while (std::getline(file, line))
+    {
         line = trim(line);
-        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
-        if (line[0] == '[') continue; // Ignore section headers
+        if (line.empty() || line[0] == '#' || line[0] == ';')
+            continue;
+        if (line[0] == '[')
+            continue;  // Ignore section headers
 
         size_t delim = line.find('=');
-        if (delim != std::string::npos) {
+        if (delim != std::string::npos)
+        {
             std::string key = trim(line.substr(0, delim));
             std::string val = trim(line.substr(delim + 1));
             config_map[key] = val;
@@ -115,16 +118,35 @@ bool parse_ini(const fs::path& filepath, std::map<std::string, std::string>& con
 }
 
 CliConfig build_config_from_map(const std::map<std::string, std::string>& m) {
-    const std::vector<std::string> required_keys = {
-        "filtered", "random_fen_skipping", "wld_filtered", "early_fen_skipping",
-        "soft_early_fen_skipping", "simple_eval_skipping", "param_index",
-        "pc_y0", "pc_y1", "pc_y2", "pc_y3", "pc_y4",
-        "ply_x1", "ply_y1", "ply_x2", "ply_y2", "ply_x3", "ply_y3", "ply_x4", "ply_y4",
-        "ddp_config.rank", "ddp_config.world_size", "batch_size", "cyclic"
-    };
+    const std::vector<std::string> required_keys = {"filtered",
+                                                    "random_fen_skipping",
+                                                    "wld_filtered",
+                                                    "early_fen_skipping",
+                                                    "soft_early_fen_skipping",
+                                                    "simple_eval_skipping",
+                                                    "param_index",
+                                                    "pc_y0",
+                                                    "pc_y1",
+                                                    "pc_y2",
+                                                    "pc_y3",
+                                                    "pc_y4",
+                                                    "ply_x1",
+                                                    "ply_y1",
+                                                    "ply_x2",
+                                                    "ply_y2",
+                                                    "ply_x3",
+                                                    "ply_y3",
+                                                    "ply_x4",
+                                                    "ply_y4",
+                                                    "ddp_config.rank",
+                                                    "ddp_config.world_size",
+                                                    "batch_size",
+                                                    "cyclic"};
 
-    for (const auto& key : required_keys) {
-        if (m.find(key) == m.end()) {
+    for (const auto& key : required_keys)
+    {
+        if (m.find(key) == m.end())
+        {
             throw std::runtime_error("Missing required key: " + key);
         }
     }
@@ -135,49 +157,40 @@ CliConfig build_config_from_map(const std::map<std::string, std::string>& m) {
         return (lower_s == "1" || lower_s == "true");
     };
 
-    return {
-        .skip_config = {
-            .filtered             = parse_bool(m.at("filtered")),
-            .random_fen_skipping  = std::stoi(m.at("random_fen_skipping")),
-            .wld_filtered         = parse_bool(m.at("wld_filtered")),
-            .early_fen_skipping   = std::stoi(m.at("early_fen_skipping")),
-            .soft_early_fen_skipping = std::stoi(m.at("soft_early_fen_skipping")),
-            .simple_eval_skipping = std::stoi(m.at("simple_eval_skipping")),
-            .param_index          = std::stoi(m.at("param_index")),
-            .pc_y0                = std::stod(m.at("pc_y0")),
-            .pc_y1                = std::stod(m.at("pc_y1")),
-            .pc_y2                = std::stod(m.at("pc_y2")),
-            .pc_y3                = std::stod(m.at("pc_y3")),
-            .pc_y4                = std::stod(m.at("pc_y4")),
-            .ply_x1               = std::stod(m.at("ply_x1")),
-            .ply_y1               = std::stod(m.at("ply_y1")),
-            .ply_x2               = std::stod(m.at("ply_x2")),
-            .ply_y2               = std::stod(m.at("ply_y2")),
-            .ply_x3               = std::stod(m.at("ply_x3")),
-            .ply_y3               = std::stod(m.at("ply_y3")),
-            .ply_x4               = std::stod(m.at("ply_x4")),
-            .ply_y4               = std::stod(m.at("ply_y4")),
-        },
-        .ddp_config = {
-            .rank       = std::stoi(m.at("ddp_config.rank")),
-            .world_size = std::stoi(m.at("ddp_config.world_size"))
-        },
-        .hll_config = {
-            .initial_hll     = nullptr,
-            .initial_hll_size = 0,
-            .initial_total   = 0
-        },
-        .io_config = {
-            .balance_window_mb = m.count("io.balance_window_mb")
-                ? std::stoi(m.at("io.balance_window_mb"))
-                : 400,
-            .shuffle_buffer_entries = m.count("io.shuffle_buffer_entries")
-                ? std::stoi(m.at("io.shuffle_buffer_entries"))
-                : 0
-        },
-        .batch_size = std::stoi(m.at("batch_size")),
-        .cyclic     = parse_bool(m.at("cyclic"))
-    };
+    return {.skip_config =
+              {
+                .filtered                = parse_bool(m.at("filtered")),
+                .random_fen_skipping     = std::stoi(m.at("random_fen_skipping")),
+                .wld_filtered            = parse_bool(m.at("wld_filtered")),
+                .early_fen_skipping      = std::stoi(m.at("early_fen_skipping")),
+                .soft_early_fen_skipping = std::stoi(m.at("soft_early_fen_skipping")),
+                .simple_eval_skipping    = std::stoi(m.at("simple_eval_skipping")),
+                .param_index             = std::stoi(m.at("param_index")),
+                .pc_y0                   = std::stod(m.at("pc_y0")),
+                .pc_y1                   = std::stod(m.at("pc_y1")),
+                .pc_y2                   = std::stod(m.at("pc_y2")),
+                .pc_y3                   = std::stod(m.at("pc_y3")),
+                .pc_y4                   = std::stod(m.at("pc_y4")),
+                .ply_x1                  = std::stod(m.at("ply_x1")),
+                .ply_y1                  = std::stod(m.at("ply_y1")),
+                .ply_x2                  = std::stod(m.at("ply_x2")),
+                .ply_y2                  = std::stod(m.at("ply_y2")),
+                .ply_x3                  = std::stod(m.at("ply_x3")),
+                .ply_y3                  = std::stod(m.at("ply_y3")),
+                .ply_x4                  = std::stod(m.at("ply_x4")),
+                .ply_y4                  = std::stod(m.at("ply_y4")),
+              },
+            .ddp_config = {.rank       = std::stoi(m.at("ddp_config.rank")),
+                           .world_size = std::stoi(m.at("ddp_config.world_size"))},
+            .hll_config = {.initial_hll = nullptr, .initial_hll_size = 0, .initial_total = 0},
+            .io_config  = {.balance_window_mb      = m.count("io.balance_window_mb")
+                                                     ? std::stoi(m.at("io.balance_window_mb"))
+                                                     : 400,
+                           .shuffle_buffer_entries = m.count("io.shuffle_buffer_entries")
+                                                     ? std::stoi(m.at("io.shuffle_buffer_entries"))
+                                                     : 0},
+            .batch_size = std::stoi(m.at("batch_size")),
+            .cyclic     = parse_bool(m.at("cyclic"))};
 }
 
 #ifdef NNUE_LOADER_STATISTICS
@@ -187,28 +200,31 @@ CliConfig build_config_from_map(const std::map<std::string, std::string>& m) {
 // -----------------------------------------------------------------------------
 
 struct DistributionReport {
-    uint64_t pc_counts[33] = {0};
-    uint64_t total_count = 0;
+    uint64_t              pc_counts[33] = {0};
+    uint64_t              total_count   = 0;
     std::vector<uint64_t> ply_counts;
-    size_t   max_plies_plus_one;
+    size_t                max_plies_plus_one;
 
-    DistributionReport(size_t max_plies)
-        : ply_counts(max_plies + 2),
-          max_plies_plus_one(max_plies + 1)
-    {}
+    DistributionReport(size_t max_plies) :
+        ply_counts(max_plies + 2),
+        max_plies_plus_one(max_plies + 1) { }
 
     void add_batch(const SparseBatch* batch, int b_size) {
-        if (!batch) return;
+        if (!batch)
+            return;
 
-        for (int i = 0; i < b_size; ++i) {
-            int pc = batch->entries_copy[i].pos.piecesBB().count();
+        for (int i = 0; i < b_size; ++i)
+        {
+            int    pc  = batch->entries_copy[i].pos.piecesBB().count();
             size_t ply = static_cast<size_t>(batch->entries_copy[i].ply);
 
-            if (pc >= 0 && pc <= 32) {
+            if (pc >= 0 && pc <= 32)
+            {
                 pc_counts[pc]++;
             }
 
-            if (ply >= 0) {
+            if (ply >= 0)
+            {
                 int ply_index = (ply > max_plies_plus_one) ? max_plies_plus_one : ply;
                 ply_counts[ply_index]++;
             }
@@ -217,28 +233,32 @@ struct DistributionReport {
         }
     }
 
-    void print_histogram(const std::string& title, const uint64_t* counts, int size, bool is_ply) const {
+    void
+    print_histogram(const std::string& title, const uint64_t* counts, int size, bool is_ply) const {
         std::cout << "\n=== " << title << " ===" << std::endl;
-        std::cout << std::setw(5) << (is_ply ? "Ply" : "PC") << " | "
-                  << std::setw(12) << "Count" << " | Share" << std::endl;
+        std::cout << std::setw(5) << (is_ply ? "Ply" : "PC") << " | " << std::setw(12) << "Count"
+                  << " | Share" << std::endl;
         std::cout << "--------------------------------------------------" << std::endl;
-        for (int i = 0; i < size; ++i) {
-            if (counts[i] == 0) continue;
-            double share = (total_count > 0) ? (double)counts[i] / total_count : 0;
-            int bar_width = static_cast<int>(share * 60);
+        for (int i = 0; i < size; ++i)
+        {
+            if (counts[i] == 0)
+                continue;
+            double share     = (total_count > 0) ? (double) counts[i] / total_count : 0;
+            int    bar_width = static_cast<int>(share * 60);
 
-            std::string label = (is_ply && i == size - 1) ? ">=" + std::to_string(i) : std::to_string(i);
+            std::string label =
+              (is_ply && i == size - 1) ? ">=" + std::to_string(i) : std::to_string(i);
 
-            std::cout << std::setw(5) << label << " | "
-                      << std::setw(12) << counts[i] << " | "
-                      << std::fixed << std::setprecision(2) << std::setw(6) << (share * 100.0) << "% "
-                      << std::string(bar_width, '#') << std::endl;
+            std::cout << std::setw(5) << label << " | " << std::setw(12) << counts[i] << " | "
+                      << std::fixed << std::setprecision(2) << std::setw(6) << (share * 100.0)
+                      << "% " << std::string(bar_width, '#') << std::endl;
         }
         std::cout << "--------------------------------------------------" << std::endl;
     }
 
     void print() const {
-        if (total_count == 0) {
+        if (total_count == 0)
+        {
             std::cout << "\nNo data processed." << std::endl;
             return;
         }
@@ -248,31 +268,40 @@ struct DistributionReport {
     }
 };
 
-void run_report(int concurrency, size_t iteration_count, size_t max_plies, int file_count, const char** files, CliConfig cli_config) {
+void run_report(int          concurrency,
+                size_t       iteration_count,
+                size_t       max_plies,
+                int          file_count,
+                const char** files,
+                CliConfig    cli_config) {
     auto skip_config = cli_config.skip_config;
-    auto ddp_config = cli_config.ddp_config;
-    auto hll_config = cli_config.hll_config;
-    int batch_size = cli_config.batch_size;
-    bool cyclic = cli_config.cyclic;
+    auto ddp_config  = cli_config.ddp_config;
+    auto hll_config  = cli_config.hll_config;
+    int  batch_size  = cli_config.batch_size;
+    bool cyclic      = cli_config.cyclic;
 
-    std::cout << "Initializing stream (Threads: " << concurrency << ", Iterations: " << iteration_count << ")..." << std::endl;
+    std::cout << "Initializing stream (Threads: " << concurrency
+              << ", Iterations: " << iteration_count << ")..." << std::endl;
 
-    std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(
-        create_sparse_batch_stream("Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files,
-            batch_size, cyclic, skip_config, ddp_config, hll_config, cli_config.io_config));
+    std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(create_sparse_batch_stream(
+      "Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files, batch_size, cyclic,
+      skip_config, ddp_config, hll_config, cli_config.io_config));
 
     DistributionReport report(max_plies);
 
     std::cout << "Sampling dataloader stream..." << std::endl;
 
-    for (size_t iter = 1; iter <= iteration_count; ++iter) {
+    for (size_t iter = 1; iter <= iteration_count; ++iter)
+    {
         std::unique_ptr<SparseBatch, SparseBatchDeleter> b(fetch_next_sparse_batch(stream.get()));
 
-        if (b) {
+        if (b)
+        {
             report.add_batch(b.get(), batch_size);
         }
 
-        if (iter % 100 == 0) {
+        if (iter % 100 == 0)
+        {
             std::cout << "\rBatches sampled: " << iter << " / " << iteration_count << std::flush;
         }
     }
@@ -293,29 +322,36 @@ std::vector<std::string> stage_files_to_ram(int file_count, const char** files) 
 
     const fs::path ram_base = "/dev/shm/app_cache";
 
-    try {
-        if (!fs::exists(ram_base)) {
+    try
+    {
+        if (!fs::exists(ram_base))
+        {
             fs::create_directories(ram_base);
         }
 
-        for (int i = 0; i < file_count; ++i) {
-            if (files[i] == nullptr) continue;
+        for (int i = 0; i < file_count; ++i)
+        {
+            if (files[i] == nullptr)
+                continue;
 
             fs::path original_path(files[i]);
 
-            if (!fs::exists(original_path) || !fs::is_regular_file(original_path)) {
+            if (!fs::exists(original_path) || !fs::is_regular_file(original_path))
+            {
                 throw std::runtime_error("Invalid or missing file: " + original_path.string());
             }
 
             fs::path target_path = ram_base / original_path.filename();
 
-            if (!fs::exists(target_path)) {
+            if (!fs::exists(target_path))
+            {
                 fs::copy_file(original_path, target_path, fs::copy_options::overwrite_existing);
             }
 
             ram_paths.push_back(target_path.string());
         }
-    } catch (const fs::filesystem_error& e) {
+    } catch (const fs::filesystem_error& e)
+    {
         std::cerr << "Filesystem error: " << e.what() << std::endl;
         throw;
     }
@@ -326,50 +362,61 @@ std::vector<std::string> stage_files_to_ram(int file_count, const char** files) 
 long long get_rchar_self() {
     std::ifstream io_file("/proc/self/io");
     std::string   line;
-    while (std::getline(io_file, line)) {
-        if (line.rfind("rchar:", 0) == 0) {
+    while (std::getline(io_file, line))
+    {
+        if (line.rfind("rchar:", 0) == 0)
+        {
             return std::stoll(line.substr(6));
         }
     }
     return -1;
 }
 
-void run_bench(int concurrency, size_t iteration_count, int do_cache_files, int file_count, const char** files, CliConfig cli_config) {
+void run_bench(int          concurrency,
+               size_t       iteration_count,
+               int          do_cache_files,
+               int          file_count,
+               const char** files,
+               CliConfig    cli_config) {
     auto skip_config = cli_config.skip_config;
-    auto ddp_config = cli_config.ddp_config;
-    auto hll_config = cli_config.hll_config;
-    int batch_size = cli_config.batch_size;
-    bool cyclic = cli_config.cyclic;
+    auto ddp_config  = cli_config.ddp_config;
+    auto hll_config  = cli_config.hll_config;
+    int  batch_size  = cli_config.batch_size;
+    bool cyclic      = cli_config.cyclic;
 
     std::vector<std::string> ram_files;
     std::vector<const char*> c_str_paths;
 
     std::cout << "Threads: " << concurrency << " | Iterations: " << iteration_count << "\n";
 
-    if (do_cache_files == 1) {
+    if (do_cache_files == 1)
+    {
         std::cout << "Caching files to ram: ..." << std::endl;
         ram_files = stage_files_to_ram(file_count, files);
-        for (const auto& path : ram_files) {
+        for (const auto& path : ram_files)
+        {
             c_str_paths.push_back(path.c_str());
         }
         file_count = static_cast<int>(c_str_paths.size());
-        files = c_str_paths.data();
+        files      = c_str_paths.data();
         std::cout << "Caching files to ram: done" << std::endl;
     }
 
-    std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(
-        create_sparse_batch_stream("Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files,
-            batch_size, cyclic, skip_config, ddp_config, hll_config, cli_config.io_config));
+    std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(create_sparse_batch_stream(
+      "Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files, batch_size, cyclic,
+      skip_config, ddp_config, hll_config, cli_config.io_config));
 
     long long bytes_before = get_rchar_self();
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto      t0           = std::chrono::high_resolution_clock::now();
 
-    for (size_t i = 1; i <= iteration_count; ++i) {
+    for (size_t i = 1; i <= iteration_count; ++i)
+    {
         std::unique_ptr<SparseBatch, SparseBatchDeleter> b(fetch_next_sparse_batch(stream.get()));
 
         auto t1 = std::chrono::high_resolution_clock::now();
         // i % 1 == 0 check from original preserved explicitly
-        if (i % 1 == 0) {
+        if (i % 1 == 0)
+        {
             double    sec   = std::chrono::duration<double>(t1 - t0).count();
             long long bytes = get_rchar_self() - bytes_before;
 
@@ -378,25 +425,23 @@ void run_bench(int concurrency, size_t iteration_count, int do_cache_files, int 
             double mbps = bytes / (sec * 1024 * 1024);
             double bpos = bytes / (i * batch_size);
 
-            std::cout << "\rIter: " << std::setw(8) << i
-                      << "   Time(s): " << std::setw(8) << std::setprecision(3) << sec
-                      << "   MPos/s: " << std::setw(8) << std::setprecision(3) << mpos
-                      << "   It/s: " << std::setw(8) << std::setprecision(3) << its
-                      << "   MB/s: " << std::setw(8) << std::setprecision(3) << mbps
-                      << "   B/pos: " << std::setw(8) << std::setprecision(3) << bpos
-                      << std::flush;
+            std::cout << "\rIter: " << std::setw(8) << i << "   Time(s): " << std::setw(8)
+                      << std::setprecision(3) << sec << "   MPos/s: " << std::setw(8)
+                      << std::setprecision(3) << mpos << "   It/s: " << std::setw(8)
+                      << std::setprecision(3) << its << "   MB/s: " << std::setw(8)
+                      << std::setprecision(3) << mbps << "   B/pos: " << std::setw(8)
+                      << std::setprecision(3) << bpos << std::flush;
         }
     }
     std::cout << std::endl;
 
     std::uint64_t preskip = 0, total = 0, unique = 0;
     get_unique_position_stats(stream.get(), &preskip, &total, &unique);
-    std::cout << "Unique positions: ~" << unique
-              << " (HLL, p=20, ~0.1% SE) from a total of "
+    std::cout << "Unique positions: ~" << unique << " (HLL, p=20, ~0.1% SE) from a total of "
               << total;
     if (preskip > total)
-        std::cout << " (preskip: " << preskip
-                  << ", skip rate: " << std::fixed << std::setprecision(2)
+        std::cout << " (preskip: " << preskip << ", skip rate: " << std::fixed
+                  << std::setprecision(2)
                   << (1.0 - static_cast<double>(total) / static_cast<double>(preskip)) * 100.0
                   << "%)";
     std::cout << std::endl;
@@ -409,77 +454,67 @@ void run_bench(int concurrency, size_t iteration_count, int do_cache_files, int 
             std::vector<DataloaderFileStats> stats(n);
             get_io_stats(stream.get(), stats.data(), n);
 
-            std::uint64_t windowTotal = 0;
-            std::uint64_t bytesTotal  = 0;
-            std::uint64_t chunksTotal = 0;
-            std::uint64_t nsTotal     = 0;
-            std::uint64_t nsMax       = 0;
-            std::size_t  maxFile      = 0;
-            int exhaustedCount        = 0;
+            std::uint64_t windowTotal    = 0;
+            std::uint64_t bytesTotal     = 0;
+            std::uint64_t chunksTotal    = 0;
+            std::uint64_t nsTotal        = 0;
+            std::uint64_t nsMax          = 0;
+            std::size_t   maxFile        = 0;
+            int           exhaustedCount = 0;
             for (std::size_t i = 0; i < n; ++i)
             {
                 windowTotal += stats[i].window_bytes;
-                bytesTotal  += stats[i].bytes_read;
+                bytesTotal += stats[i].bytes_read;
                 chunksTotal += stats[i].chunks_read;
-                nsTotal     += stats[i].read_ns_total;
+                nsTotal += stats[i].read_ns_total;
                 if (stats[i].read_ns_max > nsMax)
                 {
-                    nsMax    = stats[i].read_ns_max;
-                    maxFile  = i;
+                    nsMax   = stats[i].read_ns_max;
+                    maxFile = i;
                 }
                 if (stats[i].exhausted)
                     ++exhaustedCount;
             }
 
             std::cout << "\n=== Per-file I/O stats ===" << std::endl;
-            std::cout << std::left  << std::setw(46) << "file"
-                      << std::right << std::setw(9)  << "chunks"
-                      << std::setw(9)  << "MiB"
-                      << std::setw(11) << "rd_mean_ms"
-                      << std::setw(11) << "rd_max_ms"
-                      << std::setw(10) << "inflight_ms"
-                      << std::setw(9)  << "win_MiB"
-                      << std::setw(8)  << "share%"
+            std::cout << std::left << std::setw(46) << "file" << std::right << std::setw(9)
+                      << "chunks" << std::setw(9) << "MiB" << std::setw(11) << "rd_mean_ms"
+                      << std::setw(11) << "rd_max_ms" << std::setw(10) << "inflight_ms"
+                      << std::setw(9) << "win_MiB" << std::setw(8) << "share%"
                       << "  state" << std::endl;
             std::cout << std::string(118, '-') << std::endl;
 
             for (std::size_t i = 0; i < n; ++i)
             {
-                const auto& s = stats[i];
+                const auto&  s = stats[i];
                 const double meanMs =
-                    s.chunks_read ? static_cast<double>(s.read_ns_total) / s.chunks_read / 1e6 : 0.0;
+                  s.chunks_read ? static_cast<double>(s.read_ns_total) / s.chunks_read / 1e6 : 0.0;
                 const double winShare =
-                    windowTotal ? 100.0 * static_cast<double>(s.window_bytes) / windowTotal : 0.0;
+                  windowTotal ? 100.0 * static_cast<double>(s.window_bytes) / windowTotal : 0.0;
                 const std::string state =
-                    s.exhausted ? std::string("exhausted")
-                                : (s.claimed ? "reading" : "idle");
+                  s.exhausted ? std::string("exhausted") : (s.claimed ? "reading" : "idle");
                 std::string name = fs::path(files[i]).filename().string();
                 if (name.size() > 45)
                     name = name.substr(0, 42) + "...";
 
-                std::cout << std::left  << std::setw(46) << name
-                          << std::right << std::setw(9)  << s.chunks_read
-                          << std::fixed << std::setprecision(1)
-                          << std::setw(9)  << static_cast<double>(s.bytes_read) / (1024.0 * 1024.0)
-                          << std::setprecision(2)
-                          << std::setw(11) << meanMs
-                          << std::setw(11) << static_cast<double>(s.read_ns_max) / 1e6
-                          << std::setw(10) << (s.claimed ? s.read_started_ms_ago : 0)
-                          << std::setprecision(1)
-                          << std::setw(9)  << static_cast<double>(s.window_bytes) / (1024.0 * 1024.0)
-                          << std::setprecision(2)
-                          << std::setw(8)  << winShare
-                          << "  " << state << std::endl;
+                std::cout << std::left << std::setw(46) << name << std::right << std::setw(9)
+                          << s.chunks_read << std::fixed << std::setprecision(1) << std::setw(9)
+                          << static_cast<double>(s.bytes_read) / (1024.0 * 1024.0)
+                          << std::setprecision(2) << std::setw(11) << meanMs << std::setw(11)
+                          << static_cast<double>(s.read_ns_max) / 1e6 << std::setw(10)
+                          << (s.claimed ? s.read_started_ms_ago : 0) << std::setprecision(1)
+                          << std::setw(9) << static_cast<double>(s.window_bytes) / (1024.0 * 1024.0)
+                          << std::setprecision(2) << std::setw(8) << winShare << "  " << state
+                          << std::endl;
             }
 
             std::cout << std::string(118, '-') << std::endl;
             std::cout << "Total: " << n << " files (" << exhaustedCount << " exhausted), "
-                      << chunksTotal << " chunks, "
-                      << std::fixed << std::setprecision(1)
+                      << chunksTotal << " chunks, " << std::fixed << std::setprecision(1)
                       << static_cast<double>(bytesTotal) / (1024.0 * 1024.0) << " MiB read, "
-                      << "slowest read " << std::setprecision(2)
-                      << static_cast<double>(nsMax) / 1e6 << " ms ("
-                      << fs::path(files[maxFile]).filename().string() << ")" << std::endl;
+                      << "slowest read " << std::setprecision(2) << static_cast<double>(nsMax) / 1e6
+                      << " ms (" << fs::path(files[maxFile]).filename().string() << ")"
+                      << std::endl;
         }
     }
 }
@@ -491,86 +526,117 @@ void run_bench(int concurrency, size_t iteration_count, int do_cache_files, int 
 // -----------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
-    int concurrency = std::thread::hardware_concurrency();
-    size_t iteration_count = 1000;
-    size_t max_plies = 100;
-    int do_cache_files = 0;
+    int         concurrency       = std::thread::hardware_concurrency();
+    size_t      iteration_count   = 1000;
+    size_t      max_plies         = 100;
+    int         do_cache_files    = 0;
     std::string cli_settings_path = "";
 
     int i = 1;
-    for (; i < argc; ++i) {
+    for (; i < argc; ++i)
+    {
         std::string arg = argv[i];
 
-        if (arg == "-p" && i + 1 < argc) {
+        if (arg == "-p" && i + 1 < argc)
+        {
             concurrency = std::stoi(argv[++i]);
-        } else if (arg == "-i" && i + 1 < argc) {
+        }
+        else if (arg == "-i" && i + 1 < argc)
+        {
             iteration_count = std::stoul(argv[++i]);
-        } else if (arg == "-c" && i + 1 < argc) {
+        }
+        else if (arg == "-c" && i + 1 < argc)
+        {
             do_cache_files = std::stoi(argv[++i]);
-        } else if (arg == "-m" && i + 1 < argc) {
+        }
+        else if (arg == "-m" && i + 1 < argc)
+        {
             max_plies = std::stoul(argv[++i]);
-        } else if (arg == "-s" && i + 1 < argc) {
+        }
+        else if (arg == "-s" && i + 1 < argc)
+        {
             cli_settings_path = argv[++i];
-        } else if (arg[0] == '-') {
+        }
+        else if (arg[0] == '-')
+        {
             std::cerr << "Unknown option: " << arg << "\n";
             return 1;
-        } else {
+        }
+        else
+        {
             break;
         }
     }
 
-    if (i >= argc) {
-        std::cerr << "Usage: " << argv[0] << " [-i iterations] [-p concurrency] [-c do_cache_files] [-m max_plies] [-s config.ini] file1 [file2 ...]\n"
-                  << "\nEnv NNUE_LOADER_SIM_SLOW=\"idx:delay_ms[,idx:delay_ms...]\" adds an artificial\n"
-                  << "per-chunk read delay to the given file indices (fault injection, testing only).\n";
+    if (i >= argc)
+    {
+        std::cerr
+          << "Usage: " << argv[0]
+          << " [-i iterations] [-p concurrency] [-c do_cache_files] [-m max_plies] [-s config.ini] file1 [file2 ...]\n"
+          << "\nEnv NNUE_LOADER_SIM_SLOW=\"idx:delay_ms[,idx:delay_ms...]\" adds an artificial\n"
+          << "per-chunk read delay to the given file indices (fault injection, testing only).\n";
         return 1;
     }
 
-// --- Configuration Resolution ---
+    // --- Configuration Resolution ---
     CliConfig active_config = default_cli_config;
-    fs::path target_config_path;
+    fs::path  target_config_path;
 
-    if (!cli_settings_path.empty()) {
+    if (!cli_settings_path.empty())
+    {
         target_config_path = fs::absolute(cli_settings_path);
-        if (!fs::exists(target_config_path) || !fs::is_regular_file(target_config_path)) {
-            std::cerr << "FATAL: Explicitly requested config file not found at " << target_config_path << "\n";
+        if (!fs::exists(target_config_path) || !fs::is_regular_file(target_config_path))
+        {
+            std::cerr << "FATAL: Explicitly requested config file not found at "
+                      << target_config_path << "\n";
             std::exit(1);
         }
-    } else {
+    }
+    else
+    {
         target_config_path = get_executable_dir() / "data_loader_config.ini";
     }
 
-    if (fs::exists(target_config_path) && fs::is_regular_file(target_config_path)) {
+    if (fs::exists(target_config_path) && fs::is_regular_file(target_config_path))
+    {
         std::map<std::string, std::string> parsed_ini;
-        if (!parse_ini(target_config_path, parsed_ini)) {
+        if (!parse_ini(target_config_path, parsed_ini))
+        {
             std::cerr << "FATAL: Failed to read config file at " << target_config_path << "\n";
             std::exit(1);
         }
-        try {
+        try
+        {
             active_config = build_config_from_map(parsed_ini);
             std::cout << "Configuration loaded successfully from: " << target_config_path << "\n";
-        } catch (const std::exception& e) {
+        } catch (const std::exception& e)
+        {
             std::cerr << "FATAL: Config file at " << target_config_path
                       << " is incomplete or invalid (" << e.what() << "). Aborting.\n";
             std::exit(1);
         }
-    } else if (cli_settings_path.empty()) {
+    }
+    else if (cli_settings_path.empty())
+    {
         // Only allow fallback if no CLI flag was provided AND default file doesn't exist
-        std::cout << "No local config found at " << target_config_path << ". Using hardcoded defaults.\n";
+        std::cout << "No local config found at " << target_config_path
+                  << ". Using hardcoded defaults.\n";
     }
     // --------------------------------
 
-    const char** files = const_cast<const char**>(&argv[i]);
-    int file_count = argc - i;
+    const char** files      = const_cast<const char**>(&argv[i]);
+    int          file_count = argc - i;
 
-    if (concurrency < 1) concurrency = 1;
-    if (iteration_count < 1) iteration_count = 1;
+    if (concurrency < 1)
+        concurrency = 1;
+    if (iteration_count < 1)
+        iteration_count = 1;
 
 #ifdef NNUE_LOADER_STATISTICS
-    (void)do_cache_files;
+    (void) do_cache_files;
     run_report(concurrency, iteration_count, max_plies, file_count, files, active_config);
 #else
-    (void)max_plies;
+    (void) max_plies;
     run_bench(concurrency, iteration_count, do_cache_files, file_count, files, active_config);
 #endif
 

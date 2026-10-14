@@ -54,4 +54,4 @@
     #define NNUE_COLD
 #endif
 
-#endif // NNUE_MACROS_H
+#endif  // NNUE_MACROS_H

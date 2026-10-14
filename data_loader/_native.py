@@ -14,16 +14,36 @@ from .config import (
 )
 
 
-def _pin_and_move(t: torch.Tensor, device, use_pinned_memory=False, dtype=None) -> torch.Tensor:
+def _pin_and_move(
+    t: torch.Tensor, device, use_pinned_memory=False, dtype=None, *, copy_mode="memcpy"
+) -> torch.Tensor:
     if dtype is None:
         dtype = t.dtype
 
     # Must copy off SparseBatch-backed memory before it is freed
     if torch.cuda.is_available() and use_pinned_memory:
+        if copy_mode not in ("memcpy", "torch"):
+            raise ValueError(
+                "copy_mode must be memcpy or torch, "
+                f"got {copy_mode!r}"
+            )
         # Allocate a pinned CPU tensor and copy the data directly into it.
         # This is much faster than t.clone().pin_memory() which does two copies/allocations.
         out = torch.empty(t.shape, dtype=dtype, layout=t.layout, device="cpu", pin_memory=True)
-        out.copy_(t)
+        if (
+            copy_mode == "memcpy"
+            and t.device.type == "cpu"
+            and t.is_contiguous()
+            and t.dtype == dtype
+            and not t.is_conj()
+            and not t.is_neg()
+        ):
+            # Native blocks already have the destination representation. A
+            # synchronous libc copy releases the GIL and avoids dispatching
+            # additional PyTorch CPU workers while the C++ loader builds batches.
+            ctypes.memmove(out.data_ptr(), t.data_ptr(), t.numel() * t.element_size())
+        else:
+            out.copy_(t)
         if device == "cpu" or (isinstance(device, torch.device) and device.type == "cpu"):
             return out
         return out.to(device=device, non_blocking=True)

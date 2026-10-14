@@ -34,7 +34,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *           chunk = ~1 MiB blob + 8 B "BINP" header ~= 440k positions
  *           (~2.3 bytes/position on disk)
  *                                  |
- *                                  |  14 readers
+ *                                  |  12 readers
  *                                  |  one chunk per claim; files picked by
  *                                  |  the read-balance window (inset below)
  *                                  v
@@ -43,7 +43,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *         |             256 chunks        ~  256 MiB        |
  *         +-------------------------------------------------+
  *                                  |
- *                                  |  28 decode workers
+ *                                  |  24 decode workers
  *                                  |  decode; skip predicate (rfs, ply, wld,
  *                                  |  piece count) keeps ~3% at production;
  *                                  |  zobrist keys update the HLL counters
@@ -52,7 +52,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *                                  v
  *         +-------------------------------------------------+
  *         |              SHUFFLE WINDOW POOL                |
- *         |    12 windows x 2^20 entries  ~  2.6 GiB        |
+ *         |    16 windows x 2^20 entries  ~  3.6 GiB        |
  *         |                                                 |
  *         |     workers --append(16k bulk, one short mutex) |
  *         |                    |                            |
@@ -71,14 +71,14 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *         |     are returned to the pool and reused         |
  *         +-------------------------------------------------+
  *                                  |
- *                                  |  4 feature builders
+ *                                  |  8 feature builders
  *                                  |  each holds one window, slices batch_size
  *                                  |  (131072) entries per batch, extracts
  *                                  |  features into a SparseBatch (~304 MB)
  *                                  v
  *         +-------------------------------------------------+
  *         |             FINISHED BATCH DEQUE                |
- *         |             8 batches          ~  2.4 GiB       |
+ *         |            12 batches          ~  3.6 GiB       |
  *         +-------------------------------------------------+
  *                                  |
  *                                  |  1 python consumer thread
@@ -94,7 +94,7 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *                                  v  async H2D
  *                              [ GPU ]
  *
- *       read balance (how the 14 readers pick files):
+ *       read balance (how the 12 readers pick files):
  *
  *       W = 400 MiB sliding window of recent read bytes per file
  *       (exponentially weighted, kernel exp(-bytes/W)); each file's
