@@ -15,7 +15,12 @@ class ComposedFeatureTransformer(nn.Module):
     bias and delegates everything else to the underlying features.
     """
 
-    def __init__(self, feature_classes: list[Callable[[int], InputFeature]], l1_size: int, quantization: QuantizationManager):
+    def __init__(
+        self,
+        feature_classes: list[Callable[[int], InputFeature]],
+        l1_size: int,
+        quantization: QuantizationManager,
+    ):
         super().__init__()
 
         if not l1_size % 2 == 0:
@@ -59,7 +64,7 @@ class ComposedFeatureTransformer(nn.Module):
 
     def merged_weight_and_bias(
         self,
-        fake_quantize_weights: bool=False,
+        fake_quantize_weights: bool = False,
     ):
         merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
         b = self.bias
@@ -110,9 +115,7 @@ class ComposedFeatureTransformer(nn.Module):
         fake_quantize_weights: bool,
         backend: str = "auto",
     ) -> torch.Tensor:
-        merged, bias = self.merged_weight_and_bias(
-            fake_quantize_weights
-        )
+        merged, bias = self.merged_weight_and_bias(fake_quantize_weights)
         ft_max_act = self.quantization.max_ft_activation
 
         l0_ = double_feature_transform(

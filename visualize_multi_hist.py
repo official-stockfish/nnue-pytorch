@@ -91,9 +91,7 @@ def main():
     ]
 
     coalesced_ins = [model.input.get_export_weights() for model in models]
-    input_weights = [
-        coalesced_in.flatten().numpy() for coalesced_in in coalesced_ins
-    ]
+    input_weights = [coalesced_in.flatten().numpy() for coalesced_in in coalesced_ins]
     plot_hists(
         [input_weights],
         labels,

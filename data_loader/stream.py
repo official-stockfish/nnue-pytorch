@@ -144,6 +144,7 @@ def destroy_sparse_batch(batch: SparseBatchPtr):
 
 # --- Unique position counting (HLL) ---
 
+
 def get_unique_position_stats(stream: ctypes.c_void_p) -> tuple[int, int, int]:
     """Return (preskip, total, unique) where preskip is the exact count
     of all positions read (before filtering), total is the exact count
@@ -153,7 +154,9 @@ def get_unique_position_stats(stream: ctypes.c_void_p) -> tuple[int, int, int]:
     preskip = ctypes.c_uint64(0)
     total = ctypes.c_uint64(0)
     unique = ctypes.c_uint64(0)
-    c_lib.dll.get_unique_position_stats(stream, ctypes.byref(preskip), ctypes.byref(total), ctypes.byref(unique))
+    c_lib.dll.get_unique_position_stats(
+        stream, ctypes.byref(preskip), ctypes.byref(total), ctypes.byref(unique)
+    )
     return preskip.value, total.value, unique.value
 
 

@@ -108,8 +108,10 @@ class AsyncCheckpointWriter:
             # and drop any queued job for the same path.
             with self._cv:
                 self._cv.wait_for(
-                    lambda: self._writing_path != path
-                    and all(p != path for _, p, _ in self._jobs),
+                    lambda: (
+                        self._writing_path != path
+                        and all(p != path for _, p, _ in self._jobs)
+                    ),
                     timeout=600.0,
                 )
                 for j_idx in range(len(self._jobs) - 1, -1, -1):
@@ -151,19 +153,12 @@ class AsyncCheckpointWriter:
             buf.copy_(t, non_blocking=self._pinned)
             return buf
         if isinstance(obj, dict):
-            return {
-                k: self._snapshot(v, idx, f"{prefix}.{k}")
-                for k, v in obj.items()
-            }
+            return {k: self._snapshot(v, idx, f"{prefix}.{k}") for k, v in obj.items()}
         if isinstance(obj, list):
-            return [
-                self._snapshot(v, idx, f"{prefix}[{i}]")
-                for i, v in enumerate(obj)
-            ]
+            return [self._snapshot(v, idx, f"{prefix}[{i}]") for i, v in enumerate(obj)]
         if isinstance(obj, tuple):
             return tuple(
-                self._snapshot(v, idx, f"{prefix}[{i}]")
-                for i, v in enumerate(obj)
+                self._snapshot(v, idx, f"{prefix}[{i}]") for i, v in enumerate(obj)
             )
         return obj
 

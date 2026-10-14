@@ -12,14 +12,21 @@ class LambdaController(nn.Module):
     0.0 < lambda_ < 1.0 - interpolated score and result
     lambda_ = 1.0 - purely based on search scores
     """
+
     def __init__(self):
         super().__init__()
 
         # persistent=False ensures this is NOT saved in the standard model state_dict
         self.register_buffer("jitter_buffer", torch.zeros(1), persistent=False)
 
-
-    def forward(self, loss_params: LossParams, current_step: int, max_steps: int, is_training: bool, scorenet: Tensor) -> Tensor | float:
+    def forward(
+        self,
+        loss_params: LossParams,
+        current_step: int,
+        max_steps: int,
+        is_training: bool,
+        scorenet: Tensor,
+    ) -> Tensor | float:
         cfg = loss_params.lambda_config
         start_lambda = cfg.start_lambda if cfg.start_lambda is not None else cfg.lambda_
         end_lambda = cfg.end_lambda if cfg.end_lambda is not None else cfg.lambda_
@@ -44,13 +51,20 @@ class LambdaController(nn.Module):
                 warmup_steps = cfg.lambda_cycle_warmup_pct * cfg.lambda_schedule_steps
                 if current_step < warmup_steps:
                     if warmup_steps > 0:
-                        cos_val = 0.5 * (1.0 - math.cos(math.pi * current_step / warmup_steps))
+                        cos_val = 0.5 * (
+                            1.0 - math.cos(math.pi * current_step / warmup_steps)
+                        )
                     else:
                         cos_val = 1.0
                 else:
                     cooldown_steps = cfg.lambda_schedule_steps - warmup_steps
                     if cooldown_steps > 0:
-                        cos_val = 0.5 * (1.0 + math.cos(math.pi * (current_step - warmup_steps) / cooldown_steps))
+                        cos_val = 0.5 * (
+                            1.0
+                            + math.cos(
+                                math.pi * (current_step - warmup_steps) / cooldown_steps
+                            )
+                        )
                     else:
                         cos_val = 0.0
 
@@ -58,9 +72,15 @@ class LambdaController(nn.Module):
 
         if is_training:
             if cfg.jitter_lambda_batch != 0.0:
-                jitter_lambda_batch = cfg.jitter_lambda_batch * math.sqrt(1 - cfg.jitter_decay_lambda_batch ** 2)
-                batch_jitter_delta = jitter_lambda_batch * torch.randn_like(self.jitter_buffer)
-                self.jitter_buffer.mul_(cfg.jitter_decay_lambda_batch).add_(batch_jitter_delta)
+                jitter_lambda_batch = cfg.jitter_lambda_batch * math.sqrt(
+                    1 - cfg.jitter_decay_lambda_batch**2
+                )
+                batch_jitter_delta = jitter_lambda_batch * torch.randn_like(
+                    self.jitter_buffer
+                )
+                self.jitter_buffer.mul_(cfg.jitter_decay_lambda_batch).add_(
+                    batch_jitter_delta
+                )
                 batch_jitter = self.jitter_buffer.expand_as(scorenet)
                 if cfg.lambda_schedule_steps >= 0 and cfg.lambda_cycle_jitter:
                     batch_jitter = batch_jitter * cos_val
@@ -82,7 +102,6 @@ class LambdaController(nn.Module):
         if torch.is_tensor(actual_lambda):
             return actual_lambda.clamp(0.0, 1.0)
         return max(0.0, min(1.0, actual_lambda))
-
 
     def on_save_checkpoint(self, checkpoint):
         # Manually save the training-only buffer to the training checkpoint

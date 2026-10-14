@@ -71,15 +71,24 @@ class LambdaConfig:
         if self.end_lambda is None:
             self.end_lambda = self.lambda_
 
-        if self.jitter_decay_lambda_batch < 0.0 or self.jitter_decay_lambda_batch >= 1.0:
-            raise ValueError("jitter_decay_lambda_batch must be in the range [0.0, 1.0).")
+        if (
+            self.jitter_decay_lambda_batch < 0.0
+            or self.jitter_decay_lambda_batch >= 1.0
+        ):
+            raise ValueError(
+                "jitter_decay_lambda_batch must be in the range [0.0, 1.0)."
+            )
         if self.jitter_lambda_batch < 0.0 or self.jitter_lambda_sample < 0.0:
-            raise ValueError("jitter_lambda_batch and jitter_lambda_sample must be non-negative.")
+            raise ValueError(
+                "jitter_lambda_batch and jitter_lambda_sample must be non-negative."
+            )
         if self.lambda_schedule_steps >= 0:
             if self.lambda_schedule_steps == 0:
                 raise ValueError("lambda_schedule_steps must be positive.")
             if self.lambda_cycle_warmup_pct < 0.0 or self.lambda_cycle_warmup_pct > 1.0:
-                raise ValueError("lambda_cycle_warmup_pct must be in the range [0.0, 1.0].")
+                raise ValueError(
+                    "lambda_cycle_warmup_pct must be in the range [0.0, 1.0]."
+                )
 
 
 # parameters needed for the definition of the loss
@@ -109,6 +118,7 @@ class LossParams:
     """Tablebase score remapping scale value (default=20000.0)"""
     tb_remap_decay: float = 0.85
     """Tablebase score remapping decay parameter (default=0.8)"""
+
 
 @dataclass(kw_only=True)
 class NNUEConfig(FeatureConfig):

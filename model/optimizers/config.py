@@ -15,7 +15,9 @@ OPTIMIZER_WRAPPERS = {
 
 @dataclass(kw_only=True)
 class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig, AdamWConfig):
-    optimizer_name: Literal["schedulefree", "ranger21", "rangerlite", "adamw"] = "rangerlite"
+    optimizer_name: Literal["schedulefree", "ranger21", "rangerlite", "adamw"] = (
+        "rangerlite"
+    )
     """Which optimizer to use. Note that ranger21 is a specific configuration of rangerlite emulating ranger21 behaviour with legacy_mode=True."""
 
     ft_weight_decay: float = 0.0
@@ -43,7 +45,9 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig, AdamWConfig):
             )
         wrapper = wrapper_factory(self)
 
-        info_str = f"[OptimizerConfig] Using {optimizer_name} optimizer with lr: {self.lr}"
+        info_str = (
+            f"[OptimizerConfig] Using {optimizer_name} optimizer with lr: {self.lr}"
+        )
         if (
             self.dense_weight_decay > 0.0
             or self.ft_weight_decay > 0.0

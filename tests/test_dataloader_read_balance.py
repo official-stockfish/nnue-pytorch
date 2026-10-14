@@ -18,14 +18,25 @@ from data_loader.config import (
 )
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GENERATOR_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "make_test_binpack.cpp")
+GENERATOR_SRC = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "make_test_binpack.cpp"
+)
 LIB_INCLUDE = os.path.join(REPO_ROOT, "data_loader", "cpp", "lib")
 
 # Fixture layout: 8 files, sizes roughly 40:36:33:30:27:25:24:24 MiB. Every
 # file is >= 24 MiB so that (a) the per-file balance-window allocation spans
 # multiple 1 MiB chunks and (b) DDP rank partitioning (world_size=4) is
 # meaningful at all.
-FIXTURE_POSITIONS = [14_600_000, 13_100_000, 12_000_000, 10_900_000, 9_800_000, 9_100_000, 8_700_000, 8_700_000]
+FIXTURE_POSITIONS = [
+    14_600_000,
+    13_100_000,
+    12_000_000,
+    10_900_000,
+    9_800_000,
+    9_100_000,
+    8_700_000,
+    8_700_000,
+]
 BATCH_SIZE = 16384
 CONCURRENCY = 8
 
@@ -72,7 +83,10 @@ def _fixtures():
     """Return the list of fixture files, generating them once if needed."""
     generator = _build_generator()
     fixture_dir = _fixture_dir()
-    files = [os.path.join(fixture_dir, f"test_{i}.binpack") for i in range(len(FIXTURE_POSITIONS))]
+    files = [
+        os.path.join(fixture_dir, f"test_{i}.binpack")
+        for i in range(len(FIXTURE_POSITIONS))
+    ]
     missing = [
         (path, npos, 1000 + i)
         for i, (path, npos) in enumerate(zip(files, FIXTURE_POSITIONS))
@@ -127,7 +141,11 @@ def _consume(st, seconds=None, batches=None):
 
 
 @unittest.skipUnless(
-    os.path.exists(os.path.join(REPO_ROOT, "data_loader", "cpp", "build", "libtraining_data_loader.so")),
+    os.path.exists(
+        os.path.join(
+            REPO_ROOT, "data_loader", "cpp", "build", "libtraining_data_loader.so"
+        )
+    ),
     "data loader library not built",
 )
 class TestReadBalance(unittest.TestCase):
@@ -248,40 +266,42 @@ class TestReadBalance(unittest.TestCase):
         # smaller than both the worker scratch and the batch size, stressing
         # the seal-split and window-spanning paths.
         for shuffle_buffer_entries in (0, 1024, 65536):
-          for _ in range(3):
-            st = stream.create_sparse_batch_stream(
-                b"HalfKAv2_hm",
-                CONCURRENCY,
-                files,
-                4096,
-                False,  # cyclic=False: stream must end
-                SKIP_ALL_OFF,
-                DataloaderDDPConfig(0, 1),
-                None,
-                DataloaderIOConfig(
-                    balance_window_mb=32,
-                    shuffle_buffer_entries=shuffle_buffer_entries,
-                ),
-            )
-            result = {}
+            for _ in range(3):
+                st = stream.create_sparse_batch_stream(
+                    b"HalfKAv2_hm",
+                    CONCURRENCY,
+                    files,
+                    4096,
+                    False,  # cyclic=False: stream must end
+                    SKIP_ALL_OFF,
+                    DataloaderDDPConfig(0, 1),
+                    None,
+                    DataloaderIOConfig(
+                        balance_window_mb=32,
+                        shuffle_buffer_entries=shuffle_buffer_entries,
+                    ),
+                )
+                result = {}
 
-            def consume(st=st, result=result):
-                positions = 0
-                while True:
-                    b = stream.fetch_next_sparse_batch(st)
-                    if not b:
-                        break
-                    positions += b.contents.size
-                    stream.destroy_sparse_batch(b)
-                result["positions"] = positions
+                def consume(st=st, result=result):
+                    positions = 0
+                    while True:
+                        b = stream.fetch_next_sparse_batch(st)
+                        if not b:
+                            break
+                        positions += b.contents.size
+                        stream.destroy_sparse_batch(b)
+                    result["positions"] = positions
 
-            t = threading.Thread(target=consume, daemon=True)
-            t.start()
-            t.join(timeout=60.0)
-            self.assertFalse(t.is_alive(), "non-cyclic stream did not terminate (deadlock?)")
-            stream.destroy_sparse_batch_stream(st)
-            # 8 files x 20000 positions, no skipping.
-            self.assertEqual(result.get("positions"), 8 * 20000)
+                t = threading.Thread(target=consume, daemon=True)
+                t.start()
+                t.join(timeout=60.0)
+                self.assertFalse(
+                    t.is_alive(), "non-cyclic stream did not terminate (deadlock?)"
+                )
+                stream.destroy_sparse_batch_stream(st)
+                # 8 files x 20000 positions, no skipping.
+                self.assertEqual(result.get("positions"), 8 * 20000)
 
     def test_destroy_with_slow_read_in_flight(self):
         """Stream destruction must not hang on an in-flight (slow) read."""
@@ -298,7 +318,11 @@ class TestReadBalance(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    os.path.exists(os.path.join(REPO_ROOT, "data_loader", "cpp", "build", "libtraining_data_loader.so")),
+    os.path.exists(
+        os.path.join(
+            REPO_ROOT, "data_loader", "cpp", "build", "libtraining_data_loader.so"
+        )
+    ),
     "libtraining_data_loader.so not built",
 )
 class TestSharedCyclicStream(unittest.TestCase):
@@ -368,7 +392,11 @@ class TestSharedCyclicStream(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    os.path.exists(os.path.join(REPO_ROOT, "data_loader", "cpp", "build", "libtraining_data_loader.so")),
+    os.path.exists(
+        os.path.join(
+            REPO_ROOT, "data_loader", "cpp", "build", "libtraining_data_loader.so"
+        )
+    ),
     "libtraining_data_loader.so not built",
 )
 class TestSharedShuffleWindow(unittest.TestCase):
@@ -420,6 +448,7 @@ class TestSharedShuffleWindow(unittest.TestCase):
 
     def test_ddp_partition_counts(self):
         """DDP ranks must jointly deliver exactly the single-stream data."""
+
         def consume(rank):
             st = stream.create_sparse_batch_stream(
                 b"HalfKAv2_hm",
@@ -430,9 +459,7 @@ class TestSharedShuffleWindow(unittest.TestCase):
                 SKIP_ALL_OFF,
                 DataloaderDDPConfig(rank, 2),
                 None,
-                DataloaderIOConfig(
-                    balance_window_mb=32, shuffle_buffer_entries=4096
-                ),
+                DataloaderIOConfig(balance_window_mb=32, shuffle_buffer_entries=4096),
             )
             positions = 0
             while True:
@@ -446,14 +473,19 @@ class TestSharedShuffleWindow(unittest.TestCase):
 
         results = {}
         threads = [
-            threading.Thread(target=lambda r=r: results.__setitem__(r, consume(r)), daemon=True)
+            threading.Thread(
+                target=lambda r=r: results.__setitem__(r, consume(r)), daemon=True
+            )
             for r in (0, 1)
         ]
         for t in threads:
             t.start()
         for t in threads:
             t.join(timeout=60.0)
-        self.assertTrue(all(not t.is_alive() for t in threads), "DDP stream did not terminate (deadlock?)")
+        self.assertTrue(
+            all(not t.is_alive() for t in threads),
+            "DDP stream did not terminate (deadlock?)",
+        )
         # No skipping: both ranks together must deliver every position
         # exactly once (chunk-level partitioning is reader-side and must be
         # unaffected by the shared window pool).

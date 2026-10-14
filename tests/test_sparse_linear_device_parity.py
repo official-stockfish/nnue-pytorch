@@ -20,9 +20,9 @@ def test_sparse_linear_cpu_mps_parity():
     max_active_features = 128
     output_size = 1032
 
-    feature_indices = (
-        torch.rand(batch_size, max_active_features) * input_size
-    ).to(dtype=torch.int32)
+    feature_indices = (torch.rand(batch_size, max_active_features) * input_size).to(
+        dtype=torch.int32
+    )
 
     # Exercise padding behavior. Negative indices should be ignored
     feature_indices[:, -4:] = -1

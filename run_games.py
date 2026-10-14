@@ -185,9 +185,7 @@ def run_match(
     # errors like engine hanging or c-chess-cli having an error...
     for i in range(tries):
         print_atomic(" ".join(command))
-        print_atomic(
-            f"Running match with c-chess-cli ... {pgn_file_name}", flush=True
-        )
+        print_atomic(f"Running match with c-chess-cli ... {pgn_file_name}", flush=True)
         with open(os.path.join(root_dir, "c_chess.out"), "w") as c_chess_out:
             process = subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
@@ -415,9 +413,7 @@ def run_round(
         sorted(ordo_scores.items(), key=lambda item: item[1][0], reverse=True)
     )
     for count, net in enumerate(ordo_scores, start=1):
-        print_atomic(
-            f"   {net} : {ordo_scores[net][0]} +- {ordo_scores[net][1]}"
-        )
+        print_atomic(f"   {net} : {ordo_scores[net][0]} +- {ordo_scores[net][1]}")
         if count == 3:
             break
 
@@ -432,9 +428,7 @@ def run_round(
     )
     best = []
     for net in ordo_scores:
-        print_atomic(
-            f"   {net} : {ordo_scores[net][0]} +- {ordo_scores[net][1]}"
-        )
+        print_atomic(f"   {net} : {ordo_scores[net][0]} +- {ordo_scores[net][1]}")
         best.append(net)
         if len(best) == 3:
             break
@@ -478,9 +472,10 @@ def run_round(
         with open(main_pgn_file_name, "w"):
             pass
     try:
-        with open(main_pgn_file_name, "a") as file_to, open(
-            curr_pgn_file_name, "r"
-        ) as file_from:
+        with (
+            open(main_pgn_file_name, "a") as file_to,
+            open(curr_pgn_file_name, "r") as file_from,
+        ):
             file_to.writelines(file_from)
         os.remove(curr_pgn_file_name)
     except (OSError, PermissionError):

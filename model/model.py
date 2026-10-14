@@ -34,7 +34,6 @@ class NNUEModel(nn.Module):
 
         self.input.init_weights()
 
-
     @torch.no_grad()
     def clip_weights(self, include_input):
         """
@@ -67,12 +66,10 @@ class NNUEModel(nn.Module):
                             )
                     p_data_fp32.clamp_(min_weight, max_weight)
 
-
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
         self.input.zero_virtual_weights()
         self.layer_stacks.zero_virtual_weights()
-
 
     def forward_ft(
         self,
@@ -92,12 +89,9 @@ class NNUEModel(nn.Module):
             fake_quantize_weights,
         )
 
-    def calculate_buckets(
-        self, piece_count: torch.Tensor, queen_bucket: torch.Tensor
-    ):
+    def calculate_buckets(self, piece_count: torch.Tensor, queen_bucket: torch.Tensor):
         pc_bucket = (piece_count - 1) // 4
         return pc_bucket * 4 + queen_bucket
-
 
     def forward(
         self,
@@ -107,8 +101,8 @@ class NNUEModel(nn.Module):
         black_indices: torch.Tensor,
         piece_count: torch.Tensor,
         queen_bucket: torch.Tensor,
-        fake_quantize_acts: bool=True,
-        fake_quantize_weights: bool=True,
+        fake_quantize_acts: bool = True,
+        fake_quantize_weights: bool = True,
     ):
         layer_stack_indices = self.calculate_buckets(piece_count, queen_bucket)
 
@@ -120,6 +114,8 @@ class NNUEModel(nn.Module):
             fake_quantize_acts,
             fake_quantize_weights,
         )
-        x = self.layer_stacks(l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights)
+        x = self.layer_stacks(
+            l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights
+        )
 
         return x

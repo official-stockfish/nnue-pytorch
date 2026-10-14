@@ -8,6 +8,7 @@ try:
         make_sparse_input_linear_backward_kernel,
         make_sparse_input_linear_forward_kernel,
     )
+
     _HAS_CUPY_KERNELS = True
 except (ImportError, OSError, RuntimeError):
     pass
@@ -27,9 +28,11 @@ def _torch_sparse_linear(feature_indices, weight, bias):
         safe_indices = feature_indices.clamp(min=0).long().reshape(-1)
         per_sample_weights = mask.to(weight.dtype).reshape(-1, 1)
         gathered_weight = F.embedding(safe_indices, weight)
-        output = (gathered_weight * per_sample_weights).reshape(
-            batch_size, max_active, weight.shape[1]
-        ).sum(dim=1)
+        output = (
+            (gathered_weight * per_sample_weights)
+            .reshape(batch_size, max_active, weight.shape[1])
+            .sum(dim=1)
+        )
         return output + bias
 
     safe_indices = feature_indices.clamp(min=0).long().reshape(-1)
@@ -144,10 +147,16 @@ class SparseLinearFunction:
     Uses custom CuPy CUDA kernel when available. Otherwise falls back to a
     PyTorch implementation that works on any device (CPU, MPS).
     """
+
     @staticmethod
     def apply(feature_indices, weight, bias, backend: str = "auto"):
         if backend == "auto":
-            if _HAS_CUPY_KERNELS and feature_indices.is_cuda and weight.is_cuda and bias.is_cuda:
+            if (
+                _HAS_CUPY_KERNELS
+                and feature_indices.is_cuda
+                and weight.is_cuda
+                and bias.is_cuda
+            ):
                 return _CudaSparseLinearFunction.apply(feature_indices, weight, bias)
             return _torch_sparse_linear(feature_indices, weight, bias)
 
@@ -155,7 +164,9 @@ class SparseLinearFunction:
             if not _HAS_CUPY_KERNELS:
                 raise RuntimeError("CuPy sparse linear kernel is not available.")
             if not (feature_indices.is_cuda and weight.is_cuda and bias.is_cuda):
-                raise RuntimeError("Sparse CUDA kernel requested but tensors are not on CUDA.")
+                raise RuntimeError(
+                    "Sparse CUDA kernel requested but tensors are not on CUDA."
+                )
             return _CudaSparseLinearFunction.apply(feature_indices, weight, bias)
 
         elif backend == "torch":

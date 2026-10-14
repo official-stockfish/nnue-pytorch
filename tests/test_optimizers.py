@@ -125,7 +125,9 @@ def test_nnue_integration_all_optimizers(optimizer_name):
 @pytest.mark.parametrize("optimizer_name", ["rangerlite", "ranger21", "adamw"])
 def test_lr_scheduler_options(optimizer_name):
     # StepLR test (one_cycle_steps <= 0)
-    step_config = OptimizerConfig(optimizer_name=optimizer_name, one_cycle_steps=0, gamma=0.95)
+    step_config = OptimizerConfig(
+        optimizer_name=optimizer_name, one_cycle_steps=0, gamma=0.95
+    )
     wrapper = step_config.get_optimizer_wrapper()
     train_params = create_dummy_train_params()
     _, schedulers = wrapper.configure_optimizers(train_params)
@@ -133,7 +135,9 @@ def test_lr_scheduler_options(optimizer_name):
     assert schedulers[0].gamma == 0.95
 
     # OneCycleLR test (one_cycle_steps > 0)
-    one_cycle_config = OptimizerConfig(optimizer_name=optimizer_name, one_cycle_steps=500)
+    one_cycle_config = OptimizerConfig(
+        optimizer_name=optimizer_name, one_cycle_steps=500
+    )
     wrapper = one_cycle_config.get_optimizer_wrapper()
     _, schedulers = wrapper.configure_optimizers(train_params)
     assert isinstance(schedulers[0], dict)
@@ -193,7 +197,9 @@ def test_ranger_stable_weight_decay_option():
     assert wrapper_default.optimizer.use_stable_weight_decay is True
 
     # Test turning off stable weight decay (False)
-    config_elementwise = OptimizerConfig(optimizer_name="rangerlite", ranger_stable_weight_decay=False)
+    config_elementwise = OptimizerConfig(
+        optimizer_name="rangerlite", ranger_stable_weight_decay=False
+    )
     assert config_elementwise.ranger_stable_weight_decay is False
 
     wrapper_elementwise = config_elementwise.get_optimizer_wrapper()
@@ -250,8 +256,12 @@ def test_virtual_ft_weight_decay_and_pruning():
         ),
     )
     model_k32q2 = NNUE(config=config_k32q2)
-    real_ft = _get_parameters([model_k32q2.model.input], get_biases=False, get_virtual=False)
-    virtual_ft = _get_parameters([model_k32q2.model.input], get_biases=False, get_virtual=True)
+    real_ft = _get_parameters(
+        [model_k32q2.model.input], get_biases=False, get_virtual=False
+    )
+    virtual_ft = _get_parameters(
+        [model_k32q2.model.input], get_biases=False, get_virtual=True
+    )
     assert len(real_ft) > 0
     assert len(virtual_ft) > 0
 
@@ -280,7 +290,14 @@ def test_virtual_ft_weight_decay_and_pruning():
         ),
     )
     model_no_virt = NNUE(config=config_no_virt)
-    assert len(_get_parameters([model_no_virt.model.input], get_biases=False, get_virtual=True)) == 0
+    assert (
+        len(
+            _get_parameters(
+                [model_no_virt.model.input], get_biases=False, get_virtual=True
+            )
+        )
+        == 0
+    )
     res_no_virt = model_no_virt.configure_optimizers()
     opt_no_virt = res_no_virt[0][0]
     for group in opt_no_virt.param_groups:
@@ -325,7 +342,9 @@ def test_weight_clipper_and_swa_export():
     clipper_interval.on_train_batch_end(t)
     assert t.model.model.calls == [False, True, True]
     clipper_interval.on_train_epoch_end(t)
-    assert t.model.model.calls == [False, True, True], "Should not clip input on epoch end when interval > 0"
+    assert t.model.model.calls == [False, True, True], (
+        "Should not clip input on epoch end when interval > 0"
+    )
 
     # ExplicitSWA clip on export
     swa = ExplicitSWA(swa_start_epoch=0, save_dir="/tmp")
@@ -335,5 +354,3 @@ def test_weight_clipper_and_swa_export():
     swa.swap_weights = lambda model, to_eval: None
     swa.on_train_end(t_swa)
     assert t_swa.model.model.calls == [True]
-
-

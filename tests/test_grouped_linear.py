@@ -21,9 +21,14 @@ OPTIMIZED_AVAILABLE = (
 
 
 def _reference(layer, x, indices, quantize=False):
-    weight = layer.linear.weight.reshape(layer.count, layer.out_features, layer.in_features)
+    weight = layer.linear.weight.reshape(
+        layer.count, layer.out_features, layer.in_features
+    )
     weight = weight + layer.factorized_linear.weight
-    bias = layer.linear.bias.reshape(layer.count, layer.out_features) + layer.factorized_linear.bias
+    bias = (
+        layer.linear.bias.reshape(layer.count, layer.out_features)
+        + layer.factorized_linear.bias
+    )
     if quantize:
         weight = layer.quantization.fake_quantize_weights(weight, "ls_l1_weight")
         bias = layer.quantization.fake_quantize_weights(bias, "ls_l1_bias")
@@ -31,19 +36,29 @@ def _reference(layer, x, indices, quantize=False):
     return torch.bmm(weight[indices], x.unsqueeze(-1)).squeeze(-1) + bias[indices]
 
 
-@pytest.mark.skipif(not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required")
+@pytest.mark.skipif(
+    not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required"
+)
 @pytest.mark.parametrize("width", [1024, 1152, 1280])
 @pytest.mark.parametrize("batch", [1, 17, 257])
 @pytest.mark.parametrize("concentrated", [False, True])
 @pytest.mark.parametrize("quantize", [False, True])
 @pytest.mark.parametrize("outputs", [16, 32, 48, 64, 128])
-def test_grouped_forward_and_all_gradients(width, batch, concentrated, quantize, outputs, monkeypatch):
-    _check_forward_and_all_gradients(width, batch, concentrated, quantize, outputs, 8, monkeypatch)
+def test_grouped_forward_and_all_gradients(
+    width, batch, concentrated, quantize, outputs, monkeypatch
+):
+    _check_forward_and_all_gradients(
+        width, batch, concentrated, quantize, outputs, 8, monkeypatch
+    )
 
 
-def _check_forward_and_all_gradients(width, batch, concentrated, quantize, outputs, count, monkeypatch):
+def _check_forward_and_all_gradients(
+    width, batch, concentrated, quantize, outputs, count, monkeypatch
+):
     torch.manual_seed(123)
-    layer = FactorizedStackedLinear(width, outputs, count, QuantizationManager(QuantizationConfig()), "ls_l1").cuda()
+    layer = FactorizedStackedLinear(
+        width, outputs, count, QuantizationManager(QuantizationConfig()), "ls_l1"
+    ).cuda()
     # Distinct bucket weights catch incorrect routing/strides, unlike the
     # identical initial weights used by StackedLinear.
     with torch.no_grad():
@@ -54,7 +69,9 @@ def _check_forward_and_all_gradients(width, batch, concentrated, quantize, outpu
     # Strided all-zero, dense and 75%-zero inputs; uneven/empty buckets and partial tiles.
     storage = torch.randn(batch, width, 2, device="cuda")
     zero_fraction = {1: 1.0, 17: 0.0, 257: 0.75}[batch]
-    storage[..., 0].masked_fill_(torch.rand(batch, width, device="cuda") < zero_fraction, 0)
+    storage[..., 0].masked_fill_(
+        torch.rand(batch, width, device="cuda") < zero_fraction, 0
+    )
     x = storage[..., 0].detach().requires_grad_()
     indices = torch.randint(0, count, (batch, 1), device="cuda", dtype=torch.int32)
     indices[-1] = count - 1
@@ -85,26 +102,47 @@ def _check_forward_and_all_gradients(width, batch, concentrated, quantize, outpu
         assert torch.count_nonzero(gradients[0][x == 0]) > 0
 
 
-@pytest.mark.skipif(not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required")
+@pytest.mark.skipif(
+    not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required"
+)
 @pytest.mark.parametrize("outputs", [1, 17, 31, 33, 63, 65, 96, 127])
 def test_grouped_partial_output_tiles(outputs, monkeypatch):
     test_grouped_forward_and_all_gradients(1024, 17, False, False, outputs, monkeypatch)
 
 
-@pytest.mark.skipif(not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required")
+@pytest.mark.skipif(
+    not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required"
+)
 @pytest.mark.parametrize("count", [1, 3, 4, 16, 32, 256])
 @pytest.mark.parametrize("concentrated", [False, True])
 @pytest.mark.parametrize("quantize", [False, True])
 def test_grouped_variable_stack_count(count, concentrated, quantize, monkeypatch):
-    _check_forward_and_all_gradients(1024, 257, concentrated, quantize, 32, count, monkeypatch)
+    _check_forward_and_all_gradients(
+        1024, 257, concentrated, quantize, 32, count, monkeypatch
+    )
 
 
-@pytest.mark.skipif(not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required")
-@pytest.mark.parametrize("count,expected", [(1, False), (8, False), (16, False), (31, False), (32, True), (64, True), (256, True)])
+@pytest.mark.skipif(
+    not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required"
+)
+@pytest.mark.parametrize(
+    "count,expected",
+    [
+        (1, False),
+        (8, False),
+        (16, False),
+        (31, False),
+        (32, True),
+        (64, True),
+        (256, True),
+    ],
+)
 def test_grouped_dispatch_gate(count, expected, monkeypatch):
     monkeypatch.delenv("NNUE_GROUPED_L1", raising=False)
     torch.manual_seed(123)
-    layer = FactorizedStackedLinear(1024, 32, count, QuantizationManager(QuantizationConfig()), "ls_l1").cuda()
+    layer = FactorizedStackedLinear(
+        1024, 32, count, QuantizationManager(QuantizationConfig()), "ls_l1"
+    ).cuda()
     with torch.no_grad():
         layer.linear.weight.normal_(std=0.02)
         layer.linear.bias.normal_(std=0.02)
@@ -122,12 +160,18 @@ def test_grouped_dispatch_gate(count, expected, monkeypatch):
         # The dense path must produce identical results when the gate closes
         # (cuBLAS uses TF32 here; the bmm reference does not).
         optimized.assert_not_called()
-        torch.testing.assert_close(actual, _reference(layer, x, indices), atol=2e-3, rtol=2e-4)
+        torch.testing.assert_close(
+            actual, _reference(layer, x, indices), atol=2e-3, rtol=2e-4
+        )
 
 
-@pytest.mark.skipif(not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required")
+@pytest.mark.skipif(
+    not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required"
+)
 def test_grouped_dispatch_env_override(monkeypatch):
-    layer = FactorizedStackedLinear(1024, 32, 64, QuantizationManager(QuantizationConfig()), "ls_l1").cuda()
+    layer = FactorizedStackedLinear(
+        1024, 32, 64, QuantizationManager(QuantizationConfig()), "ls_l1"
+    ).cuda()
     x = torch.randn(17, 1024, device="cuda")
     indices = torch.randint(0, 64, (17, 1), device="cuda", dtype=torch.int32)
     optimized = Mock(wraps=grouped_l1)
@@ -142,48 +186,75 @@ def test_grouped_dispatch_env_override(monkeypatch):
     optimized.assert_called_once()
 
 
-@pytest.mark.skipif(not GPU_AVAILABLE or grouped_l1 is None, reason="GPU, CuPy and Triton required")
+@pytest.mark.skipif(
+    not GPU_AVAILABLE or grouped_l1 is None, reason="GPU, CuPy and Triton required"
+)
 def test_grouped_router_switches_stack_count():
     from model.modules.grouped_linear import _route_rows
 
     # Revisit a specialization after using another count; several CUDA blocks
     # must agree on the offsets. Bucket zero is deliberately left empty.
     for count in (8, 3, 256, 1, 8, 3):
-        indices = (torch.arange(1025, device="cuda") % max(1, count - 1) + (count > 1)).long()
+        indices = (
+            torch.arange(1025, device="cuda") % max(1, count - 1) + (count > 1)
+        ).long()
         rows, counts = _route_rows(indices, count)
         assert rows.shape == (count, len(indices))
-        torch.testing.assert_close(counts.long(), torch.bincount(indices, minlength=count))
+        torch.testing.assert_close(
+            counts.long(), torch.bincount(indices, minlength=count)
+        )
         for bucket, population in enumerate(counts.tolist()):
             expected = torch.where(indices == bucket)[0]
             actual = rows[bucket, :population].long().sort().values
             torch.testing.assert_close(actual, expected)
 
 
-@pytest.mark.parametrize("device", [
-    "cpu",
-    pytest.param("cuda", marks=pytest.mark.skipif(not GPU_AVAILABLE, reason="CUDA or ROCm GPU required")),
-])
-@pytest.mark.parametrize("case", ["dependencies", "width", "outputs", "buckets", "dtype", "empty", "autocast"])
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda",
+            marks=pytest.mark.skipif(
+                not GPU_AVAILABLE, reason="CUDA or ROCm GPU required"
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "case",
+    ["dependencies", "width", "outputs", "buckets", "dtype", "empty", "autocast"],
+)
 def test_grouped_fallback(device, case, monkeypatch):
     width = 264 if case == "width" else 1024
     outputs = 129 if case == "outputs" else 32
     buckets = 257 if case == "buckets" else 8
     dtype = torch.float64 if case == "dtype" else torch.float32
     batch = 0 if case == "empty" else 3
-    layer = FactorizedStackedLinear(width, outputs, buckets, QuantizationManager(QuantizationConfig()), "ls_l1")
+    layer = FactorizedStackedLinear(
+        width, outputs, buckets, QuantizationManager(QuantizationConfig()), "ls_l1"
+    )
     layer = layer.to(device=device, dtype=dtype)
     x = torch.randn(batch, width, device=device, dtype=dtype, requires_grad=True)
     indices = torch.arange(batch, device=device).reshape(-1, 1) % buckets
-    optimized = Mock(side_effect=AssertionError("Unsupported inputs must use the PyTorch fallback"))
-    monkeypatch.setattr(stacked_linear, "grouped_l1", None if case == "dependencies" else optimized)
+    optimized = Mock(
+        side_effect=AssertionError("Unsupported inputs must use the PyTorch fallback")
+    )
+    monkeypatch.setattr(
+        stacked_linear, "grouped_l1", None if case == "dependencies" else optimized
+    )
 
     with torch.autocast(device_type=device, enabled=case == "autocast"):
         actual = layer(x, indices)
         # Use the original all-buckets operation for matching autocast semantics.
         if case == "autocast":
-            weight = layer.linear.weight + layer.factorized_linear.weight.repeat(buckets, 1)
+            weight = layer.linear.weight + layer.factorized_linear.weight.repeat(
+                buckets, 1
+            )
             bias = layer.linear.bias + layer.factorized_linear.bias.repeat(buckets)
-            expected = layer.select_output(torch.nn.functional.linear(x, weight, bias), indices)
+            expected = layer.select_output(
+                torch.nn.functional.linear(x, weight, bias), indices
+            )
         else:
             expected = _reference(layer, x, indices)
     assert actual.dtype == expected.dtype
@@ -197,14 +268,23 @@ def test_grouped_fallback(device, case, monkeypatch):
 
 
 @pytest.mark.parametrize("count", [1, 3, 8, 16])
-@pytest.mark.parametrize("device", [
-    "cpu",
-    pytest.param("cuda", marks=pytest.mark.skipif(
-        not GPU_AVAILABLE or torch.version.hip is None, reason="ROCm GPU required"
-    )),
-])
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda",
+            marks=pytest.mark.skipif(
+                not GPU_AVAILABLE or torch.version.hip is None,
+                reason="ROCm GPU required",
+            ),
+        ),
+    ],
+)
 def test_grouped_fallback_compiles(count, device):
-    layer = FactorizedStackedLinear(1024, 32, count, QuantizationManager(QuantizationConfig()), "ls_l1").to(device)
+    layer = FactorizedStackedLinear(
+        1024, 32, count, QuantizationManager(QuantizationConfig()), "ls_l1"
+    ).to(device)
     with torch.no_grad():
         layer.linear.weight.normal_(std=0.02)
         layer.linear.bias.normal_(std=0.02)

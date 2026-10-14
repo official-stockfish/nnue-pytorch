@@ -31,7 +31,8 @@ def _sparse_forward(x, weight, bias, indices, count):
     kernel = _sparse_forward_kernels.get(key)
     if kernel is None:
         kernel = cp.RawKernel(
-            f"#define K {width}\n#define N {outputs}\n" + r"""
+            f"#define K {width}\n#define N {outputs}\n"
+            + r"""
 extern "C" __global__ void sparse_l1_forward(
     const float* x, const float* weight, const float* bias,
     const long long* buckets, float* output
@@ -86,7 +87,13 @@ extern "C" __global__ void sparse_l1_forward(
     kernel(
         (len(x), tr.cdiv(outputs, 32)),
         (128,),
-        (x.data_ptr(), transposed.data_ptr(), bias.data_ptr(), indices.data_ptr(), output.data_ptr()),
+        (
+            x.data_ptr(),
+            transposed.data_ptr(),
+            bias.data_ptr(),
+            indices.data_ptr(),
+            output.data_ptr(),
+        ),
         stream=stream,
     )
     return output
@@ -99,7 +106,8 @@ def _route_rows(indices, count):
         # One thread initializes/reserves each bucket, so count must be <= 256.
         # Specializing the constant preserves the original eight-bucket code.
         kernel = cp.RawKernel(
-            f"#define BUCKETS {count}\n" + r"""
+            f"#define BUCKETS {count}\n"
+            + r"""
 extern "C" __global__ void route(const long long* ids,int* rows,int* counts,int batch){
  __shared__ int used[BUCKETS],base[BUCKETS];
  int t=threadIdx.x,r=blockIdx.x*blockDim.x+t;
@@ -118,7 +126,9 @@ extern "C" __global__ void route(const long long* ids,int* rows,int* counts,int 
         _route_kernels[count] = kernel
     rows = torch.empty((count, len(indices)), device=indices.device, dtype=torch.int32)
     counts = torch.zeros(count, device=indices.device, dtype=torch.int32)
-    stream = cp.cuda.ExternalStream(torch.cuda.current_stream(indices.device).cuda_stream)
+    stream = cp.cuda.ExternalStream(
+        torch.cuda.current_stream(indices.device).cuda_stream
+    )
     kernel(
         (tr.cdiv(len(indices), 256),),
         (256,),
@@ -256,7 +266,9 @@ def _sum_gradient_partials(
     b = tl.program_id(0)
     i = tl.program_id(1) * BLOCK + tl.arange(0, BLOCK)
     s = tl.arange(0, SPLIT)
-    p = tl.load(P + b * SPLIT * N * K + s[:, None] * N * K + i[None, :], i[None, :] < N * K, 0)
+    p = tl.load(
+        P + b * SPLIT * N * K + s[:, None] * N * K + i[None, :], i[None, :] < N * K, 0
+    )
     tl.store(W + b * N * K + i, tl.sum(p, 0), i < N * K)
     if tl.program_id(1) == 0:
         q = tl.load(Q + b * SPLIT * N + s[:, None] * N + i[None, :], i[None, :] < N, 0)
@@ -308,7 +320,9 @@ def _weight_and_bias_gradient(x, g, rows, counts, split=8, bm=32, bk=32):
     _bucketed_bias_gradient[(count, split)](
         g, rows, counts, q, batch, n, split, max(16, tr.next_power_of_2(n)), num_warps=4
     )
-    _sum_gradient_partials[(count, tr.cdiv(n * k, 128))](p, q, w, b, k, n, split, 128, num_warps=4)
+    _sum_gradient_partials[(count, tr.cdiv(n * k, 128))](
+        p, q, w, b, k, n, split, 128, num_warps=4
+    )
     return w, b
 
 
@@ -327,8 +341,12 @@ class _GroupedLinear(torch.autograd.Function):
         x, weight, rows, counts = ctx.saved_tensors
         grad_output = grad_output.contiguous()
         # Quantized zero activations still need dense STE input gradients.
-        grad_input = _input_gradient(grad_output, weight, rows, counts, x.shape[1], 64, 64)
-        grad_weight, grad_bias = _weight_and_bias_gradient(x, grad_output, rows, counts, 16, 32, 32)
+        grad_input = _input_gradient(
+            grad_output, weight, rows, counts, x.shape[1], 64, 64
+        )
+        grad_weight, grad_bias = _weight_and_bias_gradient(
+            x, grad_output, rows, counts, 16, 32, 32
+        )
         return grad_input, grad_weight, grad_bias, None, None
 
 

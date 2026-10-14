@@ -34,9 +34,13 @@ def double_feature_transform(
 
     if impl == "fused":
         if not cupy_available:
-            raise RuntimeError("Fused double FT backend requested, but CuPy kernels are not available.")
+            raise RuntimeError(
+                "Fused double FT backend requested, but CuPy kernels are not available."
+            )
         if not all_cuda:
-            raise RuntimeError("Fused double FT backend requested, but not all tensors/parameters are on CUDA.")
+            raise RuntimeError(
+                "Fused double FT backend requested, but not all tensors/parameters are on CUDA."
+            )
         return FusedDoubleFtFunction.apply(
             us,
             them,
@@ -50,9 +54,13 @@ def double_feature_transform(
     elif impl in ("sparse", "torch"):
         if impl == "sparse":
             if not cupy_available:
-                raise RuntimeError("Sparse backend requested, but CuPy kernels are not available.")
+                raise RuntimeError(
+                    "Sparse backend requested, but CuPy kernels are not available."
+                )
             if not all_cuda:
-                raise RuntimeError("Sparse backend requested, but not all tensors/parameters are on CUDA.")
+                raise RuntimeError(
+                    "Sparse backend requested, but not all tensors/parameters are on CUDA."
+                )
 
         assert l1_size % 2 == 0
 

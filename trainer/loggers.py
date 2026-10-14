@@ -23,7 +23,9 @@ class _Logger(ABC):
 
     def __init__(self, root_dir: str | Path, version: str | None = None):
         self._root_dir = Path(root_dir)
-        self._version = version if version is not None else _make_version(self._root_dir)
+        self._version = (
+            version if version is not None else _make_version(self._root_dir)
+        )
         self._log_dir = self._root_dir / "training_logs" / self._version
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
