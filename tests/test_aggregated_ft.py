@@ -19,7 +19,8 @@ from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNE
 @pytest.mark.parametrize("batch,active", [(1, 33), (17, 288), (1025, 33)])
 @pytest.mark.parametrize("kind", ["empty", "unique", "overlap"])
 @pytest.mark.parametrize("separate_stream", [False, True])
-def test_aggregated_ft(width, batch, active, kind, separate_stream):
+@pytest.mark.parametrize("tile_size", [8, 14])
+def test_aggregated_ft(width, batch, active, kind, separate_stream, tile_size):
     if torch.version.hip is not None or torch.cuda.get_device_capability()[0] < 8:
         pytest.skip("NVIDIA Ampere or newer required")
     from model.modules.feature_transformer.aggregated_ft_kernel import (
@@ -42,7 +43,14 @@ def test_aggregated_ft(width, batch, active, kind, separate_stream):
         grad = torch.randn(batch, width, device=device)
         white = torch.full((batch, active), -1, dtype=torch.int32, device=device)
         black = torch.full_like(white, -1)
-        if kind != "empty":
+        if kind == "full":
+            # Fill every row with disjoint IDs to exhaust the tile capacity
+            # and exercise the high perspective bits of the 14-position mask.
+            white.copy_(
+                torch.arange(batch * active, device=device).reshape(batch, active)
+            )
+            black.copy_(white + batch * active)
+        elif kind != "empty":
             for row in range(batch):
                 n = min(31, row % 32)
                 if kind == "overlap":
@@ -63,7 +71,8 @@ def test_aggregated_ft(width, batch, active, kind, separate_stream):
         db1 = d1 * b0 * ((b1 > 0) & (b1 < 1))
         gw0, gw1 = us * dw0 + them * db0, us * dw1 + them * db1
         gb0, gb1 = them * dw0 + us * db0, them * dw1 + us * db1
-        expected_weight = torch.zeros(512, width, device=device)
+        inputs = 2 * batch * active if kind == "full" else 512
+        expected_weight = torch.zeros(inputs, width, device=device)
         for indices, value in [
             (white, torch.cat((gw0, gw1), dim=1)),
             (black, torch.cat((gb0, gb1), dim=1)),
@@ -74,8 +83,25 @@ def test_aggregated_ft(width, batch, active, kind, separate_stream):
         actual_weight = torch.zeros_like(expected_weight)
         actual_bias = torch.zeros_like(expected_bias)
         aggregated_ft_backward(
-            us, them, white, black, grad, clamped, actual_weight, actual_bias, 1.0
+            us,
+            them,
+            white,
+            black,
+            grad,
+            clamped,
+            actual_weight,
+            actual_bias,
+            1.0,
+            tile_size=tile_size,
         )
         torch.testing.assert_close(actual_weight, expected_weight, atol=3e-4, rtol=3e-4)
         torch.testing.assert_close(actual_bias, expected_bias, atol=3e-4, rtol=3e-4)
     stream.synchronize()
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or not _HAS_CUPY_KERNELS,
+    reason="CUDA and CuPy required",
+)
+def test_full_large_tile_with_partial_tail():
+    test_aggregated_ft(1024, 29, 288, "full", True, 14)
