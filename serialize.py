@@ -1,5 +1,6 @@
 import hashlib
 import os
+import warnings
 from dataclasses import dataclass, field
 from typing import Annotated, Literal
 
@@ -27,9 +28,11 @@ class SerializeConfig:
     """The description string to include in the network.
     Only works when serializing into a .nnue file."""
 
-    ft_compression: Literal["none", "leb128"] = "leb128"
-    """Compression method to use for FT weights and biases.
-    Either 'none' or 'leb128'. Only allowed if saving to .nnue."""
+    compression: str | None = None
+    """Deprecated option. Uncompressed format is always used."""
+
+    ft_compression: str | None = None
+    """Deprecated alias for compression."""
 
     ft_perm: str | None = None
     """Path to a file that defines the permutation to use on the feature transformer."""
@@ -81,13 +84,21 @@ def main():
     nnue_config = args.nnue_config
     feature_name = nnue_config.features
 
+    comp = serialize_config.compression or serialize_config.ft_compression
+    if comp is not None and comp.lower() != "none":
+        warnings.warn(
+            f"The compression flag ('{comp}') is currently inactive. "
+            "Networks are serialized in uncompressed format matching Stockfish master.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     print(f"Converting {args.source} to {args.target}")
 
     # Treat --out-sha as targeting .nnue even if target doesn't end with .nnue
     target_is_nnue = serialize_config.out_sha or args.target.endswith(".nnue")
 
     model_description = serialize_config.description
-    ft_compression = serialize_config.ft_compression
     if args.source.endswith(".ckpt"):
         checkpoint = torch.load(
             args.source, map_location=torch.device("cpu"), weights_only=False
@@ -113,12 +124,8 @@ def main():
     else:
         raise ValueError("Invalid network input format.")
 
-    if ft_compression != "none" and not target_is_nnue:
-        print("Warning: Compression method for non `.nnue` target ignored.")
-        ft_compression = "none"
-
-    if ft_compression not in ["none", "leb128"]:
-        raise ValueError("Invalid compression method.")
+    # Guarantee weights are clipped within valid range before export or optimization
+    nnue.model.clip_weights(include_input=True)
 
     if serialize_config.ft_optimize and serialize_config.ft_perm is not None:
         raise ValueError("Options --ft_perm and --ft_optimize are mutually exclusive.")
@@ -173,7 +180,7 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
 
         writer = M.NNUEWriter(
-            nnue.model, model_description, ft_compression=ft_compression
+            nnue.model, model_description
         )
         buf = writer.buf
 
