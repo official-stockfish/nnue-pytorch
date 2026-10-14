@@ -1,4 +1,3 @@
-import io
 import operator
 import struct
 from collections.abc import Sequence
@@ -95,11 +94,19 @@ class NNUEWriter:
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model)
         layer_stacks = model.layer_stacks
-        for bucket, (l1, l2, output) in enumerate(layer_stacks.get_coalesced_layer_stacks()):
+        for bucket, (l1, l2, output) in enumerate(
+            layer_stacks.get_coalesced_layer_stacks()
+        ):
             self.int32(fc_hash)  # FC layers hash
-            self.write_fc_layer(model, l1, layer_stacks.l1.layer_key, f"bucket {bucket}")
-            self.write_fc_layer(model, l2, layer_stacks.l2.layer_key, f"bucket {bucket}")
-            self.write_fc_layer(model, output, layer_stacks.output.layer_key, f"bucket {bucket}")
+            self.write_fc_layer(
+                model, l1, layer_stacks.l1.layer_key, f"bucket {bucket}"
+            )
+            self.write_fc_layer(
+                model, l2, layer_stacks.l2.layer_key, f"bucket {bucket}"
+            )
+            self.write_fc_layer(
+                model, output, layer_stacks.output.layer_key, f"bucket {bucket}"
+            )
 
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
@@ -277,10 +284,8 @@ class NNUEReader:
 
         weight = torch.cat(segments, dim=0)
 
-        bias, weight = (
-            self.model.quantization.dequantize_feature_transformer(
-                bias, weight
-            )
+        bias, weight = self.model.quantization.dequantize_feature_transformer(
+            bias, weight
         )
 
         layer.bias.data = bias.to(torch.float32)
@@ -305,7 +310,9 @@ class NNUEReader:
 
         layer_bias = bias.to(torch.float32)
         # Strip padding.
-        layer_weight = weight[: non_padded_shape[0], : non_padded_shape[1]].to(torch.float32)
+        layer_weight = weight[: non_padded_shape[0], : non_padded_shape[1]].to(
+            torch.float32
+        )
 
         layer_bias_t.data.copy_(layer_bias)
         layer_weight_t.data.copy_(layer_weight)

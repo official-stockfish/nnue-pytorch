@@ -34,9 +34,8 @@ jobs:
       - name: Checkout Stockfish Master
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: TonyCongqianWang/Stockfish
+          repository: official-stockfish/Stockfish
           path: Stockfish
-          ref: c6105755a2aca60958f36ec8c97a8973f49bdfaf
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
@@ -79,9 +78,8 @@ jobs:
       - name: Checkout Stockfish Master
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: TonyCongqianWang/Stockfish
+          repository: official-stockfish/Stockfish
           path: Stockfish
-          ref: c6105755a2aca60958f36ec8c97a8973f49bdfaf
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
@@ -92,5 +90,5 @@ jobs:
       - name: Perform Cross-Check Evaluation on Random Net
         run: |
           ./run_docker.sh CPU ${{ github.workspace }} --skip-build --non-interactive --exec \
-            python -u cross_check_eval.py --random-weights --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device='cpu' --count 1024
+            python -u cross_check_eval.py --random-weights --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device='cpu' --count 1024 --seed 42 --max-error 5
 

@@ -12,21 +12,26 @@ def _get_parameters(
     get_biases: bool = False,
     get_virtual: bool | None = False,
 ):
+    def match(name: str) -> bool:
+        is_bias = "bias" in name
+        if is_bias != get_biases:
+            return False
+        if not get_biases and get_virtual is not None:
+            is_virtual = "virtual" in name
+            if is_virtual != get_virtual:
+                return False
+        return True
+
     return [
         p
         for layer in layers
         for name, p in layer.named_parameters()
-        if ("bias" in name) == get_biases
-        and (get_biases or get_virtual is None or ("virtual" in name) == get_virtual)
-        and p.requires_grad
+        if p.requires_grad and match(name)
     ]
 
 
 def remap_tablebase_score(
-    score: Tensor,
-    base: float,
-    scale: float,
-    decay: float
+    score: Tensor, base: float, scale: float, decay: float
 ) -> Tensor:
     mate_score = 32000
     max_mate_ply = 245
@@ -36,7 +41,7 @@ def remap_tablebase_score(
     is_mate = abs_score >= tb_mate_threshold
 
     plies = (mate_score - abs_score).clamp(min=0)
-    remapped_abs = base + (decay ** plies) * scale
+    remapped_abs = base + (decay**plies) * scale
     remapped_score = torch.where(score < 0, -remapped_abs, remapped_abs)
 
     return torch.where(is_mate, remapped_score, score)
@@ -47,7 +52,7 @@ def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
         score,
         base=loss_params.tb_remap_base,
         scale=loss_params.tb_remap_scale,
-        decay=loss_params.tb_remap_decay
+        decay=loss_params.tb_remap_decay,
     )
 
     # convert the network and search scores to an estimate match result
@@ -70,14 +75,15 @@ def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
     if loss_params.qp_asymmetry != 0.0:
         loss = loss * ((qf > pt) * loss_params.qp_asymmetry + 1)
 
-    weights = 1 + (2.0**loss_params.w1 - 1) * torch.pow((pf - 0.5) ** 2 * pf * (1 - pf), loss_params.w2)
+    weights = 1 + (2.0**loss_params.w1 - 1) * torch.pow(
+        (pf - 0.5) ** 2 * pf * (1 - pf), loss_params.w2
+    )
     loss = (loss * weights).sum() / weights.sum()
 
     return loss
 
 
 class NNUE(nn.Module):
-
     def __init__(
         self,
         config: NNUEConfig,
@@ -135,12 +141,16 @@ class NNUE(nn.Module):
         train_params = [
             # Feature Transformer
             {
-                "params": _get_parameters([self.model.input], get_biases=False, get_virtual=False),
+                "params": _get_parameters(
+                    [self.model.input], get_biases=False, get_virtual=False
+                ),
                 "lr": LRs[0],
                 "weight_decay": ft_wd,
             },
             {
-                "params": _get_parameters([self.model.input], get_biases=False, get_virtual=True),
+                "params": _get_parameters(
+                    [self.model.input], get_biases=False, get_virtual=True
+                ),
                 "lr": LRs[0],
                 "weight_decay": virtual_ft_wd,
             },
@@ -267,8 +277,13 @@ class NNUE(nn.Module):
         state["jitter_buffer_value"] = self.lambda_scheduler.jitter_buffer
 
         # Optimizer state
-        if self.optimizer_wrapper is not None and getattr(self.optimizer_wrapper, "optimizer", None) is not None:
-            state["optimizer_state_dict"] = self.optimizer_wrapper.optimizer.state_dict()
+        if (
+            self.optimizer_wrapper is not None
+            and getattr(self.optimizer_wrapper, "optimizer", None) is not None
+        ):
+            state["optimizer_state_dict"] = (
+                self.optimizer_wrapper.optimizer.state_dict()
+            )
 
         return state
 
