@@ -34,9 +34,8 @@ jobs:
       - name: Checkout Stockfish Master
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: TonyCongqianWang/Stockfish
+          repository: official-stockfish/Stockfish
           path: Stockfish
-          ref: 3e572e81a396df462892b808a026b27b8432bd1a
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
@@ -54,3 +53,42 @@ jobs:
           ./run_docker.sh CPU ${{ github.workspace }} --skip-build --skip-setup --non-interactive --exec \
             python -u cross_check_eval.py --net /data/logs/training/runs/unittests_train_pipeline_cpu/training_logs/version_2/checkpoints/last.nnue --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device='cpu' \
             --checkpoint /data/logs/training/runs/unittests_train_pipeline_cpu/training_logs/version_2/checkpoints/last.ckpt
+
+  cross-check-random:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build and load CPU Docker image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: docker/Dockerfile.CPU
+          push: false
+          load: true
+          tags: nnue-pytorch:cpu
+          cache-from: type=gha,scope=cpu-cache
+          cache-to: type=gha,mode=max,scope=cpu-cache
+
+      - name: Checkout Stockfish Master
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: official-stockfish/Stockfish
+          path: Stockfish
+          persist-credentials: false
+
+      - name: Compile Compatible Stockfish
+        run: |
+          cd Stockfish/src
+          make -j build
+
+      - name: Perform Cross-Check Evaluation on Random Net
+        run: |
+          ./run_docker.sh CPU ${{ github.workspace }} --skip-build --non-interactive --exec \
+            python -u cross_check_eval.py --random-weights --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device='cpu' --count 1024 --seed 42 --max-error 5
+
