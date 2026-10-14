@@ -26,3 +26,6 @@ exclude = [
     "site-packages",
     "venv"
 ]
+
+[format]
+exclude = ["docs/**"]
