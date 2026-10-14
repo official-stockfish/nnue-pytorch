@@ -62,11 +62,10 @@ class QuantizationConfig:
     weight_scale_l2: float = 64.0
     weight_scale_l_out: float = 128
     weight_scale_out: float = 16.0
-    weight_quantized_max_hidden: float = 127.0 # i8 max
     ft_quantized_one: float = 256.0
-    ft_quantized_max: float = 255.0 # limited to 255 for safe squaring within i16
+    ft_quantized_max: float = 255.0  # limited to 255 for safe squaring within i16
     hidden_quantized_one: float = 128.0
-    hidden_quantized_max: float = 127.0 # i8 max
+    hidden_quantized_max: float = 127.0  # i8 max
 
     # used to calculate correction factors
     inference_l0_division_factor: float = 512.0
@@ -83,23 +82,17 @@ class QuantizationManager:
             config.weight_scale_l_out,
         ]
         self.weight_scale_out = config.weight_scale_out
-        self.weight_quantized_max_hidden = config.weight_quantized_max_hidden
         self.hidden_quantized_one = config.hidden_quantized_one
         self.ft_quantized_one = config.ft_quantized_one
 
-        hidden_q_max = config.weight_quantized_max_hidden
-        self.max_hidden_weight = [hidden_q_max / scale for scale in self.weight_scale_hidden]
-        # Threat weights are treated separately. A bit hacky...
-        # Threat weights are quantized to int8 after scaling by ft_quantized_one
-        _i8 = torch.iinfo(torch.int8)
-        self.min_threat_weight = -_i8.max / config.ft_quantized_one  # -127/256
-        self.max_threat_weight = _i8.max / config.ft_quantized_one  # 127/256
+        # FC layers are stored as int8 weights
+        i8_max = float(torch.iinfo(torch.int8).max)
+        self.max_hidden_weight = [i8_max / scale for scale in self.weight_scale_hidden]
 
         self.l0_correction_factor = config.ft_quantized_one ** 2 / config.inference_l0_division_factor / self.hidden_quantized_one
         self.sqr_crelu_correction_factor = config.hidden_quantized_one / config.inference_sqr_crelu_division_factor
         self.max_ft_activation = config.ft_quantized_max / config.ft_quantized_one
         self.max_hidden_activation = config.hidden_quantized_max / config.hidden_quantized_one
-
         self.weight_scales_dict = {
             "ft_weight" : self.ft_quantized_one,
             "ft_bias" : self.ft_quantized_one,
@@ -110,6 +103,10 @@ class QuantizationManager:
             "ls_output_weight" : self.weight_scale_hidden[2],
             "ls_output_bias" : self.weight_scale_hidden[2] * self.hidden_quantized_one,
         }
+
+    def get_ft_weight_bounds(self, dtype: torch.dtype) -> tuple[float, float]:
+        info = torch.iinfo(dtype)
+        return -info.max / self.ft_quantized_one, info.max / self.ft_quantized_one
 
     def clip_ft_act(self, preact):
         return torch.clamp(preact, 0.0, self.max_ft_activation)

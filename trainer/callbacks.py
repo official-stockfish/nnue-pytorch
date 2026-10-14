@@ -77,22 +77,24 @@ class Callback:
 class WeightClipper(Callback):
     """Clip feature-transformer weights during training."""
 
+    def __init__(self, input_clipping_interval: int = 0):
+        super().__init__()
+        self.input_clipping_interval = input_clipping_interval
+
     @torch.no_grad()
     @torch.compiler.disable
     def on_train_batch_end(self, trainer, batch=None, batch_idx=None, outputs=None):
         _, _, _ = batch, batch_idx, outputs  # Unused
-        trainer.model.model.clip_weights(include_input=False)
+        if self.input_clipping_interval > 0 and trainer.global_step % self.input_clipping_interval == 0:
+            trainer.model.model.clip_weights(include_input=True)
+        else:
+            trainer.model.model.clip_weights(include_input=False)
 
     @torch.no_grad()
     @torch.compiler.disable
     def on_train_epoch_end(self, trainer):
-        trainer.model.model.clip_weights(include_input=True)
-
-    @torch.no_grad()
-    @torch.compiler.disable
-    def on_save_checkpoint(self, trainer, checkpoint=None):
-        _ = checkpoint  # Unused
-        trainer.model.model.clip_weights(include_input=True)
+        if self.input_clipping_interval <= 0:
+            trainer.model.model.clip_weights(include_input=True)
 
 
 class ExplicitSWA(Callback):
@@ -188,6 +190,7 @@ class ExplicitSWA(Callback):
         # not supported.
         trainer.model.eval()
         self.swap_weights(trainer.model, to_eval=True)
+        trainer.model.model.clip_weights(include_input=True)
 
         # NOTE: If BN is used, it has to be updated here. Be careful when using
         # DDP.
@@ -328,11 +331,9 @@ class CheckpointManager(Callback):
         )
 
     def on_train_epoch_end(self, trainer):
-        if trainer.rank != 0:
-            return
-
         dirpath = self._get_dirpath(trainer)
-        os.makedirs(dirpath, exist_ok=True)
+        if trainer.rank == 0:
+            os.makedirs(dirpath, exist_ok=True)
 
         should_save_periodic = (
             self.every_n_epochs is not None
@@ -355,8 +356,9 @@ class CheckpointManager(Callback):
             saved.append(last_path)
             self._last_save_epoch = trainer.current_epoch
 
-        self._saved_checkpoints.extend(saved)
-        self._enforce_save_top_k()
+        if trainer.rank == 0:
+            self._saved_checkpoints.extend(saved)
+            self._enforce_save_top_k()
 
     def _enforce_save_top_k(self):
         if self.save_top_k < 0:
@@ -379,18 +381,17 @@ class CheckpointManager(Callback):
             self._saved_checkpoints.remove(path)
 
     def on_train_end(self, trainer):
-        if trainer.rank != 0:
-            return
-
         dirpath = self._get_dirpath(trainer)
-        os.makedirs(dirpath, exist_ok=True)
+        if trainer.rank == 0:
+            os.makedirs(dirpath, exist_ok=True)
 
         last_path = os.path.join(dirpath, "last.ckpt")
         if self.save_last and self._last_save_epoch != trainer.current_epoch:
             trainer.save_checkpoint(last_path)
         # Wait for asynchronous writes so post-training code (e.g. the
         # SWA checkpoint renames in train.py) sees complete files.
-        trainer.flush_checkpoints()
+        if trainer.rank == 0:
+            trainer.flush_checkpoints()
 
 
 class UniquePositionLogger(Callback):

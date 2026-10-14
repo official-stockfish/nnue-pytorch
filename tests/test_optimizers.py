@@ -236,3 +236,104 @@ def test_ranger_stable_weight_decay_option():
     opts_st[0].step()
     assert not torch.allclose(param_ew, p_stable)
 
+
+def test_virtual_ft_weight_decay_and_pruning():
+    from model.nnue import _get_parameters
+
+    # Test K32Q2^ which has virtual weights
+    config_k32q2 = NNUEConfig(
+        features="K32Q2^",
+        optimizer_config=OptimizerConfig(
+            ft_weight_decay=0.01,
+            virtual_ft_weight_decay=0.05,
+            dense_weight_decay=0.02,
+        ),
+    )
+    model_k32q2 = NNUE(config=config_k32q2)
+    real_ft = _get_parameters([model_k32q2.model.input], get_biases=False, get_virtual=False)
+    virtual_ft = _get_parameters([model_k32q2.model.input], get_biases=False, get_virtual=True)
+    assert len(real_ft) > 0
+    assert len(virtual_ft) > 0
+
+    res = model_k32q2.configure_optimizers()
+    opt = res[0][0]
+    # Check that virtual weights group exists with correct weight decay
+    found_real = False
+    found_virtual = False
+    for group in opt.param_groups:
+        assert len(group["params"]) > 0, "Empty parameter group was not pruned!"
+        if group["weight_decay"] == 0.01:
+            found_real = True
+            assert group["params"] == real_ft
+        elif group["weight_decay"] == 0.05:
+            found_virtual = True
+            assert group["params"] == virtual_ft
+    assert found_real
+    assert found_virtual
+
+    # Test architecture without virtual weights (pruning empty group)
+    config_no_virt = NNUEConfig(
+        features="Full_Threats",
+        optimizer_config=OptimizerConfig(
+            ft_weight_decay=0.01,
+            virtual_ft_weight_decay=0.05,
+        ),
+    )
+    model_no_virt = NNUE(config=config_no_virt)
+    assert len(_get_parameters([model_no_virt.model.input], get_biases=False, get_virtual=True)) == 0
+    res_no_virt = model_no_virt.configure_optimizers()
+    opt_no_virt = res_no_virt[0][0]
+    for group in opt_no_virt.param_groups:
+        assert len(group["params"]) > 0
+        assert group["weight_decay"] != 0.05  # No virtual group since it had no params
+
+
+def test_weight_clipper_and_swa_export():
+    from trainer.callbacks import ExplicitSWA, WeightClipper
+
+    class DummyModel:
+        def __init__(self):
+            self.calls = []
+
+        def clip_weights(self, include_input=False):
+            self.calls.append(include_input)
+
+    class DummyTrainer:
+        def __init__(self, global_step=0, current_epoch=0, rank=0):
+            self.global_step = global_step
+            self.current_epoch = current_epoch
+            self.rank = rank
+            self.model = type("DummyWrapper", (), {"model": DummyModel()})()
+
+    # Legacy clipping (interval <= 0)
+    clipper_legacy = WeightClipper(input_clipping_interval=0)
+    t = DummyTrainer(global_step=10)
+    clipper_legacy.on_train_batch_end(t)
+    assert t.model.model.calls == [False]
+    clipper_legacy.on_train_epoch_end(t)
+    assert t.model.model.calls == [False, True]
+
+    # Interval clipping (interval = 5)
+    clipper_interval = WeightClipper(input_clipping_interval=5)
+    t = DummyTrainer(global_step=4)
+    clipper_interval.on_train_batch_end(t)
+    assert t.model.model.calls == [False]
+    t.global_step = 5
+    clipper_interval.on_train_batch_end(t)
+    assert t.model.model.calls == [False, True]
+    t.global_step = 10
+    clipper_interval.on_train_batch_end(t)
+    assert t.model.model.calls == [False, True, True]
+    clipper_interval.on_train_epoch_end(t)
+    assert t.model.model.calls == [False, True, True], "Should not clip input on epoch end when interval > 0"
+
+    # ExplicitSWA clip on export
+    swa = ExplicitSWA(swa_start_epoch=0, save_dir="/tmp")
+    t_swa = DummyTrainer(current_epoch=0, rank=0)
+    t_swa.save_checkpoint = lambda path: None
+    t_swa.model.eval = lambda: None
+    swa.swap_weights = lambda model, to_eval: None
+    swa.on_train_end(t_swa)
+    assert t_swa.model.model.calls == [True]
+
+

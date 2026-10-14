@@ -73,7 +73,7 @@ def gather_statistics_from_batches(batches, bucket_size):
             _black_indices,
             outcome,
             score,
-            _piece_count,
+            *_rest,
         ) = batch
         batch_size = len(us)
         bucket = torch.round(score / bucket_size) * bucket_size
