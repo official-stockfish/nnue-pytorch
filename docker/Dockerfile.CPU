@@ -23,7 +23,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
-    torch==2.8.0 \
+    torch==2.14.0 \
     torchvision \
     torchaudio \
     --index-url https://download.pytorch.org/whl/cpu
