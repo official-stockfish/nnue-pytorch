@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from typing import Literal
 
@@ -58,5 +59,6 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig, AdamWConfig):
                 f"virtual_ft_weight_decay: {self.virtual_ft_weight_decay}, "
                 f"dense_weight_decay: {self.dense_weight_decay}"
             )
-        print(info_str + ".")
+        if int(os.environ.get("RANK", "0")) == 0:
+            print(info_str + ".")
         return wrapper
