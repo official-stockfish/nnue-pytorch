@@ -1,4 +1,4 @@
-FROM docker.io/rocm/pytorch:rocm7.2_ubuntu24.04_py3.12_pytorch_release_2.8.0
+FROM docker.io/rocm/pytorch:rocm10.1.0_ubuntu24.04_py3.12_pytorch_release_2.14.0
 
 RUN apt-get update && apt-get install -y \
     g++ \
@@ -6,13 +6,17 @@ RUN apt-get update && apt-get install -y \
     curl \
     cmake \
     gosu \
+    python-is-python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/nnue-pytorch
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-RUN ROCM_HOME=/opt/rocm CUPY_INSTALL_USE_HIP=1 pip install --no-cache-dir cupy
+# This image installs ROCm as Python packages instead of under /opt/rocm.
+RUN ROCM_HOME="$(rocm-sdk path --root)" CUPY_INSTALL_USE_HIP=1 \
+    pip install --no-cache-dir cupy==14.2.0 \
+    && python3 -c "import cupy"
 
 COPY docker/docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
 RUN chmod +x /usr/local/bin/docker_entrypoint.sh
