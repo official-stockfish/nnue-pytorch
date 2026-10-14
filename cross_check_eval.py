@@ -295,24 +295,42 @@ def filter_fens(fens):
 def init_random_weights(model: M.NNUEModel) -> None:
     """Initialize model weights across full dynamic range, hitting clipping bounds."""
     with torch.no_grad():
-        min_threat = model.quantization.min_threat_weight
-        max_threat = model.quantization.max_threat_weight
+        touched = set()
+
         for f in model.input.features:
-            f.weight.data.uniform_(min_threat * 1.2, max_threat * 1.2)
+            min_w, max_w = model.quantization.get_ft_weight_bounds(f.EXPORT_WEIGHT_DTYPE)
+            f.weight.data.uniform_(min_w * 1.2, max_w * 1.2)
+            touched.add(id(f.weight))
             if hasattr(f, "virtual_weight") and f.virtual_weight is not None:
-                f.virtual_weight.data.uniform_(min_threat * 1.2, max_threat * 1.2)
+                f.virtual_weight.data.uniform_(min_w * 1.2, max_w * 1.2)
+                touched.add(id(f.virtual_weight))
+
         model.input.bias.data.uniform_(-1.0, 1.0)
+        touched.add(id(model.input.bias))
 
         for group in model.weight_clipping:
             min_w = group["min_weight"]
             max_w = group["max_weight"]
             for p in group["params"]:
                 p.data.uniform_(min_w * 1.2, max_w * 1.2)
+                touched.add(id(p))
             if "virtual_params" in group:
                 group["virtual_params"].data.uniform_(min_w * 1.2, max_w * 1.2)
+                touched.add(id(group["virtual_params"]))
 
         for ls in [model.layer_stacks.l1, model.layer_stacks.l2, model.layer_stacks.output]:
-            ls.linear.bias.data.uniform_(-0.5, 0.5)
+            if hasattr(ls, "linear") and hasattr(ls.linear, "bias") and ls.linear.bias is not None:
+                ls.linear.bias.data.uniform_(-0.5, 0.5)
+                touched.add(id(ls.linear.bias))
+            if hasattr(ls, "factorized_linear") and hasattr(ls.factorized_linear, "bias") and ls.factorized_linear.bias is not None:
+                ls.factorized_linear.bias.data.uniform_(-0.5, 0.5)
+                touched.add(id(ls.factorized_linear.bias))
+
+        all_param_ids = {id(p) for p in model.parameters()}
+        untouched = all_param_ids - touched
+        if untouched:
+            untouched_names = [name for name, p in model.named_parameters() if id(p) in untouched]
+            raise RuntimeError(f"init_random_weights missed parameters: {untouched_names}")
 
         model.clip_weights(include_input=True)
 

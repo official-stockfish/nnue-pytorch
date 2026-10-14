@@ -74,25 +74,18 @@ class K32Q2(InputFeature):
 
     def clip_weights(self, quantization) -> None:
         p_data_fp32 = self.weight.data
-        min_weight = quantization.min_threat_weight
-        max_weight = quantization.max_threat_weight
+        min_weight, max_weight = quantization.get_ft_weight_bounds(self.EXPORT_WEIGHT_DTYPE)
 
         virtual_params = self.virtual_weight.data
-        xs = p_data_fp32.shape[0] // virtual_params.shape[0]
-        ys = p_data_fp32.shape[1] // virtual_params.shape[1]
-        expanded_virtual_layer = virtual_params.repeat(xs, ys)
 
-        if min_weight is not None:
-            min_weight = (
-                p_data_fp32.new_full(p_data_fp32.shape, min_weight)
-                - expanded_virtual_layer
-            )
-        if max_weight is not None:
-            max_weight = (
-                p_data_fp32.new_full(p_data_fp32.shape, max_weight)
-                - expanded_virtual_layer
-            )
-        p_data_fp32.clamp_(min_weight, max_weight)
+        # Reshape to (NUM_BUCKETS, NUM_PLANES, L1) and broadcast virtual weights
+        # in-place to avoid allocating ~600MB of temporary tensors during clipping.
+        p_view = p_data_fp32.view(self.NUM_BUCKETS, self.NUM_PLANES, -1)
+        v_view = virtual_params.view(1, self.NUM_PLANES, -1)
+
+        p_view.add_(v_view)
+        p_view.clamp_(min_weight, max_weight)
+        p_view.sub_(v_view)
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:

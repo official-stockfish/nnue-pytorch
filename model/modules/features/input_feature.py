@@ -33,7 +33,8 @@ class InputFeature(nn.Module, ABC):
     def load_export_weights(self, export_weight: torch.Tensor) -> None: ...
 
     def clip_weights(self, quantization) -> None:
-        pass
+        min_w, max_w = quantization.get_ft_weight_bounds(self.EXPORT_WEIGHT_DTYPE)
+        self.weight.data.clamp_(min_w, max_w)
 
     def reset_parameters(self):
         sigma = math.sqrt(1 / self.NUM_INPUTS)
