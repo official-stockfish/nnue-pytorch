@@ -538,7 +538,7 @@ def eval_ft(model: NNUEModel, batch: Iterable[torch.Tensor], device_str: str) ->
             black_indices,
             _outcome,
             _score,
-            _piece_count,
+            *_rest,
         ) = batch_tuple
         l0_ = model.forward_ft(
             us,

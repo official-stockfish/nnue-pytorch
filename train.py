@@ -354,6 +354,7 @@ def main():
             rank=rank,
             world_size=world_size,
         ),
+        WeightClipper(input_clipping_interval=args.input_clipping_interval),
         CheckpointManager(
             save_last=args.save_last_network,
             every_n_epochs=args.network_save_period,
@@ -362,7 +363,6 @@ def main():
         ),
         SimpleLineLogger(refresh_rate=refresh_rate),
         TimeLimit(args.max_time),
-        WeightClipper(),
         nan_callback,
     ]
     if 0 <= args.swa_start_epoch < args.max_epochs:

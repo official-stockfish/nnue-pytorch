@@ -21,6 +21,9 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig, AdamWConfig):
     ft_weight_decay: float = 0.0
     """Weight decay to apply to the feature transformer parameters."""
 
+    virtual_ft_weight_decay: float = 0.0
+    """Weight decay to apply to the virtual feature transformer parameters."""
+
     dense_weight_decay: float = 0.0
     """Weight decay to apply to the dense layer parameters."""
 
@@ -41,7 +44,15 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig, AdamWConfig):
         wrapper = wrapper_factory(self)
 
         info_str = f"[OptimizerConfig] Using {optimizer_name} optimizer with lr: {self.lr}"
-        if self.dense_weight_decay > 0.0 or self.ft_weight_decay > 0.0:
-            info_str += f" and ft_weight_decay: {self.ft_weight_decay}, dense_weight_decay: {self.dense_weight_decay}"
+        if (
+            self.dense_weight_decay > 0.0
+            or self.ft_weight_decay > 0.0
+            or self.virtual_ft_weight_decay > 0.0
+        ):
+            info_str += (
+                f" and ft_weight_decay: {self.ft_weight_decay}, "
+                f"virtual_ft_weight_decay: {self.virtual_ft_weight_decay}, "
+                f"dense_weight_decay: {self.dense_weight_decay}"
+            )
         print(info_str + ".")
         return wrapper

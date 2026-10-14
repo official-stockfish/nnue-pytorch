@@ -11,7 +11,6 @@ class NNUEModel(nn.Module):
         self,
         feature_name: str,
         config: ModelConfig,
-        num_ls_buckets: int = 8,
     ):
         super().__init__()
 
@@ -23,7 +22,7 @@ class NNUEModel(nn.Module):
         self.quantize_config = config.quantize_config
         self.quantization = QuantizationManager(config.quantize_config)
 
-        self.num_ls_buckets = num_ls_buckets
+        self.num_ls_buckets = 32
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME
@@ -93,9 +92,11 @@ class NNUEModel(nn.Module):
             fake_quantize_weights,
         )
 
-    def calculate_buckets(self, piece_count: torch.Tensor):
-        layer_stack_indices = (piece_count - 1) // 4
-        return layer_stack_indices
+    def calculate_buckets(
+        self, piece_count: torch.Tensor, queen_bucket: torch.Tensor
+    ):
+        pc_bucket = (piece_count - 1) // 4
+        return pc_bucket * 4 + queen_bucket
 
 
     def forward(
@@ -105,10 +106,11 @@ class NNUEModel(nn.Module):
         white_indices: torch.Tensor,
         black_indices: torch.Tensor,
         piece_count: torch.Tensor,
+        queen_bucket: torch.Tensor,
         fake_quantize_acts: bool=True,
         fake_quantize_weights: bool=True,
     ):
-        layer_stack_indices = self.calculate_buckets(piece_count)
+        layer_stack_indices = self.calculate_buckets(piece_count, queen_bucket)
 
         l0_ = self.forward_ft(
             us,
