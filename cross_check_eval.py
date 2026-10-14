@@ -1,6 +1,8 @@
 import math
+import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from typing import Literal
 
@@ -22,8 +24,11 @@ class CrossCheckConfig:
     data: str
     """Path to the .bin or .binpack dataset to use for evaluation."""
 
-    net: str
+    net: str | None = None
     """Path to the .nnue net to evaluate."""
+
+    random_weights: bool = False
+    """Generate a random network for cross-checking instead of using a trained net."""
 
     checkpoint: str | None = None
     """Optional checkpoint (used instead of nnue for local eval)."""
@@ -33,6 +38,15 @@ class CrossCheckConfig:
 
     count: int = 8 * 2**10
     """Number of positions to process."""
+
+    seed: int | None = None
+    """Random seed for reproducibility when generating random weights."""
+
+    max_error: float | None = None
+    """Maximum allowed absolute error between quantized NNUE and engine evaluations."""
+
+    min_r2: float | None = None
+    """Minimum allowed R^2 score between quantized NNUE and engine evaluations."""
 
 
 @dataclass(frozen=True)
@@ -63,7 +77,12 @@ def make_fen_batch_provider(data_path, batch_size):
     )
 
 
-def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, device: str, fake_quantize: bool):
+def eval_model_batch(
+    model: M.NNUEModel,
+    batch: data_loader.SparseBatchPtr,
+    device: str,
+    fake_quantize: bool,
+):
     (
         us,
         them,
@@ -72,6 +91,7 @@ def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, devi
         _outcome,
         _score,
         piece_count,
+        queen_bucket,
     ) = batch.contents.get_tensors(device)
 
     evals = [
@@ -82,6 +102,7 @@ def eval_model_batch(model: M.NNUEModel, batch: data_loader.SparseBatchPtr, devi
             white_indices,
             black_indices,
             piece_count,
+            queen_bucket,
             fake_quantize_acts=fake_quantize,
             fake_quantize_weights=fake_quantize,
         )
@@ -146,7 +167,7 @@ def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
     for e, m, f in zip(ref_evals, cmp_evals, fens):
         ae = abs(m - e)
         # relative error, with a floor to avoid division by zero and to not exaggerate small evals too much
-        ae_rel = ae / (max(abs(e), 1/32))
+        ae_rel = ae / (max(abs(e), 1 / 32))
         q_ref = calculate_qf(e, IN_OFFSET, IN_SCALING)
         q_cmp = calculate_qf(m, IN_OFFSET, IN_SCALING)
         qe = abs(q_cmp - q_ref)
@@ -250,6 +271,14 @@ def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
     print_top("TOP 5 LARGEST Q ERRORS", "q_err", "Q Err", "12.6f")
     print("\n" + "=" * W + "\n")
 
+    return {
+        "abs_errors": abs_errors,
+        "max_abs_error": max(abs_errors) if abs_errors else 0.0,
+        "mean_abs_error": sum(abs_errors) / len(data) if data else 0.0,
+        "r_squared_score": r_squared_score,
+        "r_squared_q": r_squared_q,
+    }
+
 
 def eval_engine_batch(engine_path, net_path, fens):
     if not fens:
@@ -285,11 +314,134 @@ def filter_fens(fens):
     return filtered_fens
 
 
+def init_random_weights(model: M.NNUEModel) -> None:
+    """Initialize model weights across full dynamic range, hitting clipping bounds."""
+    with torch.no_grad():
+        touched = set()
+
+        for f in model.input.features:
+            min_w, max_w = model.quantization.get_ft_weight_bounds(
+                f.EXPORT_WEIGHT_DTYPE
+            )
+            f.weight.data.uniform_(min_w * 1.2, max_w * 1.2)
+            touched.add(id(f.weight))
+            if hasattr(f, "virtual_weight") and f.virtual_weight is not None:
+                f.virtual_weight.data.uniform_(min_w * 1.2, max_w * 1.2)
+                touched.add(id(f.virtual_weight))
+
+        model.input.bias.data.uniform_(-1.0, 1.0)
+        touched.add(id(model.input.bias))
+
+        for group in model.weight_clipping:
+            min_w = group["min_weight"]
+            max_w = group["max_weight"]
+            for p in group["params"]:
+                p.data.uniform_(min_w * 1.2, max_w * 1.2)
+                touched.add(id(p))
+            if "virtual_params" in group:
+                group["virtual_params"].data.uniform_(min_w * 1.2, max_w * 1.2)
+                touched.add(id(group["virtual_params"]))
+
+        for ls in [
+            model.layer_stacks.l1,
+            model.layer_stacks.l2,
+            model.layer_stacks.output,
+        ]:
+            if (
+                hasattr(ls, "linear")
+                and hasattr(ls.linear, "bias")
+                and ls.linear.bias is not None
+            ):
+                ls.linear.bias.data.uniform_(-0.5, 0.5)
+                touched.add(id(ls.linear.bias))
+            if (
+                hasattr(ls, "factorized_linear")
+                and hasattr(ls.factorized_linear, "bias")
+                and ls.factorized_linear.bias is not None
+            ):
+                ls.factorized_linear.bias.data.uniform_(-0.5, 0.5)
+                touched.add(id(ls.factorized_linear.bias))
+
+        all_param_ids = {id(p) for p in model.parameters()}
+        untouched = all_param_ids - touched
+        if untouched:
+            untouched_names = [
+                name for name, p in model.named_parameters() if id(p) in untouched
+            ]
+            raise RuntimeError(
+                f"init_random_weights missed parameters: {untouched_names}"
+            )
+
+        model.clip_weights(include_input=True)
+
+
+def run_smoke_test(
+    engine_path: str,
+    net_path: str,
+    nnue_model: M.NNUEModel,
+    ckpt_model: M.NNUEModel | None,
+    device: str,
+) -> None:
+    fen = chess.STARTING_FEN
+    fens = [fen]
+    b = data_loader.get_sparse_batch_from_fens(
+        nnue_model.input_feature_name, fens, [0], [1], [0]
+    )
+    nnue_eval = eval_model_batch(nnue_model, b, device, False)[0]
+    nnue_quant = eval_model_batch(nnue_model, b, device, True)[0]
+
+    ckpt_eval = None
+    ckpt_quant = None
+    if ckpt_model is not None:
+        ckpt_eval = eval_model_batch(ckpt_model, b, device, False)[0]
+        ckpt_quant = eval_model_batch(ckpt_model, b, device, True)[0]
+
+    data_loader.destroy_sparse_batch(b)
+
+    sf_evals = eval_engine_batch(engine_path, net_path, fens)
+    if not sf_evals:
+        raise RuntimeError("Stockfish returned no evaluation for starting position.")
+    sf_eval = sf_evals[0]
+
+    diff_quant = nnue_quant - sf_eval
+
+    W = 80
+    print("=" * W)
+    print(f"[Smoke Test] Evaluating starting position: {fen}")
+    print(f"  Stockfish Eval      : {sf_eval:+d}")
+    print(f"  NNUE (PyTorch) Eval : {nnue_eval:+.2f}")
+    print(f"  NNUE (Quant) Eval   : {nnue_quant:+.2f}")
+    if ckpt_model is not None and ckpt_eval is not None and ckpt_quant is not None:
+        print(f"  CKPT Eval           : {ckpt_eval:+.2f}")
+        print(f"  CKPT (Quant) Eval   : {ckpt_quant:+.2f}")
+    print(f"  Diff (Quant - SF)   : {diff_quant:+.2f}")
+
+    if math.isnan(nnue_quant) or abs(diff_quant) > 5.0:
+        print(
+            f"[Smoke Test] FAILED: Evaluation difference too large ({diff_quant:+.2f})!"
+        )
+        print("=" * W)
+        raise RuntimeError(
+            f"Smoke test failed: Quantized NNUE eval ({nnue_quant}) and Stockfish eval ({sf_eval}) "
+            f"differ by {diff_quant:.2f} (> 5.0) on starting position."
+        )
+
+    print("[Smoke Test] SUCCESS: Starting position evaluation verified!")
+    print("=" * W + "\n")
+
+
 def main():
     args = tyro.cli(CliConfig)
 
     cross_check_config = args.cross_check_config
     nnue_config = args.nnue_config
+
+    if cross_check_config.random_weights and cross_check_config.net:
+        raise ValueError("Cannot specify both --random-weights and --net.")
+
+    if cross_check_config.seed is not None:
+        torch.manual_seed(cross_check_config.seed)
+        print(f"Set random seed: {cross_check_config.seed}")
 
     batch_size = 1024
 
@@ -305,61 +457,157 @@ def main():
         # --checkpoint - returns a plain NNUE wrapping a NNUEModel
         ckpt_model = ckpt.model
 
-    nnue = read_model(
-        cross_check_config.net,
-        config=nnue_config,
-    )
-    nnue.to(cross_check_config.device)
-    nnue.eval()
-    # --net - returns the NNUEModel directly
-    nnue_model = nnue
+    temp_net_path = None
+    try:
+        if cross_check_config.random_weights:
+            init_model = M.NNUEModel(
+                feature_name=nnue_config.features,
+                config=nnue_config.model_config,
+            )
+            init_random_weights(init_model)
+            with tempfile.NamedTemporaryFile(suffix=".nnue", delete=False) as temp_file:
+                net_path = temp_file.name
+            temp_net_path = net_path
 
-    input_feature_name = nnue_model.input_feature_name
-    fen_batch_provider = make_fen_batch_provider(cross_check_config.data, batch_size)
+            writer = M.NNUEWriter(init_model, verbose=False)
+            with open(net_path, "wb") as f:
+                f.write(writer.buf)
 
-    ckpt_evals = []
-    ckpt_quantized_evals = []
-    nnue_evals = []
-    nnue_quantized_evals = []
-    engine_evals = []
-    all_fens = []
+            nnue = read_model(net_path, config=nnue_config)
+        elif cross_check_config.net:
+            net_path = cross_check_config.net
+            nnue = read_model(net_path, config=nnue_config)
+        else:
+            raise ValueError("Either --net or --random-weights must be specified.")
 
-    done = 0
-    print(f"Processed {done} positions.")
-    while done < cross_check_config.count:
-        fens = filter_fens(next(fen_batch_provider))
-        all_fens += fens
+        nnue.to(cross_check_config.device)
+        nnue.eval()
+        # --net - returns the NNUEModel directly
+        nnue_model = nnue
 
-        b = data_loader.get_sparse_batch_from_fens(
-            input_feature_name, fens, [0] * len(fens), [1] * len(fens), [0] * len(fens)
-        )
-        if ckpt_model:
-            ckpt_evals += eval_model_batch(ckpt_model, b, cross_check_config.device, False)
-            ckpt_quantized_evals += eval_model_batch(ckpt_model, b, cross_check_config.device, True)
-
-        nnue_evals += eval_model_batch(nnue_model, b, cross_check_config.device, False)
-        nnue_quantized_evals += eval_model_batch(nnue_model, b, cross_check_config.device, True)
-        data_loader.destroy_sparse_batch(b)
-
-        engine_evals += eval_engine_batch(
+        # Run smoke test upfront before initializing dataloader
+        run_smoke_test(
             cross_check_config.engine,
-            cross_check_config.net,
-            fens,
+            net_path,
+            nnue_model,
+            ckpt_model,
+            cross_check_config.device,
         )
 
-        done += len(fens)
-        print(f"Processed {done} positions.")
+        input_feature_name = nnue_model.input_feature_name
+        fen_batch_provider = make_fen_batch_provider(
+            cross_check_config.data, batch_size
+        )
 
-    if ckpt_model:
-        compute_correlation(ckpt_evals, nnue_evals, all_fens, "CKPT VS NNUE", "CKPT", "NNUE")
-        compute_correlation(ckpt_quantized_evals, nnue_quantized_evals, all_fens, "CKPT (Q) VS NNUE (Q)", "CKPT (Q)", "NNUE (Q)")
-        compute_correlation(ckpt_evals, engine_evals, all_fens, "CKPT VS SF", "CKPT", "SF")
-        compute_correlation(ckpt_quantized_evals, engine_evals, all_fens, "QUANTIZED CKPT VS SF", "CKPT (Q)", "SF")
-        compute_correlation(nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF")
-        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "NNUE (Q)", "SF")
-    else:
-        compute_correlation(nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF")
-        compute_correlation(nnue_quantized_evals, engine_evals, all_fens, "QUANTIZED NNUE VS SF", "NNUE (Q)", "SF")
+        ckpt_evals = []
+        ckpt_quantized_evals = []
+        nnue_evals = []
+        nnue_quantized_evals = []
+        engine_evals = []
+        all_fens = []
+
+        done = 0
+        print(f"Processed {done} positions.")
+        while done < cross_check_config.count:
+            fens = filter_fens(next(fen_batch_provider))
+            all_fens += fens
+
+            b = data_loader.get_sparse_batch_from_fens(
+                input_feature_name,
+                fens,
+                [0] * len(fens),
+                [1] * len(fens),
+                [0] * len(fens),
+            )
+            if ckpt_model:
+                ckpt_evals += eval_model_batch(
+                    ckpt_model, b, cross_check_config.device, False
+                )
+                ckpt_quantized_evals += eval_model_batch(
+                    ckpt_model, b, cross_check_config.device, True
+                )
+
+            nnue_evals += eval_model_batch(
+                nnue_model, b, cross_check_config.device, False
+            )
+            nnue_quantized_evals += eval_model_batch(
+                nnue_model, b, cross_check_config.device, True
+            )
+            data_loader.destroy_sparse_batch(b)
+
+            engine_evals += eval_engine_batch(
+                cross_check_config.engine,
+                net_path,
+                fens,
+            )
+
+            done += len(fens)
+            print(f"Processed {done} positions.")
+
+        q_stats = None
+        if ckpt_model:
+            compute_correlation(
+                ckpt_evals, nnue_evals, all_fens, "CKPT VS NNUE", "CKPT", "NNUE"
+            )
+            compute_correlation(
+                ckpt_quantized_evals,
+                nnue_quantized_evals,
+                all_fens,
+                "CKPT (Q) VS NNUE (Q)",
+                "CKPT (Q)",
+                "NNUE (Q)",
+            )
+            compute_correlation(
+                ckpt_evals, engine_evals, all_fens, "CKPT VS SF", "CKPT", "SF"
+            )
+            compute_correlation(
+                ckpt_quantized_evals,
+                engine_evals,
+                all_fens,
+                "QUANTIZED CKPT VS SF",
+                "CKPT (Q)",
+                "SF",
+            )
+            compute_correlation(
+                nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF"
+            )
+            q_stats = compute_correlation(
+                nnue_quantized_evals,
+                engine_evals,
+                all_fens,
+                "QUANTIZED NNUE VS SF",
+                "NNUE (Q)",
+                "SF",
+            )
+        else:
+            compute_correlation(
+                nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF"
+            )
+            q_stats = compute_correlation(
+                nnue_quantized_evals,
+                engine_evals,
+                all_fens,
+                "QUANTIZED NNUE VS SF",
+                "NNUE (Q)",
+                "SF",
+            )
+
+        if cross_check_config.max_error is not None and q_stats is not None:
+            max_err = q_stats["max_abs_error"]
+            if max_err > cross_check_config.max_error:
+                raise RuntimeError(
+                    f"Cross-check error threshold exceeded: max absolute error {max_err:.2f} > {cross_check_config.max_error:.2f}"
+                )
+
+        if cross_check_config.min_r2 is not None and q_stats is not None:
+            r2 = q_stats["r_squared_score"]
+            if r2 < cross_check_config.min_r2:
+                raise RuntimeError(
+                    f"Cross-check R^2 threshold not met: R^2 {r2:.4f} < {cross_check_config.min_r2:.4f}"
+                )
+    finally:
+        if temp_net_path and os.path.exists(temp_net_path):
+            os.remove(temp_net_path)
 
 
 if __name__ == "__main__":
