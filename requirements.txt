@@ -4,7 +4,6 @@ GPUtil
 python-chess==0.31.4
 matplotlib
 tensorboard
-numba
 numpy<2.0
 requests
 tyro
