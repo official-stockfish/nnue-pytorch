@@ -27,13 +27,11 @@ class SerializeConfig:
     """The description string to include in the network.
     Only works when serializing into a .nnue file."""
 
-    compression: Literal["none", "zlib"] = "zlib"
-    """Compression method to use for the network.
-    Either 'none' or 'zlib'. Only allowed if saving to .nnue."""
+    compression: str | None = None
+    """Deprecated option. Uncompressed format is always used."""
 
-    ft_compression: Literal["none", "zlib", "leb128"] | None = None
-    """Deprecated alias for compression.
-    Either 'none', 'zlib', or 'leb128' (mapped to zlib). Only allowed if saving to .nnue."""
+    ft_compression: str | None = None
+    """Deprecated alias for compression."""
 
     ft_perm: str | None = None
     """Path to a file that defines the permutation to use on the feature transformer."""
@@ -91,12 +89,6 @@ def main():
     target_is_nnue = serialize_config.out_sha or args.target.endswith(".nnue")
 
     model_description = serialize_config.description
-    compression = serialize_config.compression
-    if serialize_config.ft_compression is not None:
-        if serialize_config.ft_compression in ("none", "raw"):
-            compression = "none"
-        else:
-            compression = "zlib"
     if args.source.endswith(".ckpt"):
         checkpoint = torch.load(
             args.source, map_location=torch.device("cpu"), weights_only=False
@@ -122,12 +114,8 @@ def main():
     else:
         raise ValueError("Invalid network input format.")
 
-    if compression != "none" and not target_is_nnue:
-        print("Warning: Compression method for non `.nnue` target ignored.")
-        compression = "none"
-
-    if compression not in ["none", "zlib"]:
-        raise ValueError("Invalid compression method.")
+    # Guarantee weights are clipped within valid range before export or optimization
+    nnue.model.clip_weights(include_input=True)
 
     if serialize_config.ft_optimize and serialize_config.ft_perm is not None:
         raise ValueError("Options --ft_perm and --ft_optimize are mutually exclusive.")
@@ -182,7 +170,7 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
 
         writer = M.NNUEWriter(
-            nnue.model, model_description, compression=compression
+            nnue.model, model_description
         )
         buf = writer.buf
 

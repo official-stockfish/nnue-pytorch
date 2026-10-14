@@ -1,7 +1,6 @@
 import io
 import operator
 import struct
-import zlib
 from collections.abc import Sequence
 from functools import reduce
 from typing import BinaryIO
@@ -79,31 +78,20 @@ class NNUEWriter:
         self,
         model: NNUEModel,
         description: str | None = None,
-        compression: str = "zlib",
-        ft_compression: str | None = None,
         verbose: bool = True,
     ):
         if description is None:
             description = DEFAULT_DESCRIPTION
 
-        if ft_compression is not None:
-            if ft_compression in ("none", "raw"):
-                compression = "none"
-            elif ft_compression in ("zlib", "leb128"):
-                compression = "zlib"
-
         self.verbose = verbose
 
         fc_hash = self.fc_hash(model)
 
-        # 1. Plaintext header (always uncompressed)
-        header_buf = bytearray()
-        self.buf = header_buf
+        # 1. Plaintext header
+        self.buf = bytearray()
         self.write_header(model, fc_hash, description)
 
         # 2. Payload (Feature Transformer + Layer Stacks)
-        payload_buf = bytearray()
-        self.buf = payload_buf
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model)
         layer_stacks = model.layer_stacks
@@ -112,20 +100,6 @@ class NNUEWriter:
             self.write_fc_layer(model, l1, layer_stacks.l1.layer_key, f"bucket {bucket}")
             self.write_fc_layer(model, l2, layer_stacks.l2.layer_key, f"bucket {bucket}")
             self.write_fc_layer(model, output, layer_stacks.output.layer_key, f"bucket {bucket}")
-
-        # 3. Combine header and payload
-        if compression == "zlib":
-            compressed_payload = zlib.compress(bytes(payload_buf), level=6)
-            self.buf = (
-                header_buf
-                + b"COMPRESSED_ZLIB"
-                + struct.pack("<II", len(payload_buf), len(compressed_payload))
-                + compressed_payload
-            )
-        elif compression == "none":
-            self.buf = header_buf + payload_buf
-        else:
-            raise ValueError(f"Invalid compression method: {compression}")
 
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
@@ -240,24 +214,6 @@ class NNUEReader:
         fc_hash = NNUEWriter.fc_hash(self.model)
 
         self.read_header(self.model.feature_hash, fc_hash)
-
-        # Check if the payload is compressed with zlib
-        magic = b"COMPRESSED_ZLIB"
-        if self.peek(len(magic)) == magic:
-            self.f.read(len(magic))
-            uncompressed_size, compressed_size = struct.unpack("<II", self.f.read(8))
-            compressed_data = self.f.read(compressed_size)
-            if len(compressed_data) != compressed_size:
-                raise EOFError(
-                    f"Unexpected end of file when reading compressed data: expected {compressed_size}, got {len(compressed_data)}"
-                )
-            decompressed_data = zlib.decompress(compressed_data)
-            if len(decompressed_data) != uncompressed_size:
-                raise ValueError(
-                    f"Decompressed size mismatch: expected {uncompressed_size}, got {len(decompressed_data)}"
-                )
-            self.f = io.BytesIO(decompressed_data)
-
         self.read_int32(
             self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
@@ -294,12 +250,6 @@ class NNUEReader:
         self.read_int32(fc_hash ^ feature_hash ^ (self.config.L1 * 2))
         desc_len = self.read_int32()
         self.description = self.f.read(desc_len).decode("utf-8")
-
-    def peek(self, length: int = 1) -> bytes:
-        pos = self.f.tell()
-        data = self.f.read(length)
-        self.f.seek(pos)
-        return data
 
     def tensor(self, dtype: npt.DTypeLike, shape: Sequence[int]) -> torch.Tensor:
         count = reduce(operator.mul, shape, 1)
