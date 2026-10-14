@@ -1,5 +1,6 @@
 import hashlib
 import os
+import warnings
 from dataclasses import dataclass, field
 from typing import Annotated, Literal
 
@@ -82,6 +83,15 @@ def main():
     serialize_config = args.serialize_config
     nnue_config = args.nnue_config
     feature_name = nnue_config.features
+
+    comp = serialize_config.compression or serialize_config.ft_compression
+    if comp is not None and comp.lower() != "none":
+        warnings.warn(
+            f"The compression flag ('{comp}') is currently inactive. "
+            "Networks are serialized in uncompressed format matching Stockfish master.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     print(f"Converting {args.source} to {args.target}")
 
