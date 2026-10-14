@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/pytorch:25.03-py3
+FROM nvcr.io/nvidia/pytorch:26.09-py3
 
 RUN apt-get update && apt-get install -y \
     g++ \
@@ -11,6 +11,11 @@ WORKDIR /workspace/nnue-pytorch
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+# NGC 26.09 does not include CuPy. Install the CUDA 13 wheel so nnue-pytorch
+# uses its custom CUDA kernels instead of the PyTorch fallback.
+RUN python -m pip install --no-cache-dir cupy-cuda13x==13.6.0 \
+    && python -c "import cupy"
 
 COPY docker/docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
 RUN chmod +x /usr/local/bin/docker_entrypoint.sh
