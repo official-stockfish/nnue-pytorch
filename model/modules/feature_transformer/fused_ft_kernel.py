@@ -303,6 +303,7 @@ void fused_double_ft_backward(
         )
         kernel.compile()
 
+        @torch.compiler.disable
         def launch(grid, args):
             stream = cp.cuda.ExternalStream(torch.cuda.current_stream().cuda_stream)
             kernel(
