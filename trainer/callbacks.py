@@ -96,12 +96,6 @@ class WeightClipper(Callback):
         if self.input_clipping_interval <= 0:
             trainer.model.model.clip_weights(include_input=True)
 
-    @torch.no_grad()
-    @torch.compiler.disable
-    def on_save_checkpoint(self, trainer, checkpoint=None):
-        _ = checkpoint  # Unused
-        trainer.model.model.clip_weights(include_input=True)
-
 
 class ExplicitSWA(Callback):
     def __init__(self, swa_start_epoch: int, save_dir: str):
@@ -337,11 +331,9 @@ class CheckpointManager(Callback):
         )
 
     def on_train_epoch_end(self, trainer):
-        if trainer.rank != 0:
-            return
-
         dirpath = self._get_dirpath(trainer)
-        os.makedirs(dirpath, exist_ok=True)
+        if trainer.rank == 0:
+            os.makedirs(dirpath, exist_ok=True)
 
         should_save_periodic = (
             self.every_n_epochs is not None
@@ -364,8 +356,9 @@ class CheckpointManager(Callback):
             saved.append(last_path)
             self._last_save_epoch = trainer.current_epoch
 
-        self._saved_checkpoints.extend(saved)
-        self._enforce_save_top_k()
+        if trainer.rank == 0:
+            self._saved_checkpoints.extend(saved)
+            self._enforce_save_top_k()
 
     def _enforce_save_top_k(self):
         if self.save_top_k < 0:
@@ -388,18 +381,17 @@ class CheckpointManager(Callback):
             self._saved_checkpoints.remove(path)
 
     def on_train_end(self, trainer):
-        if trainer.rank != 0:
-            return
-
         dirpath = self._get_dirpath(trainer)
-        os.makedirs(dirpath, exist_ok=True)
+        if trainer.rank == 0:
+            os.makedirs(dirpath, exist_ok=True)
 
         last_path = os.path.join(dirpath, "last.ckpt")
         if self.save_last and self._last_save_epoch != trainer.current_epoch:
             trainer.save_checkpoint(last_path)
         # Wait for asynchronous writes so post-training code (e.g. the
         # SWA checkpoint renames in train.py) sees complete files.
-        trainer.flush_checkpoints()
+        if trainer.rank == 0:
+            trainer.flush_checkpoints()
 
 
 class UniquePositionLogger(Callback):
