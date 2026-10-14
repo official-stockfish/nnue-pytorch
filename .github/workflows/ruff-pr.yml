@@ -1,4 +1,4 @@
-name: Ruff Lint
+name: Ruff Lint and Format
 
 on:
   pull_request:
@@ -30,3 +30,6 @@ jobs:
       - name: Run ruff
         run: |
           ruff check --output-format=github .
+
+      - name: Check formatting
+        run: ruff format --check .
