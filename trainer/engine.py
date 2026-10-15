@@ -42,7 +42,15 @@ def init_distributed(
                     backend = "gloo"
                 else:
                     backend = "nccl" if torch.cuda.is_available() else "gloo"
-            dist.init_process_group(backend, init_method="env://")
+            kwargs = {}
+            if backend == "nccl":
+                # Bind the process group to this rank's GPU. This eagerly
+                # forms the NCCL communicator and lets device-less
+                # collectives (such as the epoch-end torchmetrics barrier)
+                # target the bound device instead of the current-context
+                # device, which torch warns about.
+                kwargs["device_id"] = torch.device("cuda", local_rank)
+            dist.init_process_group(backend, init_method="env://", **kwargs)
 
     if torch.cuda.is_available() and device_type != "cpu":
         torch.cuda.set_device(local_rank)
