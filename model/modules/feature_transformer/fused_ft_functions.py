@@ -54,6 +54,8 @@ def _aggregated_tile_size(l1_size, batch_size, max_active_features, capability):
             return 14
         if capability == (8, 0) and batch_size >= 8192:
             return 12
+        if capability == (9, 0) and batch_size >= 8192:
+            return 14
     return 8
 
 
