@@ -614,6 +614,7 @@ SparseBatch::SparseBatch(const IFeatureExtractor&               feature_set,
 
     num_active_white_features = 0;
     num_active_black_features = 0;
+    m_feature_counts.resize(std::size_t(size) * 2);
 
     for (int i = 0; i < size * max_active_features; ++i)
         white[i] = -1;
@@ -648,9 +649,42 @@ void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingD
 }
 
 void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
-    const int offset = i * max_active_features;
-    num_active_white_features += fs.fill_features_sparse(e, white + offset, Color::White).first;
-    num_active_black_features += fs.fill_features_sparse(e, black + offset, Color::Black).first;
+    const int offset           = i * max_active_features;
+    const int nw               = fs.fill_features_sparse(e, white + offset, Color::White).first;
+    const int nb               = fs.fill_features_sparse(e, black + offset, Color::Black).first;
+    m_feature_counts[i]        = nw;
+    m_feature_counts[size + i] = nb;
+    num_active_white_features += nw;
+    num_active_black_features += nb;
+}
+
+bool SparseBatch::pack_indices(int* output, std::size_t capacity) const {
+    const std::size_t required =
+      std::size_t(size) * 4 + 2 + num_active_white_features + num_active_black_features;
+    if (!output || capacity < required)
+        return false;
+    int* white_offsets = output;
+    int* black_offsets = white_offsets + size + 1;
+    int* white_ids     = black_offsets + size + 1;
+    int* black_ids     = white_ids + num_active_white_features;
+    int* piece_counts  = black_ids + num_active_black_features;
+    int  white_count   = 0, black_count = 0;
+    white_offsets[0] = black_offsets[0] = 0;
+    for (int row = 0; row < size; ++row)
+    {
+        const int         num_white = m_feature_counts[row];
+        const int         num_black = m_feature_counts[size + row];
+        const std::size_t offset    = std::size_t(row) * max_active_features;
+        std::memcpy(white_ids + white_count, white + offset, std::size_t(num_white) * sizeof(int));
+        std::memcpy(black_ids + black_count, black + offset, std::size_t(num_black) * sizeof(int));
+        white_count += num_white;
+        black_count += num_black;
+        white_offsets[row + 1] = white_count;
+        black_offsets[row + 1] = black_count;
+    }
+    std::memcpy(piece_counts, piece_count, std::size_t(size) * sizeof(int));
+    std::memcpy(piece_counts + size, queen_bucket, std::size_t(size) * sizeof(int));
+    return true;
 }
 
 int FeaturedBatchStream::calculate_num_reader_threads(int concurrency) {

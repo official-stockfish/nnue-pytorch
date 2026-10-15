@@ -58,6 +58,13 @@ struct SparseBatch final {
                 std::shared_ptr<SparseBatchBufferPool>                buffer_pool = nullptr);
     ~SparseBatch();
 
+    // Packed int32 layout: white offsets [size + 1], black offsets [size + 1],
+    // white IDs [num_active_white_features], black IDs [num_active_black_features],
+    // piece counts [size], queen buckets [size]. Offsets begin at zero and end
+    // at the total ID count.
+    // capacity is in elements; insufficient capacity leaves output untouched.
+    bool pack_indices(int* output, std::size_t capacity) const;
+
     int num_inputs;
     int size;
 
@@ -80,6 +87,7 @@ struct SparseBatch final {
     float*                                 m_float_block = nullptr;
     int*                                   m_int_block   = nullptr;
     std::shared_ptr<SparseBatchBufferPool> m_buffer_pool;
+    std::vector<int>                       m_feature_counts;
     void fill_entry(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
     void
     fill_features(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
