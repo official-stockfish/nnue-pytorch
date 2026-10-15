@@ -5,6 +5,7 @@ import os
 import numpy as np
 import torch
 
+from ._transport import CompactTransportPolicy, _pin_and_move, move_indices
 from .config import (
     CDataloaderDDPConfig,
     CDataloaderFileStats,
@@ -12,49 +13,6 @@ from .config import (
     CDataloaderIOConfig,
     CDataloaderSkipConfig,
 )
-
-
-def _pin_and_move(
-    t: torch.Tensor, device, use_pinned_memory=False, dtype=None, *, copy_mode="memcpy"
-) -> torch.Tensor:
-    if dtype is None:
-        dtype = t.dtype
-
-    # Must copy off SparseBatch-backed memory before it is freed
-    if torch.cuda.is_available() and use_pinned_memory:
-        if copy_mode not in ("memcpy", "torch"):
-            raise ValueError(f"copy_mode must be memcpy or torch, got {copy_mode!r}")
-        # Allocate a pinned CPU tensor and copy the data directly into it.
-        # This is much faster than t.clone().pin_memory() which does two copies/allocations.
-        out = torch.empty(
-            t.shape, dtype=dtype, layout=t.layout, device="cpu", pin_memory=True
-        )
-        if (
-            copy_mode == "memcpy"
-            and t.device.type == "cpu"
-            and t.is_contiguous()
-            and t.dtype == dtype
-            and not t.is_conj()
-            and not t.is_neg()
-        ):
-            # Native blocks already have the destination representation. A
-            # synchronous libc copy releases the GIL and avoids dispatching
-            # additional PyTorch CPU workers while the C++ loader builds batches.
-            ctypes.memmove(out.data_ptr(), t.data_ptr(), t.numel() * t.element_size())
-        else:
-            out.copy_(t)
-        if device == "cpu" or (
-            isinstance(device, torch.device) and device.type == "cpu"
-        ):
-            return out
-        return out.to(device=device, non_blocking=True)
-
-    # If not using pinned memory, just copy to standard CPU storage
-    out = torch.empty(t.shape, dtype=dtype, layout=t.layout, device="cpu")
-    out.copy_(t)
-    if device == "cpu" or (isinstance(device, torch.device) and device.type == "cpu"):
-        return out
-    return out.to(device=device)
 
 
 class SparseBatch(ctypes.Structure):
@@ -73,25 +31,40 @@ class SparseBatch(ctypes.Structure):
         ("queen_bucket", ctypes.POINTER(ctypes.c_int)),
     ]
 
-    def get_tensors(self, device, use_pinned_memory=False):
+    def get_tensors(
+        self,
+        device: str | torch.device,
+        use_pinned_memory: bool = False,
+        *,
+        transport_policy: CompactTransportPolicy | None = None,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         size = self.size
         max_active = self.max_active_features
 
-        # We only transfer:
-        # - float block: is_white, outcome, score (3 * size floats)
-        # - int block: white, black, piece_count, queen_bucket (2 * size * max_active + 2 * size ints)
+        # is_white, outcome, score(3 * size floats)
         total_floats = size * 3
-        total_ints = size * max_active * 2 + 2 * size
 
         float_block_cpu = torch.from_numpy(
             np.ctypeslib.as_array(self.is_white, shape=(total_floats,))
         )
-        int_block_cpu = torch.from_numpy(
-            np.ctypeslib.as_array(self.white, shape=(total_ints,))
-        )
-
         float_block_gpu = _pin_and_move(float_block_cpu, device, use_pinned_memory)
-        int_block_gpu = _pin_and_move(int_block_cpu, device, use_pinned_memory)
+        int_block_gpu = move_indices(
+            self,
+            device,
+            use_pinned_memory,
+            native_owned=isinstance(self._b_base_, NativeSparseBatchPointer),
+            pack=c_lib.pack_sparse_batch,
+            policy=transport_policy or CompactTransportPolicy(),
+        )
 
         us = float_block_gpu[0:size].view(size, 1)
         outcome = float_block_gpu[size : 2 * size].view(size, 1)
@@ -138,6 +111,12 @@ class SparseBatch(ctypes.Structure):
             piece_count,
             queen_bucket,
         )
+
+
+class NativeSparseBatchPointer(ctypes._Pointer):
+    """Distinguish native allocations with private fields from Python-created batches."""
+
+    _type_ = SparseBatch
 
 
 class Fen(ctypes.Structure):
@@ -193,6 +172,13 @@ class CDataLoaderAPI:
         raise FileNotFoundError("Cannot find data_loader shared library.")
 
     def _define_prototypes(self):
+        self.pack_sparse_batch = self.dll.pack_sparse_batch
+        self.pack_sparse_batch.restype = ctypes.c_bool
+        self.pack_sparse_batch.argtypes = [
+            ctypes.POINTER(SparseBatch),
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+        ]
         # EXPORT FenBatchStream* CDECL create_fen_batch_stream(
         #     int concurrency,
         #     int num_files,
@@ -254,7 +240,7 @@ class CDataLoaderAPI:
         self.dll.destroy_sparse_batch_stream.argtypes = [ctypes.c_void_p]
 
         # EXPORT SparseBatch* CDECL fetch_next_sparse_batch(Stream<SparseBatch>* stream)
-        self.dll.fetch_next_sparse_batch.restype = ctypes.POINTER(SparseBatch)
+        self.dll.fetch_next_sparse_batch.restype = NativeSparseBatchPointer
         self.dll.fetch_next_sparse_batch.argtypes = [ctypes.c_void_p]
 
         # EXPORT SparseBatch* get_sparse_batch_from_fens(
@@ -265,7 +251,7 @@ class CDataLoaderAPI:
         #    int* plies,
         #    int* results
         # )
-        self.dll.get_sparse_batch_from_fens.restype = ctypes.POINTER(SparseBatch)
+        self.dll.get_sparse_batch_from_fens.restype = NativeSparseBatchPointer
         self.dll.get_sparse_batch_from_fens.argtypes = [
             ctypes.c_char_p,
             ctypes.c_int,
@@ -313,7 +299,7 @@ class CDataLoaderAPI:
         ]
 
 
-type SparseBatchPtr = ctypes._Pointer[SparseBatch]
+type SparseBatchPtr = NativeSparseBatchPointer
 type FenBatchPtr = ctypes._Pointer[FenBatch]
 
 try:

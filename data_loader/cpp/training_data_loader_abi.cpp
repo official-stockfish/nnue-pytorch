@@ -97,6 +97,12 @@ NNUE_API FenBatch* NNUE_CDECL fetch_next_fen_batch(FenBatchStream* stream) {
 
 NNUE_API void NNUE_CDECL destroy_sparse_batch(SparseBatch* e) { delete e; }
 
+NNUE_API bool NNUE_CDECL pack_sparse_batch(const SparseBatch* batch,
+                                         int*               output,
+                                         std::size_t        capacity) {
+    return batch && batch->pack_indices(output, capacity);
+}
+
 NNUE_API void NNUE_CDECL destroy_fen_batch(FenBatch* e) { delete e; }
 
 // unique position counting (HLL)

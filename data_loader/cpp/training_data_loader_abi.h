@@ -21,6 +21,10 @@ NNUE_API SparseBatch* NNUE_CDECL get_sparse_batch_from_fens(const char*        f
                                                             int*               results);
 
 NNUE_API void NNUE_CDECL destroy_sparse_batch(SparseBatch* e);
+// capacity is in int32 elements. Returns false without writing if too small.
+NNUE_API bool NNUE_CDECL pack_sparse_batch(const SparseBatch* batch,
+                                         int*               output,
+                                         std::size_t        capacity);
 NNUE_API void NNUE_CDECL destroy_fen_batch(FenBatch* e);
 
 // fen stream
