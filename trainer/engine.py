@@ -426,8 +426,8 @@ class SimpleTrainer:
                 val_loss = outputs["val_loss"]
                 if not torch.is_tensor(val_loss):
                     val_loss = torch.tensor(val_loss, device=self.device)
-                total_val_loss = val_loss if total_val_loss is None else (
-                    total_val_loss + val_loss
+                total_val_loss = (
+                    val_loss if total_val_loss is None else (total_val_loss + val_loss)
                 )
                 num_val_batches += 1
 

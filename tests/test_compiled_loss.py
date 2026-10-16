@@ -24,7 +24,9 @@ def _make_inputs(device, batch, per_element_lambda=True):
     return scorenet, score, outcome, actual_lambda
 
 
-@pytest.mark.parametrize("device", ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"])
+@pytest.mark.parametrize(
+    "device", ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+)
 @pytest.mark.parametrize("per_element_lambda", [True, False])
 def test_compiled_loss_matches_eager(device, per_element_lambda):
     if device == "cuda":
@@ -48,9 +50,7 @@ def test_compiled_loss_matches_eager(device, per_element_lambda):
     compiled = nnue._sf_loss_fn(scorenet, score, outcome, params, actual_lambda)
 
     exact = torch.equal(eager.detach(), compiled.detach())
-    torch.testing.assert_close(
-        eager.detach(), compiled.detach(), rtol=1e-6, atol=1e-8
-    )
+    torch.testing.assert_close(eager.detach(), compiled.detach(), rtol=1e-6, atol=1e-8)
     if not exact:
         diff = (eager.detach() - compiled.detach()).abs().max().item()
         print(f"[compiled loss] not bitwise identical; max abs diff {diff:.3e}")
