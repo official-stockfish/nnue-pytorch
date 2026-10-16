@@ -117,10 +117,6 @@ class NNUE(nn.Module):
         # compiled model; replaced by a compiled version on request.
         self._sf_loss_fn = calculate_sf_loss
 
-    def enable_compiled_loss(self) -> None:
-        """Fuse the loss pointwise chain into compiled kernels."""
-        self._sf_loss_fn = torch.compile(calculate_sf_loss)
-
         self.loss_metrics = MetricCollection(
             {
                 # Avoid a CUDA-to-CPU NaN check on every metric update.
@@ -131,6 +127,10 @@ class NNUE(nn.Module):
                 "test_loss_epoch": MeanMetric(nan_strategy="disable"),
             }
         )
+
+    def enable_compiled_loss(self) -> None:
+        """Fuse the loss pointwise chain into compiled kernels."""
+        self._sf_loss_fn = torch.compile(calculate_sf_loss)
 
     # --- setup optimizers and training hooks ---
     def configure_optimizers(self):
