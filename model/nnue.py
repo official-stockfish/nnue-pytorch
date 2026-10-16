@@ -113,6 +113,14 @@ class NNUE(nn.Module):
         # Initialize the lambda controller
         self.lambda_scheduler = LambdaController()
 
+        # The loss runs as ~20 eager pointwise kernels per step outside the
+        # compiled model; replaced by a compiled version on request.
+        self._sf_loss_fn = calculate_sf_loss
+
+    def enable_compiled_loss(self) -> None:
+        """Fuse the loss pointwise chain into compiled kernels."""
+        self._sf_loss_fn = torch.compile(calculate_sf_loss)
+
         self.loss_metrics = MetricCollection(
             {
                 # Avoid a CUDA-to-CPU NaN check on every metric update.
@@ -386,8 +394,12 @@ class NNUE(nn.Module):
             is_training=self.training,
             scorenet=scorenet,
         )
+        if not torch.is_tensor(actual_lambda):
+            # A stable tensor input keeps the compiled loss from respecializing
+            # on every schedule value when jitter is disabled.
+            actual_lambda = scorenet.new_tensor(actual_lambda)
 
-        sf_loss = calculate_sf_loss(
+        sf_loss = self._sf_loss_fn(
             scorenet, score, outcome, self.config.loss_params, actual_lambda
         )
 

@@ -407,7 +407,7 @@ class SimpleTrainer:
             self.model.on_validation_epoch_start()
         self._call_callbacks("on_validation_epoch_start", self)
 
-        total_val_loss = 0.0
+        total_val_loss = None
         num_val_batches = 0
 
         with torch.no_grad():
@@ -421,16 +421,24 @@ class SimpleTrainer:
                 outputs = self.model.val_step(
                     batch, self.current_epoch, self.global_step
                 )
-                total_val_loss += float(outputs["val_loss"])
+                # Accumulate on the device: a per-batch float() would force a
+                # GPU-to-CPU sync in every iteration.
+                val_loss = outputs["val_loss"]
+                if not torch.is_tensor(val_loss):
+                    val_loss = torch.tensor(val_loss, device=self.device)
+                total_val_loss = val_loss if total_val_loss is None else (
+                    total_val_loss + val_loss
+                )
                 num_val_batches += 1
 
                 self._call_callbacks(
                     "on_validation_batch_end", self, batch, batch_idx, outputs
                 )
 
-        mean_val_loss = (
-            total_val_loss / num_val_batches if num_val_batches > 0 else float("nan")
-        )
+        if total_val_loss is None or num_val_batches == 0:
+            mean_val_loss = float("nan")
+        else:
+            mean_val_loss = (total_val_loss / num_val_batches).item()
 
         if self.world_size > 1:
             mean_tensor = torch.tensor(mean_val_loss, device=self.device)
