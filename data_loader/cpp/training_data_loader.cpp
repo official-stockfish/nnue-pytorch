@@ -365,12 +365,50 @@ struct FullThreatsExtractor: IFeatureExtractor {
 struct PP_3Wide {
     static constexpr std::string_view NAME = "PP_3Wide";
 
-    static constexpr int PAWN_IDS            = 2 * 48;
-    static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
+    static constexpr int NUM_PLANES          = 2163;
+    static constexpr int NUM_BUCKETS         = 8;
+    static constexpr int INPUTS              = NUM_PLANES * NUM_BUCKETS;
     static constexpr int MAX_ACTIVE_FEATURES = 128;
 
+    // Perspective-normalized king squares are mirrored onto files a-d.
+    // clang-format off
+    static constexpr int KingBuckets[64] = {
+        0, 1, 2, 3, 3, 2, 1, 0,
+        4, 4, 5, 5, 5, 5, 4, 4,
+        6, 6, 6, 6, 6, 6, 6, 6,
+        6, 6, 6, 6, 6, 6, 6, 6,
+        7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7
+    };
+    // clang-format on
+
+    // File-major IDs make same/adjacent-file pairs fit a 23-wide band.
+    // Ranks 1 and 8 are unused; their entries are harmless placeholders.
+    // clang-format off
+    alignas(64) static constexpr std::array<std::array<std::uint8_t, 64>, 2> PawnIds = {{
+        { 0, 12, 24, 36, 48, 60, 72, 84,
+          0, 12, 24, 36, 48, 60, 72, 84,
+          1, 13, 25, 37, 49, 61, 73, 85,
+          2, 14, 26, 38, 50, 62, 74, 86,
+          3, 15, 27, 39, 51, 63, 75, 87,
+          4, 16, 28, 40, 52, 64, 76, 88,
+          5, 17, 29, 41, 53, 65, 77, 89,
+          0, 12, 24, 36, 48, 60, 72, 84 },
+        { 6, 18, 30, 42, 54, 66, 78, 90,
+          6, 18, 30, 42, 54, 66, 78, 90,
+          7, 19, 31, 43, 55, 67, 79, 91,
+          8, 20, 32, 44, 56, 68, 80, 92,
+          9, 21, 33, 45, 57, 69, 81, 93,
+         10, 22, 34, 46, 58, 70, 82, 94,
+         11, 23, 35, 47, 59, 71, 83, 95,
+          6, 18, 30, 42, 54, 66, 78, 90 },
+    }};
+    // clang-format on
+
     static int make_pawn_id(Color color, Square square) {
-        return 48 * static_cast<int>(color) + static_cast<int>(square) - static_cast<int>(a2);
+        return PawnIds[static_cast<int>(color)][static_cast<int>(square)];
     }
 
     static int make_index(
@@ -393,7 +431,8 @@ struct PP_3Wide {
         int hi   = std::max(id_a, id_b);
         int lo   = std::min(id_a, id_b);
 
-        return hi * (hi - 1) / 2 + lo;
+        int king_oriented = static_cast<int>(ksq) ^ orient;
+        return KingBuckets[king_oriented] * NUM_PLANES + 22 * lo + hi - 1;
     }
 
     static std::pair<int, int>

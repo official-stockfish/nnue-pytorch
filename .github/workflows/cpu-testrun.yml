@@ -31,17 +31,19 @@ jobs:
           cache-from: type=gha,scope=cpu-cache
           cache-to: type=gha,mode=max,scope=cpu-cache
 
-      - name: Checkout Stockfish Master
+      - name: Checkout Compatible Stockfish
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: official-stockfish/Stockfish
+          repository: sscg13/Stockfish
           path: Stockfish
+          ref: fb356a0c7ac4e7b31b363d86fdfae7ae926aaa82 # compress-pp-indexing, eight PP king buckets
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
         run: |
           cd Stockfish/src
-          make -j build
+          # Cross-checks supply their own nets; no embedded seed is needed.
+          make -j all EXTRACXXFLAGS=-DNNUE_EMBEDDING_OFF
 
       - name: Perform Test Run of entire Training Pipeline on CPU
         run: |
@@ -75,17 +77,19 @@ jobs:
           cache-from: type=gha,scope=cpu-cache
           cache-to: type=gha,mode=max,scope=cpu-cache
 
-      - name: Checkout Stockfish Master
+      - name: Checkout Compatible Stockfish
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: official-stockfish/Stockfish
+          repository: sscg13/Stockfish
           path: Stockfish
+          ref: fb356a0c7ac4e7b31b363d86fdfae7ae926aaa82 # compress-pp-indexing, eight PP king buckets
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
         run: |
           cd Stockfish/src
-          make -j build
+          # Cross-checks supply their own nets; no embedded seed is needed.
+          make -j all EXTRACXXFLAGS=-DNNUE_EMBEDDING_OFF
 
       - name: Perform Cross-Check Evaluation on Random Net
         run: |
