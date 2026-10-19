@@ -551,7 +551,7 @@ def eval_ft(
             _score,
             *_rest,
         ) = batch_tuple
-        l0_ = model.forward_ft(
+        l0_, _dyn_biases = model.forward_ft(
             us,
             them,
             white_indices,
@@ -573,15 +573,23 @@ def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
         )
 
     # Both sides of the FT must use the same permutation.
+    # Dynamic bias neurons at [l1_size..num_outputs) are strictly kept unchanged (identity).
     permutation.extend([x + l1_size // 2 for x in permutation])
+    full_perm = permutation + list(range(l1_size, model.input.num_outputs))
 
     # Apply the permutation in place.
     for f in model.input.features:
-        f.weight.copy_(f.weight[:, permutation])
-    model.input.bias.copy_(model.input.bias[permutation])
+        f.weight.copy_(f.weight[:, full_perm])
+        if hasattr(f, "virtual_weight"):
+            f.virtual_weight.copy_(f.virtual_weight[:, full_perm])
+    model.input.bias.copy_(model.input.bias[full_perm])
     model.layer_stacks.l1.linear.weight.copy_(
         model.layer_stacks.l1.linear.weight[:, permutation]
     )
+    if hasattr(model.layer_stacks.l1, "factorized_linear"):
+        model.layer_stacks.l1.factorized_linear.weight.copy_(
+            model.layer_stacks.l1.factorized_linear.weight[:, permutation]
+        )
 
 
 def ft_permute(model: NNUEModel, ft_perm_path: str) -> None:

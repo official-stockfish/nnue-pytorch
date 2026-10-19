@@ -143,6 +143,34 @@ class QuantizationManager:
         # currently no separate quantization necessary, but might be necessary in the future if quant schemes change.
         return preact
 
+    def fake_quantize_dyn_biases(
+        self,
+        u: torch.Tensor,
+        v: torch.Tensor,
+        l2_size: int = 32,
+        l3_size: int = 32,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        u_q = _fake_quantize_acts(
+            torch.clamp(u, 0.0, self.max_ft_activation), self.ft_quantized_one
+        )
+        v_q = _fake_quantize_acts(v, self.ft_quantized_one)
+        delta_b = u_q * v_q
+        b1_sqr = _fake_quantize_acts(
+            delta_b[:, :l2_size], self.weight_scales_dict["ls_l1_bias"]
+        )
+        b1_lin = _fake_quantize_acts(
+            delta_b[:, l2_size : 2 * l2_size], self.weight_scales_dict["ls_l1_bias"]
+        )
+        b2_sqr = _fake_quantize_acts(
+            delta_b[:, 2 * l2_size : 2 * l2_size + l3_size],
+            self.weight_scales_dict["ls_l2_bias"],
+        )
+        b2_lin = _fake_quantize_acts(
+            delta_b[:, 2 * l2_size + l3_size : 2 * (l2_size + l3_size)],
+            self.weight_scales_dict["ls_l2_bias"],
+        )
+        return b1_sqr, b1_lin, b2_sqr, b2_lin
+
     def fake_quantize_output(self, preact: torch.Tensor) -> torch.Tensor:
         multiplier_int = int(self.config.nnue2score * self.config.weight_scale_out)
         denominator_int = int(

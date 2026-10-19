@@ -116,7 +116,7 @@ def run_bench():
                     p.grad.zero_()
 
             for _ in range(WARMUP_ITERS):
-                l0_ = compiled_double_ft(
+                l0_, _dyn_biases = compiled_double_ft(
                     us,
                     them,
                     indices0,
@@ -139,7 +139,7 @@ def run_bench():
             for p in compiled_double_ft.parameters():
                 if p.grad is not None:
                     p.grad.zero_()
-            l0_ = compiled_double_ft(
+            l0_, _dyn_biases = compiled_double_ft(
                 us,
                 them,
                 indices0,

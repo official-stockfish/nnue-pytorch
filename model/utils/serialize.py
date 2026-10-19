@@ -91,7 +91,9 @@ class NNUEWriter:
         self.write_header(model, fc_hash, description)
 
         # 2. Payload (Feature Transformer + Layer Stacks)
-        self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
+        self.int32(
+            model.feature_hash ^ (model.ft_outputs * 2)
+        )  # Feature transformer hash
         self.write_feature_transformer(model)
         layer_stacks = model.layer_stacks
         for bucket, (l1, l2, output) in enumerate(
@@ -133,7 +135,9 @@ class NNUEWriter:
 
     def write_header(self, model: NNUEModel, fc_hash: int, description: str) -> None:
         self.int32(VERSION)  # version
-        self.int32(fc_hash ^ model.feature_hash ^ (model.L1 * 2))  # halfkp network hash
+        self.int32(
+            fc_hash ^ model.feature_hash ^ (model.ft_outputs * 2)
+        )  # halfkp network hash
         encoded_description = description.encode("utf-8")
         self.int32(len(encoded_description))  # Network definition
         self.buf.extend(encoded_description)
@@ -145,7 +149,7 @@ class NNUEWriter:
     def write_feature_transformer(self, model: NNUEModel) -> None:
         layer = model.input
 
-        bias = layer.bias.data[: model.L1]
+        bias = layer.bias.data[: model.ft_outputs]
 
         # Get export weights (coalesced + remapped 12→11 piece types)
         weight = layer.get_export_weights()
@@ -221,7 +225,7 @@ class NNUEReader:
 
         self.read_header(self.model.feature_hash, fc_hash)
         self.read_int32(
-            self.model.feature_hash ^ (self.config.L1 * 2)
+            self.model.feature_hash ^ (self.config.ft_outputs * 2)
         )  # Feature transformer hash
         self.model.zero_virtual_weights()
 
@@ -253,7 +257,7 @@ class NNUEReader:
 
     def read_header(self, feature_hash: int, fc_hash: int) -> None:
         self.read_int32(VERSION)  # version
-        self.read_int32(fc_hash ^ feature_hash ^ (self.config.L1 * 2))
+        self.read_int32(fc_hash ^ feature_hash ^ (self.config.ft_outputs * 2))
         desc_len = self.read_int32()
         self.description = self.f.read(desc_len).decode("utf-8")
 

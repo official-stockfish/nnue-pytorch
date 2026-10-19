@@ -21,6 +21,12 @@ class ModelConfig(LayerStacksConfig):
             default=ModelConfig.L1,
         )
         parser.add_argument(
+            "--l1-bias",
+            dest="L1_bias",
+            type=int,
+            default=ModelConfig.L1_bias,
+        )
+        parser.add_argument(
             "--l2",
             dest="L2",
             type=int,
@@ -31,6 +37,7 @@ class ModelConfig(LayerStacksConfig):
     def get_model_config(args) -> "ModelConfig":
         config = ModelConfig()
         config.L1 = args.L1
+        config.L1_bias = args.L1_bias
         config.L2 = args.L2
         return config
 

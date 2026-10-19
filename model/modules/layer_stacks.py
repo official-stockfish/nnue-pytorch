@@ -40,6 +40,7 @@ class LayerStacks(nn.Module):
         self,
         x: torch.Tensor,
         ls_indices: torch.Tensor,
+        dyn_biases: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
     ):
@@ -47,14 +48,18 @@ class LayerStacks(nn.Module):
 
         # Extract the short-path skip connection before fake quantization
         l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)
-        l1x_ = l1c_
 
-        l1_sqr = torch.pow(l1x_, 2.0)
+        b1_sqr, b1_lin, b2_sqr, b2_lin = dyn_biases
+        l1_sqr_in = l1c_ + b1_sqr
+        l1_lin_in = l1c_ + b1_lin
+
+        l1_sqr = torch.pow(l1_sqr_in, 2.0)
         if fake_quantize_acts:
             l1_sqr = self.quantization.fake_quantize_ls_act(l1_sqr)
 
         l1_sqr = l1_sqr * (self.quantization.sqr_crelu_correction_factor)
 
+        l1x_ = l1_lin_in
         if fake_quantize_acts:
             l1x_ = self.quantization.fake_quantize_ls_act(l1x_)
 
@@ -62,14 +67,17 @@ class LayerStacks(nn.Module):
         l1x_ = self.quantization.clip_ls_act(l1x_)
 
         l2c_ = self.l2(l1x_, ls_indices, fake_quantize_weights)
-        l2x_ = l2c_
 
-        l2_sqr = torch.pow(l2x_, 2.0)
+        l2_sqr_in = l2c_ + b2_sqr
+        l2_lin_in = l2c_ + b2_lin
+
+        l2_sqr = torch.pow(l2_sqr_in, 2.0)
         if fake_quantize_acts:
             l2_sqr = self.quantization.fake_quantize_ls_act(l2_sqr)
 
         l2_sqr = l2_sqr * (self.quantization.sqr_crelu_correction_factor)
 
+        l2x_ = l2_lin_in
         if fake_quantize_acts:
             l2x_ = self.quantization.fake_quantize_ls_act(l2x_)
 

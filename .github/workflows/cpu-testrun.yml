@@ -34,7 +34,8 @@ jobs:
       - name: Checkout Stockfish Master
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: official-stockfish/Stockfish
+          repository: TonyCongqianWang/Stockfish
+          ref: a9e989dae499f883738c9909f5cc16b58112e043
           path: Stockfish
           persist-credentials: false
 
@@ -78,7 +79,8 @@ jobs:
       - name: Checkout Stockfish Master
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: official-stockfish/Stockfish
+          repository: TonyCongqianWang/Stockfish
+          ref: a9e989dae499f883738c9909f5cc16b58112e043
           path: Stockfish
           persist-credentials: false
 
