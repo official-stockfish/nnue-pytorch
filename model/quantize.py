@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from .model import NNUEModel
 
 FAKE_QUANTIZE_EPS = 1e-5
+INT8_MAX = float(torch.iinfo(torch.int8).max)
 
 
 class WeightClippingConfig(TypedDict):
@@ -52,23 +53,14 @@ def _fake_quantize_acts(value, act_scale):
     return value
 
 
-def _fake_quantize_weights(
-    value: torch.Tensor,
-    weight_scale: float,
-    clamp_bounds: tuple[float, float] | None = None,
-) -> torch.Tensor:
+def _fake_quantize_weights(value: torch.Tensor, weight_scale: float) -> torch.Tensor:
     # Fake quantization with STE
     # In contrast to activations,
     # weights use rounding as they are
     # quantized during serialization.
-    scaled = value.mul(weight_scale)
-    if clamp_bounds is not None:
-        scaled_clamped = scaled.clamp(clamp_bounds[0], clamp_bounds[1])
-    else:
-        scaled_clamped = scaled
-    value_hard = scaled_clamped.round().div(weight_scale).detach()
-    value_soft = scaled_clamped.div(weight_scale).detach()
-    value = value_hard + (scaled_clamped.div(weight_scale) - value_soft)
+    value_hard = value.mul(weight_scale).round().div(weight_scale).detach()
+    value_soft = value.detach()
+    value = value_hard + (value - value_soft)
 
     return value
 
@@ -104,7 +96,7 @@ class QuantizationManager:
         self.ft_quantized_one = config.ft_quantized_one
 
         # FC layers are stored as int8 weights
-        i8_max = float(torch.iinfo(torch.int8).max)
+        i8_max = INT8_MAX
         self.max_hidden_weight = [i8_max / scale for scale in self.weight_scale_hidden]
 
         self.l0_correction_factor = (
@@ -133,6 +125,18 @@ class QuantizationManager:
     def get_ft_weight_bounds(self, dtype: torch.dtype) -> tuple[float, float]:
         info = torch.iinfo(dtype)
         return -info.max / self.ft_quantized_one, info.max / self.ft_quantized_one
+
+    def get_ls_weight_bounds(self, layer_key: str) -> tuple[float, float]:
+        scale_key = (
+            layer_key if layer_key.endswith("_weight") else f"{layer_key}_weight"
+        )
+        scale = self.weight_scales_dict[scale_key]
+        max_w = INT8_MAX / scale
+        return -max_w, max_w
+
+    def clip_ls_weight(self, weight: torch.Tensor, layer_key: str) -> torch.Tensor:
+        min_w, max_w = self.get_ls_weight_bounds(layer_key)
+        return weight.clamp(min_w, max_w)
 
     def clip_ft_act(self, preact):
         return torch.clamp(preact, 0.0, self.max_ft_activation)
@@ -170,8 +174,7 @@ class QuantizationManager:
 
     def fake_quantize_weights(self, tensor: torch.Tensor, key: str) -> torch.Tensor:
         weight_scale = self.weight_scales_dict[key]
-        clamp_bounds = (-127.0, 127.0) if key.endswith("_weight") else None
-        return _fake_quantize_weights(tensor, weight_scale, clamp_bounds=clamp_bounds)
+        return _fake_quantize_weights(tensor, weight_scale)
 
     def generate_weight_clipping_config(
         self, model: "NNUEModel"

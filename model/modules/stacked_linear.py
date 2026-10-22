@@ -298,6 +298,7 @@ class LowRankStackedLinear(nn.Module):
                 raise RuntimeError(
                     "self.quantization and self.layer_key are required to use fake quantize weights."
                 )
+            flat_w = self.quantization.clip_ls_weight(flat_w, self.layer_key)
             flat_w = self.quantization.fake_quantize_weights(
                 flat_w, f"{self.layer_key}_weight"
             )
@@ -352,10 +353,7 @@ class LowRankStackedLinear(nn.Module):
         else:
             flat_w, flat_b = self.get_merged_weights_and_biases(codebook)
             if self.quantization is not None and self.layer_key is not None:
-                scale_key = f"{self.layer_key}_weight"
-                if scale_key in self.quantization.weight_scales_dict:
-                    max_w = 127.0 / self.quantization.weight_scales_dict[scale_key]
-                    flat_w = flat_w.clamp(-max_w, max_w)
+                flat_w = self.quantization.clip_ls_weight(flat_w, self.layer_key)
 
         begin = index * self.out_features
         end = (index + 1) * self.out_features
@@ -368,10 +366,7 @@ class LowRankStackedLinear(nn.Module):
     def coalesce_weights(self, codebook: torch.Tensor | None = None) -> None:
         flat_w, flat_b = self.get_merged_weights_and_biases(codebook)
         if self.quantization is not None and self.layer_key is not None:
-            scale_key = f"{self.layer_key}_weight"
-            if scale_key in self.quantization.weight_scales_dict:
-                max_w = 127.0 / self.quantization.weight_scales_dict[scale_key]
-                flat_w = flat_w.clamp(-max_w, max_w)
+            flat_w = self.quantization.clip_ls_weight(flat_w, self.layer_key)
         self.coalesced_weight.copy_(flat_w)
         self.coalesced_bias.copy_(flat_b)
         self.is_coalesced = True

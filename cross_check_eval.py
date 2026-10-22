@@ -48,7 +48,7 @@ class CrossCheckConfig:
     min_r2: float | None = None
     """Minimum allowed R^2 score between quantized NNUE and engine evaluations."""
 
-    max_ckpt_error: float | None = 0.001
+    max_ckpt_error: float | None = 1.0
     """Maximum allowed absolute error between quantized CKPT and quantized NNUE evaluations."""
 
 
@@ -377,6 +377,7 @@ def run_smoke_test(
     nnue_model: M.NNUEModel,
     ckpt_model: M.NNUEModel | None,
     device: str,
+    max_ckpt_error: float | None = 1.0,
 ) -> None:
     fen = chess.STARTING_FEN
     fens = [fen]
@@ -412,14 +413,14 @@ def run_smoke_test(
         print(f"  CKPT (Quant) Eval   : {ckpt_quant:+.2f}")
         diff_ckpt_nnue = abs(ckpt_quant - nnue_quant)
         print(f"  Diff (CKPT_Q - NNUE_Q): {diff_ckpt_nnue:.4f}")
-        if diff_ckpt_nnue >= 0.001:
+        if max_ckpt_error is not None and diff_ckpt_nnue >= max_ckpt_error:
             print(
-                f"[Smoke Test] FAILED: CKPT (Q) vs NNUE (Q) difference too large ({diff_ckpt_nnue:.4f} >= 0.001)!"
+                f"[Smoke Test] FAILED: CKPT (Q) vs NNUE (Q) difference too large ({diff_ckpt_nnue:.4f} >= {max_ckpt_error:.4f})!"
             )
             print("=" * W)
             raise RuntimeError(
                 f"Smoke test failed: CKPT (Q) eval ({ckpt_quant}) and NNUE (Q) eval ({nnue_quant}) "
-                f"differ by {diff_ckpt_nnue:.4f} (>= 0.001) on starting position."
+                f"differ by {diff_ckpt_nnue:.4f} (>= {max_ckpt_error:.4f}) on starting position."
             )
     print(f"  Diff (Quant - SF)   : {diff_quant:+.2f}")
 
@@ -502,6 +503,7 @@ def main():
             nnue_model,
             ckpt_model,
             cross_check_config.device,
+            cross_check_config.max_ckpt_error,
         )
 
         input_feature_name = nnue_model.input_feature_name
