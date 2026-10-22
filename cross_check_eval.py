@@ -48,6 +48,9 @@ class CrossCheckConfig:
     min_r2: float | None = None
     """Minimum allowed R^2 score between quantized NNUE and engine evaluations."""
 
+    max_ckpt_error: float | None = 0.001
+    """Maximum allowed absolute error between quantized CKPT and quantized NNUE evaluations."""
+
 
 @dataclass(frozen=True)
 class CliConfig:
@@ -407,6 +410,17 @@ def run_smoke_test(
     if ckpt_model is not None and ckpt_eval is not None and ckpt_quant is not None:
         print(f"  CKPT Eval           : {ckpt_eval:+.2f}")
         print(f"  CKPT (Quant) Eval   : {ckpt_quant:+.2f}")
+        diff_ckpt_nnue = abs(ckpt_quant - nnue_quant)
+        print(f"  Diff (CKPT_Q - NNUE_Q): {diff_ckpt_nnue:.4f}")
+        if diff_ckpt_nnue >= 0.001:
+            print(
+                f"[Smoke Test] FAILED: CKPT (Q) vs NNUE (Q) difference too large ({diff_ckpt_nnue:.4f} >= 0.001)!"
+            )
+            print("=" * W)
+            raise RuntimeError(
+                f"Smoke test failed: CKPT (Q) eval ({ckpt_quant}) and NNUE (Q) eval ({nnue_quant}) "
+                f"differ by {diff_ckpt_nnue:.4f} (>= 0.001) on starting position."
+            )
     print(f"  Diff (Quant - SF)   : {diff_quant:+.2f}")
 
     if math.isnan(nnue_quant) or abs(diff_quant) > 5.0:
@@ -467,6 +481,9 @@ def main():
                 f.write(writer.buf)
 
             nnue = read_model(net_path, config=nnue_config)
+            init_model.to(cross_check_config.device)
+            init_model.eval()
+            ckpt_model = init_model
         elif cross_check_config.net:
             net_path = cross_check_config.net
             nnue = read_model(net_path, config=nnue_config)
@@ -538,11 +555,12 @@ def main():
             print(f"Processed {done} positions.")
 
         q_stats = None
+        ckpt_q_stats = None
         if ckpt_model:
             compute_correlation(
                 ckpt_evals, nnue_evals, all_fens, "CKPT VS NNUE", "CKPT", "NNUE"
             )
-            compute_correlation(
+            ckpt_q_stats = compute_correlation(
                 ckpt_quantized_evals,
                 nnue_quantized_evals,
                 all_fens,
@@ -584,6 +602,17 @@ def main():
                 "NNUE (Q)",
                 "SF",
             )
+
+        if (
+            ckpt_model
+            and ckpt_q_stats is not None
+            and cross_check_config.max_ckpt_error is not None
+        ):
+            max_ckpt_err = ckpt_q_stats["max_abs_error"]
+            if max_ckpt_err >= cross_check_config.max_ckpt_error:
+                raise RuntimeError(
+                    f"Cross-check error threshold exceeded: CKPT (Q) vs NNUE (Q) max absolute error {max_ckpt_err:.4f} >= {cross_check_config.max_ckpt_error:.4f}"
+                )
 
         if cross_check_config.max_error is not None and q_stats is not None:
             max_err = q_stats["max_abs_error"]
