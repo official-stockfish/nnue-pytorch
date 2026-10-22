@@ -19,6 +19,7 @@ class MoeLinear(nn.Module):
     Mixture-of-Experts (MoE) Linear layer with low-rank adapter projection from codebook embeddings.
     Dynamically generates expert weights and biases on the fly or accesses coalesced tables.
     """
+
     def __init__(
         self,
         in_features: int,
@@ -116,7 +117,9 @@ class MoeLinear(nn.Module):
             return self.coalesced_weight, self.coalesced_bias
 
         if codebook is None:
-            raise ValueError("codebook must be provided when MoeLinear is not coalesced")
+            raise ValueError(
+                "codebook must be provided when MoeLinear is not coalesced"
+            )
 
         w = self.get_delta_weights(codebook)
         b = self.get_delta_biases(codebook)
@@ -198,7 +201,9 @@ class MoeLinear(nn.Module):
             flat_b = self.coalesced_bias
         else:
             if codebook is None:
-                raise ValueError("codebook must be provided when MoeLinear is not coalesced")
+                raise ValueError(
+                    "codebook must be provided when MoeLinear is not coalesced"
+                )
             flat_w, flat_b = self.get_all_weights_and_biases(codebook)
             if self.quantization is not None and self.layer_key is not None:
                 flat_w = self.quantization.clip_ls_weight(flat_w, self.layer_key)

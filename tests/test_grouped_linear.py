@@ -248,7 +248,11 @@ def test_grouped_fallback(device, case, monkeypatch):
     dtype = torch.float64 if case == "dtype" else torch.float32
     batch = 0 if case == "empty" else 3
     layer = MoeLinear(
-        width, outputs, buckets, quantization=QuantizationManager(QuantizationConfig()), layer_key="ls_l1"
+        width,
+        outputs,
+        buckets,
+        quantization=QuantizationManager(QuantizationConfig()),
+        layer_key="ls_l1",
     )
     layer = layer.to(device=device, dtype=dtype)
     x = torch.randn(batch, width, device=device, dtype=dtype, requires_grad=True)
@@ -301,7 +305,11 @@ def test_grouped_fallback(device, case, monkeypatch):
 )
 def test_grouped_fallback_compiles(count, device):
     layer = MoeLinear(
-        1024, 32, count, quantization=QuantizationManager(QuantizationConfig()), layer_key="ls_l1"
+        1024,
+        32,
+        count,
+        quantization=QuantizationManager(QuantizationConfig()),
+        layer_key="ls_l1",
     ).to(device)
     with torch.no_grad():
         layer.adapter_down.normal_(std=0.02)

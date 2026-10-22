@@ -5,8 +5,8 @@ from torch import nn
 
 from ..quantize import QuantizationManager
 from .config import LayerStacksConfig
-from .router import CODEBOOK_DIM
 from .moe_linear import MoeLinear
+from .router import CODEBOOK_DIM
 
 
 class LayerStacks(nn.Module):
@@ -207,9 +207,7 @@ class LayerStacks(nn.Module):
             yield (l1, l2, output)
 
     @torch.no_grad()
-    def coalesce_layer_stacks_inplace(
-        self, codebook: torch.Tensor
-    ) -> None:
+    def coalesce_layer_stacks_inplace(self, codebook: torch.Tensor) -> None:
         self.l1.coalesce_weights(codebook)
         self.l2.coalesce_weights(codebook)
         self.output.coalesce_weights(codebook)
