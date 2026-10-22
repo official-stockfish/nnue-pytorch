@@ -343,14 +343,10 @@ def init_random_weights(model: M.NNUEModel) -> None:
             model.layer_stacks.l2,
             model.layer_stacks.output,
         ]:
-            ls.bias_base.data.uniform_(-0.5, 0.5)
-            touched.add(id(ls.bias_base))
             ls.adapter_down.data.uniform_(-0.1, 0.1)
             touched.add(id(ls.adapter_down))
-            ls.down_proj.data.uniform_(-0.1, 0.1)
-            touched.add(id(ls.down_proj))
-            ls.up_proj.data.uniform_(-0.1, 0.1)
-            touched.add(id(ls.up_proj))
+            ls.adapter_up.data.uniform_(-0.1, 0.1)
+            touched.add(id(ls.adapter_up))
             ls.bias_adapter.data.uniform_(-0.1, 0.1)
             touched.add(id(ls.bias_adapter))
 

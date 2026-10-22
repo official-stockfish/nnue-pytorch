@@ -42,7 +42,7 @@ def print_routing_profile(model, file=None) -> None:
     mat_id, k_us, k_them = decompose_router_index(all_ctx)
     mat_feats = router.material_decode_table[mat_id]
 
-    lut_np = (lut & 0x1F).cpu().numpy()  # Extract 5 bits for weight experts
+    lut_np = (lut & 0x3F).cpu().numpy()  # Extract 6 bits for weight experts
     t_np = mat_feats[:, 0].cpu().numpy() + 1  # 1..16 pieces
     q_np = mat_feats[:, 2].cpu().numpy()  # 0 or 1
     k_us_np = k_us.cpu().numpy()  # 0..32

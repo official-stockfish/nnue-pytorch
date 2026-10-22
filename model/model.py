@@ -27,7 +27,7 @@ class NNUEModel(nn.Module):
         self.quantize_config = config.quantize_config
         self.quantization = QuantizationManager(config.quantize_config)
 
-        self.num_ls_buckets = 32
+        self.num_ls_buckets = 64
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME

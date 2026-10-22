@@ -354,3 +354,62 @@ def test_weight_clipper_and_swa_export():
     swa.swap_weights = lambda model, to_eval: None
     swa.on_train_end(t_swa)
     assert t_swa.model.model.calls == [True]
+
+
+def test_top2moe_optimizer_param_groups():
+    config = NNUEConfig(
+        features="Full_Threats",
+        optimizer_config=OptimizerConfig(
+            ft_weight_decay=1e-4,
+            dense_weight_decay=2e-4,
+            dynamic_bias_weight_decay=3e-4,
+        ),
+    )
+    nnue = NNUE(config=config)
+    res = nnue.configure_optimizers()
+    opt = res[0][0]
+
+    all_model_params = {id(p) for p in nnue.model.parameters()}
+    registered_params = set()
+
+    found_ft = False
+    found_dense = False
+    found_dyn_bias = False
+
+    for group in opt.param_groups:
+        for p in group["params"]:
+            assert id(p) not in registered_params, "Duplicate parameter in optimizer!"
+            registered_params.add(id(p))
+
+        if group["weight_decay"] == 1e-4:
+            found_ft = True
+        elif group["weight_decay"] == 2e-4:
+            found_dense = True
+            expected_dense = {
+                id(nnue.model.layer_stacks.l1.adapter_down),
+                id(nnue.model.layer_stacks.l1.adapter_up),
+                id(nnue.model.layer_stacks.l2.adapter_down),
+                id(nnue.model.layer_stacks.l2.adapter_up),
+                id(nnue.model.layer_stacks.output.adapter_down),
+                id(nnue.model.layer_stacks.output.adapter_up),
+            }
+            assert {id(p) for p in group["params"]} == expected_dense
+        elif group["weight_decay"] == 3e-4:
+            found_dyn_bias = True
+            expected_dyn_bias = {
+                id(nnue.model.router.bias_head_down.weight),
+                id(nnue.model.router.bias_head_up.weight),
+                id(nnue.model.router.bias_head_up.bias),
+            }
+            assert {id(p) for p in group["params"]} == expected_dyn_bias
+
+    assert found_ft
+    assert found_dense
+    assert found_dyn_bias
+    assert registered_params == all_model_params, (
+        f"Missing {all_model_params - registered_params} params from optimizer!"
+    )
+
+    # Test backward compatibility alias
+    cfg_alias = OptimizerConfig(factorized_weight_decay=4e-5)
+    assert cfg_alias.dynamic_bias_weight_decay == 4e-5

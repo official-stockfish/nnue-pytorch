@@ -57,7 +57,6 @@ class LayerStacks(nn.Module):
         )
 
         with torch.no_grad():
-            self.output.bias_base.zero_()
             self.output.bias_adapter.zero_()
 
     def get_expert_deltas(self, codebook: torch.Tensor) -> list[torch.Tensor]:

@@ -148,8 +148,8 @@ def test_dual_router_eval_mode_and_bit_packing():
     c_sample = torch.tensor([0, 12345, 810809], dtype=torch.long)
     packed = lut[c_sample]
 
-    e_w = packed & 0x1F
-    e_b = (packed >> 5) & 0xFF
+    e_w = packed & 0x3F
+    e_b = (packed >> 6) & 0xFF
 
     assert all(0 <= w.item() < NUM_WEIGHT_EXPERTS for w in e_w)
     assert all(0 <= b.item() < NUM_BIAS_EXPERTS for b in e_b)

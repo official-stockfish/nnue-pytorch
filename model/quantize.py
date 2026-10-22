@@ -176,23 +176,7 @@ class QuantizationManager:
     def generate_weight_clipping_config(
         self, model: "NNUEModel"
     ) -> list[WeightClippingConfig]:
-        return [
-            {
-                "params": [model.layer_stacks.l1.weight_base],
-                "min_weight": -self.max_hidden_weight[0],
-                "max_weight": self.max_hidden_weight[0],
-            },
-            {
-                "params": [model.layer_stacks.l2.weight_base],
-                "min_weight": -self.max_hidden_weight[1],
-                "max_weight": self.max_hidden_weight[1],
-            },
-            {
-                "params": [model.layer_stacks.output.weight_base],
-                "min_weight": -self.max_hidden_weight[2],
-                "max_weight": self.max_hidden_weight[2],
-            },
-        ]
+        return []
 
     def quantize_feature_transformer_weights(
         self,

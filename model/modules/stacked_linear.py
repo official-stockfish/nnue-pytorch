@@ -209,11 +209,8 @@ class LowRankStackedLinear(nn.Module):
         self.layer_key = layer_key
         self.is_coalesced = False
 
-        self.weight_base = nn.Parameter(torch.empty(out_features, in_features))
-        self.bias_base = nn.Parameter(torch.empty(out_features))
         self.adapter_down = nn.Parameter(torch.empty(rank, codebook_dim))
-        self.down_proj = nn.Parameter(torch.empty(rank, in_features))
-        self.up_proj = nn.Parameter(torch.empty(out_features, rank))
+        self.adapter_up = nn.Parameter(torch.empty(out_features * in_features, rank))
         self.bias_adapter = nn.Parameter(torch.empty(out_features, rank))
 
         self.register_buffer(
@@ -228,16 +225,18 @@ class LowRankStackedLinear(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
-        bound_base = 1.0 / math.sqrt(self.in_features) if self.in_features > 0 else 0.0
-        nn.init.uniform_(self.weight_base, -bound_base, bound_base)
-        nn.init.uniform_(self.bias_base, -bound_base, bound_base)
         bound_cb = 1.0 / math.sqrt(self.codebook_dim) if self.codebook_dim > 0 else 0.0
         nn.init.uniform_(self.adapter_down, -bound_cb, bound_cb)
-        nn.init.uniform_(self.down_proj, -bound_base, bound_base)
 
-        bound_r = 1.0 / math.sqrt(self.rank) if self.rank > 0 else 0.0
-        nn.init.uniform_(self.up_proj, -bound_r, bound_r)
-        nn.init.uniform_(self.bias_adapter, -bound_r, bound_r)
+        bound_up = (
+            1.0 / math.sqrt(self.in_features * self.rank)
+            if self.in_features > 0 and self.rank > 0
+            else 0.0
+        )
+        nn.init.uniform_(self.adapter_up, -bound_up, bound_up)
+
+        bound_bias = 1.0 / math.sqrt(self.rank) if self.rank > 0 else 0.0
+        nn.init.uniform_(self.bias_adapter, -bound_bias, bound_bias)
 
     def get_delta_weights(self, codebook: torch.Tensor) -> torch.Tensor:
         # codebook: (count, codebook_dim)
@@ -247,11 +246,9 @@ class LowRankStackedLinear(nn.Module):
                 f"adapter_down expects {self.adapter_down.shape[1]}, got {codebook.shape[-1]}"
             )
         act = F.gelu(codebook)
-        r = F.linear(act, self.adapter_down)  # (count, rank)
-        c_v = r.unsqueeze(2) * self.down_proj.unsqueeze(0)  # (count, rank, in_features)
-        return torch.matmul(
-            self.up_proj.unsqueeze(0), c_v
-        )  # (count, out_features, in_features)
+        h = F.linear(act, self.adapter_down)  # (count, rank)
+        w = F.linear(h, self.adapter_up)  # (count, out_features * in_features)
+        return w.view(-1, self.out_features, self.in_features)
 
     def get_delta_biases(self, codebook: torch.Tensor) -> torch.Tensor:
         # codebook: (count, codebook_dim)
@@ -261,8 +258,8 @@ class LowRankStackedLinear(nn.Module):
                 f"adapter_down expects {self.adapter_down.shape[1]}, got {codebook.shape[-1]}"
             )
         act = F.gelu(codebook)
-        r = F.linear(act, self.adapter_down)  # (count, rank)
-        return torch.matmul(r, self.bias_adapter.t())  # (count, out_features)
+        h = F.linear(act, self.adapter_down)  # (count, rank)
+        return F.linear(h, self.bias_adapter)  # (count, out_features)
 
     def get_merged_weights_and_biases(
         self, codebook: torch.Tensor | None = None
@@ -274,15 +271,12 @@ class LowRankStackedLinear(nn.Module):
             codebook = torch.zeros(
                 self.count,
                 self.codebook_dim,
-                device=self.weight_base.device,
-                dtype=self.weight_base.dtype,
+                device=self.adapter_down.device,
+                dtype=self.adapter_down.dtype,
             )
 
-        delta_w = self.get_delta_weights(codebook)
-        delta_b = self.get_delta_biases(codebook)
-
-        w = self.weight_base.unsqueeze(0) + delta_w
-        b = self.bias_base.unsqueeze(0) + delta_b
+        w = self.get_delta_weights(codebook)
+        b = self.get_delta_biases(codebook)
 
         flat_w = w.reshape(
             self.count * self.out_features, self.in_features
@@ -386,17 +380,17 @@ class LowRankStackedLinear(nn.Module):
     def init_coalesced_storage(self) -> None:
         self.coalesced_weight.zero_()
         self.coalesced_bias.zero_()
-        self.weight_base.zero_()
-        self.bias_base.zero_()
         self.adapter_down.zero_()
-        self.down_proj.zero_()
-        self.up_proj.zero_()
+        self.adapter_up.zero_()
         self.bias_adapter.zero_()
         self.is_coalesced = True
 
     @torch.no_grad()
     def permute_inputs(self, permutation: Sequence[int]) -> None:
-        self.weight_base.copy_(self.weight_base[:, permutation])
-        self.down_proj.copy_(self.down_proj[:, permutation])
+        reshaped = self.adapter_up.view(self.out_features, self.in_features, self.rank)
+        permuted = reshaped[:, permutation, :].contiguous()
+        self.adapter_up.copy_(
+            permuted.view(self.out_features * self.in_features, self.rank)
+        )
         if self.is_coalesced:
             self.coalesced_weight.copy_(self.coalesced_weight[:, permutation])

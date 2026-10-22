@@ -144,7 +144,19 @@ class NNUE(nn.Module):
         ft_wd = optimizer_config.ft_weight_decay
         virtual_ft_wd = optimizer_config.virtual_ft_weight_decay
         dense_wd = optimizer_config.dense_weight_decay
-        factorized_wd = optimizer_config.factorized_weight_decay
+        dynamic_bias_wd = optimizer_config.dynamic_bias_weight_decay
+
+        router_dyn_bias_params = [
+            self.model.router.bias_head_down.weight,
+            self.model.router.bias_head_up.weight,
+            self.model.router.bias_head_up.bias,
+        ]
+        router_dyn_bias_ids = {id(p) for p in router_dyn_bias_params}
+        other_router_params = [
+            p
+            for p in self.model.router.parameters()
+            if id(p) not in router_dyn_bias_ids
+        ]
 
         train_params = [
             # Feature Transformer
@@ -170,32 +182,20 @@ class NNUE(nn.Module):
             # Dense Layer Stacks
             {
                 "params": [
-                    self.model.layer_stacks.l1.weight_base,
-                    self.model.layer_stacks.l2.weight_base,
-                    self.model.layer_stacks.output.weight_base,
+                    self.model.layer_stacks.l1.adapter_down,
+                    self.model.layer_stacks.l1.adapter_up,
+                    self.model.layer_stacks.l2.adapter_down,
+                    self.model.layer_stacks.l2.adapter_up,
+                    self.model.layer_stacks.output.adapter_down,
+                    self.model.layer_stacks.output.adapter_up,
                 ],
                 "lr": LRs[4],
                 "weight_decay": dense_wd,
             },
             {
                 "params": [
-                    self.model.layer_stacks.l1.down_proj,
-                    self.model.layer_stacks.l1.up_proj,
-                    self.model.layer_stacks.l2.down_proj,
-                    self.model.layer_stacks.l2.up_proj,
-                    self.model.layer_stacks.output.down_proj,
-                    self.model.layer_stacks.output.up_proj,
-                ],
-                "lr": LRs[4],
-                "weight_decay": factorized_wd,
-            },
-            {
-                "params": [
-                    self.model.layer_stacks.l1.bias_base,
                     self.model.layer_stacks.l1.bias_adapter,
-                    self.model.layer_stacks.l2.bias_base,
                     self.model.layer_stacks.l2.bias_adapter,
-                    self.model.layer_stacks.output.bias_base,
                     self.model.layer_stacks.output.bias_adapter,
                 ],
                 "lr": LRs[5],
@@ -203,7 +203,12 @@ class NNUE(nn.Module):
             },
             # Downstream Top-2 MoE Router
             {
-                "params": list(self.model.router.parameters()),
+                "params": router_dyn_bias_params,
+                "lr": LRs[0],
+                "weight_decay": dynamic_bias_wd,
+            },
+            {
+                "params": other_router_params,
                 "lr": LRs[0],
                 "weight_decay": 0.0,
             },

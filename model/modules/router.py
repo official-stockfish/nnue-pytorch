@@ -8,7 +8,7 @@ NUM_MATERIAL_STATES = 378
 NUM_OUR_KINGS = 33
 NUM_ENEMY_KINGS = 65
 ROUTER_TABLE_SIZE = NUM_MATERIAL_STATES * NUM_OUR_KINGS * NUM_ENEMY_KINGS  # 810,810
-NUM_WEIGHT_EXPERTS = 32
+NUM_WEIGHT_EXPERTS = 64
 NUM_BIAS_EXPERTS = 256
 NUM_BIASES = 128
 BIAS_RANK = 32
@@ -194,7 +194,7 @@ class StructuredKingEmbedding(nn.Module):
 class DualVQCodebookRouter(nn.Module):
     """
     Dual Discrete Vector Quantization (VQ) Codebook Router for Top-2 Downstream MoE:
-    - Weight Router: K1 = 32 discrete experts (5 bits) selecting layer stack weights
+    - Weight Router: K1 = 64 discrete experts (6 bits) selecting layer stack weights
     - Bias Router: K2 = 256 discrete experts (8 bits) selecting 128 dynamic threshold biases via rank-32 subspace
     - Single packed uint16 LUT of size 810,810 (1.55 MB)
     - 256 coalesced 128-element dynamic bias vectors (128 KB)
@@ -236,7 +236,7 @@ class DualVQCodebookRouter(nn.Module):
         # Structured spatial King embedding table
         self.king_embed = StructuredKingEmbedding(dim=dim)
 
-        # Weight Router Codebook: 32 experts in R^128
+        # Weight Router Codebook: 64 experts in R^128
         self.codebook_weights = nn.Parameter(torch.empty(num_weight_experts, dim))
 
         # Bias Router Codebook: 512 experts in R^128
@@ -410,7 +410,7 @@ class DualVQCodebookRouter(nn.Module):
             z_chunk = z_all[i : i + chunk_size]
             z_sq = torch.sum(z_chunk**2, dim=-1, keepdim=True)
 
-            # Weight routing (32 experts)
+            # Weight routing (64 experts)
             dist_w = z_sq + cb_w_sq - 2.0 * torch.matmul(z_chunk, cb_w.t())
             idx_w = torch.argmin(dist_w, dim=-1)
 
@@ -418,8 +418,8 @@ class DualVQCodebookRouter(nn.Module):
             dist_b = z_sq + cb_b_sq - 2.0 * torch.matmul(z_chunk, cb_b.t())
             idx_b = torch.argmin(dist_b, dim=-1)
 
-            # Bit packing: 5 bits weight | 8 bits bias
-            packed = (idx_w & 0x1F) | ((idx_b & 0xFF) << 5)
+            # Bit packing: 6 bits weight | 8 bits bias
+            packed = (idx_w & 0x3F) | ((idx_b & 0xFF) << 6)
             self.lut[i : i + chunk_size] = packed
 
         self.lut_valid.fill_(True)
@@ -640,10 +640,10 @@ class DualVQCodebookRouter(nn.Module):
             packed_1 = self.lut[c_us.long()]
             packed_2 = self.lut[c_them.long()]
 
-            e1_w = (packed_1 & 0x1F).long()
-            e2_w = (packed_2 & 0x1F).long()
-            e1_b = ((packed_1 >> 5) & 0xFF).long()
-            e2_b = ((packed_2 >> 5) & 0xFF).long()
+            e1_w = (packed_1 & 0x3F).long()
+            e2_w = (packed_2 & 0x3F).long()
+            e1_b = ((packed_1 >> 6) & 0xFF).long()
+            e2_b = ((packed_2 >> 6) & 0xFF).long()
 
             coalesced = self.get_coalesced_bias_table()
             dyn_bias_1 = coalesced[e1_b]
