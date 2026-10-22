@@ -6,7 +6,7 @@ from torch import nn
 from ..quantize import QuantizationManager
 from .config import LayerStacksConfig
 from .router import CODEBOOK_DIM
-from .stacked_linear import LowRankStackedLinear
+from .moe_linear import MoeLinear
 
 
 class LayerStacks(nn.Module):
@@ -28,7 +28,7 @@ class LayerStacks(nn.Module):
         self.rank = rank
         self.codebook_dim = codebook_dim
 
-        self.l1 = LowRankStackedLinear(
+        self.l1 = MoeLinear(
             2 * self.L1 // 2,
             self.L2,
             count,
@@ -37,7 +37,7 @@ class LayerStacks(nn.Module):
             quantization=quantization,
             layer_key="ls_l1",
         )
-        self.l2 = LowRankStackedLinear(
+        self.l2 = MoeLinear(
             self.L2 * 2,
             self.L3,
             count,
@@ -46,7 +46,7 @@ class LayerStacks(nn.Module):
             quantization=quantization,
             layer_key="ls_l2",
         )
-        self.output = LowRankStackedLinear(
+        self.output = MoeLinear(
             self.L2 * 2 + self.L3 * 2,
             1,
             count,
@@ -70,13 +70,13 @@ class LayerStacks(nn.Module):
         self,
         x: torch.Tensor,
         codebook: torch.Tensor | None,
-        ls_indices: torch.Tensor,
+        expert_indices: torch.Tensor,
         dyn_biases: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
     ) -> torch.Tensor:
         b1_sqr, b1_lin, b2_sqr, b2_lin = dyn_biases
-        l1c_ = self.l1(x, codebook, ls_indices, fake_quantize_weights)
+        l1c_ = self.l1(x, codebook, expert_indices, fake_quantize_weights)
 
         # Extract the short-path skip connection before fake quantization and dynamic biases
         l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)
@@ -97,7 +97,7 @@ class LayerStacks(nn.Module):
         l1x_ = torch.cat([l1_sqr, l1x_], dim=1)
         l1x_ = self.quantization.clip_ls_act(l1x_)
 
-        l2c_ = self.l2(l1x_, codebook, ls_indices, fake_quantize_weights)
+        l2c_ = self.l2(l1x_, codebook, expert_indices, fake_quantize_weights)
 
         l2x_sqr = l2c_ + b2_sqr
         l2x_lin = l2c_ + b2_lin
@@ -117,7 +117,7 @@ class LayerStacks(nn.Module):
 
         l3_input = torch.cat([l1x_, l2x_], dim=1)
 
-        l3c_ = self.output(l3_input, codebook, ls_indices, fake_quantize_weights)
+        l3c_ = self.output(l3_input, codebook, expert_indices, fake_quantize_weights)
 
         if fake_quantize_acts:
             l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
@@ -165,16 +165,50 @@ class LayerStacks(nn.Module):
         self,
         codebook: torch.Tensor | None = None,
     ) -> Generator[tuple[nn.Linear, nn.Linear, nn.Linear], None, None]:
+        if not self.l1.is_coalesced:
+            if codebook is None:
+                raise ValueError(
+                    "codebook must be provided when layer stacks are not coalesced"
+                )
+            w1, b1 = self.l1.get_all_weights_and_biases(codebook)
+            w2, b2 = self.l2.get_all_weights_and_biases(codebook)
+            wo, bo = self.output.get_all_weights_and_biases(codebook)
+            if self.quantization is not None:
+                w1 = self.quantization.clip_ls_weight(w1, self.l1.layer_key)
+                w2 = self.quantization.clip_ls_weight(w2, self.l2.layer_key)
+                wo = self.quantization.clip_ls_weight(wo, self.output.layer_key)
+        else:
+            w1, b1 = self.l1.coalesced_weight, self.l1.coalesced_bias
+            w2, b2 = self.l2.coalesced_weight, self.l2.coalesced_bias
+            wo, bo = self.output.coalesced_weight, self.output.coalesced_bias
+
         for i in range(self.count):
-            yield (
-                self.l1.at_index(i, codebook),
-                self.l2.at_index(i, codebook),
-                self.output.at_index(i, codebook),
+            l1 = nn.Linear(self.l1.in_features, self.l1.out_features)
+            l2 = nn.Linear(self.l2.in_features, self.l2.out_features)
+            output = nn.Linear(self.output.in_features, self.output.out_features)
+
+            l1.weight.copy_(
+                w1[i * self.l1.out_features : (i + 1) * self.l1.out_features, :]
             )
+            l1.bias.copy_(b1[i * self.l1.out_features : (i + 1) * self.l1.out_features])
+
+            l2.weight.copy_(
+                w2[i * self.l2.out_features : (i + 1) * self.l2.out_features, :]
+            )
+            l2.bias.copy_(b2[i * self.l2.out_features : (i + 1) * self.l2.out_features])
+
+            output.weight.copy_(
+                wo[i * self.output.out_features : (i + 1) * self.output.out_features, :]
+            )
+            output.bias.copy_(
+                bo[i * self.output.out_features : (i + 1) * self.output.out_features]
+            )
+
+            yield (l1, l2, output)
 
     @torch.no_grad()
     def coalesce_layer_stacks_inplace(
-        self, codebook: torch.Tensor | None = None
+        self, codebook: torch.Tensor
     ) -> None:
         self.l1.coalesce_weights(codebook)
         self.l2.coalesce_weights(codebook)

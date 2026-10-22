@@ -48,7 +48,7 @@ class CrossCheckConfig:
     min_r2: float | None = None
     """Minimum allowed R^2 score between quantized NNUE and engine evaluations."""
 
-    max_ckpt_error: float | None = 1.0
+    max_ckpt_error: float | None = 0.001
     """Maximum allowed absolute error between quantized CKPT and quantized NNUE evaluations."""
 
 

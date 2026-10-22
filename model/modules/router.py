@@ -4,6 +4,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from ..quantize import QuantizationManager
+
 NUM_MATERIAL_STATES = 378
 NUM_OUR_KINGS = 33
 NUM_ENEMY_KINGS = 65
@@ -213,6 +215,7 @@ class DualVQCodebookRouter(nn.Module):
         temperature: float = 1.0,
         reseed_dead_experts: bool = True,
         ema_decay: float = 0.999,
+        quantization: QuantizationManager | None = None,
     ):
         super().__init__()
         self.num_contexts = num_contexts
@@ -226,6 +229,7 @@ class DualVQCodebookRouter(nn.Module):
         self.temperature = temperature
         self.reseed_dead_experts = reseed_dead_experts
         self.ema_decay = ema_decay
+        self.quantization = quantization
 
         # Material feature embedding tables
         self.embed_T = nn.Embedding(16, dim)
@@ -365,7 +369,15 @@ class DualVQCodebookRouter(nn.Module):
     def get_coalesced_bias_table(self) -> torch.Tensor:
         if bool(self.coalesced_valid.item()):
             return self.coalesced_biases
-        return self.bias_head(self.codebook_biases)
+        raw_biases = self.bias_head(self.codebook_biases)
+        if self.quantization is not None:
+            q_biases = self.quantization.quantize_dynamic_bias(raw_biases)
+            self.coalesced_biases.copy_(
+                self.quantization.dequantize_dynamic_bias(q_biases)
+            )
+            self.coalesced_valid.fill_(True)
+            return self.coalesced_biases
+        return raw_biases
 
     @torch.no_grad()
     def load_coalesced_biases(self, biases: torch.Tensor) -> None:
@@ -423,6 +435,15 @@ class DualVQCodebookRouter(nn.Module):
             self.lut[i : i + chunk_size] = packed
 
         self.lut_valid.fill_(True)
+
+        if self.quantization is not None:
+            raw_biases = self.bias_head(self.codebook_biases)
+            q_biases = self.quantization.quantize_dynamic_bias(raw_biases)
+            self.coalesced_biases.copy_(
+                self.quantization.dequantize_dynamic_bias(q_biases)
+            )
+            self.coalesced_valid.fill_(True)
+
         return self.lut
 
     def get_lookup_table(self) -> torch.Tensor:
@@ -564,7 +585,10 @@ class DualVQCodebookRouter(nn.Module):
         return reseeded_w, reseeded_b
 
     def forward(
-        self, c_us: torch.Tensor, c_them: torch.Tensor
+        self,
+        c_us: torch.Tensor,
+        c_them: torch.Tensor,
+        fake_quantize: bool = False,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -599,6 +623,8 @@ class DualVQCodebookRouter(nn.Module):
                 self.ema_traffic_biases.lerp_(freq_b, 1.0 - self.ema_decay)
 
             dyn_bias = self.bias_head(z_q_ste_b)
+            if fake_quantize and self.quantization is not None:
+                dyn_bias = self.quantization.fake_quantize_dynamic_bias(dyn_bias)
 
             commit_loss = commit_loss_w + commit_loss_b
             balance_loss = balance_loss_w + balance_loss_b

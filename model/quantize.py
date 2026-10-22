@@ -281,3 +281,9 @@ class QuantizationManager:
     def dequantize_dynamic_bias(self, biases: torch.Tensor) -> torch.Tensor:
         scales = self.get_dynamic_bias_scales(device=biases.device, dtype=biases.dtype)
         return biases.divide(scales)
+
+    def fake_quantize_dynamic_bias(self, biases: torch.Tensor) -> torch.Tensor:
+        scales = self.get_dynamic_bias_scales(device=biases.device, dtype=biases.dtype)
+        biases_hard = biases.mul(scales).round().div(scales).detach()
+        biases_soft = biases.detach()
+        return biases_hard + (biases - biases_soft)

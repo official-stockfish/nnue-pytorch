@@ -13,6 +13,7 @@ from .features import (
     get_feature_cls,
 )
 from .layer_stacks import LayerStacks
+from .moe_linear import MoeLinear
 from .router import (
     BIAS_RANK,
     CODEBOOK_DIM,
@@ -44,6 +45,7 @@ __all__ = [
     "InputFeature",
     "LayerStacks",
     "LayerStacksConfig",
+    "MoeLinear",
     "StructuredKingEmbedding",
     "VQCodebookRouter",
     "add_feature_args",

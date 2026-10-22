@@ -33,7 +33,7 @@ class NNUEModel(nn.Module):
         self.feature_name = self.input.FEATURE_NAME
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
-        self.router = DualVQCodebookRouter()
+        self.router = DualVQCodebookRouter(quantization=self.quantization)
         self.layer_stacks = LayerStacks(
             self.num_ls_buckets,
             config,
@@ -123,7 +123,7 @@ class NNUEModel(nn.Module):
             moe_loss,
             commit_loss,
             balance_loss,
-        ) = self.router(c_us, c_them)
+        ) = self.router(c_us, c_them, fake_quantize=fake_quantize_weights)
         self.moe_loss = moe_loss
         self.commit_loss = commit_loss
         self.balance_loss = balance_loss
