@@ -63,6 +63,13 @@ def get_histogram_callback(hist_title: str, verbose: bool):
     return histogram_callback
 
 
+from ..modules.router import (
+    NUM_BIAS_EXPERTS,
+    NUM_BIASES,
+    ROUTER_TABLE_SIZE,
+    get_router_hash,
+)
+
 # hardcoded for now
 VERSION = 0x6A448AFA
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
@@ -84,6 +91,9 @@ class NNUEWriter:
 
         self.verbose = verbose
 
+        # Ensure lookup table is populated and valid upfront
+        router_table = model.router.get_lookup_table()
+
         fc_hash = self.fc_hash(model)
 
         # 1. Plaintext header
@@ -95,7 +105,7 @@ class NNUEWriter:
         self.write_feature_transformer(model)
         layer_stacks = model.layer_stacks
         for bucket, (l1, l2, output) in enumerate(
-            layer_stacks.get_coalesced_layer_stacks()
+            layer_stacks.get_coalesced_layer_stacks(model.router.codebook)
         ):
             self.int32(fc_hash)  # FC layers hash
             self.write_fc_layer(
@@ -108,6 +118,20 @@ class NNUEWriter:
                 model, output, layer_stacks.output.layer_key, f"bucket {bucket}"
             )
 
+        # 3. Downstream Top-2 MoE Dual Router Lookup Table (810,810 uint16 = 1,621,620 bytes)
+        if self.verbose:
+            from .routing_profiler import print_routing_profile
+
+            print_routing_profile(model)
+        self.write_tensor(router_table.to(torch.uint16))
+
+        # 4. Dynamic Biases Table (512 experts x 128 int32 values = 262,144 bytes)
+        coalesced_biases = model.router.get_coalesced_bias_table()
+        q_biases = model.quantization.quantize_dynamic_bias(
+            coalesced_biases, get_histogram_callback("dynamic_bias", self.verbose)
+        )
+        self.write_tensor(q_biases)
+
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
         # InputSlice hash
@@ -116,16 +140,16 @@ class NNUEWriter:
 
         # Fully connected layers
         layers = [
-            model.layer_stacks.l1.linear,
-            model.layer_stacks.l2.linear,
-            model.layer_stacks.output.linear,
+            model.layer_stacks.l1,
+            model.layer_stacks.l2,
+            model.layer_stacks.output,
         ]
         for layer in layers:
             layer_hash = 0xCC03DAE4
-            layer_hash += layer.out_features // model.num_ls_buckets
+            layer_hash += layer.out_features
             layer_hash ^= prev_hash >> 1
             layer_hash ^= (prev_hash << 31) & 0xFFFFFFFF
-            if layer.out_features // model.num_ls_buckets != 1:
+            if layer.out_features != 1:
                 # Clipped ReLU hash
                 layer_hash = (layer_hash + 0x538D24C7) & 0xFFFFFFFF
             prev_hash = layer_hash
@@ -133,7 +157,11 @@ class NNUEWriter:
 
     def write_header(self, model: NNUEModel, fc_hash: int, description: str) -> None:
         self.int32(VERSION)  # version
-        self.int32(fc_hash ^ model.feature_hash ^ (model.L1 * 2))  # halfkp network hash
+        router_hash = get_router_hash(
+            model.router.num_weight_experts, model.router.num_bias_experts
+        )
+        net_hash = fc_hash ^ model.feature_hash ^ (model.L1 * 2) ^ router_hash
+        self.int32(net_hash)  # halfkp network hash
         encoded_description = description.encode("utf-8")
         self.int32(len(encoded_description))  # Network definition
         self.buf.extend(encoded_description)
@@ -233,27 +261,38 @@ class NNUEReader:
             self.model.layer_stacks.output,
         ]
         num_ls_buckets = self.model.num_ls_buckets
-        l_w_slices = [
-            torch.chunk(layer.linear.weight.data, num_ls_buckets, dim=0)
-            for layer in layers
-        ]
-        l_b_slices = [
-            torch.chunk(layer.linear.bias.data, num_ls_buckets, dim=0)
-            for layer in layers
-        ]
+        for layer in layers:
+            layer.init_coalesced_storage()
 
         for b in range(num_ls_buckets):
             self.read_int32(fc_hash)  # FC layers hash
-            for layer_idx in range(len(layers)):
-                self.read_fc_layer(
-                    l_w_slices[layer_idx][b],
-                    l_b_slices[layer_idx][b],
-                    layers[layer_idx].layer_key,
-                )
+            for layer in layers:
+                out_f = layer.out_features
+                w_slice = layer.coalesced_weight[b * out_f : (b + 1) * out_f, :]
+                b_slice = layer.coalesced_bias[b * out_f : (b + 1) * out_f]
+                self.read_fc_layer(w_slice, b_slice, layer.layer_key)
+
+        router_table_bytes = ROUTER_TABLE_SIZE * 2
+        raw_router = self.f.read(router_table_bytes)
+        if len(raw_router) != router_table_bytes:
+            raise EOFError(
+                f"Expected {router_table_bytes} bytes for router table, got {len(raw_router)}"
+            )
+        self.model.router.load_lookup_table(raw_router)
+
+        raw_biases = self.tensor(np.int32, [NUM_BIAS_EXPERTS, NUM_BIASES])
+        biases = self.model.quantization.dequantize_dynamic_bias(raw_biases)
+        self.model.router.load_coalesced_biases(biases)
 
     def read_header(self, feature_hash: int, fc_hash: int) -> None:
         self.read_int32(VERSION)  # version
-        self.read_int32(fc_hash ^ feature_hash ^ (self.config.L1 * 2))
+        header_hash = self.read_int32()
+        router_hash = get_router_hash(
+            self.model.router.num_weight_experts, self.model.router.num_bias_experts
+        )
+        expected_hash = fc_hash ^ feature_hash ^ (self.config.L1 * 2) ^ router_hash
+        if header_hash != expected_hash:
+            raise ValueError(f"Expected hash {expected_hash:x}, got {header_hash:x}")
         desc_len = self.read_int32()
         self.description = self.f.read(desc_len).decode("utf-8")
 

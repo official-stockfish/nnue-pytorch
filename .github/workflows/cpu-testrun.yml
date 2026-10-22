@@ -31,10 +31,11 @@ jobs:
           cache-from: type=gha,scope=cpu-cache
           cache-to: type=gha,mode=max,scope=cpu-cache
 
-      - name: Checkout Stockfish Master
+      - name: Checkout Stockfish
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: official-stockfish/Stockfish
+          repository: TonyCongqianWang/Stockfish
+          ref: 4899932d0ae7c1886685c111fe2742acae137b77
           path: Stockfish
           persist-credentials: false
 
@@ -75,10 +76,11 @@ jobs:
           cache-from: type=gha,scope=cpu-cache
           cache-to: type=gha,mode=max,scope=cpu-cache
 
-      - name: Checkout Stockfish Master
+      - name: Checkout Stockfish
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: official-stockfish/Stockfish
+          repository: TonyCongqianWang/Stockfish
+          ref: 4899932d0ae7c1886685c111fe2742acae137b77
           path: Stockfish
           persist-credentials: false
 

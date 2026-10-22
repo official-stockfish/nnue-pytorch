@@ -1,8 +1,12 @@
+import math
+from collections.abc import Sequence
+
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 from ..quantize import QuantizationManager
+from .router import CODEBOOK_DIM
 
 try:
     from .grouped_linear import grouped_l1, grouped_l1_preferred
@@ -181,3 +185,218 @@ class FactorizedStackedLinear(StackedLinear):
             self.linear.bias[begin:end].add_(self.factorized_linear.bias)
 
         self.zero_virtual_weights()
+
+
+class LowRankStackedLinear(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        count: int,
+        rank: int = 32,
+        codebook_dim: int = CODEBOOK_DIM,
+        quantization: QuantizationManager | None = None,
+        layer_key: str | None = None,
+    ):
+        super().__init__()
+
+        self.in_features = in_features
+        self.out_features = out_features
+        self.count = count
+        self.rank = rank
+        self.codebook_dim = codebook_dim
+        self.quantization = quantization
+        self.layer_key = layer_key
+        self.is_coalesced = False
+
+        self.weight_base = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias_base = nn.Parameter(torch.empty(out_features))
+        self.adapter_down = nn.Parameter(torch.empty(rank, codebook_dim))
+        self.down_proj = nn.Parameter(torch.empty(rank, in_features))
+        self.up_proj = nn.Parameter(torch.empty(out_features, rank))
+        self.bias_adapter = nn.Parameter(torch.empty(out_features, rank))
+
+        self.register_buffer(
+            "coalesced_weight",
+            torch.zeros(count * out_features, in_features, dtype=torch.float32),
+        )
+        self.register_buffer(
+            "coalesced_bias",
+            torch.zeros(count * out_features, dtype=torch.float32),
+        )
+
+        self._reset_parameters()
+
+    def _reset_parameters(self) -> None:
+        bound_base = 1.0 / math.sqrt(self.in_features) if self.in_features > 0 else 0.0
+        nn.init.uniform_(self.weight_base, -bound_base, bound_base)
+        nn.init.uniform_(self.bias_base, -bound_base, bound_base)
+        bound_cb = 1.0 / math.sqrt(self.codebook_dim) if self.codebook_dim > 0 else 0.0
+        nn.init.uniform_(self.adapter_down, -bound_cb, bound_cb)
+        nn.init.uniform_(self.down_proj, -bound_base, bound_base)
+
+        bound_r = 1.0 / math.sqrt(self.rank) if self.rank > 0 else 0.0
+        nn.init.uniform_(self.up_proj, -bound_r, bound_r)
+        nn.init.uniform_(self.bias_adapter, -bound_r, bound_r)
+
+    def get_delta_weights(self, codebook: torch.Tensor) -> torch.Tensor:
+        # codebook: (count, codebook_dim)
+        if codebook.shape[-1] != self.adapter_down.shape[1]:
+            raise ValueError(
+                f"codebook dimension mismatch in LowRankStackedLinear: "
+                f"adapter_down expects {self.adapter_down.shape[1]}, got {codebook.shape[-1]}"
+            )
+        act = F.gelu(codebook)
+        r = F.linear(act, self.adapter_down)  # (count, rank)
+        c_v = r.unsqueeze(2) * self.down_proj.unsqueeze(0)  # (count, rank, in_features)
+        return torch.matmul(
+            self.up_proj.unsqueeze(0), c_v
+        )  # (count, out_features, in_features)
+
+    def get_delta_biases(self, codebook: torch.Tensor) -> torch.Tensor:
+        # codebook: (count, codebook_dim)
+        if codebook.shape[-1] != self.adapter_down.shape[1]:
+            raise ValueError(
+                f"codebook dimension mismatch in LowRankStackedLinear: "
+                f"adapter_down expects {self.adapter_down.shape[1]}, got {codebook.shape[-1]}"
+            )
+        act = F.gelu(codebook)
+        r = F.linear(act, self.adapter_down)  # (count, rank)
+        return torch.matmul(r, self.bias_adapter.t())  # (count, out_features)
+
+    def get_merged_weights_and_biases(
+        self, codebook: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.is_coalesced:
+            return self.coalesced_weight, self.coalesced_bias
+
+        if codebook is None:
+            codebook = torch.zeros(
+                self.count,
+                self.codebook_dim,
+                device=self.weight_base.device,
+                dtype=self.weight_base.dtype,
+            )
+
+        delta_w = self.get_delta_weights(codebook)
+        delta_b = self.get_delta_biases(codebook)
+
+        w = self.weight_base.unsqueeze(0) + delta_w
+        b = self.bias_base.unsqueeze(0) + delta_b
+
+        flat_w = w.reshape(
+            self.count * self.out_features, self.in_features
+        ).contiguous()
+        flat_b = b.reshape(self.count * self.out_features).contiguous()
+        return flat_w, flat_b
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        codebook: torch.Tensor | None,
+        ls_indices: torch.Tensor,
+        fake_quantize_weights: bool = False,
+    ) -> torch.Tensor:
+        flat_w, flat_b = self.get_merged_weights_and_biases(codebook)
+
+        if fake_quantize_weights:
+            if self.quantization is None or self.layer_key is None:
+                raise RuntimeError(
+                    "self.quantization and self.layer_key are required to use fake quantize weights."
+                )
+            flat_w = self.quantization.fake_quantize_weights(
+                flat_w, f"{self.layer_key}_weight"
+            )
+            flat_b = self.quantization.fake_quantize_weights(
+                flat_b, f"{self.layer_key}_bias"
+            )
+
+        if (
+            grouped_l1 is not None
+            and x.is_cuda
+            and torch.version.hip is None
+            and x.dtype == flat_w.dtype == flat_b.dtype == torch.float32
+            and not torch.is_autocast_enabled()
+            and 128 <= self.in_features <= 4096
+            and self.in_features % 128 == 0
+            and 1 <= self.out_features <= 128
+            and 1 <= self.count <= 256
+            and grouped_l1_preferred(self.count)
+            and x.ndim == 2
+            and x.shape[0] > 0
+            and x.shape[1] == self.in_features
+            and torch.cuda.get_device_capability(x.device)[0] >= 8
+        ):
+            return grouped_l1(x, flat_w, flat_b, ls_indices, self.count)
+
+        stacked_output = F.linear(x, flat_w, flat_b)
+        return self.select_output(stacked_output, ls_indices)
+
+    def select_output(
+        self, stacked_output: torch.Tensor, ls_indices: torch.Tensor
+    ) -> torch.Tensor:
+        reshaped_output = stacked_output.reshape(-1, self.out_features)
+
+        idx_offset = torch.arange(
+            0,
+            ls_indices.shape[0] * self.count,
+            self.count,
+            device=stacked_output.device,
+        )
+        indices = ls_indices.flatten() + idx_offset
+
+        selected_output = reshaped_output[indices]
+        return selected_output
+
+    @torch.no_grad()
+    def at_index(self, index: int, codebook: torch.Tensor | None = None) -> nn.Linear:
+        layer = nn.Linear(self.in_features, self.out_features)
+
+        if self.is_coalesced:
+            flat_w = self.coalesced_weight
+            flat_b = self.coalesced_bias
+        else:
+            flat_w, flat_b = self.get_merged_weights_and_biases(codebook)
+            if self.quantization is not None and self.layer_key is not None:
+                scale_key = f"{self.layer_key}_weight"
+                if scale_key in self.quantization.weight_scales_dict:
+                    max_w = 127.0 / self.quantization.weight_scales_dict[scale_key]
+                    flat_w = flat_w.clamp(-max_w, max_w)
+
+        begin = index * self.out_features
+        end = (index + 1) * self.out_features
+
+        layer.weight.copy_(flat_w[begin:end, :])
+        layer.bias.copy_(flat_b[begin:end])
+        return layer
+
+    @torch.no_grad()
+    def coalesce_weights(self, codebook: torch.Tensor | None = None) -> None:
+        flat_w, flat_b = self.get_merged_weights_and_biases(codebook)
+        if self.quantization is not None and self.layer_key is not None:
+            scale_key = f"{self.layer_key}_weight"
+            if scale_key in self.quantization.weight_scales_dict:
+                max_w = 127.0 / self.quantization.weight_scales_dict[scale_key]
+                flat_w = flat_w.clamp(-max_w, max_w)
+        self.coalesced_weight.copy_(flat_w)
+        self.coalesced_bias.copy_(flat_b)
+        self.is_coalesced = True
+
+    @torch.no_grad()
+    def init_coalesced_storage(self) -> None:
+        self.coalesced_weight.zero_()
+        self.coalesced_bias.zero_()
+        self.weight_base.zero_()
+        self.bias_base.zero_()
+        self.adapter_down.zero_()
+        self.down_proj.zero_()
+        self.up_proj.zero_()
+        self.bias_adapter.zero_()
+        self.is_coalesced = True
+
+    @torch.no_grad()
+    def permute_inputs(self, permutation: Sequence[int]) -> None:
+        self.weight_base.copy_(self.weight_base[:, permutation])
+        self.down_proj.copy_(self.down_proj[:, permutation])
+        if self.is_coalesced:
+            self.coalesced_weight.copy_(self.coalesced_weight[:, permutation])

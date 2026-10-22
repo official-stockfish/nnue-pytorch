@@ -53,6 +53,9 @@ def test_random_weights_roundtrip():
         f"Round-trip 2 mismatch: {len(bytes2)} vs {len(bytes3)} bytes"
     )
 
-    # Verify model parameters match between model2 and model3
+    # Verify model parameters and buffers match between model2 and model3
     for (n2, p2), (n3, p3) in zip(model2.named_parameters(), model3.named_parameters()):
         assert torch.equal(p2, p3), f"Parameter {n2} mismatch between model2 and model3"
+
+    for (n2, b2), (n3, b3) in zip(model2.named_buffers(), model3.named_buffers()):
+        assert torch.equal(b2, b3), f"Buffer {n2} mismatch between model2 and model3"

@@ -135,7 +135,9 @@ def main():
 
         if not args.source.endswith(".nnue"):
             nnue.model.input.coalesce()
-            nnue.model.layer_stacks.coalesce_layer_stacks_inplace()
+            nnue.model.layer_stacks.coalesce_layer_stacks_inplace(
+                nnue.model.router.codebook
+            )
 
         ftperm.ft_permute(nnue.model, serialize_config.ft_perm)
 
@@ -156,7 +158,9 @@ def main():
 
         if not args.source.endswith(".nnue"):
             nnue.model.input.coalesce()
-            nnue.model.layer_stacks.coalesce_layer_stacks_inplace()
+            nnue.model.layer_stacks.coalesce_layer_stacks_inplace(
+                nnue.model.router.codebook
+            )
 
         ftperm.ft_optimize(
             nnue.model,

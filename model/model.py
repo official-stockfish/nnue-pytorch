@@ -2,7 +2,12 @@ import torch
 from torch import nn
 
 from .config import ModelConfig
-from .modules import ComposedFeatureTransformer, LayerStacks, get_feature_cls
+from .modules import (
+    ComposedFeatureTransformer,
+    DualVQCodebookRouter,
+    LayerStacks,
+    get_feature_cls,
+)
 from .quantize import QuantizationManager
 
 
@@ -28,7 +33,14 @@ class NNUEModel(nn.Module):
         self.feature_name = self.input.FEATURE_NAME
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
-        self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
+        self.router = DualVQCodebookRouter()
+        self.layer_stacks = LayerStacks(
+            self.num_ls_buckets,
+            config,
+            self.quantization,
+            codebook_dim=self.router.dim,
+        )
+        self.commit_loss: torch.Tensor | None = None
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
@@ -69,7 +81,6 @@ class NNUEModel(nn.Module):
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
         self.input.zero_virtual_weights()
-        self.layer_stacks.zero_virtual_weights()
 
     def forward_ft(
         self,
@@ -89,9 +100,9 @@ class NNUEModel(nn.Module):
             fake_quantize_weights,
         )
 
-    def calculate_buckets(self, piece_count: torch.Tensor, queen_bucket: torch.Tensor):
-        pc_bucket = (piece_count - 1) // 4
-        return pc_bucket * 4 + queen_bucket
+    def calculate_buckets(self, c_us: torch.Tensor, c_them: torch.Tensor):
+        e1_w, e2_w, *_ = self.router(c_us, c_them)
+        return e1_w, e2_w
 
     def forward(
         self,
@@ -99,12 +110,23 @@ class NNUEModel(nn.Module):
         them: torch.Tensor,
         white_indices: torch.Tensor,
         black_indices: torch.Tensor,
-        piece_count: torch.Tensor,
-        queen_bucket: torch.Tensor,
+        c_us: torch.Tensor,
+        c_them: torch.Tensor,
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
     ):
-        layer_stack_indices = self.calculate_buckets(piece_count, queen_bucket)
+        (
+            e1_w,
+            e2_w,
+            dyn_b1,
+            dyn_b2,
+            moe_loss,
+            commit_loss,
+            balance_loss,
+        ) = self.router(c_us, c_them)
+        self.moe_loss = moe_loss
+        self.commit_loss = commit_loss
+        self.balance_loss = balance_loss
 
         l0_ = self.forward_ft(
             us,
@@ -115,7 +137,14 @@ class NNUEModel(nn.Module):
             fake_quantize_weights,
         )
         x = self.layer_stacks(
-            l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights
+            l0_,
+            self.router.codebook_weights,
+            e1_w,
+            e2_w,
+            dyn_b1,
+            dyn_b2,
+            fake_quantize_acts,
+            fake_quantize_weights,
         )
 
         return x

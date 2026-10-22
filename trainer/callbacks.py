@@ -660,6 +660,12 @@ class SimpleLineLogger(Callback):
             loss_val = trainer.callback_metrics.get(
                 self.train_metric_step, float("nan")
             )
+            sf_val = trainer.callback_metrics.get("sf_loss", None)
+            moe_val = trainer.callback_metrics.get("moe_loss", None)
+            if sf_val is not None and moe_val is not None:
+                loss_str = f"{self.train_metric_step}={loss_val:.5f} (sf={sf_val:.5f}, moe={moe_val:.5f})"
+            else:
+                loss_str = f"{self.train_metric_step}={loss_val:.5f}"
 
             print(
                 f"Epoch {trainer.current_epoch:>2} (Train): "
@@ -667,7 +673,7 @@ class SimpleLineLogger(Callback):
                 f"{current_step:>5}/{total_batches:<5} "
                 f"[{self._format_time(elapsed_total)}<{self._format_time(remaining)}, "
                 f"{rate:>6.2f}it/s, "
-                f"{self.train_metric_step}={loss_val:.5f}, "
+                f"{loss_str}, "
                 f"v_num={trainer.logger.version}]",
                 flush=True,
             )
@@ -681,9 +687,16 @@ class SimpleLineLogger(Callback):
             return
 
         train_loss = trainer.callback_metrics.get(self.train_metric_epoch, float("nan"))
+        sf_loss_epoch = trainer.callback_metrics.get("train_sf_loss_epoch", None)
+        moe_loss_epoch = trainer.callback_metrics.get("train_moe_loss_epoch", None)
         unique_val = trainer.callback_metrics.get("unique", None)
         total_val = trainer.callback_metrics.get("total", None)
         preskip_val = trainer.callback_metrics.get("preskip", None)
+
+        if sf_loss_epoch is not None and moe_loss_epoch is not None:
+            loss_str = f"{self.train_metric_epoch}={train_loss:.5f} (sf={sf_loss_epoch:.5f}, moe={moe_loss_epoch:.5f})"
+        else:
+            loss_str = f"{self.train_metric_epoch}={train_loss:.5f}"
 
         unique_str = f", unique={unique_val:.0f}" if unique_val is not None else ""
         total_str = f", total={total_val:.0f}" if total_val is not None else ""
@@ -691,7 +704,7 @@ class SimpleLineLogger(Callback):
 
         print(
             f"Epoch {trainer.current_epoch:>2} (Train): "
-            f"[{self.train_metric_epoch}={train_loss:.5f}"
+            f"[{loss_str}"
             f"{unique_str}{total_str}{preskip_str}]",
             flush=True,
         )
@@ -749,3 +762,108 @@ class SimpleLineLogger(Callback):
             f"[{self.val_metric}={val_loss:.5f}]",
             flush=True,
         )
+
+
+class MoEDeadExpertReseeder(Callback):
+    """Periodically checks all 810,810 contexts and reseeds dead MoE experts via traffic-weighted cell splitting."""
+
+    def __init__(self, reseed_interval: int = 1024, temperature: float = 1.0):
+        super().__init__()
+        self.reseed_interval = reseed_interval
+        self.temperature = temperature
+
+    @torch.no_grad()
+    @torch.compiler.disable
+    def on_train_batch_end(self, trainer, batch=None, batch_idx=None, outputs=None):
+        if (
+            self.reseed_interval > 0
+            and trainer.global_step > 0
+            and trainer.global_step % self.reseed_interval == 0
+        ):
+            from .engine import _unwrap_module
+
+            unwrapped = _unwrap_module(trainer.model)
+            router = unwrapped.model.router
+            is_ddp = (
+                dist.is_available()
+                and dist.is_initialized()
+                and getattr(trainer, "world_size", 1) > 1
+            )
+            rank = getattr(trainer, "rank", 0)
+
+            # In DDP, rank 0 determines dead experts and executes cell splitting.
+            # Other ranks wait for broadcast masks to avoid divergence and collective desync.
+            if not is_ddp or rank == 0:
+                reseeded_w, reseeded_b = router.reseed_dead_experts_context_wide(
+                    temperature=self.temperature
+                )
+            else:
+                reseeded_w, reseeded_b = [], []
+
+            if is_ddp:
+                mask_w = torch.zeros(
+                    router.num_weight_experts,
+                    dtype=torch.bool,
+                    device=router.codebook_weights.device,
+                )
+                mask_b = torch.zeros(
+                    router.num_bias_experts,
+                    dtype=torch.bool,
+                    device=router.codebook_biases.device,
+                )
+                if rank == 0:
+                    if reseeded_w:
+                        mask_w[reseeded_w] = True
+                    if reseeded_b:
+                        mask_b[reseeded_b] = True
+
+                dist.broadcast(mask_w, src=0)
+                dist.broadcast(mask_b, src=0)
+
+                if mask_w.any():
+                    dist.broadcast(router.codebook_weights.data, src=0)
+                    reseeded_w = torch.nonzero(mask_w).flatten().tolist()
+                    self._reset_optimizer_state(
+                        trainer.optimizer, router.codebook_weights, reseeded_w
+                    )
+
+                if mask_b.any():
+                    dist.broadcast(router.codebook_biases.data, src=0)
+                    reseeded_b = torch.nonzero(mask_b).flatten().tolist()
+                    self._reset_optimizer_state(
+                        trainer.optimizer, router.codebook_biases, reseeded_b
+                    )
+            else:
+                if reseeded_w:
+                    self._reset_optimizer_state(
+                        trainer.optimizer, router.codebook_weights, reseeded_w
+                    )
+                if reseeded_b:
+                    self._reset_optimizer_state(
+                        trainer.optimizer, router.codebook_biases, reseeded_b
+                    )
+
+            if rank == 0:
+                if reseeded_w:
+                    print(
+                        f"[Step {trainer.global_step}] Reseeded {len(reseeded_w)} dead weight expert(s): {reseeded_w}",
+                        flush=True,
+                    )
+                if reseeded_b:
+                    print(
+                        f"[Step {trainer.global_step}] Reseeded {len(reseeded_b)} dead bias expert(s): {reseeded_b}",
+                        flush=True,
+                    )
+
+    def _reset_optimizer_state(self, optimizer, param, reseeded_indices):
+        if optimizer is None:
+            return
+        state = optimizer.state.get(param, None)
+        if state is None:
+            return
+        idx_tensor = torch.tensor(
+            reseeded_indices, device=param.device, dtype=torch.long
+        )
+        for key in ("exp_avg", "exp_avg_sq"):
+            if key in state and state[key] is not None:
+                state[key].index_fill_(0, idx_tensor, 0.0)

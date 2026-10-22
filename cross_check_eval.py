@@ -338,29 +338,26 @@ def init_random_weights(model: M.NNUEModel) -> None:
             for p in group["params"]:
                 p.data.uniform_(min_w * 1.2, max_w * 1.2)
                 touched.add(id(p))
-            if "virtual_params" in group:
-                group["virtual_params"].data.uniform_(min_w * 1.2, max_w * 1.2)
-                touched.add(id(group["virtual_params"]))
-
         for ls in [
             model.layer_stacks.l1,
             model.layer_stacks.l2,
             model.layer_stacks.output,
         ]:
-            if (
-                hasattr(ls, "linear")
-                and hasattr(ls.linear, "bias")
-                and ls.linear.bias is not None
-            ):
-                ls.linear.bias.data.uniform_(-0.5, 0.5)
-                touched.add(id(ls.linear.bias))
-            if (
-                hasattr(ls, "factorized_linear")
-                and hasattr(ls.factorized_linear, "bias")
-                and ls.factorized_linear.bias is not None
-            ):
-                ls.factorized_linear.bias.data.uniform_(-0.5, 0.5)
-                touched.add(id(ls.factorized_linear.bias))
+            ls.bias_base.data.uniform_(-0.5, 0.5)
+            touched.add(id(ls.bias_base))
+            ls.adapter_down.data.uniform_(-0.1, 0.1)
+            touched.add(id(ls.adapter_down))
+            ls.down_proj.data.uniform_(-0.1, 0.1)
+            touched.add(id(ls.down_proj))
+            ls.up_proj.data.uniform_(-0.1, 0.1)
+            touched.add(id(ls.up_proj))
+            ls.bias_adapter.data.uniform_(-0.1, 0.1)
+            touched.add(id(ls.bias_adapter))
+
+        for p in model.router.parameters():
+            p.data.uniform_(-1.0, 1.0)
+            touched.add(id(p))
+        model.router.update_lookup_table()
 
         all_param_ids = {id(p) for p in model.parameters()}
         untouched = all_param_ids - touched
