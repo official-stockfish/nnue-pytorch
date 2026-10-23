@@ -291,6 +291,9 @@ class DualVQCodebookRouter(nn.Module):
             persistent=False,
         )
 
+        self.last_reseed_parents_w: dict[int, int] = {}
+        self.last_reseed_parents_b: dict[int, int] = {}
+
         self.init_weights()
 
     @property
@@ -465,12 +468,15 @@ class DualVQCodebookRouter(nn.Module):
     @torch.no_grad()
     def reseed_dead_experts_context_wide(
         self,
-        temperature: float = 1.0,
+        temperature: float = 0.5,
         perturbation_scale: float = 0.02,
     ) -> tuple[list[int], list[int]]:
         """Evaluates contexts across the board context space and reseeds dead experts
         via traffic-weighted cell splitting of active experts.
         """
+        self.last_reseed_parents_w = {}
+        self.last_reseed_parents_b = {}
+
         device = self.codebook_weights.device
         mat_feats = self.material_decode_table
         z_mat = (
@@ -526,10 +532,12 @@ class DualVQCodebookRouter(nn.Module):
                 probs_w = F.softmax(logits_w, dim=-1)
 
                 modified_w = set(dead_w.tolist())
+                parent_map_w: dict[int, int] = {}
                 for dead_idx in dead_w:
                     target_pos = torch.multinomial(probs_w, num_samples=1).item()
                     target_idx = active_w[target_pos].item()
                     modified_w.add(target_idx)
+                    parent_map_w[int(dead_idx)] = int(target_idx)
 
                     direction = torch.randn_like(self.codebook_weights[dead_idx])
                     norm = torch.norm(direction).clamp(min=1e-8)
@@ -544,6 +552,7 @@ class DualVQCodebookRouter(nn.Module):
                     probs_w = probs_w / probs_w.sum().clamp(min=1e-8)
 
                 reseeded_w = sorted(modified_w)
+                self.last_reseed_parents_w = parent_map_w
 
         counts_b = torch.bincount(idx_b, minlength=self.num_bias_experts)
         dead_b = torch.nonzero(counts_b == 0, as_tuple=True)[0]
@@ -559,10 +568,12 @@ class DualVQCodebookRouter(nn.Module):
                 probs_b = F.softmax(logits_b, dim=-1)
 
                 modified_b = set(dead_b.tolist())
+                parent_map_b: dict[int, int] = {}
                 for dead_idx in dead_b:
                     target_pos = torch.multinomial(probs_b, num_samples=1).item()
                     target_idx = active_b[target_pos].item()
                     modified_b.add(target_idx)
+                    parent_map_b[int(dead_idx)] = int(target_idx)
 
                     direction = torch.randn_like(self.codebook_biases[dead_idx])
                     norm = torch.norm(direction).clamp(min=1e-8)
@@ -577,6 +588,7 @@ class DualVQCodebookRouter(nn.Module):
                     probs_b = probs_b / probs_b.sum().clamp(min=1e-8)
 
                 reseeded_b = sorted(modified_b)
+                self.last_reseed_parents_b = parent_map_b
 
         if reseeded_w or reseeded_b:
             self.lut_valid.fill_(False)

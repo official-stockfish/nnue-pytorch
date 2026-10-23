@@ -767,7 +767,7 @@ class SimpleLineLogger(Callback):
 class MoEDeadExpertReseeder(Callback):
     """Periodically checks all 810,810 contexts and reseeds dead MoE experts via traffic-weighted cell splitting."""
 
-    def __init__(self, reseed_interval: int = 1024, temperature: float = 1.0):
+    def __init__(self, reseed_interval: int = 1024, temperature: float = 0.5):
         super().__init__()
         self.reseed_interval = reseed_interval
         self.temperature = temperature
@@ -792,68 +792,90 @@ class MoEDeadExpertReseeder(Callback):
             rank = getattr(trainer, "rank", 0)
 
             # In DDP, rank 0 determines dead experts and executes cell splitting.
-            # Other ranks wait for broadcast masks to avoid divergence and collective desync.
+            # Other ranks wait for broadcast parent tensors to avoid divergence and collective desync.
             if not is_ddp or rank == 0:
                 reseeded_w, reseeded_b = router.reseed_dead_experts_context_wide(
                     temperature=self.temperature
                 )
+                parent_map_w = getattr(router, "last_reseed_parents_w", {})
+                parent_map_b = getattr(router, "last_reseed_parents_b", {})
             else:
                 reseeded_w, reseeded_b = [], []
+                parent_map_w, parent_map_b = {}, {}
+
+            parent_tensor_w = torch.full(
+                (router.num_weight_experts,),
+                -1,
+                dtype=torch.long,
+                device=router.codebook_weights.device,
+            )
+            parent_tensor_b = torch.full(
+                (router.num_bias_experts,),
+                -1,
+                dtype=torch.long,
+                device=router.codebook_biases.device,
+            )
+            if rank == 0:
+                for child, parent in parent_map_w.items():
+                    parent_tensor_w[child] = parent
+                for child, parent in parent_map_b.items():
+                    parent_tensor_b[child] = parent
 
             if is_ddp:
-                mask_w = torch.zeros(
-                    router.num_weight_experts,
-                    dtype=torch.bool,
-                    device=router.codebook_weights.device,
-                )
-                mask_b = torch.zeros(
-                    router.num_bias_experts,
-                    dtype=torch.bool,
-                    device=router.codebook_biases.device,
-                )
-                if rank == 0:
-                    if reseeded_w:
-                        mask_w[reseeded_w] = True
-                    if reseeded_b:
-                        mask_b[reseeded_b] = True
+                dist.broadcast(parent_tensor_w, src=0)
+                dist.broadcast(parent_tensor_b, src=0)
 
-                dist.broadcast(mask_w, src=0)
-                dist.broadcast(mask_b, src=0)
-
-                if mask_w.any():
+                if (parent_tensor_w >= 0).any():
                     dist.broadcast(router.codebook_weights.data, src=0)
-                    reseeded_w = torch.nonzero(mask_w).flatten().tolist()
-                    self._reset_optimizer_state(
-                        trainer.optimizer, router.codebook_weights, reseeded_w
+                    self._copy_optimizer_state(
+                        trainer.optimizer, router.codebook_weights, parent_tensor_w
                     )
 
-                if mask_b.any():
+                if (parent_tensor_b >= 0).any():
                     dist.broadcast(router.codebook_biases.data, src=0)
-                    reseeded_b = torch.nonzero(mask_b).flatten().tolist()
-                    self._reset_optimizer_state(
-                        trainer.optimizer, router.codebook_biases, reseeded_b
+                    self._copy_optimizer_state(
+                        trainer.optimizer, router.codebook_biases, parent_tensor_b
                     )
             else:
-                if reseeded_w:
-                    self._reset_optimizer_state(
-                        trainer.optimizer, router.codebook_weights, reseeded_w
+                if (parent_tensor_w >= 0).any():
+                    self._copy_optimizer_state(
+                        trainer.optimizer, router.codebook_weights, parent_tensor_w
                     )
-                if reseeded_b:
-                    self._reset_optimizer_state(
-                        trainer.optimizer, router.codebook_biases, reseeded_b
+                if (parent_tensor_b >= 0).any():
+                    self._copy_optimizer_state(
+                        trainer.optimizer, router.codebook_biases, parent_tensor_b
                     )
 
             if rank == 0:
-                if reseeded_w:
+                if parent_map_w:
                     print(
-                        f"[Step {trainer.global_step}] Reseeded {len(reseeded_w)} dead weight expert(s): {reseeded_w}",
+                        f"[Step {trainer.global_step}] Reseeded {len(parent_map_w)} dead weight expert(s): "
+                        f"{[f'{c}<-{p}' for c, p in sorted(parent_map_w.items())]}",
                         flush=True,
                     )
-                if reseeded_b:
+                if parent_map_b:
                     print(
-                        f"[Step {trainer.global_step}] Reseeded {len(reseeded_b)} dead bias expert(s): {reseeded_b}",
+                        f"[Step {trainer.global_step}] Reseeded {len(parent_map_b)} dead bias expert(s): "
+                        f"{[f'{c}<-{p}' for c, p in sorted(parent_map_b.items())]}",
                         flush=True,
                     )
+
+    def _copy_optimizer_state(self, optimizer, param, parent_tensor):
+        """Copies optimizer momentum and second moments from parent to child for reseeded experts.
+
+        The parent cell retains its momentum buffers intact.
+        """
+        if optimizer is None:
+            return
+        state = optimizer.state.get(param, None)
+        if state is None:
+            return
+        children = torch.nonzero(parent_tensor >= 0).flatten()
+        for child_idx in children:
+            parent_idx = parent_tensor[child_idx]
+            for key in ("exp_avg", "exp_avg_sq"):
+                if key in state and state[key] is not None:
+                    state[key][child_idx].copy_(state[key][parent_idx])
 
     def _reset_optimizer_state(self, optimizer, param, reseeded_indices):
         if optimizer is None:

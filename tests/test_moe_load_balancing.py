@@ -142,10 +142,17 @@ def test_dead_expert_callback_momentum_reset():
         router.ema_traffic_weights[2] = 1.0
 
     opt = torch.optim.AdamW([router.codebook_weights, router.codebook_biases], lr=1e-3)
-    # Simulate non-zero momentum buffers
+    # Simulate distinctive momentum buffers: expert 2 has momentum 2.5, expert 31 has 0.0
+    exp_avg_w = torch.ones_like(router.codebook_weights)
+    exp_avg_w[2] = 2.5
+    exp_avg_w[31] = 0.0
+    exp_avg_sq_w = torch.ones_like(router.codebook_weights) * 3.0
+    exp_avg_sq_w[2] = 5.0
+    exp_avg_sq_w[31] = 0.0
+
     opt.state[router.codebook_weights] = {
-        "exp_avg": torch.ones_like(router.codebook_weights),
-        "exp_avg_sq": torch.ones_like(router.codebook_weights),
+        "exp_avg": exp_avg_w,
+        "exp_avg_sq": exp_avg_sq_w,
     }
     opt.state[router.codebook_biases] = {
         "exp_avg": torch.ones_like(router.codebook_biases),
@@ -156,10 +163,12 @@ def test_dead_expert_callback_momentum_reset():
     callback = MoEDeadExpertReseeder(reseed_interval=1024, temperature=1e-4)
     callback.on_train_batch_end(trainer)
 
-    # Expert 31 and parent expert 2 should have momentum reset, other experts retain 1.0
+    # Expert 31 (reseeded child) should copy momentum from parent expert 2, parent retains 2.5
     state_w = opt.state[router.codebook_weights]
-    assert state_w["exp_avg"][31].sum() == 0.0
-    assert state_w["exp_avg"][2].sum() == 0.0
+    assert torch.equal(state_w["exp_avg"][31], state_w["exp_avg"][2])
+    assert torch.equal(state_w["exp_avg_sq"][31], state_w["exp_avg_sq"][2])
+    assert state_w["exp_avg"][2].sum() == 2.5 * float(router.dim)
+    assert state_w["exp_avg_sq"][2].sum() == 5.0 * float(router.dim)
     # An untouched active expert (e.g. expert 0) retains its momentum
     assert state_w["exp_avg"][0].sum() == float(router.dim)
 
@@ -227,12 +236,19 @@ def test_dead_expert_callback_ddp_synchronization(monkeypatch):
         router_0.ema_traffic_weights.zero_()
         router_0.ema_traffic_weights[2] = 1.0
 
+    exp_avg_w = torch.ones_like(router_0.codebook_weights)
+    exp_avg_w[2] = 2.5
+    exp_avg_w[31] = 0.0
+    exp_avg_sq_w = torch.ones_like(router_0.codebook_weights) * 3.0
+    exp_avg_sq_w[2] = 5.0
+    exp_avg_sq_w[31] = 0.0
+
     opt_0 = torch.optim.AdamW(
         [router_0.codebook_weights, router_0.codebook_biases], lr=1e-3
     )
     opt_0.state[router_0.codebook_weights] = {
-        "exp_avg": torch.ones_like(router_0.codebook_weights),
-        "exp_avg_sq": torch.ones_like(router_0.codebook_weights),
+        "exp_avg": exp_avg_w.clone(),
+        "exp_avg_sq": exp_avg_sq_w.clone(),
     }
 
     # Setup Rank 1 (identical initial state, but no dead expert initially or different EMA)
@@ -245,8 +261,8 @@ def test_dead_expert_callback_ddp_synchronization(monkeypatch):
         [router_1.codebook_weights, router_1.codebook_biases], lr=1e-3
     )
     opt_1.state[router_1.codebook_weights] = {
-        "exp_avg": torch.ones_like(router_1.codebook_weights),
-        "exp_avg_sq": torch.ones_like(router_1.codebook_weights),
+        "exp_avg": exp_avg_w.clone(),
+        "exp_avg_sq": exp_avg_sq_w.clone(),
     }
 
     trainer_0 = DummyTrainer(DummyNNUE(router_0), opt_0, rank=0, world_size=2)
@@ -286,8 +302,12 @@ def test_dead_expert_callback_ddp_synchronization(monkeypatch):
     # Weights on Rank 1 must match Rank 0 exactly
     assert torch.equal(router_0.codebook_weights, router_1.codebook_weights)
 
-    # Rank 1 optimizer momentum must be reset for the exact reseeded indices (31 and 2)
+    # Rank 1 optimizer momentum must be copied from parent expert 2 to child expert 31
     state_w_1 = opt_1.state[router_1.codebook_weights]
-    assert state_w_1["exp_avg"][31].sum() == 0.0
-    assert state_w_1["exp_avg"][2].sum() == 0.0
+    state_w_0 = opt_0.state[router_0.codebook_weights]
+    assert torch.equal(state_w_1["exp_avg"][31], state_w_1["exp_avg"][2])
+    assert torch.equal(state_w_1["exp_avg_sq"][31], state_w_1["exp_avg_sq"][2])
+    assert state_w_1["exp_avg"][2].sum() == 2.5 * float(router_1.dim)
     assert state_w_1["exp_avg"][0].sum() == float(router_1.dim)
+    assert torch.equal(state_w_1["exp_avg"], state_w_0["exp_avg"])
+    assert torch.equal(state_w_1["exp_avg_sq"], state_w_0["exp_avg_sq"])
