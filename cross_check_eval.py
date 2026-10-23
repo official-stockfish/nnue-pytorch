@@ -1,3 +1,4 @@
+import copy
 import math
 import os
 import re
@@ -7,11 +8,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 import chess
+import numpy as np
 import torch
 import tyro
 from tyro.conf import OmitArgPrefixes
 
 import data_loader
+import ftperm
 import model as M
 
 
@@ -50,6 +53,9 @@ class CrossCheckConfig:
 
     max_ckpt_error: float | None = 0.001
     """Maximum allowed absolute error between quantized CKPT and quantized NNUE evaluations."""
+
+    max_perm_error: float | None = 0.0
+    """Maximum allowed absolute error between permuted and unpermuted Stockfish evaluations."""
 
 
 @dataclass(frozen=True)
@@ -371,6 +377,19 @@ def init_random_weights(model: M.NNUEModel) -> None:
         model.clip_weights(include_input=True)
 
 
+def create_permuted_model(base_model: M.NNUEModel) -> M.NNUEModel:
+    model_perm = copy.deepcopy(base_model)
+    model_perm.clip_weights(include_input=True)
+    if not getattr(model_perm.layer_stacks.l1, "is_coalesced", False):
+        model_perm.input.coalesce()
+        model_perm.layer_stacks.coalesce_layer_stacks_inplace(
+            model_perm.router.codebook
+        )
+    perm = np.random.permutation(model_perm.L1 // 2)
+    ftperm.ft_permute_impl(model_perm, perm)
+    return model_perm
+
+
 def run_smoke_test(
     engine_path: str,
     net_path: str,
@@ -378,6 +397,9 @@ def run_smoke_test(
     ckpt_model: M.NNUEModel | None,
     device: str,
     max_ckpt_error: float | None = 1.0,
+    secondary_net_path: str | None = None,
+    sf_primary_name: str = "Stockfish",
+    sf_secondary_name: str = "Stockfish (Alt)",
 ) -> None:
     fen = chess.STARTING_FEN
     fens = [fen]
@@ -397,20 +419,44 @@ def run_smoke_test(
 
     sf_evals = eval_engine_batch(engine_path, net_path, fens)
     if not sf_evals:
-        raise RuntimeError("Stockfish returned no evaluation for starting position.")
+        raise RuntimeError(
+            f"{sf_primary_name} returned no evaluation for starting position."
+        )
     sf_eval = sf_evals[0]
+
+    sf_sec_eval = None
+    if secondary_net_path is not None:
+        sf_sec_evals = eval_engine_batch(engine_path, secondary_net_path, fens)
+        if not sf_sec_evals:
+            raise RuntimeError(
+                f"{sf_secondary_name} returned no evaluation for starting position."
+            )
+        sf_sec_eval = sf_sec_evals[0]
 
     diff_quant = nnue_quant - sf_eval
 
     W = 80
     print("=" * W)
     print(f"[Smoke Test] Evaluating starting position: {fen}")
-    print(f"  Stockfish Eval      : {sf_eval:+d}")
-    print(f"  NNUE (PyTorch) Eval : {nnue_eval:+.2f}")
-    print(f"  NNUE (Quant) Eval   : {nnue_quant:+.2f}")
+    print(f"  {sf_primary_name:<22}: {sf_eval:+d}")
+    if sf_sec_eval is not None:
+        print(f"  {sf_secondary_name:<22}: {sf_sec_eval:+d}")
+        diff_sf = abs(sf_eval - sf_sec_eval)
+        print(f"  Diff ({sf_primary_name} - {sf_secondary_name}): {diff_sf:+d}")
+        if diff_sf != 0:
+            print(
+                f"[Smoke Test] FAILED: {sf_primary_name} vs {sf_secondary_name} difference detected ({diff_sf})!"
+            )
+            print("=" * W)
+            raise RuntimeError(
+                f"Smoke test failed: {sf_primary_name} eval ({sf_eval}) and {sf_secondary_name} eval ({sf_sec_eval}) "
+                f"differ by {diff_sf} on starting position."
+            )
+    print(f"  NNUE (PyTorch) Eval   : {nnue_eval:+.2f}")
+    print(f"  NNUE (Quant) Eval     : {nnue_quant:+.2f}")
     if ckpt_model is not None and ckpt_eval is not None and ckpt_quant is not None:
-        print(f"  CKPT Eval           : {ckpt_eval:+.2f}")
-        print(f"  CKPT (Quant) Eval   : {ckpt_quant:+.2f}")
+        print(f"  CKPT Eval             : {ckpt_eval:+.2f}")
+        print(f"  CKPT (Quant) Eval     : {ckpt_quant:+.2f}")
         diff_ckpt_nnue = abs(ckpt_quant - nnue_quant)
         print(f"  Diff (CKPT_Q - NNUE_Q): {diff_ckpt_nnue:.4f}")
         if max_ckpt_error is not None and diff_ckpt_nnue >= max_ckpt_error:
@@ -422,7 +468,7 @@ def run_smoke_test(
                 f"Smoke test failed: CKPT (Q) eval ({ckpt_quant}) and NNUE (Q) eval ({nnue_quant}) "
                 f"differ by {diff_ckpt_nnue:.4f} (>= {max_ckpt_error:.4f}) on starting position."
             )
-    print(f"  Diff (Quant - SF)   : {diff_quant:+.2f}")
+    print(f"  Diff (Quant - {sf_primary_name}): {diff_quant:+.2f}")
 
     if math.isnan(nnue_quant) or abs(diff_quant) > 5.0:
         print(
@@ -430,7 +476,7 @@ def run_smoke_test(
         )
         print("=" * W)
         raise RuntimeError(
-            f"Smoke test failed: Quantized NNUE eval ({nnue_quant}) and Stockfish eval ({sf_eval}) "
+            f"Smoke test failed: Quantized NNUE eval ({nnue_quant}) and {sf_primary_name} eval ({sf_eval}) "
             f"differ by {diff_quant:.2f} (> 5.0) on starting position."
         )
 
@@ -447,53 +493,124 @@ def main():
     if cross_check_config.random_weights and cross_check_config.net:
         raise ValueError("Cannot specify both --random-weights and --net.")
 
+    if not (
+        cross_check_config.random_weights
+        or cross_check_config.checkpoint
+        or cross_check_config.net
+    ):
+        raise ValueError(
+            "At least one of --random-weights, --checkpoint, or --net must be specified."
+        )
+
     if cross_check_config.seed is not None:
         torch.manual_seed(cross_check_config.seed)
+        np.random.seed(cross_check_config.seed)
         print(f"Set random seed: {cross_check_config.seed}")
 
     batch_size = 1024
+    temp_files = []
 
-    ckpt_model = None
-    if cross_check_config.checkpoint:
-        checkpoint = torch.load(
-            cross_check_config.checkpoint, map_location="cpu", weights_only=False
-        )
-        ckpt = M.NNUE(config=nnue_config)
-        ckpt.load_state_dict(checkpoint["state_dict"])
-        ckpt.to(cross_check_config.device)
-        ckpt.eval()
-        # --checkpoint - returns a plain NNUE wrapping a NNUEModel
-        ckpt_model = ckpt.model
-
-    temp_net_path = None
     try:
+        ckpt_model = None
+        secondary_net_path = None
+        sf_primary_name = "Stockfish"
+        sf_secondary_name = "Stockfish (Alt)"
+        sf_comp_title = "SF (PERM) VS SF (NO-PERM)"
+
         if cross_check_config.random_weights:
             init_model = M.NNUEModel(
                 feature_name=nnue_config.features,
                 config=nnue_config.model_config,
             )
             init_random_weights(init_model)
-            with tempfile.NamedTemporaryFile(suffix=".nnue", delete=False) as temp_file:
-                net_path = temp_file.name
-            temp_net_path = net_path
 
-            writer = M.NNUEWriter(init_model, verbose=False)
-            with open(net_path, "wb") as f:
-                f.write(writer.buf)
+            # 1. Unpermuted network (temp_noperm)
+            with tempfile.NamedTemporaryFile(suffix=".nnue", delete=False) as temp_file:
+                temp_noperm_path = temp_file.name
+            temp_files.append(temp_noperm_path)
+            writer_noperm = M.NNUEWriter(init_model, verbose=False)
+            with open(temp_noperm_path, "wb") as f:
+                f.write(writer_noperm.buf)
+
+            # 2. In-memory permuted network (temp_perm)
+            model_perm = create_permuted_model(init_model)
+            with tempfile.NamedTemporaryFile(suffix=".nnue", delete=False) as temp_file:
+                temp_perm_path = temp_file.name
+            temp_files.append(temp_perm_path)
+            writer_perm = M.NNUEWriter(model_perm, verbose=False)
+            with open(temp_perm_path, "wb") as f:
+                f.write(writer_perm.buf)
+
+            net_path = temp_perm_path
+            secondary_net_path = temp_noperm_path
+            sf_primary_name = "SF (PERM)"
+            sf_secondary_name = "SF (NO-PERM)"
+            sf_comp_title = "SF (PERM) VS SF (NO-PERM)"
 
             nnue = read_model(net_path, config=nnue_config)
             init_model.to(cross_check_config.device)
             init_model.eval()
             ckpt_model = init_model
+
+        elif cross_check_config.checkpoint:
+            checkpoint = torch.load(
+                cross_check_config.checkpoint, map_location="cpu", weights_only=False
+            )
+            ckpt = M.NNUE(config=nnue_config)
+            ckpt.load_state_dict(checkpoint["state_dict"])
+            ckpt.to(cross_check_config.device)
+            ckpt.eval()
+            ckpt_model = ckpt.model
+
+            # 1. Unpermuted network serialized from checkpoint
+            with tempfile.NamedTemporaryFile(suffix=".nnue", delete=False) as temp_file:
+                temp_noperm_path = temp_file.name
+            temp_files.append(temp_noperm_path)
+            ckpt_cpu = copy.deepcopy(ckpt_model).to("cpu")
+            ckpt_cpu.clip_weights(include_input=True)
+            writer_noperm = M.NNUEWriter(ckpt_cpu, verbose=False)
+            with open(temp_noperm_path, "wb") as f:
+                f.write(writer_noperm.buf)
+
+            secondary_net_path = temp_noperm_path
+            sf_primary_name = "SF (PERM)"
+            sf_secondary_name = "SF (NO-PERM)"
+            sf_comp_title = "SF (PERM) VS SF (NO-PERM)"
+
+            if cross_check_config.net:
+                net_path = cross_check_config.net
+            else:
+                model_perm = create_permuted_model(ckpt_cpu)
+                with tempfile.NamedTemporaryFile(suffix=".nnue", delete=False) as temp_file:
+                    temp_perm_path = temp_file.name
+                temp_files.append(temp_perm_path)
+                writer_perm = M.NNUEWriter(model_perm, verbose=False)
+                with open(temp_perm_path, "wb") as f:
+                    f.write(writer_perm.buf)
+                net_path = temp_perm_path
+
+            nnue = read_model(net_path, config=nnue_config)
+
         elif cross_check_config.net:
             net_path = cross_check_config.net
             nnue = read_model(net_path, config=nnue_config)
-        else:
-            raise ValueError("Either --net or --random-weights must be specified.")
+
+            # Re-permute in-memory from loaded net to test SF (ORIG) vs SF (PERM)
+            model_perm = create_permuted_model(copy.deepcopy(nnue).to("cpu"))
+            with tempfile.NamedTemporaryFile(suffix=".nnue", delete=False) as temp_file:
+                temp_perm_path = temp_file.name
+            temp_files.append(temp_perm_path)
+            writer_perm = M.NNUEWriter(model_perm, verbose=False)
+            with open(temp_perm_path, "wb") as f:
+                f.write(writer_perm.buf)
+
+            secondary_net_path = temp_perm_path
+            sf_primary_name = "SF (ORIG)"
+            sf_secondary_name = "SF (PERM)"
+            sf_comp_title = "SF (ORIG) VS SF (PERM)"
 
         nnue.to(cross_check_config.device)
         nnue.eval()
-        # --net - returns the NNUEModel directly
         nnue_model = nnue
 
         # Run smoke test upfront before initializing dataloader
@@ -504,6 +621,9 @@ def main():
             ckpt_model,
             cross_check_config.device,
             cross_check_config.max_ckpt_error,
+            secondary_net_path=secondary_net_path,
+            sf_primary_name=sf_primary_name,
+            sf_secondary_name=sf_secondary_name,
         )
 
         input_feature_name = nnue_model.input_feature_name
@@ -516,6 +636,7 @@ def main():
         nnue_evals = []
         nnue_quantized_evals = []
         engine_evals = []
+        engine_sec_evals = []
         all_fens = []
 
         done = 0
@@ -552,6 +673,12 @@ def main():
                 net_path,
                 fens,
             )
+            if secondary_net_path:
+                engine_sec_evals += eval_engine_batch(
+                    cross_check_config.engine,
+                    secondary_net_path,
+                    fens,
+                )
 
             done += len(fens)
             print(f"Processed {done} positions.")
@@ -571,39 +698,77 @@ def main():
                 "NNUE (Q)",
             )
             compute_correlation(
-                ckpt_evals, engine_evals, all_fens, "CKPT VS SF", "CKPT", "SF"
+                ckpt_evals,
+                engine_evals,
+                all_fens,
+                f"CKPT VS {sf_primary_name}",
+                "CKPT",
+                sf_primary_name,
             )
             compute_correlation(
                 ckpt_quantized_evals,
                 engine_evals,
                 all_fens,
-                "QUANTIZED CKPT VS SF",
+                f"QUANTIZED CKPT VS {sf_primary_name}",
                 "CKPT (Q)",
-                "SF",
+                sf_primary_name,
             )
             compute_correlation(
-                nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF"
+                nnue_evals,
+                engine_evals,
+                all_fens,
+                f"NNUE VS {sf_primary_name}",
+                "NNUE",
+                sf_primary_name,
             )
             q_stats = compute_correlation(
                 nnue_quantized_evals,
                 engine_evals,
                 all_fens,
-                "QUANTIZED NNUE VS SF",
+                f"QUANTIZED NNUE VS {sf_primary_name}",
                 "NNUE (Q)",
-                "SF",
+                sf_primary_name,
             )
         else:
             compute_correlation(
-                nnue_evals, engine_evals, all_fens, "NNUE VS SF", "NNUE", "SF"
+                nnue_evals,
+                engine_evals,
+                all_fens,
+                f"NNUE VS {sf_primary_name}",
+                "NNUE",
+                sf_primary_name,
             )
             q_stats = compute_correlation(
                 nnue_quantized_evals,
                 engine_evals,
                 all_fens,
-                "QUANTIZED NNUE VS SF",
+                f"QUANTIZED NNUE VS {sf_primary_name}",
                 "NNUE (Q)",
-                "SF",
+                sf_primary_name,
             )
+
+        perm_stats = None
+        if secondary_net_path and engine_sec_evals:
+            perm_stats = compute_correlation(
+                engine_evals,
+                engine_sec_evals,
+                all_fens,
+                sf_comp_title,
+                sf_primary_name,
+                sf_secondary_name,
+            )
+
+        if (
+            secondary_net_path
+            and perm_stats is not None
+            and cross_check_config.max_perm_error is not None
+        ):
+            max_perm_err = perm_stats["max_abs_error"]
+            if max_perm_err > cross_check_config.max_perm_error:
+                raise RuntimeError(
+                    f"Cross-check error threshold exceeded: {sf_comp_title} max absolute error "
+                    f"{max_perm_err:.2f} > {cross_check_config.max_perm_error:.2f}"
+                )
 
         if (
             ckpt_model
@@ -630,8 +795,12 @@ def main():
                     f"Cross-check R^2 threshold not met: R^2 {r2:.4f} < {cross_check_config.min_r2:.4f}"
                 )
     finally:
-        if temp_net_path and os.path.exists(temp_net_path):
-            os.remove(temp_net_path)
+        for tf in temp_files:
+            if tf and os.path.exists(tf):
+                try:
+                    os.remove(tf)
+                except OSError:
+                    pass
 
 
 if __name__ == "__main__":
