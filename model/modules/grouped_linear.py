@@ -83,7 +83,8 @@ extern "C" __global__ void sparse_l1_forward(
         _sparse_forward_kernels[key] = kernel
     transposed = weight.reshape(count, outputs, width).transpose(1, 2).contiguous()
     output = torch.empty((len(x), outputs), device=x.device, dtype=x.dtype)
-    stream = cp.cuda.ExternalStream(torch.cuda.current_stream(x.device).cuda_stream)
+    curr_stream = torch.cuda.current_stream(x.device)
+    stream = cp.cuda.ExternalStream(curr_stream.cuda_stream)
     kernel(
         (len(x), tr.cdiv(outputs, 32)),
         (128,),
@@ -96,6 +97,8 @@ extern "C" __global__ void sparse_l1_forward(
         ),
         stream=stream,
     )
+    transposed.record_stream(curr_stream)
+    output.record_stream(curr_stream)
     return output
 
 
@@ -126,15 +129,16 @@ extern "C" __global__ void route(const long long* ids,int* rows,int* counts,int 
         _route_kernels[count] = kernel
     rows = torch.empty((count, len(indices)), device=indices.device, dtype=torch.int32)
     counts = torch.zeros(count, device=indices.device, dtype=torch.int32)
-    stream = cp.cuda.ExternalStream(
-        torch.cuda.current_stream(indices.device).cuda_stream
-    )
+    curr_stream = torch.cuda.current_stream(indices.device)
+    stream = cp.cuda.ExternalStream(curr_stream.cuda_stream)
     kernel(
         (tr.cdiv(len(indices), 256),),
         (256,),
         (indices.data_ptr(), rows.data_ptr(), counts.data_ptr(), len(indices)),
         stream=stream,
     )
+    rows.record_stream(curr_stream)
+    counts.record_stream(curr_stream)
     return rows, counts
 
 

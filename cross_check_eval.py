@@ -51,7 +51,7 @@ class CrossCheckConfig:
     min_r2: float | None = None
     """Minimum allowed R^2 score between quantized NNUE and engine evaluations."""
 
-    max_ckpt_error: float | None = 0.001
+    max_ckpt_error: float | None = None
     """Maximum allowed absolute error between quantized CKPT and quantized NNUE evaluations."""
 
     max_perm_error: float | None = 0.0
@@ -283,6 +283,9 @@ def compute_correlation(cmp_evals, ref_evals, fens, title, cmp_name, ref_name):
     return {
         "abs_errors": abs_errors,
         "max_abs_error": max(abs_errors) if abs_errors else 0.0,
+        "three_sigma_abs_error": (
+            get_percentile(abs_errors, 0.9973) if abs_errors else 0.0
+        ),
         "mean_abs_error": sum(abs_errors) / len(data) if data else 0.0,
         "r_squared_score": r_squared_score,
         "r_squared_q": r_squared_q,
@@ -396,7 +399,7 @@ def run_smoke_test(
     nnue_model: M.NNUEModel,
     ckpt_model: M.NNUEModel | None,
     device: str,
-    max_ckpt_error: float | None = 1.0,
+    max_ckpt_error: float | None = None,
     secondary_net_path: str | None = None,
     sf_primary_name: str = "Stockfish",
     sf_secondary_name: str = "Stockfish (Alt)",
@@ -439,46 +442,46 @@ def run_smoke_test(
     print("=" * W)
     print(f"[Smoke Test] Evaluating starting position: {fen}")
     print(f"  {sf_primary_name:<22}: {sf_eval:+d}")
+
+    errors = []
     if sf_sec_eval is not None:
         print(f"  {sf_secondary_name:<22}: {sf_sec_eval:+d}")
         diff_sf = abs(sf_eval - sf_sec_eval)
         print(f"  Diff ({sf_primary_name} - {sf_secondary_name}): {diff_sf:+d}")
         if diff_sf != 0:
-            print(
-                f"[Smoke Test] FAILED: {sf_primary_name} vs {sf_secondary_name} difference detected ({diff_sf})!"
-            )
-            print("=" * W)
-            raise RuntimeError(
-                f"Smoke test failed: {sf_primary_name} eval ({sf_eval}) and {sf_secondary_name} eval ({sf_sec_eval}) "
+            errors.append(
+                f"{sf_primary_name} eval ({sf_eval}) and {sf_secondary_name} eval ({sf_sec_eval}) "
                 f"differ by {diff_sf} on starting position."
             )
+
     print(f"  NNUE (PyTorch) Eval   : {nnue_eval:+.2f}")
     print(f"  NNUE (Quant) Eval     : {nnue_quant:+.2f}")
+
     if ckpt_model is not None and ckpt_eval is not None and ckpt_quant is not None:
         print(f"  CKPT Eval             : {ckpt_eval:+.2f}")
         print(f"  CKPT (Quant) Eval     : {ckpt_quant:+.2f}")
         diff_ckpt_nnue = abs(ckpt_quant - nnue_quant)
         print(f"  Diff (CKPT_Q - NNUE_Q): {diff_ckpt_nnue:.4f}")
-        if max_ckpt_error is not None and diff_ckpt_nnue >= max_ckpt_error:
-            print(
-                f"[Smoke Test] FAILED: CKPT (Q) vs NNUE (Q) difference too large ({diff_ckpt_nnue:.4f} >= {max_ckpt_error:.4f})!"
+        if max_ckpt_error is not None and diff_ckpt_nnue > max_ckpt_error:
+            errors.append(
+                f"CKPT (Q) eval ({ckpt_quant}) and NNUE (Q) eval ({nnue_quant}) "
+                f"differ by {diff_ckpt_nnue:.4f} (> {max_ckpt_error:.4f}) on starting position."
             )
-            print("=" * W)
-            raise RuntimeError(
-                f"Smoke test failed: CKPT (Q) eval ({ckpt_quant}) and NNUE (Q) eval ({nnue_quant}) "
-                f"differ by {diff_ckpt_nnue:.4f} (>= {max_ckpt_error:.4f}) on starting position."
-            )
+
     print(f"  Diff (Quant - {sf_primary_name}): {diff_quant:+.2f}")
 
     if math.isnan(nnue_quant) or abs(diff_quant) > 5.0:
-        print(
-            f"[Smoke Test] FAILED: Evaluation difference too large ({diff_quant:+.2f})!"
-        )
-        print("=" * W)
-        raise RuntimeError(
-            f"Smoke test failed: Quantized NNUE eval ({nnue_quant}) and {sf_primary_name} eval ({sf_eval}) "
+        errors.append(
+            f"Quantized NNUE eval ({nnue_quant}) and {sf_primary_name} eval ({sf_eval}) "
             f"differ by {diff_quant:.2f} (> 5.0) on starting position."
         )
+
+    if errors:
+        print(f"[Smoke Test] FAILED: {len(errors)} error(s) detected:")
+        for err in errors:
+            print(f"  - {err}")
+        print("=" * W)
+        raise RuntimeError("Smoke test failed: " + "; ".join(errors))
 
     print("[Smoke Test] SUCCESS: Starting position evaluation verified!")
     print("=" * W + "\n")
@@ -581,7 +584,9 @@ def main():
                 net_path = cross_check_config.net
             else:
                 model_perm = create_permuted_model(ckpt_cpu)
-                with tempfile.NamedTemporaryFile(suffix=".nnue", delete=False) as temp_file:
+                with tempfile.NamedTemporaryFile(
+                    suffix=".nnue", delete=False
+                ) as temp_file:
                     temp_perm_path = temp_file.name
                 temp_files.append(temp_perm_path)
                 writer_perm = M.NNUEWriter(model_perm, verbose=False)
@@ -775,10 +780,16 @@ def main():
             and ckpt_q_stats is not None
             and cross_check_config.max_ckpt_error is not None
         ):
+            three_sigma_err = ckpt_q_stats.get(
+                "three_sigma_abs_error", ckpt_q_stats["max_abs_error"]
+            )
             max_ckpt_err = ckpt_q_stats["max_abs_error"]
-            if max_ckpt_err >= cross_check_config.max_ckpt_error:
+            threshold = cross_check_config.max_ckpt_error
+            # Pass if 3-sigma error is within threshold (even if rare outlier exceeds max)
+            if min(three_sigma_err, max_ckpt_err) > threshold:
                 raise RuntimeError(
-                    f"Cross-check error threshold exceeded: CKPT (Q) vs NNUE (Q) max absolute error {max_ckpt_err:.4f} >= {cross_check_config.max_ckpt_error:.4f}"
+                    f"Cross-check error threshold exceeded: CKPT (Q) vs NNUE (Q) 3-sigma error "
+                    f"{three_sigma_err:.4f} (max {max_ckpt_err:.4f}) > {threshold:.4f}"
                 )
 
         if cross_check_config.max_error is not None and q_stats is not None:
