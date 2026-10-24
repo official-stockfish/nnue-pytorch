@@ -103,7 +103,7 @@ def gather_statistics_from_data(filename: str, count: int, bucket_size: int):
     # it doesn't actually matter, all we care about are the scores and outcomes
     # this is just the easiest way to do it
     dataset = data_loader.SparseBatchDataset(
-        "HalfKP",
+        "HalfKAv2_hm",
         [filename],
         batch_size,
         cyclic,
@@ -139,7 +139,7 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) <= 1:
+    if len(sys.argv) <= 1 or sys.argv[1] in ("-h", "--help"):
         show_help()
     else:
         main()
