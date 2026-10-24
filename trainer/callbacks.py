@@ -767,10 +767,16 @@ class SimpleLineLogger(Callback):
 class MoEDeadExpertReseeder(Callback):
     """Periodically checks all 810,810 contexts and reseeds dead MoE experts via traffic-weighted cell splitting."""
 
-    def __init__(self, reseed_interval: int = 1024, temperature: float = 0.5):
+    def __init__(
+        self,
+        reseed_interval: int = 1024,
+        temperature: float = 0.5,
+        min_utilization: float = 0.001,
+    ):
         super().__init__()
         self.reseed_interval = reseed_interval
         self.temperature = temperature
+        self.min_utilization = min_utilization
 
     @torch.no_grad()
     @torch.compiler.disable
@@ -794,13 +800,14 @@ class MoEDeadExpertReseeder(Callback):
             # In DDP, rank 0 determines dead experts and executes cell splitting.
             # Other ranks wait for broadcast parent tensors to avoid divergence and collective desync.
             if not is_ddp or rank == 0:
-                reseeded_w, reseeded_b = router.reseed_dead_experts_context_wide(
-                    temperature=self.temperature
+                router.reseed_dead_experts_context_wide(
+                    temperature=self.temperature,
+                    min_utilization=self.min_utilization,
                 )
+
                 parent_map_w = getattr(router, "last_reseed_parents_w", {})
                 parent_map_b = getattr(router, "last_reseed_parents_b", {})
             else:
-                reseeded_w, reseeded_b = [], []
                 parent_map_w, parent_map_b = {}, {}
 
             parent_tensor_w = torch.full(

@@ -211,8 +211,8 @@ class DualVQCodebookRouter(nn.Module):
         bias_rank: int = BIAS_RANK,
         num_biases: int = NUM_BIASES,
         commitment_cost: float = 0.005,
-        balance_cost: float = 0.004,
-        temperature: float = 1.0,
+        balance_cost: float = 0.001,
+        temperature: float = 0.2,
         reseed_dead_experts: bool = True,
         ema_decay: float = 0.999,
         quantization: QuantizationManager | None = None,
@@ -470,6 +470,7 @@ class DualVQCodebookRouter(nn.Module):
         self,
         temperature: float = 0.5,
         perturbation_scale: float = 0.02,
+        min_utilization: float = 0.001,
     ) -> tuple[list[int], list[int]]:
         """Evaluates contexts across the board context space and reseeds dead experts
         via traffic-weighted cell splitting of active experts.
@@ -519,10 +520,20 @@ class DualVQCodebookRouter(nn.Module):
         idx_b = torch.cat(all_idx_b, dim=0)
 
         counts_w = torch.bincount(idx_w, minlength=self.num_weight_experts)
-        dead_w = torch.nonzero(counts_w == 0, as_tuple=True)[0]
+        dead_w = torch.nonzero(
+            (counts_w == 0) | (self.ema_traffic_weights < min_utilization),
+            as_tuple=True,
+        )[0]
         reseeded_w: list[int] = []
         if len(dead_w) > 0:
-            active_w = torch.nonzero(counts_w > 0, as_tuple=True)[0]
+            floor_w = (1.0 / self.num_weight_experts) - 1e-5
+            active_w = torch.nonzero(
+                self.ema_traffic_weights >= floor_w, as_tuple=True
+            )[0]
+            if len(active_w) == 0:
+                active_w = torch.nonzero(counts_w > 0, as_tuple=True)[0]
+            if len(active_w) == 0:
+                active_w = torch.arange(self.num_weight_experts, device=device)
             if len(active_w) > 0:
                 traffic_w = self.ema_traffic_weights[active_w].clone()
                 if traffic_w.sum() <= 0:
@@ -547,6 +558,12 @@ class DualVQCodebookRouter(nn.Module):
                     self.codebook_weights.data[dead_idx].copy_(parent_vec + eps)
                     self.codebook_weights.data[target_idx].copy_(parent_vec - eps)
 
+                    # Split EMA traffic between parent and newly reseeded child
+                    self.ema_traffic_weights[target_idx] *= 0.5
+                    self.ema_traffic_weights[dead_idx] = self.ema_traffic_weights[
+                        target_idx
+                    ]
+
                     # Halve probability of the target to prevent dogpiling
                     probs_w[target_pos] *= 0.5
                     probs_w = probs_w / probs_w.sum().clamp(min=1e-8)
@@ -555,10 +572,20 @@ class DualVQCodebookRouter(nn.Module):
                 self.last_reseed_parents_w = parent_map_w
 
         counts_b = torch.bincount(idx_b, minlength=self.num_bias_experts)
-        dead_b = torch.nonzero(counts_b == 0, as_tuple=True)[0]
+        dead_b = torch.nonzero(
+            (counts_b == 0) | (self.ema_traffic_biases < min_utilization),
+            as_tuple=True,
+        )[0]
         reseeded_b: list[int] = []
         if len(dead_b) > 0:
-            active_b = torch.nonzero(counts_b > 0, as_tuple=True)[0]
+            floor_b = (1.0 / self.num_bias_experts) - 1e-5
+            active_b = torch.nonzero(self.ema_traffic_biases >= floor_b, as_tuple=True)[
+                0
+            ]
+            if len(active_b) == 0:
+                active_b = torch.nonzero(counts_b > 0, as_tuple=True)[0]
+            if len(active_b) == 0:
+                active_b = torch.arange(self.num_bias_experts, device=device)
             if len(active_b) > 0:
                 traffic_b = self.ema_traffic_biases[active_b].clone()
                 if traffic_b.sum() <= 0:
@@ -582,6 +609,12 @@ class DualVQCodebookRouter(nn.Module):
                     parent_vec = self.codebook_biases.data[target_idx].clone()
                     self.codebook_biases.data[dead_idx].copy_(parent_vec + eps)
                     self.codebook_biases.data[target_idx].copy_(parent_vec - eps)
+
+                    # Split EMA traffic between parent and newly reseeded child
+                    self.ema_traffic_biases[target_idx] *= 0.5
+                    self.ema_traffic_biases[dead_idx] = self.ema_traffic_biases[
+                        target_idx
+                    ]
 
                     # Halve probability of the target to prevent dogpiling
                     probs_b[target_pos] *= 0.5

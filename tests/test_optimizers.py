@@ -116,10 +116,19 @@ def test_nnue_integration_all_optimizers(optimizer_name):
     state = model.state_dict()
     assert "optimizer_state_dict" in state
 
-    # Create new model instance and load state dict
-    new_model = NNUE(config=config)
+    # Create new model instance with different weight decay and load state dict
+    from copy import deepcopy
+
+    new_cfg = deepcopy(config)
+    new_cfg.optimizer_config.dense_weight_decay = 1.0e-6
+    new_cfg.optimizer_config.dynamic_bias_weight_decay = 1.0e-6
+    new_model = NNUE(config=new_cfg)
     new_model.configure_optimizers()
     new_model.load_state_dict(state)
+
+    # Verify that new_model preserved its newly configured weight decays
+    opt = new_model.optimizer_wrapper.optimizer
+    assert any(g.get("weight_decay") == 1.0e-6 for g in opt.param_groups)
 
 
 @pytest.mark.parametrize("optimizer_name", ["rangerlite", "ranger21", "adamw"])

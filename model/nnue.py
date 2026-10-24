@@ -331,7 +331,12 @@ class NNUE(nn.Module):
             and self.optimizer_wrapper is not None
             and getattr(self.optimizer_wrapper, "optimizer", None) is not None
         ):
-            self.optimizer_wrapper.optimizer.load_state_dict(optimizer_state)
+            opt = self.optimizer_wrapper.optimizer
+            configured_wds = [group.get("weight_decay") for group in opt.param_groups]
+            opt.load_state_dict(optimizer_state)
+            for group, wd in zip(opt.param_groups, configured_wds):
+                if wd is not None:
+                    group["weight_decay"] = wd
 
     # --- Training step implementation ---
 

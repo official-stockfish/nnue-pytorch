@@ -138,7 +138,8 @@ def test_dead_expert_callback_momentum_reset():
     # Only expert 31 is dead; set heavy traffic on expert 2 so it is selected as parent
     with torch.no_grad():
         router.codebook_weights.data[31] = 1000.0
-        router.ema_traffic_weights.zero_()
+        router.ema_traffic_weights.fill_(0.01)
+        router.ema_traffic_weights[31] = 0.0
         router.ema_traffic_weights[2] = 1.0
 
     opt = torch.optim.AdamW([router.codebook_weights, router.codebook_biases], lr=1e-3)
@@ -233,7 +234,8 @@ def test_dead_expert_callback_ddp_synchronization(monkeypatch):
     router_0 = DualVQCodebookRouter()
     with torch.no_grad():
         router_0.codebook_weights.data[31] = 1000.0
-        router_0.ema_traffic_weights.zero_()
+        router_0.ema_traffic_weights.fill_(0.01)
+        router_0.ema_traffic_weights[31] = 0.0
         router_0.ema_traffic_weights[2] = 1.0
 
     exp_avg_w = torch.ones_like(router_0.codebook_weights)

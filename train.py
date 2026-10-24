@@ -371,6 +371,7 @@ def main():
         MoEDeadExpertReseeder(
             reseed_interval=args.moe_reseed_interval,
             temperature=args.moe_reseed_sampling_temperature,
+            min_utilization=args.moe_reseed_min_utilization,
         ),
         TimeLimit(args.max_time),
         nan_callback,
