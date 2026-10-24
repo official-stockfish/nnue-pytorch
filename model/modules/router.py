@@ -314,21 +314,13 @@ class DualVQCodebookRouter(nn.Module):
             torch.zeros(num_contexts, dtype=torch.int32),
             persistent=False,
         )
-        self.register_buffer(
-            "lut_valid",
-            torch.tensor(False, dtype=torch.bool),
-            persistent=False,
-        )
+        self.lut_valid: bool = False
         self.register_buffer(
             "coalesced_biases",
             torch.zeros(num_bias_experts, num_biases, dtype=torch.float32),
             persistent=False,
         )
-        self.register_buffer(
-            "coalesced_valid",
-            torch.tensor(False, dtype=torch.bool),
-            persistent=False,
-        )
+        self.coalesced_valid: bool = False
 
         self.last_reseed_parents_w: dict[int, int] = {}
         self.last_reseed_parents_b: dict[int, int] = {}
@@ -357,8 +349,8 @@ class DualVQCodebookRouter(nn.Module):
     def train(self, mode: bool = True):
         super().train(mode)
         if mode:
-            self.lut_valid.fill_(False)
-            self.coalesced_valid.fill_(False)
+            self.lut_valid = False
+            self.coalesced_valid = False
         return self
 
     def init_weights(self) -> None:
@@ -448,7 +440,7 @@ class DualVQCodebookRouter(nn.Module):
             return indices, z_q_ste, commit_loss, balance_loss
 
     def get_coalesced_bias_table(self) -> torch.Tensor:
-        if bool(self.coalesced_valid.item()):
+        if self.coalesced_valid:
             return self.coalesced_biases
         with ieee_matmul_precision():
             raw_biases = self.bias_head(self.codebook_b)
@@ -457,7 +449,7 @@ class DualVQCodebookRouter(nn.Module):
                 self.coalesced_biases.copy_(
                     self.quantization.dequantize_dynamic_bias(q_biases)
                 )
-                self.coalesced_valid.fill_(True)
+                self.coalesced_valid = True
                 return self.coalesced_biases
             return raw_biases
 
@@ -466,7 +458,7 @@ class DualVQCodebookRouter(nn.Module):
         self.coalesced_biases.copy_(
             biases.to(device=self.coalesced_biases.device, dtype=torch.float32)
         )
-        self.coalesced_valid.fill_(True)
+        self.coalesced_valid = True
 
     @torch.no_grad()
     def update_lookup_table(self) -> torch.Tensor:
@@ -496,7 +488,7 @@ class DualVQCodebookRouter(nn.Module):
                 packed = (idx_w & 0x3F) | ((idx_b & 0xFF) << 6)
                 self.lut[i : i + chunk_size] = packed
 
-            self.lut_valid.fill_(True)
+            self.lut_valid = True
 
             if self.quantization is not None:
                 raw_biases = self.bias_head(self.codebook_b)
@@ -504,12 +496,12 @@ class DualVQCodebookRouter(nn.Module):
                 self.coalesced_biases.copy_(
                     self.quantization.dequantize_dynamic_bias(q_biases)
                 )
-                self.coalesced_valid.fill_(True)
+                self.coalesced_valid = True
 
             return self.lut
 
     def get_lookup_table(self) -> torch.Tensor:
-        if not bool(self.lut_valid.item()):
+        if not self.lut_valid:
             self.update_lookup_table()
         return self.lut
 
@@ -520,7 +512,7 @@ class DualVQCodebookRouter(nn.Module):
                 torch.int32
             )
         self.lut.copy_(table.to(device=self.lut.device, dtype=torch.int32))
-        self.lut_valid.fill_(True)
+        self.lut_valid = True
         for p in self.parameters():
             p.zero_()
 
@@ -670,8 +662,8 @@ class DualVQCodebookRouter(nn.Module):
                 self.last_reseed_parents_b = parent_map_b
 
         if reseeded_w or reseeded_b:
-            self.lut_valid.fill_(False)
-            self.coalesced_valid.fill_(False)
+            self.lut_valid = False
+            self.coalesced_valid = False
 
         return reseeded_w, reseeded_b
 
@@ -721,8 +713,8 @@ class DualVQCodebookRouter(nn.Module):
             balance_loss = balance_loss_w + balance_loss_b
             moe_loss = commit_loss + self.balance_cost * balance_loss
 
-            self.lut_valid.fill_(False)
-            self.coalesced_valid.fill_(False)
+            self.lut_valid = False
+            self.coalesced_valid = False
 
             half = c_us.shape[0]
             e1_w = e_w[:half]
@@ -752,7 +744,7 @@ class DualVQCodebookRouter(nn.Module):
                 balance_loss,
             )
         else:
-            if not bool(self.lut_valid.item()):
+            if not self.lut_valid:
                 self.update_lookup_table()
             packed_1 = self.lut[c_us.long()]
             packed_2 = self.lut[c_them.long()]

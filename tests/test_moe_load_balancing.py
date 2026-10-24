@@ -63,7 +63,7 @@ def test_dead_expert_reseeding():
         assert not torch.all(router.codebook_weights.data[j] == 1000.0), (
             f"Expert {j} was not reseeded!"
         )
-    assert not bool(router.lut_valid.item())
+    assert not router.lut_valid
 
 
 def test_traffic_weighted_cell_splitting():
@@ -97,7 +97,7 @@ def test_traffic_weighted_cell_splitting():
 def test_lut_cache_lifecycle():
     """Verify clean LUT cache invalidation, train-mode resets, and non-persistence."""
     router = DualVQCodebookRouter()
-    assert not bool(router.lut_valid.item())
+    assert not router.lut_valid
 
     # State dict should not contain ephemeral buffers lut and lut_valid
     sd = router.state_dict()
@@ -107,11 +107,11 @@ def test_lut_cache_lifecycle():
     # update_lookup_table sets lut_valid = True
     lut = router.update_lookup_table()
     assert lut.shape[0] == ROUTER_TABLE_SIZE
-    assert bool(router.lut_valid.item())
+    assert router.lut_valid
 
     # Switching to train mode invalidates the LUT cache
     router.train()
-    assert not bool(router.lut_valid.item())
+    assert not router.lut_valid
 
 
 def test_dead_expert_callback_momentum_reset():
