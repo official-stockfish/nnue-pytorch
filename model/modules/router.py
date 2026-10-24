@@ -41,7 +41,7 @@ NUM_BIASES = 128
 BIAS_RANK = 32
 CODEBOOK_DIM = 256
 ROUTER_HASH = 0x4475616C  # 'Dual'
-DEFAULT_CODEBOOK_TARGET_NORM = 8.7232
+DEFAULT_CODEBOOK_TARGET_NORM = 1.0
 
 
 def rms_norm(
@@ -248,8 +248,8 @@ class DualVQCodebookRouter(nn.Module):
         bias_rank: int = BIAS_RANK,
         num_biases: int = NUM_BIASES,
         commitment_cost: float = 0.005,
-        balance_cost: float = 0.001,
-        temperature: float = 0.2,
+        balance_cost: float = 0.004,
+        temperature: float = 0.1,
         reseed_dead_experts: bool = True,
         ema_decay: float = 0.999,
         quantization: QuantizationManager | None = None,
@@ -344,7 +344,9 @@ class DualVQCodebookRouter(nn.Module):
 
     def bias_head(self, emb: torch.Tensor) -> torch.Tensor:
         """Linear bottleneck on non-linearly activated codebook embeddings: Wup . Wdown . GELU(emb)."""
-        return self.bias_head_up(self.bias_head_down(F.gelu(emb)))
+        h = self.bias_head_down(F.gelu(emb))
+        h = rms_norm(h, target_norm=1.0)
+        return self.bias_head_up(h)
 
     def train(self, mode: bool = True):
         super().train(mode)

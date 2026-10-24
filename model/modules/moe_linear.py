@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from ..quantize import QuantizationManager
-from .router import CODEBOOK_DIM, ieee_matmul_precision
+from .router import CODEBOOK_DIM, ieee_matmul_precision, rms_norm
 
 try:
     from .grouped_linear import grouped_l1, grouped_l1_preferred
@@ -84,6 +84,7 @@ class MoeLinear(nn.Module):
         with ieee_matmul_precision():
             act = F.gelu(c)
             h = F.linear(act, self.adapter_down)
+            h = rms_norm(h, target_norm=1.0)
             w = F.linear(h, self.adapter_up).reshape(
                 self.out_features, self.in_features
             )
@@ -99,6 +100,7 @@ class MoeLinear(nn.Module):
             )
         act = F.gelu(codebook)
         h = F.linear(act, self.adapter_down)  # (count, rank)
+        h = rms_norm(h, target_norm=1.0)
         w = F.linear(h, self.adapter_up)  # (count, out_features * in_features)
         return w.view(-1, self.out_features, self.in_features)
 
@@ -111,6 +113,7 @@ class MoeLinear(nn.Module):
             )
         act = F.gelu(codebook)
         h = F.linear(act, self.adapter_down)  # (count, rank)
+        h = rms_norm(h, target_norm=1.0)
         return F.linear(h, self.bias_adapter)  # (count, out_features)
 
     def get_all_weights_and_biases(
