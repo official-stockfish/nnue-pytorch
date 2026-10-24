@@ -55,6 +55,26 @@ def rms_norm(
     return x * (target_rms / rms)
 
 
+def center_and_rms_norm(
+    x: torch.Tensor,
+    target_norm: float = DEFAULT_CODEBOOK_TARGET_NORM,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Mean-centers vectors and projects them onto hypersphere of radius target_norm."""
+    x_c = x - torch.mean(x, dim=-1, keepdim=True)
+    rms = torch.sqrt(torch.mean(x_c**2, dim=-1, keepdim=True) + eps)
+    target_rms = target_norm / math.sqrt(x.shape[-1])
+    return x_c * (target_rms / rms)
+
+
+def codebook_diversity_loss(cb: torch.Tensor) -> torch.Tensor:
+    """Penalizes pairwise cosine similarity between distinct codebook vectors (Frobenius distance to identity)."""
+    k = cb.shape[0]
+    gram = torch.matmul(cb, cb.t())
+    off_diag = gram - torch.eye(k, device=cb.device, dtype=cb.dtype)
+    return torch.sum(off_diag**2) / (k * (k - 1))
+
+
 def get_router_hash(
     num_weight_experts: int = NUM_WEIGHT_EXPERTS,
     num_bias_experts: int = NUM_BIAS_EXPERTS,
@@ -248,8 +268,9 @@ class DualVQCodebookRouter(nn.Module):
         bias_rank: int = BIAS_RANK,
         num_biases: int = NUM_BIASES,
         commitment_cost: float = 0.005,
-        balance_cost: float = 0.004,
-        temperature: float = 0.1,
+        balance_cost: float = 0.001,
+        temperature: float = 0.2,
+        diversity_cost: float = 0.01,
         reseed_dead_experts: bool = True,
         ema_decay: float = 0.999,
         quantization: QuantizationManager | None = None,
@@ -265,6 +286,7 @@ class DualVQCodebookRouter(nn.Module):
         self.commitment_cost = commitment_cost
         self.balance_cost = balance_cost
         self.temperature = temperature
+        self.diversity_cost = diversity_cost
         self.reseed_dead_experts = reseed_dead_experts
         self.ema_decay = ema_decay
         self.quantization = quantization
@@ -329,13 +351,13 @@ class DualVQCodebookRouter(nn.Module):
 
     @property
     def codebook_w(self) -> torch.Tensor:
-        """RMS-normalized weight codebook (single source of truth)."""
-        return rms_norm(self.codebook_weights, self.codebook_target_norm)
+        """Zero-mean RMS-normalized weight codebook (single source of truth)."""
+        return center_and_rms_norm(self.codebook_weights, self.codebook_target_norm)
 
     @property
     def codebook_b(self) -> torch.Tensor:
-        """RMS-normalized bias codebook (single source of truth)."""
-        return rms_norm(self.codebook_biases, self.codebook_target_norm)
+        """Zero-mean RMS-normalized bias codebook (single source of truth)."""
+        return center_and_rms_norm(self.codebook_biases, self.codebook_target_norm)
 
     @property
     def codebook(self) -> torch.Tensor:
@@ -371,7 +393,7 @@ class DualVQCodebookRouter(nn.Module):
         nn.init.zeros_(self.bias_head_up.bias)
 
     def get_context_vector(self, c: torch.Tensor) -> torch.Tensor:
-        """Computes and RMS-normalizes context vector for batch of context indices c."""
+        """Computes, mean-centers, and RMS-normalizes context vector for batch of context indices c."""
         mat_id, k_us, k_them = decompose_router_index(c)
         mat_feats = self.material_decode_table[mat_id]  # (B, 4)
         t = mat_feats[:, 0]
@@ -381,10 +403,10 @@ class DualVQCodebookRouter(nn.Module):
 
         z_mat = self.embed_T(t) + self.embed_P(p) + self.embed_Q(q) + self.embed_BP(bp)
         z_king = self.king_embed(k_us, k_them)
-        return rms_norm(z_mat + z_king, self.codebook_target_norm)
+        return center_and_rms_norm(z_mat + z_king, self.codebook_target_norm)
 
     def get_all_context_vectors(self) -> torch.Tensor:
-        """Computes and RMS-normalizes context vectors for all 810,810 contexts."""
+        """Computes, mean-centers, and RMS-normalizes context vectors for all 810,810 contexts."""
         device = self.codebook_weights.device
 
         # Compute z_mat for all 378 material states
@@ -407,7 +429,7 @@ class DualVQCodebookRouter(nn.Module):
         z_all = (z_mat.unsqueeze(1) + z_king.unsqueeze(0)).reshape(
             self.num_contexts, self.dim
         )
-        return rms_norm(z_all, self.codebook_target_norm)
+        return center_and_rms_norm(z_all, self.codebook_target_norm)
 
     def quantize(
         self, z: torch.Tensor, codebook: torch.Tensor, num_experts: int
@@ -713,7 +735,14 @@ class DualVQCodebookRouter(nn.Module):
 
             commit_loss = commit_loss_w + commit_loss_b
             balance_loss = balance_loss_w + balance_loss_b
-            moe_loss = commit_loss + self.balance_cost * balance_loss
+            div_loss = codebook_diversity_loss(
+                self.codebook_w
+            ) + codebook_diversity_loss(self.codebook_b)
+            moe_loss = (
+                commit_loss
+                + self.balance_cost * balance_loss
+                + self.diversity_cost * div_loss
+            )
 
             self.lut_valid = False
             self.coalesced_valid = False
