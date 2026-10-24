@@ -178,10 +178,12 @@ def test_dead_expert_reseeding():
     torch.manual_seed(99)
     router = DualVQCodebookRouter()
 
-    # Force expert 0 in weights and expert 0 in biases to be extreme outliers
+    # Force expert 0 in weights and expert 0 in biases to be extreme outliers / dead
     with torch.no_grad():
         router.codebook_weights[0].fill_(1000.0)
         router.codebook_biases[0].fill_(1000.0)
+        router.ema_traffic_weights[0] = 0.0
+        router.ema_traffic_biases[0] = 0.0
 
     reseeded_w, reseeded_b = router.reseed_dead_experts_context_wide()
     assert 0 in reseeded_w

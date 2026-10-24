@@ -138,7 +138,7 @@ class NNUEModel(nn.Module):
         )
         x = self.layer_stacks(
             l0_,
-            self.router.codebook_weights,
+            self.router.codebook,
             e1_w,
             e2_w,
             dyn_b1,

@@ -16,6 +16,18 @@ NUM_BIASES = 128
 BIAS_RANK = 32
 CODEBOOK_DIM = 256
 ROUTER_HASH = 0x4475616C  # 'Dual'
+DEFAULT_CODEBOOK_TARGET_NORM = 8.7232
+
+
+def rms_norm(
+    x: torch.Tensor,
+    target_norm: float = DEFAULT_CODEBOOK_TARGET_NORM,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Projects vectors onto a hypersphere of radius target_norm (parameter-free RMSNorm)."""
+    rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + eps)
+    target_rms = target_norm / math.sqrt(x.shape[-1])
+    return x * (target_rms / rms)
 
 
 def get_router_hash(
@@ -216,6 +228,7 @@ class DualVQCodebookRouter(nn.Module):
         reseed_dead_experts: bool = True,
         ema_decay: float = 0.999,
         quantization: QuantizationManager | None = None,
+        codebook_target_norm: float = DEFAULT_CODEBOOK_TARGET_NORM,
     ):
         super().__init__()
         self.num_contexts = num_contexts
@@ -230,6 +243,7 @@ class DualVQCodebookRouter(nn.Module):
         self.reseed_dead_experts = reseed_dead_experts
         self.ema_decay = ema_decay
         self.quantization = quantization
+        self.codebook_target_norm = codebook_target_norm
 
         # Material feature embedding tables
         self.embed_T = nn.Embedding(16, dim)
@@ -297,8 +311,19 @@ class DualVQCodebookRouter(nn.Module):
         self.init_weights()
 
     @property
+    def codebook_w(self) -> torch.Tensor:
+        """RMS-normalized weight codebook (single source of truth)."""
+        return rms_norm(self.codebook_weights, self.codebook_target_norm)
+
+    @property
+    def codebook_b(self) -> torch.Tensor:
+        """RMS-normalized bias codebook (single source of truth)."""
+        return rms_norm(self.codebook_biases, self.codebook_target_norm)
+
+    @property
     def codebook(self) -> torch.Tensor:
-        return self.codebook_weights
+        """Normalized weight codebook for downstream layer stacks and serialization."""
+        return self.codebook_w
 
     def bias_head(self, emb: torch.Tensor) -> torch.Tensor:
         """Linear bottleneck on non-linearly activated codebook embeddings: Wup . Wdown . GELU(emb)."""
@@ -327,6 +352,7 @@ class DualVQCodebookRouter(nn.Module):
         nn.init.zeros_(self.bias_head_up.bias)
 
     def get_context_vector(self, c: torch.Tensor) -> torch.Tensor:
+        """Computes and RMS-normalizes context vector for batch of context indices c."""
         mat_id, k_us, k_them = decompose_router_index(c)
         mat_feats = self.material_decode_table[mat_id]  # (B, 4)
         t = mat_feats[:, 0]
@@ -336,7 +362,33 @@ class DualVQCodebookRouter(nn.Module):
 
         z_mat = self.embed_T(t) + self.embed_P(p) + self.embed_Q(q) + self.embed_BP(bp)
         z_king = self.king_embed(k_us, k_them)
-        return z_mat + z_king
+        return rms_norm(z_mat + z_king, self.codebook_target_norm)
+
+    def get_all_context_vectors(self) -> torch.Tensor:
+        """Computes and RMS-normalizes context vectors for all 810,810 contexts."""
+        device = self.codebook_weights.device
+
+        # Compute z_mat for all 378 material states
+        mat_feats = self.material_decode_table  # (378, 4)
+        z_mat = (
+            self.embed_T(mat_feats[:, 0])
+            + self.embed_P(mat_feats[:, 1])
+            + self.embed_Q(mat_feats[:, 2])
+            + self.embed_BP(mat_feats[:, 3])
+        )  # (378, dim)
+
+        # Compute z_king for all 33 x 65 = 2,145 king pairs
+        all_kus = torch.arange(NUM_OUR_KINGS, device=device).repeat_interleave(
+            NUM_ENEMY_KINGS
+        )
+        all_kth = torch.arange(NUM_ENEMY_KINGS, device=device).repeat(NUM_OUR_KINGS)
+        z_king = self.king_embed(all_kus, all_kth)  # (2145, dim)
+
+        # Outer sum: (378, 2145, dim) -> (810810, dim)
+        z_all = (z_mat.unsqueeze(1) + z_king.unsqueeze(0)).reshape(
+            self.num_contexts, self.dim
+        )
+        return rms_norm(z_all, self.codebook_target_norm)
 
     def quantize(
         self, z: torch.Tensor, codebook: torch.Tensor, num_experts: int
@@ -372,7 +424,7 @@ class DualVQCodebookRouter(nn.Module):
     def get_coalesced_bias_table(self) -> torch.Tensor:
         if bool(self.coalesced_valid.item()):
             return self.coalesced_biases
-        raw_biases = self.bias_head(self.codebook_biases)
+        raw_biases = self.bias_head(self.codebook_b)
         if self.quantization is not None:
             q_biases = self.quantization.quantize_dynamic_bias(raw_biases)
             self.coalesced_biases.copy_(
@@ -392,31 +444,10 @@ class DualVQCodebookRouter(nn.Module):
     @torch.no_grad()
     def update_lookup_table(self) -> torch.Tensor:
         """Evaluates all 810,810 contexts and bit-packs (idx_w, idx_b) into uint16 lookup table."""
-        device = self.codebook_weights.device
+        z_all = self.get_all_context_vectors()
 
-        # Compute z_mat for all 378 material states
-        mat_feats = self.material_decode_table  # (378, 4)
-        z_mat = (
-            self.embed_T(mat_feats[:, 0])
-            + self.embed_P(mat_feats[:, 1])
-            + self.embed_Q(mat_feats[:, 2])
-            + self.embed_BP(mat_feats[:, 3])
-        )  # (378, 32)
-
-        # Compute z_king for all 33 x 65 = 2,145 king pairs
-        all_kus = torch.arange(NUM_OUR_KINGS, device=device).repeat_interleave(
-            NUM_ENEMY_KINGS
-        )
-        all_kth = torch.arange(NUM_ENEMY_KINGS, device=device).repeat(NUM_OUR_KINGS)
-        z_king = self.king_embed(all_kus, all_kth)  # (2145, 32)
-
-        # Outer sum: (378, 2145, 32) -> (810810, 32)
-        z_all = (z_mat.unsqueeze(1) + z_king.unsqueeze(0)).reshape(
-            self.num_contexts, self.dim
-        )
-
-        cb_w = self.codebook_weights
-        cb_b = self.codebook_biases
+        cb_w = self.codebook_w
+        cb_b = self.codebook_b
         cb_w_sq = torch.sum(cb_w**2, dim=-1).unsqueeze(0)
         cb_b_sq = torch.sum(cb_b**2, dim=-1).unsqueeze(0)
 
@@ -440,7 +471,7 @@ class DualVQCodebookRouter(nn.Module):
         self.lut_valid.fill_(True)
 
         if self.quantization is not None:
-            raw_biases = self.bias_head(self.codebook_biases)
+            raw_biases = self.bias_head(self.codebook_b)
             q_biases = self.quantization.quantize_dynamic_bias(raw_biases)
             self.coalesced_biases.copy_(
                 self.quantization.dequantize_dynamic_bias(q_biases)
@@ -479,24 +510,10 @@ class DualVQCodebookRouter(nn.Module):
         self.last_reseed_parents_b = {}
 
         device = self.codebook_weights.device
-        mat_feats = self.material_decode_table
-        z_mat = (
-            self.embed_T(mat_feats[:, 0])
-            + self.embed_P(mat_feats[:, 1])
-            + self.embed_Q(mat_feats[:, 2])
-            + self.embed_BP(mat_feats[:, 3])
-        )
-        all_kus = torch.arange(NUM_OUR_KINGS, device=device).repeat_interleave(
-            NUM_ENEMY_KINGS
-        )
-        all_kth = torch.arange(NUM_ENEMY_KINGS, device=device).repeat(NUM_OUR_KINGS)
-        z_king = self.king_embed(all_kus, all_kth)
-        z_all = (z_mat.unsqueeze(1) + z_king.unsqueeze(0)).reshape(
-            self.num_contexts, self.dim
-        )
+        z_all = self.get_all_context_vectors()
 
-        cb_w = self.codebook_weights
-        cb_b = self.codebook_biases
+        cb_w = self.codebook_w
+        cb_b = self.codebook_b
         cb_w_sq = torch.sum(cb_w**2, dim=-1).unsqueeze(0)
         cb_b_sq = torch.sum(cb_b**2, dim=-1).unsqueeze(0)
 
@@ -648,10 +665,10 @@ class DualVQCodebookRouter(nn.Module):
             z = self.get_context_vector(c_combined)
 
             e_w, _, commit_loss_w, balance_loss_w = self.quantize(
-                z, self.codebook_weights, self.num_weight_experts
+                z, self.codebook_w, self.num_weight_experts
             )
             idx_b, z_q_ste_b, commit_loss_b, balance_loss_b = self.quantize(
-                z, self.codebook_biases, self.num_bias_experts
+                z, self.codebook_b, self.num_bias_experts
             )
 
             # Update recent batch usage EMA buffers
