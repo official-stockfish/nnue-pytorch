@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from ..quantize import QuantizationManager
-from .router import CODEBOOK_DIM
+from .router import CODEBOOK_DIM, ieee_matmul_precision
 
 try:
     from .grouped_linear import grouped_l1, grouped_l1_preferred
@@ -81,11 +81,14 @@ class MoeLinear(nn.Module):
                 f"codebook dimension mismatch in MoeLinear: "
                 f"adapter_down expects {self.adapter_down.shape[1]}, got {c.shape[-1]}"
             )
-        act = F.gelu(c)
-        h = F.linear(act, self.adapter_down)
-        w = F.linear(h, self.adapter_up).reshape(self.out_features, self.in_features)
-        b = F.linear(h, self.bias_adapter).reshape(self.out_features)
-        return w, b
+        with ieee_matmul_precision():
+            act = F.gelu(c)
+            h = F.linear(act, self.adapter_down)
+            w = F.linear(h, self.adapter_up).reshape(
+                self.out_features, self.in_features
+            )
+            b = F.linear(h, self.bias_adapter).reshape(self.out_features)
+            return w, b
 
     def get_delta_weights(self, codebook: torch.Tensor) -> torch.Tensor:
         # codebook: (count, codebook_dim)
@@ -121,14 +124,15 @@ class MoeLinear(nn.Module):
                 "codebook must be provided when MoeLinear is not coalesced"
             )
 
-        w = self.get_delta_weights(codebook)
-        b = self.get_delta_biases(codebook)
+        with ieee_matmul_precision():
+            w = self.get_delta_weights(codebook)
+            b = self.get_delta_biases(codebook)
 
-        flat_w = w.reshape(
-            self.count * self.out_features, self.in_features
-        ).contiguous()
-        flat_b = b.reshape(self.count * self.out_features).contiguous()
-        return flat_w, flat_b
+            flat_w = w.reshape(
+                self.count * self.out_features, self.in_features
+            ).contiguous()
+            flat_b = b.reshape(self.count * self.out_features).contiguous()
+            return flat_w, flat_b
 
     # Backward compatibility alias
     get_merged_weights_and_biases = get_all_weights_and_biases

@@ -1,10 +1,35 @@
 import math
+from contextlib import contextmanager
 
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 from ..quantize import QuantizationManager
+
+
+@contextmanager
+def ieee_matmul_precision():
+    """Forces standard IEEE float32 precision (disabling TF32) for numerical sensitivity.
+
+    Ensures discrete routing decisions (argmin) and codebook distance metrics
+    are bit-identical between training (CUDA), table generation (CUDA/CPU),
+    and Stockfish inference.
+    """
+    if not torch.cuda.is_available():
+        yield
+        return
+
+    prev_precision = torch.get_float32_matmul_precision()
+    prev_tf32 = torch.backends.cuda.matmul.allow_tf32
+    try:
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.allow_tf32 = False
+        yield
+    finally:
+        torch.set_float32_matmul_precision(prev_precision)
+        torch.backends.cuda.matmul.allow_tf32 = prev_tf32
+
 
 NUM_MATERIAL_STATES = 378
 NUM_OUR_KINGS = 33
@@ -393,46 +418,48 @@ class DualVQCodebookRouter(nn.Module):
     def quantize(
         self, z: torch.Tensor, codebook: torch.Tensor, num_experts: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        z_sq = torch.sum(z**2, dim=-1, keepdim=True)
-        c_sq = torch.sum(codebook**2, dim=-1).unsqueeze(0)
-        dot = torch.matmul(z, codebook.t())
-        distances = z_sq + c_sq - 2.0 * dot
+        with ieee_matmul_precision():
+            z_sq = torch.sum(z**2, dim=-1, keepdim=True)
+            c_sq = torch.sum(codebook**2, dim=-1).unsqueeze(0)
+            dot = torch.matmul(z, codebook.t())
+            distances = z_sq + c_sq - 2.0 * dot
 
-        indices = torch.argmin(distances, dim=-1)
-        z_q = F.embedding(indices, codebook)
+            indices = torch.argmin(distances, dim=-1)
+            z_q = F.embedding(indices, codebook)
 
-        # Commitment loss
-        vq_loss = 0.25 * F.mse_loss(z, z_q.detach()) + F.mse_loss(z_q, z.detach())
-        commit_loss = self.commitment_cost * vq_loss
+            # Commitment loss
+            vq_loss = 0.25 * F.mse_loss(z, z_q.detach()) + F.mse_loss(z_q, z.detach())
+            commit_loss = self.commitment_cost * vq_loss
 
-        # Load balancing auxiliary loss
-        k_exp = num_experts
-        one_hot = F.one_hot(indices, num_classes=k_exp).float()
-        f = one_hot.mean(dim=0).detach()
+            # Load balancing auxiliary loss
+            k_exp = num_experts
+            one_hot = F.one_hot(indices, num_classes=k_exp).float()
+            f = one_hot.mean(dim=0).detach()
 
-        scaled_neg_dist = -distances / max(self.temperature, 1e-4)
-        probs = F.softmax(scaled_neg_dist, dim=-1)
-        prob_mean = probs.mean(dim=0)
+            scaled_neg_dist = -distances / max(self.temperature, 1e-4)
+            probs = F.softmax(scaled_neg_dist, dim=-1)
+            prob_mean = probs.mean(dim=0)
 
-        balance_loss = k_exp * torch.sum(f * prob_mean) - 1.0
+            balance_loss = k_exp * torch.sum(f * prob_mean) - 1.0
 
-        # Straight-Through Estimator
-        z_q_ste = z + (z_q - z).detach()
+            # Straight-Through Estimator
+            z_q_ste = z + (z_q - z).detach()
 
-        return indices, z_q_ste, commit_loss, balance_loss
+            return indices, z_q_ste, commit_loss, balance_loss
 
     def get_coalesced_bias_table(self) -> torch.Tensor:
         if bool(self.coalesced_valid.item()):
             return self.coalesced_biases
-        raw_biases = self.bias_head(self.codebook_b)
-        if self.quantization is not None:
-            q_biases = self.quantization.quantize_dynamic_bias(raw_biases)
-            self.coalesced_biases.copy_(
-                self.quantization.dequantize_dynamic_bias(q_biases)
-            )
-            self.coalesced_valid.fill_(True)
-            return self.coalesced_biases
-        return raw_biases
+        with ieee_matmul_precision():
+            raw_biases = self.bias_head(self.codebook_b)
+            if self.quantization is not None:
+                q_biases = self.quantization.quantize_dynamic_bias(raw_biases)
+                self.coalesced_biases.copy_(
+                    self.quantization.dequantize_dynamic_bias(q_biases)
+                )
+                self.coalesced_valid.fill_(True)
+                return self.coalesced_biases
+            return raw_biases
 
     @torch.no_grad()
     def load_coalesced_biases(self, biases: torch.Tensor) -> None:
@@ -444,41 +471,42 @@ class DualVQCodebookRouter(nn.Module):
     @torch.no_grad()
     def update_lookup_table(self) -> torch.Tensor:
         """Evaluates all 810,810 contexts and bit-packs (idx_w, idx_b) into uint16 lookup table."""
-        z_all = self.get_all_context_vectors()
+        with ieee_matmul_precision():
+            z_all = self.get_all_context_vectors()
 
-        cb_w = self.codebook_w
-        cb_b = self.codebook_b
-        cb_w_sq = torch.sum(cb_w**2, dim=-1).unsqueeze(0)
-        cb_b_sq = torch.sum(cb_b**2, dim=-1).unsqueeze(0)
+            cb_w = self.codebook_w
+            cb_b = self.codebook_b
+            cb_w_sq = torch.sum(cb_w**2, dim=-1).unsqueeze(0)
+            cb_b_sq = torch.sum(cb_b**2, dim=-1).unsqueeze(0)
 
-        chunk_size = 65536
-        for i in range(0, self.num_contexts, chunk_size):
-            z_chunk = z_all[i : i + chunk_size]
-            z_sq = torch.sum(z_chunk**2, dim=-1, keepdim=True)
+            chunk_size = 65536
+            for i in range(0, self.num_contexts, chunk_size):
+                z_chunk = z_all[i : i + chunk_size]
+                z_sq = torch.sum(z_chunk**2, dim=-1, keepdim=True)
 
-            # Weight routing (64 experts)
-            dist_w = z_sq + cb_w_sq - 2.0 * torch.matmul(z_chunk, cb_w.t())
-            idx_w = torch.argmin(dist_w, dim=-1)
+                # Weight routing (64 experts)
+                dist_w = z_sq + cb_w_sq - 2.0 * torch.matmul(z_chunk, cb_w.t())
+                idx_w = torch.argmin(dist_w, dim=-1)
 
-            # Bias routing (256 experts)
-            dist_b = z_sq + cb_b_sq - 2.0 * torch.matmul(z_chunk, cb_b.t())
-            idx_b = torch.argmin(dist_b, dim=-1)
+                # Bias routing (256 experts)
+                dist_b = z_sq + cb_b_sq - 2.0 * torch.matmul(z_chunk, cb_b.t())
+                idx_b = torch.argmin(dist_b, dim=-1)
 
-            # Bit packing: 6 bits weight | 8 bits bias
-            packed = (idx_w & 0x3F) | ((idx_b & 0xFF) << 6)
-            self.lut[i : i + chunk_size] = packed
+                # Bit packing: 6 bits weight | 8 bits bias
+                packed = (idx_w & 0x3F) | ((idx_b & 0xFF) << 6)
+                self.lut[i : i + chunk_size] = packed
 
-        self.lut_valid.fill_(True)
+            self.lut_valid.fill_(True)
 
-        if self.quantization is not None:
-            raw_biases = self.bias_head(self.codebook_b)
-            q_biases = self.quantization.quantize_dynamic_bias(raw_biases)
-            self.coalesced_biases.copy_(
-                self.quantization.dequantize_dynamic_bias(q_biases)
-            )
-            self.coalesced_valid.fill_(True)
+            if self.quantization is not None:
+                raw_biases = self.bias_head(self.codebook_b)
+                q_biases = self.quantization.quantize_dynamic_bias(raw_biases)
+                self.coalesced_biases.copy_(
+                    self.quantization.dequantize_dynamic_bias(q_biases)
+                )
+                self.coalesced_valid.fill_(True)
 
-        return self.lut
+            return self.lut
 
     def get_lookup_table(self) -> torch.Tensor:
         if not bool(self.lut_valid.item()):
@@ -510,31 +538,32 @@ class DualVQCodebookRouter(nn.Module):
         self.last_reseed_parents_b = {}
 
         device = self.codebook_weights.device
-        z_all = self.get_all_context_vectors()
+        with ieee_matmul_precision():
+            z_all = self.get_all_context_vectors()
 
-        cb_w = self.codebook_w
-        cb_b = self.codebook_b
-        cb_w_sq = torch.sum(cb_w**2, dim=-1).unsqueeze(0)
-        cb_b_sq = torch.sum(cb_b**2, dim=-1).unsqueeze(0)
+            cb_w = self.codebook_w
+            cb_b = self.codebook_b
+            cb_w_sq = torch.sum(cb_w**2, dim=-1).unsqueeze(0)
+            cb_b_sq = torch.sum(cb_b**2, dim=-1).unsqueeze(0)
 
-        chunk_size = 65536
-        all_idx_w = []
-        all_idx_b = []
+            chunk_size = 65536
+            all_idx_w = []
+            all_idx_b = []
 
-        for i in range(0, self.num_contexts, chunk_size):
-            z_chunk = z_all[i : i + chunk_size]
-            z_sq = torch.sum(z_chunk**2, dim=-1, keepdim=True)
+            for i in range(0, self.num_contexts, chunk_size):
+                z_chunk = z_all[i : i + chunk_size]
+                z_sq = torch.sum(z_chunk**2, dim=-1, keepdim=True)
 
-            dist_w = z_sq + cb_w_sq - 2.0 * torch.matmul(z_chunk, cb_w.t())
-            idx_w = torch.argmin(dist_w, dim=-1)
-            all_idx_w.append(idx_w)
+                dist_w = z_sq + cb_w_sq - 2.0 * torch.matmul(z_chunk, cb_w.t())
+                idx_w = torch.argmin(dist_w, dim=-1)
+                all_idx_w.append(idx_w)
 
-            dist_b = z_sq + cb_b_sq - 2.0 * torch.matmul(z_chunk, cb_b.t())
-            idx_b = torch.argmin(dist_b, dim=-1)
-            all_idx_b.append(idx_b)
+                dist_b = z_sq + cb_b_sq - 2.0 * torch.matmul(z_chunk, cb_b.t())
+                idx_b = torch.argmin(dist_b, dim=-1)
+                all_idx_b.append(idx_b)
 
-        idx_w = torch.cat(all_idx_w, dim=0)
-        idx_b = torch.cat(all_idx_b, dim=0)
+            idx_w = torch.cat(all_idx_w, dim=0)
+            idx_b = torch.cat(all_idx_b, dim=0)
 
         counts_w = torch.bincount(idx_w, minlength=self.num_weight_experts)
         dead_w = torch.nonzero(
