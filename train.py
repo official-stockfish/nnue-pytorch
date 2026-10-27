@@ -1,5 +1,6 @@
 import os
 import random
+import signal
 import sys
 import warnings
 
@@ -353,6 +354,12 @@ def main():
 
     refresh_rate = max(1, (args.num_batches_per_epoch + 4) // 5)
     nan_callback = TerminateOnNaN()
+    checkpoint_manager = CheckpointManager(
+        save_last=args.save_last_network,
+        every_n_epochs=args.network_save_period,
+        save_top_k=args.save_top_k,
+        dirpath=os.path.join(tb_logger.log_dir, "checkpoints"),
+    )
     trainer_callbacks = [
         UniquePositionLogger(
             train_dataset=train.dataset,
@@ -360,12 +367,7 @@ def main():
             world_size=world_size,
         ),
         WeightClipper(input_clipping_interval=args.input_clipping_interval),
-        CheckpointManager(
-            save_last=args.save_last_network,
-            every_n_epochs=args.network_save_period,
-            save_top_k=args.save_top_k,
-            dirpath=os.path.join(tb_logger.log_dir, "checkpoints"),
-        ),
+        checkpoint_manager,
         SimpleLineLogger(refresh_rate=refresh_rate),
         TimeLimit(args.max_time),
         nan_callback,
@@ -402,6 +404,17 @@ def main():
 
     if args.resume_from_checkpoint:
         trainer.load_checkpoint(args.resume_from_checkpoint)
+
+    # stop cleanly on SIGTERM: save the checkpoint immediately and exit
+    def _handle_sigterm(signum, frame):
+        print(
+            f"[Signal] {signal.Signals(signum).name} received - saving "
+            "checkpoint and stopping"
+        )
+        checkpoint_manager.on_train_end(trainer)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
 
     trainer.fit(train, val)
 
