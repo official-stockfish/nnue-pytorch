@@ -101,3 +101,9 @@ logging. Direct `train.py` usage is documented in the
 * https://github.com/DanielUranga/TensorFlowNNUE
 * https://hxim.github.io/Stockfish-Evaluation-Guide/
 * dkappe - Suggesting ranger (https://github.com/lessw2020/Ranger-Deep-Learning-Optimizer)
+
+## Experimental global feature branch
+
+This branch uses signed global supports, enemy attacks and pawn frontier/file
+pairs. It requires newly compatible networks and checkpoints. See the
+[feature contract and training-free validation](docs/global_features.md).

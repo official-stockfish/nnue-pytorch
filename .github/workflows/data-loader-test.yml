@@ -11,6 +11,9 @@ on:
       - "compile_data_loader.bat"
       - "scripts/compile_data_loader.sh"
 
+  push:
+    branches: ["feature/global-threats-pawn-frontier*"]
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -24,7 +27,9 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Compile using cmake
-        run: ./scripts/compile_data_loader.sh
+        run: |
+          cmake -S data_loader/cpp -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j2
 
       - name: Run cmake compiled benchmark (100 iterations)
         run: ./build/training_data_loader_bench -i 100 ./.pgo/small.binpack

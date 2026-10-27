@@ -4,6 +4,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [master]
+  push:
+    branches: ["feature/global-threats-pawn-frontier*"]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -11,7 +14,7 @@ concurrency:
 
 jobs:
   train-and-cross-check:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -31,17 +34,18 @@ jobs:
           cache-from: type=gha,scope=cpu-cache
           cache-to: type=gha,mode=max,scope=cpu-cache
 
-      - name: Checkout Stockfish Master
+      - name: Checkout exactly compatible Stockfish
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: official-stockfish/Stockfish
+          repository: TonyCongqianWang/Stockfish
+          ref: cb56fd2cc5afe107a2b5d801a5eb79f99d1426d4
           path: Stockfish
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
         run: |
           cd Stockfish/src
-          make -j build
+          make -j2 stockfish ARCH=x86-64-avx2 EXTRACXXFLAGS=-DNNUE_EMBEDDING_OFF
 
       - name: Perform Test Run of entire Training Pipeline on CPU
         run: |
@@ -55,7 +59,7 @@ jobs:
             --checkpoint /data/logs/training/runs/unittests_train_pipeline_cpu/training_logs/version_2/checkpoints/last.ckpt
 
   cross-check-random:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -75,20 +79,20 @@ jobs:
           cache-from: type=gha,scope=cpu-cache
           cache-to: type=gha,mode=max,scope=cpu-cache
 
-      - name: Checkout Stockfish Master
+      - name: Checkout exactly compatible Stockfish
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: official-stockfish/Stockfish
+          repository: TonyCongqianWang/Stockfish
+          ref: cb56fd2cc5afe107a2b5d801a5eb79f99d1426d4
           path: Stockfish
           persist-credentials: false
 
       - name: Compile Compatible Stockfish
         run: |
           cd Stockfish/src
-          make -j build
+          make -j2 stockfish ARCH=x86-64-avx2 EXTRACXXFLAGS=-DNNUE_EMBEDDING_OFF
 
       - name: Perform Cross-Check Evaluation on Random Net
         run: |
           ./run_docker.sh CPU ${{ github.workspace }} --skip-build --non-interactive --exec \
             python -u cross_check_eval.py --random-weights --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device='cpu' --count 1024 --seed 42 --max-error 5
-

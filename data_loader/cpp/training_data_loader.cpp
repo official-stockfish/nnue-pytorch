@@ -443,6 +443,8 @@ struct PP_3WideExtractor: IFeatureExtractor {
     }
 };
 
+#include "global_features.h"
+
 struct ComposedFeatureExtractor: IFeatureExtractor {
     std::vector<std::unique_ptr<IFeatureExtractor>> extractors;
     int                                             m_inputs;
@@ -485,6 +487,14 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
 };
 
 static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view name) {
+    if (name == "Global_Supports")
+        return std::make_unique<GlobalRelationsExtractor<true>>();
+    if (name == "Global_Attacks")
+        return std::make_unique<GlobalRelationsExtractor<false>>();
+    if (name == "Pawn_FrontierPairs")
+        return std::make_unique<PawnStructureExtractor<true>>();
+    if (name == "Pawn_FilePairs")
+        return std::make_unique<PawnStructureExtractor<false>>();
     if (name == "HalfKAv2_hm")
         return std::make_unique<HalfKAv2_hmExtractor>();
     if (name == "K32Q2")
@@ -668,7 +678,7 @@ bool SparseBatch::pack_indices(int* output, std::size_t capacity) const {
     int* white_ids     = black_offsets + size + 1;
     int* black_ids     = white_ids + num_active_white_features;
     int* piece_counts  = black_ids + num_active_black_features;
-    int  white_count   = 0, black_count = 0;
+    int  white_count = 0, black_count = 0;
     white_offsets[0] = black_offsets[0] = 0;
     for (int row = 0; row < size; ++row)
     {

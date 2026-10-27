@@ -284,7 +284,7 @@ void run_report(int          concurrency,
               << ", Iterations: " << iteration_count << ")..." << std::endl;
 
     std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(create_sparse_batch_stream(
-      "Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files, batch_size, cyclic,
+      "Global_Supports+Global_Attacks+Pawn_FrontierPairs+Pawn_FilePairs+K32Q2", concurrency, file_count, files, batch_size, cyclic,
       skip_config, ddp_config, hll_config, cli_config.io_config));
 
     DistributionReport report(max_plies);
@@ -403,7 +403,7 @@ void run_bench(int          concurrency,
     }
 
     std::unique_ptr<SparseBatchStream, SparseBatchStreamDeleter> stream(create_sparse_batch_stream(
-      "Full_Threats+PP_3Wide+HalfKAv2_hm", concurrency, file_count, files, batch_size, cyclic,
+      "Global_Supports+Global_Attacks+Pawn_FrontierPairs+Pawn_FilePairs+K32Q2", concurrency, file_count, files, batch_size, cyclic,
       skip_config, ddp_config, hll_config, cli_config.io_config));
 
     long long bytes_before = get_rchar_self();

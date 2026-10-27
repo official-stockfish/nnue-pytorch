@@ -1,0 +1,59 @@
+name: CPU compatibility (no training)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [master]
+  push:
+    branches: ["feature/global-threats-pawn-frontier*"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trainer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Build and load CPU Docker image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: docker/Dockerfile.CPU
+          push: false
+          load: true
+          tags: nnue-pytorch:cpu
+          cache-from: type=gha,scope=cpu-cache
+          cache-to: type=gha,mode=max,scope=cpu-cache
+      - name: Checkout exactly compatible Stockfish
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: TonyCongqianWang/Stockfish
+          ref: cb56fd2cc5afe107a2b5d801a5eb79f99d1426d4
+          path: Stockfish
+          persist-credentials: false
+      - name: Compile without a pretrained network or PGO
+        working-directory: Stockfish/src
+        run: make -j2 stockfish global-nnue-test ARCH=x86-64-avx2 EXTRACXXFLAGS=-DNNUE_EMBEDDING_OFF
+      - name: Verify engine incremental accumulators
+        run: ./Stockfish/src/global-nnue-test
+      - name: Build the native loader without PGO
+        run: |
+          ./run_docker.sh CPU "${{ github.workspace }}" --skip-build --skip-setup --non-interactive --exec \
+            bash -c 'cmake -S data_loader/cpp -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target training_data_loader -j2'
+      - name: Check features, signed gradients, serialization and FT permutation
+        run: |
+          ./run_docker.sh CPU "${{ github.workspace }}" --skip-build --skip-setup --non-interactive --exec \
+            env OMP_NUM_THREADS=2 GLOBAL_NNUE_TEST=/data/Stockfish/src/global-nnue-test \
+            pytest -q tests/test_global_features.py
+      - name: Cross-check a seeded random network (no optimizer steps)
+        run: |
+          ./run_docker.sh CPU "${{ github.workspace }}" --skip-build --skip-setup --non-interactive --exec \
+            env OMP_NUM_THREADS=2 python -u cross_check_eval.py --random-weights \
+            --data .pgo/small.binpack --engine ./Stockfish/src/stockfish --device cpu \
+            --count 1024 --seed 42 --max-error 5
