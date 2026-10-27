@@ -16,33 +16,31 @@ KingBuckets = [
 ]
 # fmt: on
 
-# Inverse mapping: bucket -> oriented king square
+# Inverse mapping: king bucket -> oriented king square
 InverseKingBuckets = [0] * 32
 for _sq, _bucket in enumerate(KingBuckets):
     if _bucket >= 0:
         InverseKingBuckets[_bucket] = _sq
 
 
-def _orient(is_white_pov: bool, sq: int, ksq: int) -> int:
-    kfile = ksq % 8
-    return (7 * (kfile < 4)) ^ (56 * (not is_white_pov)) ^ sq
-
-
-class HalfKav2Hm(InputFeature):
-    HASH = 0x7F234CB8
-    FEATURE_NAME = "HalfKAv2_hm^"
-    INPUT_FEATURE_NAME = "HalfKAv2_hm"
+class K32H3(InputFeature):
+    HASH = 0xAB005CEF
+    FEATURE_NAME = "K32H3^"
+    INPUT_FEATURE_NAME = "K32H3"
     MAX_ACTIVE_FEATURES = 32
 
     NUM_SQ = 64
     NUM_PT = 12
     NUM_PLANES = NUM_SQ * NUM_PT  # 768
-    NUM_BUCKETS = NUM_SQ // 2  # 32
-    NUM_INPUTS = NUM_PLANES * NUM_BUCKETS  # 24,576
+    NUM_KING_BUCKETS = NUM_SQ // 2  # 32
+    NUM_STATES = 3
+    NUM_BUCKETS = NUM_KING_BUCKETS * NUM_STATES  # 96
+    NUM_INPUTS = NUM_PLANES * NUM_BUCKETS  # 73,728
     NUM_INPUTS_VIRTUAL = NUM_PLANES  # 768
 
-    # Export size uses 11 piece types (704 * 32 = 22,528)
-    NUM_REAL_FEATURES = 704 * 32  # 22,528
+    # Export size uses 11 piece types (704 * 96 = 67,584)
+    NUM_REAL_FEATURES = 704 * NUM_BUCKETS  # 67,584
+    EXPORT_WEIGHT_DTYPE = torch.int8
 
     def __init__(self, num_outputs: int):
         super().__init__()
@@ -56,6 +54,10 @@ class HalfKav2Hm(InputFeature):
         )
 
         self.reset_parameters()
+
+    @classmethod
+    def own_king_square(cls, bucket: int) -> int:
+        return InverseKingBuckets[bucket % cls.NUM_KING_BUCKETS]
 
     def merged_weight(self) -> torch.Tensor:
         return self.weight + self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
@@ -73,6 +75,23 @@ class HalfKav2Hm(InputFeature):
     def init_weights(self) -> None:
         """Initialize virtual weights to zero."""
         self.zero_virtual_weights()
+
+    def clip_weights(self, quantization) -> None:
+        p_data_fp32 = self.weight.data
+        min_weight, max_weight = quantization.get_ft_weight_bounds(
+            self.EXPORT_WEIGHT_DTYPE
+        )
+
+        virtual_params = self.virtual_weight.data
+
+        # Reshape to (NUM_BUCKETS, NUM_PLANES, L1) and broadcast virtual weights
+        # in-place to avoid allocating ~600MB of temporary tensors during clipping.
+        p_view = p_data_fp32.view(self.NUM_BUCKETS, self.NUM_PLANES, -1)
+        v_view = virtual_params.view(1, self.NUM_PLANES, -1)
+
+        p_view.add_(v_view)
+        p_view.clamp_(min_weight, max_weight)
+        p_view.sub_(v_view)
 
     @torch.no_grad()
     def get_export_weights(self) -> torch.Tensor:
@@ -99,7 +118,7 @@ class HalfKav2Hm(InputFeature):
             own_king_src = src_offset + 10 * 64
             opp_king_src = src_offset + 11 * 64
             dst_king = dst_offset + 10 * 64
-            ksq = InverseKingBuckets[b]
+            ksq = self.own_king_square(b)
 
             export[dst_king : dst_king + 64] = coalesced[
                 opp_king_src : opp_king_src + 64
@@ -129,7 +148,7 @@ class HalfKav2Hm(InputFeature):
 
             # Split merged king block back into p_idx 10 and 11
             src_king = src_offset + 10 * 64
-            ksq = InverseKingBuckets[b]
+            ksq = self.own_king_square(b)
 
             # Own king: only weight at ksq matters (rest stays zero)
             expanded[dst_offset + 10 * 64 + ksq] = export_weight[src_king + ksq]

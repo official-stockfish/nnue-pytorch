@@ -30,7 +30,7 @@ def run_bench():
     # 1) Instantiate Features FIRST to determine true input bounds
     config = ModelConfig()
     quantization = QuantizationManager(config.quantize_config)
-    feature_classes = get_feature_cls("HalfKAv2_hm^")
+    feature_classes = get_feature_cls("K32H3^")
 
     double_ft = ComposedFeatureTransformer(
         feature_classes, STRIDE, quantization=quantization

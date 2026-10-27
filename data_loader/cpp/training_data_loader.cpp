@@ -26,70 +26,15 @@ static Square orient_flip_2(Color color, Square sq, Square ksq) {
     return sq;
 }
 
-struct HalfKAv2_hm {
-    static constexpr std::string_view NAME = "HalfKAv2_hm";
-
-    static constexpr int NUM_SQ              = 64;
-    static constexpr int NUM_PT              = 12;
-    static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
-    static constexpr int INPUTS              = NUM_PLANES * NUM_SQ / 2;
-    static constexpr int MAX_ACTIVE_FEATURES = 32;
-
-    // clang-format off
-    static constexpr int KingBuckets[64] = {
-      -1, -1, -1, -1, 31, 30, 29, 28,
-      -1, -1, -1, -1, 27, 26, 25, 24,
-      -1, -1, -1, -1, 23, 22, 21, 20,
-      -1, -1, -1, -1, 19, 18, 17, 16,
-      -1, -1, -1, -1, 15, 14, 13, 12,
-      -1, -1, -1, -1, 11, 10, 9, 8,
-      -1, -1, -1, -1, 7, 6, 5, 4,
-      -1, -1, -1, -1, 3, 2, 1, 0
-    };
-    // clang-format on
-
-    static int feature_index(Color color, Square ksq, Square sq, Piece p) {
-        Square o_ksq = orient_flip_2(color, ksq, ksq);
-        auto   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
-        return static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
-             + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
-    }
-
-    static std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
-        auto& pos    = e.pos;
-        auto  pieces = pos.piecesBB();
-        auto  ksq    = pos.kingSquare(color);
-
-        int j = 0;
-        for (Square sq : pieces)
-        {
-            auto p      = pos.pieceAt(sq);
-            features[j] = feature_index(color, ksq, sq, p);
-            ++j;
-        }
-        return {j, INPUTS};
-    }
-};
-
-struct HalfKAv2_hmExtractor: IFeatureExtractor {
-    int inputs() const override { return HalfKAv2_hm::INPUTS; }
-    int max_active_features() const override { return HalfKAv2_hm::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
-        return HalfKAv2_hm::fill_features_sparse(e, features, color);
-    }
-};
-
-struct K32Q2 {
-    static constexpr std::string_view NAME = "K32Q2";
+struct K32H3 {
+    static constexpr std::string_view NAME = "K32H3";
 
     static constexpr int NUM_SQ              = 64;
     static constexpr int NUM_PT              = 12;
     static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
     static constexpr int NUM_KING_BUCKETS    = NUM_SQ / 2;
-    static constexpr int NUM_QUEEN_BUCKETS   = 2;
-    static constexpr int NUM_BUCKETS         = NUM_KING_BUCKETS * NUM_QUEEN_BUCKETS;
+    static constexpr int NUM_STATES          = 3;
+    static constexpr int NUM_BUCKETS         = NUM_KING_BUCKETS * NUM_STATES;
     static constexpr int INPUTS              = NUM_PLANES * NUM_BUCKETS;
     static constexpr int MAX_ACTIVE_FEATURES = 32;
 
@@ -106,38 +51,32 @@ struct K32Q2 {
     };
     // clang-format on
 
-    static int feature_index(Color color, Square ksq, bool opp_queen, Square sq, Piece p) {
-        Square o_ksq  = orient_flip_2(color, ksq, ksq);
-        auto   p_idx  = static_cast<int>(p.type()) * 2 + (p.color() != color);
-        int    bucket = KingBuckets[static_cast<int>(o_ksq)] * 2 + (opp_queen ? 1 : 0);
-        return static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
-             + bucket * NUM_PLANES;
+    static int block_idx(const Position& pos, Color color) {
+        if (pos.piecesBB(Piece(PieceType::Queen, !color)).any())
+            return 2;
+        for (Color c : {Color::White, Color::Black})
+            if (pos.piecesBB(Piece(PieceType::Rook, c)).any()
+                || pos.piecesBB(Piece(PieceType::Queen, c)).any())
+                return 1;
+        return 0;
     }
 
     static std::pair<int, int>
     fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
-        auto& pos       = e.pos;
-        auto  pieces    = pos.piecesBB();
-        auto  ksq       = pos.kingSquare(color);
-        bool  opp_queen = pos.piecesBB(Piece(PieceType::Queen, !color)).any();
+        auto&      pos    = e.pos;
+        const auto ksq    = pos.kingSquare(color);
+        const int  kb     = KingBuckets[static_cast<int>(orient_flip_2(color, ksq, ksq))];
+        const int  bucket = block_idx(pos, color) * NUM_KING_BUCKETS + kb;
 
         int j = 0;
-        for (Square sq : pieces)
+        for (Square sq : pos.piecesBB())
         {
-            auto p      = pos.pieceAt(sq);
-            features[j] = feature_index(color, ksq, opp_queen, sq, p);
-            ++j;
+            const Piece p     = pos.pieceAt(sq);
+            const int   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+            features[j++]     = static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
+                          + bucket * NUM_PLANES;
         }
         return {j, INPUTS};
-    }
-};
-
-struct K32Q2Extractor: IFeatureExtractor {
-    int inputs() const override { return K32Q2::INPUTS; }
-    int max_active_features() const override { return K32Q2::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
-        return K32Q2::fill_features_sparse(e, features, color);
     }
 };
 
@@ -220,22 +159,22 @@ struct FullThreats {
 
     // clang-format off
     static constexpr Square OrientTBL[COLOR_NB][SQUARE_NB] = {
-      { a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1 },
-      { a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8 }
+      { h1, h1, h1, h1, a1, a1, a1, a1,
+        h1, h1, h1, h1, a1, a1, a1, a1,
+        h1, h1, h1, h1, a1, a1, a1, a1,
+        h1, h1, h1, h1, a1, a1, a1, a1,
+        h1, h1, h1, h1, a1, a1, a1, a1,
+        h1, h1, h1, h1, a1, a1, a1, a1,
+        h1, h1, h1, h1, a1, a1, a1, a1,
+        h1, h1, h1, h1, a1, a1, a1, a1 },
+      { h8, h8, h8, h8, a8, a8, a8, a8,
+        h8, h8, h8, h8, a8, a8, a8, a8,
+        h8, h8, h8, h8, a8, a8, a8, a8,
+        h8, h8, h8, h8, a8, a8, a8, a8,
+        h8, h8, h8, h8, a8, a8, a8, a8,
+        h8, h8, h8, h8, a8, a8, a8, a8,
+        h8, h8, h8, h8, a8, a8, a8, a8,
+        h8, h8, h8, h8, a8, a8, a8, a8 }
     };
 
     static constexpr int map[PIECE_TYPE_NB][PIECE_TYPE_NB] = {
@@ -353,15 +292,6 @@ struct FullThreats {
     }
 };
 
-struct FullThreatsExtractor: IFeatureExtractor {
-    int inputs() const override { return FullThreats::INPUTS; }
-    int max_active_features() const override { return FullThreats::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
-        return FullThreats::fill_features_sparse(e, features, color);
-    }
-};
-
 struct PP_3Wide {
     static constexpr std::string_view NAME = "PP_3Wide";
 
@@ -434,15 +364,6 @@ struct PP_3Wide {
     }
 };
 
-struct PP_3WideExtractor: IFeatureExtractor {
-    int inputs() const override { return PP_3Wide::INPUTS; }
-    int max_active_features() const override { return PP_3Wide::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
-        return PP_3Wide::fill_features_sparse(e, features, color);
-    }
-};
-
 struct ComposedFeatureExtractor: IFeatureExtractor {
     std::vector<std::unique_ptr<IFeatureExtractor>> extractors;
     int                                             m_inputs;
@@ -484,15 +405,23 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
     }
 };
 
+template<typename T>
+struct SimpleExtractor: IFeatureExtractor {
+    int inputs() const override { return T::INPUTS; }
+    int max_active_features() const override { return T::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return T::fill_features_sparse(e, features, color);
+    }
+};
+
 static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view name) {
-    if (name == "HalfKAv2_hm")
-        return std::make_unique<HalfKAv2_hmExtractor>();
-    if (name == "K32Q2")
-        return std::make_unique<K32Q2Extractor>();
     if (name == "Full_Threats")
-        return std::make_unique<FullThreatsExtractor>();
+        return std::make_unique<SimpleExtractor<FullThreats>>();
     if (name == "PP_3Wide")
-        return std::make_unique<PP_3WideExtractor>();
+        return std::make_unique<SimpleExtractor<PP_3Wide>>();
+    if (name == "K32H3")
+        return std::make_unique<SimpleExtractor<K32H3>>();
     return nullptr;
 }
 
@@ -533,7 +462,7 @@ template<typename T>
 struct BumpAllocator {
     T* ptr;
     BumpAllocator(T* block) :
-        ptr(block) { }
+        ptr(block) {}
     T* alloc(size_t count) {
         T* res = ptr;
         ptr += count;
@@ -668,7 +597,7 @@ bool SparseBatch::pack_indices(int* output, std::size_t capacity) const {
     int* white_ids     = black_offsets + size + 1;
     int* black_ids     = white_ids + num_active_white_features;
     int* piece_counts  = black_ids + num_active_black_features;
-    int  white_count   = 0, black_count = 0;
+    int  white_count = 0, black_count = 0;
     white_offsets[0] = black_offsets[0] = 0;
     for (int row = 0; row < size; ++row)
     {
@@ -800,7 +729,7 @@ SparseBatch* FeaturedBatchStream::next() {
 }
 
 Fen::Fen() :
-    m_fen(nullptr) { }
+    m_fen(nullptr) {}
 
 Fen::Fen(const std::string& fen) :
     m_size(fen.size()),
@@ -1163,7 +1092,7 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
         {
             double current_ratio = (pc_history_all_total * target_pc_weights_lut[pc])
                                  / (target_pc_weights_total * pc_history_all[pc]);
-            accept_prob          = alpha * current_ratio;
+            accept_prob = alpha * current_ratio;
         }
 
         accept_prob = std::clamp(accept_prob, 0.0, 1.0);

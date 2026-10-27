@@ -246,26 +246,26 @@ def test_ranger_stable_weight_decay_option():
 def test_virtual_ft_weight_decay_and_pruning():
     from model.nnue import _get_parameters
 
-    # Test K32Q2^ which has virtual weights
-    config_k32q2 = NNUEConfig(
-        features="K32Q2^",
+    # Test K32H3^ which has virtual weights
+    config_k32h3 = NNUEConfig(
+        features="K32H3^",
         optimizer_config=OptimizerConfig(
             ft_weight_decay=0.01,
             virtual_ft_weight_decay=0.05,
             dense_weight_decay=0.02,
         ),
     )
-    model_k32q2 = NNUE(config=config_k32q2)
+    model_k32h3 = NNUE(config=config_k32h3)
     real_ft = _get_parameters(
-        [model_k32q2.model.input], get_biases=False, get_virtual=False
+        [model_k32h3.model.input], get_biases=False, get_virtual=False
     )
     virtual_ft = _get_parameters(
-        [model_k32q2.model.input], get_biases=False, get_virtual=True
+        [model_k32h3.model.input], get_biases=False, get_virtual=True
     )
     assert len(real_ft) > 0
     assert len(virtual_ft) > 0
 
-    res = model_k32q2.configure_optimizers()
+    res = model_k32h3.configure_optimizers()
     opt = res[0][0]
     # Check that virtual weights group exists with correct weight decay
     found_real = False
