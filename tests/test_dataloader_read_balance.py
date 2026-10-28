@@ -111,7 +111,7 @@ def _make_stream(files, ddp=None, batch_size=BATCH_SIZE, cyclic=True):
     if ddp is None:
         ddp = DataloaderDDPConfig(0, 1)
     return stream.create_sparse_batch_stream(
-        b"HalfKAv2_hm",
+        b"K32H3",
         CONCURRENCY,
         files,
         batch_size,
@@ -268,7 +268,7 @@ class TestReadBalance(unittest.TestCase):
         for shuffle_buffer_entries in (0, 1024, 65536):
             for _ in range(3):
                 st = stream.create_sparse_batch_stream(
-                    b"HalfKAv2_hm",
+                    b"K32H3",
                     CONCURRENCY,
                     files,
                     4096,
@@ -342,7 +342,7 @@ class TestSharedCyclicStream(unittest.TestCase):
         from data_loader.dataset import SparseBatchDataset
 
         return SparseBatchDataset(
-            "HalfKAv2_hm",
+            "K32H3",
             self.files,
             BATCH_SIZE,
             cyclic=cyclic,
@@ -422,7 +422,7 @@ class TestSharedShuffleWindow(unittest.TestCase):
         from data_loader.dataset import FixedNumBatchesDataset, SparseBatchDataset
 
         ds = SparseBatchDataset(
-            "HalfKAv2_hm",
+            "K32H3",
             self.files,
             4096,
             cyclic=True,
@@ -451,7 +451,7 @@ class TestSharedShuffleWindow(unittest.TestCase):
 
         def consume(rank):
             st = stream.create_sparse_batch_stream(
-                b"HalfKAv2_hm",
+                b"K32H3",
                 CONCURRENCY,
                 self.files,
                 4096,

@@ -3,10 +3,9 @@ from .feature_transformer import (
     ComposedFeatureTransformer,
 )
 from .features import (
-    K32Q2,
+    K32H3,
     FeatureConfig,
     FullThreats,
-    HalfKav2Hm,
     InputFeature,
     add_feature_args,
     get_available_features,
@@ -15,11 +14,10 @@ from .features import (
 from .layer_stacks import LayerStacks
 
 __all__ = [
-    "K32Q2",
+    "K32H3",
     "ComposedFeatureTransformer",
     "FeatureConfig",
     "FullThreats",
-    "HalfKav2Hm",
     "InputFeature",
     "LayerStacks",
     "LayerStacksConfig",

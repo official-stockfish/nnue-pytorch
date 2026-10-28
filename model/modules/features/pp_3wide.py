@@ -5,7 +5,7 @@ from .input_feature import InputFeature
 
 
 class PP3Wide(InputFeature):
-    HASH = 0x86F2B1DD
+    HASH = 0x5C80FA69
     FEATURE_NAME = "PP_3Wide"
     INPUT_FEATURE_NAME = "PP_3Wide"
     MAX_ACTIVE_FEATURES = 128

@@ -20,7 +20,7 @@ def test_native_packing(batch_size: int) -> None:
         "8/8/8/4k3/8/3K4/8/8 b - - 0 1",
     ]
     batch = stream.get_sparse_batch_from_fens(
-        "Full_Threats+PP_3Wide+HalfKAv2_hm",
+        "Full_Threats+PP_3Wide+K32H3",
         [fens[i % 2] for i in range(batch_size)],
         list(range(batch_size)),
         [1] * batch_size,
@@ -110,7 +110,7 @@ def test_large_native_batch_survives_release(
 ) -> None:
     size = 16384
     batch = stream.get_sparse_batch_from_fens(
-        "Full_Threats+PP_3Wide+HalfKAv2_hm",
+        "Full_Threats+PP_3Wide+K32H3",
         ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"] * size,
         [1] * size,
         [1] * size,

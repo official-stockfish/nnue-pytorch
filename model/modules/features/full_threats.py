@@ -5,7 +5,7 @@ from .input_feature import InputFeature
 
 
 class FullThreats(InputFeature):
-    HASH = 0x2E6B9D04
+    HASH = 0x2C41EAEA
     FEATURE_NAME = "Full_Threats"
     INPUT_FEATURE_NAME = "Full_Threats"
     MAX_ACTIVE_FEATURES = 128
