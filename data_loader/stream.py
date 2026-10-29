@@ -54,7 +54,7 @@ def create_fen_batch_stream(
     if io_config is None:
         io_config = DataloaderIOConfig()
 
-    return c_lib.dll.create_fen_batch_stream(
+    handle = c_lib.dll.create_fen_batch_stream(
         concurrency,
         len(filenames),
         _to_c_str_array(filenames),
@@ -65,6 +65,9 @@ def create_fen_batch_stream(
         CDataloaderHllConfig(hll_config),
         CDataloaderIOConfig(io_config),
     )
+    if not handle:
+        raise RuntimeError("data loader stream creation failed — stale .so?")
+    return handle
 
 
 def destroy_fen_batch_stream(stream: ctypes.c_void_p):
@@ -98,7 +101,7 @@ def create_sparse_batch_stream(
     if io_config is None:
         io_config = DataloaderIOConfig()
 
-    return c_lib.dll.create_sparse_batch_stream(
+    handle = c_lib.dll.create_sparse_batch_stream(
         feature_set,
         concurrency,
         len(filenames),
@@ -110,6 +113,9 @@ def create_sparse_batch_stream(
         CDataloaderHllConfig(hll_config),
         CDataloaderIOConfig(io_config),
     )
+    if not handle:
+        raise RuntimeError("data loader stream creation failed — stale .so?")
+    return handle
 
 
 def destroy_sparse_batch_stream(stream: ctypes.c_void_p):
