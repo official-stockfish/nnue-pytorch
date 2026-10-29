@@ -15,6 +15,7 @@ except ImportError as e:
     DataloaderSkipConfig = None
 
 import model as M
+from model.utils.serialize import estimate_nnue_size
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,18 @@ def main():
 
         writer = M.NNUEWriter(nnue.model, model_description)
         buf = writer.buf
+
+        # verify the serialized size matches the config-only estimate
+        estimated_size = estimate_nnue_size(nnue_config, model_description)
+        print(
+            f"Serialized .nnue size: {len(buf):,} bytes "
+            f"(estimated {estimated_size:,} bytes)"
+        )
+        assert len(buf) == estimated_size, (
+            f"Serialized size ({len(buf):,}) does not match the estimate "
+            f"({estimated_size:,}); the writer layout and estimate_nnue_size "
+            "have diverged."
+        )
 
         if serialize_config.out_sha:
             sha = hashlib.sha256(buf).hexdigest()

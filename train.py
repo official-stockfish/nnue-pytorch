@@ -15,6 +15,7 @@ import data_loader
 import model as M
 from config import TrainingConfig
 from data_loader.config import DataloaderDDPConfig
+from model.utils.serialize import estimate_nnue_size
 from trainer.callbacks import (
     CheckpointManager,
     ExplicitSWA,
@@ -151,6 +152,16 @@ def _normalize_optimizer_and_schedulers(optimizer_and_schedulers):
 def main():
     args = tyro.cli(TrainingConfig)
     actual_threads, actual_workers = args.threads, args.num_workers
+
+    # expected serialized .nnue size, computed from the model config alone
+    estimated_nnue_size = estimate_nnue_size(args.nnue_config)
+    print(f"Expected .nnue size: {estimated_nnue_size / 2**20:.1f} MiB")
+    if estimated_nnue_size > args.max_nnue_size * 2**20:
+        raise RuntimeError(
+            f"Estimated .nnue size ({estimated_nnue_size / 2**20:.1f} MiB) exceeds "
+            f"--max-nnue-size ({args.max_nnue_size} MiB); aborting before training. "
+            "Raise --max-nnue-size if this is intended."
+        )
 
     for dataset in args.datasets:
         if not os.path.exists(dataset):

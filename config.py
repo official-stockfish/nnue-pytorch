@@ -43,6 +43,9 @@ class TrainingConfig:
     max_epochs: int = 800
     """Maximum number of epochs to train for."""
 
+    max_nnue_size: int = 200
+    """Maximum expected .nnue size in MiB. The run aborts before training if the estimate exceeds it."""
+
     swa_start_epoch: int = -1
     """Start epoch for swa. Negative number to disable."""
 

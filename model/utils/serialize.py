@@ -9,8 +9,9 @@ import numpy.typing as npt
 import torch
 from torch import nn
 
-from ..config import ModelConfig
+from ..config import ModelConfig, NNUEConfig
 from ..model import NNUEModel
+from ..modules.features import get_feature_cls
 
 
 def ascii_hist(name, x, bins=7):
@@ -66,6 +67,48 @@ def get_histogram_callback(hist_title: str, verbose: bool):
 # hardcoded for now
 VERSION = 0x6A448AFA
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
+
+
+def estimate_nnue_size(config: NNUEConfig, description: str | None = None) -> int:
+    """
+    The exact expected size (bytes) of the serialized .nnue file, computed
+    from the model config alone (no model is instantiated, no weights are
+    needed).  Mirrors the layout written by NNUEWriter.
+    """
+
+    if description is None:
+        description = DEFAULT_DESCRIPTION
+
+    feature_cls = get_feature_cls(config.features)
+
+    L1 = config.model_config.L1
+    L2 = config.model_config.L2
+    L3 = config.model_config.L3
+    num_ls_buckets = 32
+
+    def _pad32(n: int) -> int:
+        return n + (32 - n % 32) % 32
+
+    # 1. Plaintext header (version, network hash, description length, description)
+    size = 3 * 4 + len(description.encode("utf-8"))
+
+    # 2. Feature transformer hash
+    size += 4
+
+    # 3. Feature transformer: biases (i16) + weights per feature (export dtype)
+    size += L1 * 2
+    for f in feature_cls:
+        dtype_size = torch.empty(0, dtype=f.EXPORT_WEIGHT_DTYPE).element_size()
+        size += f.NUM_REAL_FEATURES * L1 * dtype_size
+
+    # 4. Layer stacks: per bucket an fc hash, then l1/l2/output (i32 bias + i8 weight)
+    per_bucket = 4  # fc layers hash
+    per_bucket += L2 * 4 + L2 * _pad32(L1)  # l1
+    per_bucket += L3 * 4 + L3 * _pad32(2 * L2)  # l2
+    per_bucket += 1 * 4 + 1 * _pad32(2 * L2 + 2 * L3)  # output
+    size += num_ls_buckets * per_bucket
+
+    return size
 
 
 class NNUEWriter:
