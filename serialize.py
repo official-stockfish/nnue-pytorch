@@ -1,5 +1,6 @@
 import hashlib
 import os
+import sys
 import warnings
 from dataclasses import dataclass, field
 from typing import Annotated, Literal
@@ -15,6 +16,7 @@ except ImportError as e:
     DataloaderSkipConfig = None
 
 import model as M
+from model.utils.serialize import CountingExporter, NNUEWriter
 
 
 @dataclass(frozen=True)
@@ -78,7 +80,30 @@ class CliConfig:
     nnue_config: OmitArgPrefixes[M.NNUEConfig] = field(default_factory=M.NNUEConfig)
 
 
+@dataclass(frozen=True)
+class EstimateConfig:
+    """The config for --estimate-size: the model config only (no source/target)."""
+
+    nnue_config: OmitArgPrefixes[M.NNUEConfig] = field(default_factory=M.NNUEConfig)
+
+
 def main():
+    # --estimate-size: dry-run the NNUEWriter with a CountingExporter to print
+    # the expected .nnue size from the model config alone (no source/target)
+    if "--estimate-size" in sys.argv:
+        sys.argv.remove("--estimate-size")
+        args = tyro.cli(EstimateConfig)
+        nnue_config = args.nnue_config
+
+        nnue = M.NNUE(config=nnue_config)
+        counting = CountingExporter()
+        NNUEWriter(nnue.model, verbose=False, exporter=counting)
+        print(
+            f"Estimated .nnue size: {counting.size:,} bytes "
+            f"({counting.size / 2**20:.1f} MiB)"
+        )
+        return
+
     args = tyro.cli(CliConfig)
     serialize_config = args.serialize_config
     nnue_config = args.nnue_config
@@ -181,6 +206,17 @@ def main():
 
         writer = M.NNUEWriter(nnue.model, model_description)
         buf = writer.buf
+
+        # verify the counting exporter agrees with the actual serialized size
+        counting = CountingExporter()
+        M.NNUEWriter(nnue.model, model_description, verbose=False, exporter=counting)
+        assert len(buf) == counting.size, (
+            f"Serialized size ({len(buf):,}) does not match the estimate "
+            f"({counting.size:,}); the writer and CountingExporter have diverged."
+        )
+        print(
+            f"Serialized .nnue size: {len(buf):,} bytes (estimated {counting.size:,})"
+        )
 
         if serialize_config.out_sha:
             sha = hashlib.sha256(buf).hexdigest()
