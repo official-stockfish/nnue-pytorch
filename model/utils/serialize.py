@@ -68,6 +68,26 @@ VERSION = 0x6A448AFA
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
 
 
+class BufferExporter:
+    """The default exporter — an in-memory buffer."""
+
+    def __init__(self):
+        self.buf = bytearray()
+
+    def extend(self, data) -> None:
+        self.buf.extend(data)
+
+
+class CountingExporter:
+    """A counting exporter — tallies the bytes written without producing output."""
+
+    def __init__(self):
+        self.size = 0
+
+    def extend(self, data) -> None:
+        self.size += len(data)
+
+
 class NNUEWriter:
     """
     All values are stored in little endian.
@@ -78,16 +98,20 @@ class NNUEWriter:
         model: NNUEModel,
         description: str | None = None,
         verbose: bool = True,
+        exporter: BufferExporter | CountingExporter | None = None,
     ):
         if description is None:
             description = DEFAULT_DESCRIPTION
 
         self.verbose = verbose
 
+        if exporter is None:
+            exporter = BufferExporter()
+        self.exporter = exporter
+
         fc_hash = self.fc_hash(model)
 
         # 1. Plaintext header
-        self.buf = bytearray()
         self.write_header(model, fc_hash, description)
 
         # 2. Payload (Feature Transformer + Layer Stacks)
@@ -107,6 +131,11 @@ class NNUEWriter:
             self.write_fc_layer(
                 model, output, layer_stacks.output.layer_key, f"bucket {bucket}"
             )
+
+    @property
+    def buf(self) -> bytearray:
+        """The default exporter's in-memory buffer (kept for compatibility)."""
+        return self.exporter.buf
 
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
@@ -136,11 +165,11 @@ class NNUEWriter:
         self.int32(fc_hash ^ model.feature_hash ^ (model.L1 * 2))  # halfkp network hash
         encoded_description = description.encode("utf-8")
         self.int32(len(encoded_description))  # Network definition
-        self.buf.extend(encoded_description)
+        self.exporter.extend(encoded_description)
 
     def write_tensor(self, arr: torch.Tensor) -> None:
         arr = arr.detach().flatten().cpu().numpy()
-        self.buf.extend(arr.tobytes())
+        self.exporter.extend(arr.tobytes())
 
     def write_feature_transformer(self, model: NNUEModel) -> None:
         layer = model.input
@@ -203,7 +232,7 @@ class NNUEWriter:
         self.write_tensor(weight)
 
     def int32(self, v: int) -> None:
-        self.buf.extend(struct.pack("<I", v))
+        self.exporter.extend(struct.pack("<I", v))
 
 
 class NNUEReader:
