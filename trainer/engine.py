@@ -275,12 +275,16 @@ class SimpleTrainer:
 
     def load_checkpoint(self, path: str):
         """Load a checkpoint and return the raw dictionary."""
+        print(f'Loading checkpoint from {path}...')
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
         unwrapped = _unwrap_module(self.model)
         unwrapped.load_state_dict(checkpoint["state_dict"])
         self.current_epoch = checkpoint.get("epoch", 0)
         self.global_step = checkpoint.get("global_step", 0)
+        print(f'Checkpoint loaded: curr epoch {self.current_epoch},'
+              f' global step {self.global_step}, params:\n'
+              f'{checkpoint["state_dict"]["param_groups"]}')
 
         # Restore scheduler states if they were saved.
         scheduler_states = checkpoint.get("lr_schedulers", [])
