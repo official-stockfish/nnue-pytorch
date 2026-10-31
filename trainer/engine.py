@@ -362,11 +362,24 @@ class SimpleTrainer:
             if (batch_idx + 1) % self.log_every_n_steps == 0 or (
                 batch_idx + 1
             ) == self.num_training_batches:
-                self.callback_metrics["train_loss"] = float(
-                    self.callback_metrics["train_loss"]
-                )
+                # Transfer both scalars together to avoid a separate GPU sync
+                # for lambda when logging the loss.
+                train_loss, current_lambda = torch.stack(
+                    (
+                        self.callback_metrics["train_loss"],
+                        self.model.current_lambda.mean(),
+                    )
+                ).tolist()
+                self.callback_metrics["train_loss"] = train_loss
+                self.callback_metrics["lr"] = sum(
+                    group["lr"] for group in self.optimizer.param_groups
+                ) / len(self.optimizer.param_groups)
+                self.callback_metrics["lambda"] = current_lambda
                 self._log_metrics(
-                    {"train_loss": self.callback_metrics["train_loss"]},
+                    {
+                        key: self.callback_metrics[key]
+                        for key in ("train_loss", "lr", "lambda")
+                    },
                     step=self.global_step,
                 )
 
