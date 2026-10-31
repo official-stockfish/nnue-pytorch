@@ -399,6 +399,8 @@ class NNUE(nn.Module):
             # on every schedule value when jitter is disabled.
             actual_lambda = scorenet.new_tensor(actual_lambda)
 
+        self.current_lambda = actual_lambda.detach()
+
         sf_loss = self._sf_loss_fn(
             scorenet, score, outcome, self.config.loss_params, actual_lambda
         )
