@@ -97,7 +97,7 @@ class NNUEWriter:
         self,
         model: NNUEModel,
         description: str | None = None,
-        verbose: bool = True,
+        verbose: bool = False,
         exporter: BufferExporter | CountingExporter | None = None,
     ):
         if description is None:

@@ -36,6 +36,10 @@ class SerializeConfig:
     ft_compression: str | None = None
     """Deprecated alias for compression."""
 
+    histogram: bool = False
+    """Print a histogram and min/max stats of the quantized values of every
+    exported layer."""
+
     ft_perm: str | None = None
     """Path to a file that defines the permutation to use on the feature transformer."""
 
@@ -204,7 +208,9 @@ def main():
             out_dir = os.path.abspath(os.path.dirname(args.target) or os.getcwd())
         os.makedirs(out_dir, exist_ok=True)
 
-        writer = M.NNUEWriter(nnue.model, model_description)
+        writer = M.NNUEWriter(
+            nnue.model, model_description, verbose=serialize_config.histogram
+        )
         buf = writer.buf
 
         # verify the counting exporter agrees with the actual serialized size
