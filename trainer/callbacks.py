@@ -668,6 +668,8 @@ class SimpleLineLogger(Callback):
                 f"[{self._format_time(elapsed_total)}<{self._format_time(remaining)}, "
                 f"{rate:>6.2f}it/s, "
                 f"{self.train_metric_step}={loss_val:.5f}, "
+                f"lr={trainer.callback_metrics['lr']:.7f}, "
+                f"lambda={trainer.callback_metrics['lambda']:.5f}, "
                 f"v_num={trainer.logger.version}]",
                 flush=True,
             )
@@ -746,6 +748,6 @@ class SimpleLineLogger(Callback):
         val_loss = trainer.callback_metrics.get(self.val_metric, float("nan"))
         print(
             f"Epoch {trainer.current_epoch:>2} (Val): "
-            f"[{self.val_metric}={val_loss:.5f}]",
+            f"[{self.val_metric}={val_loss:.7f}]",
             flush=True,
         )
