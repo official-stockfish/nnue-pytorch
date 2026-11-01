@@ -37,8 +37,8 @@ class TestCountingExporter(unittest.TestCase):
         return counting.size
 
     def test_default_config(self):
-        """The production config (Full_Threats+PP_3Wide+K32H3^, 1024/32/32)."""
-        size = self._roundtrip("Full_Threats+PP_3Wide+K32H3^", 1024, 32, 32)
+        """The production config (Full_Threats+PP_3Wide+Ram_Ram+K32H3^, 1024/32/32)."""
+        size = self._roundtrip("Full_Threats+PP_3Wide+Ram_Ram+K32H3^", 1024, 32, 32)
         self.assertGreater(size, 100_000_000)
 
     def test_small_config(self):

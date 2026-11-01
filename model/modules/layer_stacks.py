@@ -7,6 +7,27 @@ from ..quantize import QuantizationManager
 from .config import LayerStacksConfig
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 
+# Number of states of each layer-stack key (see LayerStacksConfig.ls_keys)
+STACK_KEY_STATES = {"piececount": 8, "queen": 4, "pawnhalf": 3, "manyoffi": 2}
+
+
+def stack_keys(ls_keys: str) -> list[str]:
+    """The layer-stack keys (--ls-keys) in index order."""
+    keys = [k for k in ls_keys.split(":") if k]
+    for k in keys:
+        assert k in STACK_KEY_STATES, (
+            f"unknown layer-stack key {k!r} (known: {sorted(STACK_KEY_STATES)})"
+        )
+    assert len(set(keys)) == len(keys), f"repeated layer-stack key in {keys}"
+    return keys
+
+
+def stack_count(keys: list[str]) -> int:
+    count = 1
+    for k in keys:
+        count *= STACK_KEY_STATES[k]
+    return count
+
 
 class LayerStacks(nn.Module):
     def __init__(
@@ -35,6 +56,12 @@ class LayerStacks(nn.Module):
 
         with torch.no_grad():
             self.output.linear.bias.zero_()
+
+        factors = [f for f in config.ls_factors.split(":") if f]
+        if factors:
+            self.set_group_factors(
+                self.factor_maps(count, factors, stack_keys(config.ls_keys))
+            )
 
     def forward(
         self,
@@ -92,6 +119,39 @@ class LayerStacks(nn.Module):
         )
         return l3x_
 
+    @staticmethod
+    def factor_maps(
+        count: int, names: list[str], keys: list[str]
+    ) -> list[torch.Tensor]:
+        """Group id of every stack under each named factor: a key, or keys joined by '+' (e.g.
+        "piececount+queen"). The stack index is the mixed-radix index of the keys."""
+        assert count == stack_count(keys), (count, keys)
+        rest = torch.arange(count)
+        values = {}
+        for k in reversed(keys):
+            values[k] = rest % STACK_KEY_STATES[k]
+            rest = rest // STACK_KEY_STATES[k]
+        maps = []
+        for name in names:
+            group = torch.zeros(count, dtype=torch.long)
+            for k in name.split("+"):
+                assert k in values, (
+                    f"layer-stack factor {name!r} uses {k!r}, not in --ls-keys {keys}"
+                )
+                group = group * STACK_KEY_STATES[k] + values[k]
+            maps.append(group)
+        return maps
+
+    def set_group_factors(self, maps: list[torch.Tensor]) -> None:
+        for layer in (self.l1, self.l2, self.output):
+            layer.set_group_factors(maps)
+
+    def group_factor_params(self, biases: bool) -> list:
+        out = []
+        for layer in (self.l1, self.l2, self.output):
+            out += list(layer.group_factor_b if biases else layer.group_factor_w)
+        return out
+
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
         self.l1.zero_virtual_weights()
@@ -109,3 +169,5 @@ class LayerStacks(nn.Module):
     @torch.no_grad()
     def coalesce_layer_stacks_inplace(self) -> None:
         self.l1.coalesce_weights()
+        self.l2.coalesce_group_factors()
+        self.output.coalesce_group_factors()

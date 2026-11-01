@@ -172,16 +172,19 @@ class QuantizationManager:
                 "min_weight": -self.max_hidden_weight[0],
                 "max_weight": self.max_hidden_weight[0],
                 "virtual_params": model.layer_stacks.l1.factorized_linear.weight,
+                "stacked_layer": model.layer_stacks.l1,
             },
             {
                 "params": [model.layer_stacks.l2.linear.weight],
                 "min_weight": -self.max_hidden_weight[1],
                 "max_weight": self.max_hidden_weight[1],
+                "stacked_layer": model.layer_stacks.l2,
             },
             {
                 "params": [model.layer_stacks.output.linear.weight],
                 "min_weight": -self.max_hidden_weight[2],
                 "max_weight": self.max_hidden_weight[2],
+                "stacked_layer": model.layer_stacks.output,
             },
         ]
 

@@ -297,7 +297,7 @@ struct PP_3Wide {
 
     static constexpr int PAWN_IDS            = 2 * 48;
     static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
-    static constexpr int MAX_ACTIVE_FEATURES = 128;
+    static constexpr int MAX_ACTIVE_FEATURES = 100;
 
     static int make_pawn_id(Color color, Square square) {
         return 48 * static_cast<int>(color) + static_cast<int>(square) - static_cast<int>(a2);
@@ -405,6 +405,38 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
     }
 };
 
+// Every pair of rams on the board (a ram is a pawn blocked head-on by an enemy pawn), by both ram ids:
+// the oriented square of the ram's lower pawn (ranks 2-6). These change only when a ram forms or breaks.
+struct RamRam {
+    static constexpr std::string_view NAME = "Ram_Ram";
+
+    static constexpr int INPUTS              = 40 * 39 / 2;
+    static constexpr int MAX_ACTIVE_FEATURES = 8 * 7 / 2;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&     pos    = e.pos;
+        const int orient = static_cast<int>(
+          FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+        const std::uint64_t white = pos.piecesBB(whitePawn).bits(),
+                            black = pos.piecesBB(blackPawn).bits();
+
+        int ids[8], n = 0;
+        for (Square w : Bitboard::fromBits(white & (black >> 8)))
+        {
+            const int a = static_cast<int>(w) ^ orient, b = (static_cast<int>(w) + 8) ^ orient;
+            ids[n++] = std::min(a, b) - 8;
+        }
+
+        int k = 0;
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j)
+                if (ids[i] < ids[j])
+                    features[k++] = ids[j] * (ids[j] - 1) / 2 + ids[i];
+        return {k, INPUTS};
+    }
+};
+
 template<typename T>
 struct SimpleExtractor: IFeatureExtractor {
     int inputs() const override { return T::INPUTS; }
@@ -418,6 +450,8 @@ struct SimpleExtractor: IFeatureExtractor {
 static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view name) {
     if (name == "Full_Threats")
         return std::make_unique<SimpleExtractor<FullThreats>>();
+    if (name == "Ram_Ram")
+        return std::make_unique<SimpleExtractor<RamRam>>();
     if (name == "PP_3Wide")
         return std::make_unique<SimpleExtractor<PP_3Wide>>();
     if (name == "K32H3")
@@ -452,6 +486,70 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
         return std::shared_ptr<IFeatureExtractor>(std::move(components[0]));
 
     return std::make_shared<ComposedFeatureExtractor>(std::move(components));
+}
+
+// Piece-count band: (pieces - 1) / 4
+static int piece_count(const Position& pos) { return (pos.piecesBB().count() - 1) / 4; }
+
+// 0 if no queens on the board
+// 1 if only the non-side-to-move has a queen
+// 2 if only the side-to-move has a queen
+// 3 if both sides have a queen
+static int queens(const Position& pos) {
+    const Color stm = pos.sideToMove();
+    return 2 * pos.piecesBB(Piece(PieceType::Queen, stm)).any()
+         + pos.piecesBB(Piece(PieceType::Queen, !stm)).any();
+}
+
+// 0 if pawns stand on both board halves (files a-d and e-h), 1 if on one half only, 2 if none
+static int pawn_halves(const Position& pos) {
+    const Bitboard pawns     = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn);
+    const Bitboard queenSide = Bitboard::betweenFiles(fileA, fileD);
+    return !pawns.any() ? 2 : (pawns & queenSide).any() && (pawns & ~queenSide).any() ? 0 : 1;
+}
+
+// 1 if some side has two or more officers (knights, bishops, rooks, queens)
+static int many_officers(const Position& pos) {
+    const Bitboard pawnsKings = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn)
+                              | pos.piecesBB(whiteKing) | pos.piecesBB(blackKing);
+    const auto officers = [&](Color c) { return (pos.piecesBB(c) & ~pawnsKings).count(); };
+    return std::max(officers(Color::White), officers(Color::Black)) >= 2;
+}
+
+int LayerStackKeys::index(const Position& pos) const {
+    int index = 0;
+    for (const auto& key : keys)
+        index = index * key.states + key.value(pos);
+    return index;
+}
+
+std::optional<LayerStackKeys> get_layer_stack_keys(std::string_view names) {
+    LayerStackKeys result;
+    std::size_t    start = 0;
+
+    while (start < names.size())
+    {
+        auto pos  = names.find(':', start);
+        auto name = names.substr(start, pos == std::string_view::npos ? pos : pos - start);
+
+        if (name == "piececount")
+            result.keys.push_back({8, piece_count});
+        else if (name == "queen")
+            result.keys.push_back({4, queens});
+        else if (name == "pawnhalf")
+            result.keys.push_back({3, pawn_halves});
+        else if (name == "manyoffi")
+            result.keys.push_back({2, many_officers});
+        else
+        {
+            std::cerr << "Unknown layer-stack key: " << name << std::endl;
+            return std::nullopt;
+        }
+
+        start = (pos == std::string_view::npos) ? names.size() : pos + 1;
+    }
+
+    return result;
 }
 
 // ---------------------------------------------------------
@@ -506,6 +604,7 @@ void SparseBatchBufferPool::release(Buffers buffers, std::size_t floats, std::si
 }
 
 SparseBatch::SparseBatch(const IFeatureExtractor&               feature_set,
+                         const LayerStackKeys&                  ls_keys,
                          const std::vector<TrainingDataEntry>&  entries,
                          std::shared_ptr<SparseBatchBufferPool> buffer_pool) :
 #ifdef NNUE_LOADER_STATISTICS
@@ -516,7 +615,7 @@ SparseBatch::SparseBatch(const IFeatureExtractor&               feature_set,
     size                      = entries.size();
     max_active_features       = feature_set.max_active_features();
     const size_t total_floats = size * 3;
-    const size_t total_ints   = size * 2 + size * max_active_features * 2;
+    const size_t total_ints   = size + size * max_active_features * 2;
 
     if (m_buffer_pool)
     {
@@ -536,10 +635,9 @@ SparseBatch::SparseBatch(const IFeatureExtractor&               feature_set,
     score    = float_alloc.alloc(size);
 
     BumpAllocator<int> int_alloc(m_int_block);
-    white        = int_alloc.alloc(size * max_active_features);
-    black        = int_alloc.alloc(size * max_active_features);
-    piece_count  = int_alloc.alloc(size);
-    queen_bucket = int_alloc.alloc(size);
+    white             = int_alloc.alloc(size * max_active_features);
+    black             = int_alloc.alloc(size * max_active_features);
+    layer_stack_index = int_alloc.alloc(size);
 
     num_active_white_features = 0;
     num_active_black_features = 0;
@@ -551,14 +649,17 @@ SparseBatch::SparseBatch(const IFeatureExtractor&               feature_set,
         black[i] = -1;
 
     for (int i = 0; i < size; ++i)
+    {
         fill_entry(feature_set, i, entries[i]);
+        layer_stack_index[i] = ls_keys.index(entries[i].pos);
+    }
 }
 
 SparseBatch::~SparseBatch() {
     if (m_buffer_pool)
         m_buffer_pool->release(
           {std::unique_ptr<float[]>(m_float_block), std::unique_ptr<int[]>(m_int_block)},
-          std::size_t(size) * 3, std::size_t(size) * (2 * max_active_features + 2));
+          std::size_t(size) * 3, std::size_t(size) * (2 * max_active_features + 1));
     else
     {
         delete[] m_float_block;
@@ -567,13 +668,9 @@ SparseBatch::~SparseBatch() {
 }
 
 void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
-    is_white[i]     = static_cast<float>(e.pos.sideToMove() == Color::White);
-    outcome[i]      = (e.result + 1.0f) / 2.0f;
-    score[i]        = e.score;
-    piece_count[i]  = e.pos.piecesBB().count();
-    const auto stm  = e.pos.sideToMove();
-    queen_bucket[i] = (e.pos.piecesBB(Piece(PieceType::Queen, stm)).any() ? 2 : 0)
-                    | (e.pos.piecesBB(Piece(PieceType::Queen, !stm)).any() ? 1 : 0);
+    is_white[i] = static_cast<float>(e.pos.sideToMove() == Color::White);
+    outcome[i]  = (e.result + 1.0f) / 2.0f;
+    score[i]    = e.score;
     fill_features(fs, i, e);
 }
 
@@ -589,14 +686,14 @@ void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const Traini
 
 bool SparseBatch::pack_indices(int* output, std::size_t capacity) const {
     const std::size_t required =
-      std::size_t(size) * 4 + 2 + num_active_white_features + num_active_black_features;
+      std::size_t(size) * 3 + 2 + num_active_white_features + num_active_black_features;
     if (!output || capacity < required)
         return false;
     int* white_offsets = output;
     int* black_offsets = white_offsets + size + 1;
     int* white_ids     = black_offsets + size + 1;
     int* black_ids     = white_ids + num_active_white_features;
-    int* piece_counts  = black_ids + num_active_black_features;
+    int* stack_indices = black_ids + num_active_black_features;
     int  white_count = 0, black_count = 0;
     white_offsets[0] = black_offsets[0] = 0;
     for (int row = 0; row < size; ++row)
@@ -611,8 +708,7 @@ bool SparseBatch::pack_indices(int* output, std::size_t capacity) const {
         white_offsets[row + 1] = white_count;
         black_offsets[row + 1] = black_count;
     }
-    std::memcpy(piece_counts, piece_count, std::size_t(size) * sizeof(int));
-    std::memcpy(piece_counts + size, queen_bucket, std::size_t(size) * sizeof(int));
+    std::memcpy(stack_indices, layer_stack_index, std::size_t(size) * sizeof(int));
     return true;
 }
 
@@ -630,6 +726,7 @@ int FeaturedBatchStream::calculate_num_worker_threads(int concurrency) {
 
 FeaturedBatchStream::FeaturedBatchStream(
   std::shared_ptr<IFeatureExtractor>            feature_set,
+  LayerStackKeys                                ls_keys,
   int                                           concurrency,
   const std::vector<std::string>&               filenames,
   int                                           batch_size,
@@ -649,6 +746,7 @@ FeaturedBatchStream::FeaturedBatchStream(
              io_config,
              calculate_num_worker_threads(concurrency)),
     m_feature_set(std::move(feature_set)),
+    m_ls_keys(std::move(ls_keys)),
     m_batch_size(batch_size),
     m_concurrency(concurrency),
     m_num_workers(calculate_num_worker_threads(concurrency)),
@@ -659,7 +757,7 @@ FeaturedBatchStream::FeaturedBatchStream(
     // process-global cache or keeping buffers alive after the stream closes.
     m_buffer_pool = std::make_shared<SparseBatchBufferPool>(
       std::size_t(batch_size) * 3,
-      std::size_t(batch_size) * (2 * m_feature_set->max_active_features() + 2),
+      std::size_t(batch_size) * (2 * m_feature_set->max_active_features() + 1),
       std::size_t(m_batch_queue_capacity) + m_num_workers.load() + 1);
     m_stop_flag.store(false);
 
@@ -676,7 +774,7 @@ FeaturedBatchStream::FeaturedBatchStream(
                     break;
             }
 
-            auto batch = new SparseBatch(*m_feature_set, entries, m_buffer_pool);
+            auto batch = new SparseBatch(*m_feature_set, m_ls_keys, entries, m_buffer_pool);
 
             {
                 std::unique_lock lock(m_batch_mutex);

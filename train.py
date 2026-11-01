@@ -35,6 +35,7 @@ def make_data_loaders(
     train_filenames,
     val_filenames,
     feature_name: str,
+    ls_keys: str,
     num_workers,
     batch_size,
     config: data_loader.DataloaderSkipConfig,
@@ -59,6 +60,7 @@ def make_data_loaders(
         config=config,
         ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
         io_config=io_config,
+        ls_keys=ls_keys,
     )
     # num_workers has to be 0 for sparse, and 1 for dense
     # it currently cannot work in parallel mode but it shouldn't need to
@@ -98,6 +100,7 @@ def make_data_loaders(
             config=config,
             ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
             io_config=io_config,
+            ls_keys=ls_keys,
         )
         val = DataLoader(
             data_loader.FixedNumBatchesDataset(
@@ -260,6 +263,7 @@ def main():
         nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
+    ls_keys = nnue.model.ls_keys
 
     torch.manual_seed(args.seed)
     random.seed(args.seed)
@@ -334,6 +338,7 @@ def main():
         train_datasets,
         val_datasets,
         input_feature_name,
+        ls_keys,
         actual_workers,
         per_gpu_batch_size,
         args.dataloader_config,

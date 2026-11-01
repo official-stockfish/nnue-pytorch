@@ -3,6 +3,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .modules import ComposedFeatureTransformer, LayerStacks, get_feature_cls
+from .modules.layer_stacks import stack_count, stack_keys
 from .quantize import QuantizationManager
 
 
@@ -22,7 +23,9 @@ class NNUEModel(nn.Module):
         self.quantize_config = config.quantize_config
         self.quantization = QuantizationManager(config.quantize_config)
 
-        self.num_ls_buckets = 32
+        # The data loader computes the layer-stack index from these keys
+        self.ls_keys = config.ls_keys
+        self.num_ls_buckets = stack_count(stack_keys(config.ls_keys))
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME
@@ -64,6 +67,20 @@ class NNUEModel(nn.Module):
                                 p_data_fp32.new_full(p_data_fp32.shape, max_weight)
                                 - expanded_virtual_layer
                             )
+                    if "stacked_layer" in group:
+                        ge = group["stacked_layer"].group_expansion()
+                        if ge is not None:
+                            gw = ge[0].detach()
+                            if not torch.is_tensor(min_weight):
+                                min_weight = p_data_fp32.new_full(
+                                    p_data_fp32.shape, min_weight
+                                )
+                            if not torch.is_tensor(max_weight):
+                                max_weight = p_data_fp32.new_full(
+                                    p_data_fp32.shape, max_weight
+                                )
+                            min_weight = min_weight - gw
+                            max_weight = max_weight - gw
                     p_data_fp32.clamp_(min_weight, max_weight)
 
     @torch.no_grad()
@@ -89,23 +106,16 @@ class NNUEModel(nn.Module):
             fake_quantize_weights,
         )
 
-    def calculate_buckets(self, piece_count: torch.Tensor, queen_bucket: torch.Tensor):
-        pc_bucket = (piece_count - 1) // 4
-        return pc_bucket * 4 + queen_bucket
-
     def forward(
         self,
         us: torch.Tensor,
         them: torch.Tensor,
         white_indices: torch.Tensor,
         black_indices: torch.Tensor,
-        piece_count: torch.Tensor,
-        queen_bucket: torch.Tensor,
+        layer_stack_indices: torch.Tensor,
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
     ):
-        layer_stack_indices = self.calculate_buckets(piece_count, queen_bucket)
-
         l0_ = self.forward_ft(
             us,
             them,
