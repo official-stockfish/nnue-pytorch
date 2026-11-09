@@ -160,9 +160,9 @@ def _normalize_optimizer_and_schedulers(optimizer_and_schedulers):
 
 
 def prepare_stack_table(args) -> None:
-    """--ls-compact: take the layer-stack table from the checkpoint being resumed, or build it from --ls-remap-data."""
+    """Take the layer-stack table from the checkpoint being resumed, or build it from --ls-remap-data."""
     mc = args.nnue_config.model_config
-    if not mc.ls_compact or mc.ls_remap_table:
+    if mc.ls_remap_table:
         return
     if args.resume_from_checkpoint:
         ckpt = torch.load(

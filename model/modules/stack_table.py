@@ -1,4 +1,4 @@
-"""Layer-stack tables for --ls-compact: which raw stacks (from --ls-keys) are stored, and which stored stack every
+"""Layer-stack tables: which raw stacks (from --ls-keys) are stored, and which stored stack every
 other raw stack uses.
 
 A table is a list `remap` with remap[raw] = the raw stack whose weights `raw` uses; stacks with remap[s] == s are
@@ -61,7 +61,7 @@ def fallback_table(
 
 
 def table_from_state_dict(state_dict) -> str | None:
-    """The layer-stack table saved in a checkpoint of a --ls-compact model, or None."""
+    """The layer-stack table saved in a checkpoint, or None."""
     for k, v in state_dict.items():
         if k.endswith("layer_stacks.stack_fallback"):
             return table_to_str(v.tolist())
@@ -69,9 +69,9 @@ def table_from_state_dict(state_dict) -> str | None:
 
 
 def use_checkpoint_stack_table(nnue_config, checkpoint: dict) -> None:
-    """Before building a --ls-compact model to load a checkpoint into: take the checkpoint's layer-stack table."""
+    """Before building a model to load a checkpoint into: take the checkpoint's layer-stack table."""
     mc = nnue_config.model_config
-    if mc.ls_compact and not mc.ls_remap_table:
+    if not mc.ls_remap_table:
         table = table_from_state_dict(checkpoint["state_dict"])
         if table is not None:
             mc.ls_remap_table = table

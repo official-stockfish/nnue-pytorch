@@ -117,22 +117,16 @@ class NNUEWriter:
         layer_stacks = model.layer_stacks
 
         # 1. Plaintext header
-        self.write_header(
-            model,
-            fc_hash ^ (STACK_TABLE_HASH if layer_stacks.compact else 0),
-            description,
-        )
+        self.write_header(model, fc_hash ^ STACK_TABLE_HASH, description)
 
-        if layer_stacks.compact:
-            self.int32(STACK_TABLE_HASH)
-            self.int32(layer_stacks.raw_count)
-            self.int32(layer_stacks.count)
-            self.exporter.extend(
-                struct.pack(
-                    f"<{layer_stacks.raw_count}H",
-                    *layer_stacks.stack_fallback.tolist(),
-                )
+        self.int32(STACK_TABLE_HASH)
+        self.int32(layer_stacks.raw_count)
+        self.int32(layer_stacks.count)
+        self.exporter.extend(
+            struct.pack(
+                f"<{layer_stacks.raw_count}H", *layer_stacks.stack_fallback.tolist()
             )
+        )
 
         # 2. Payload (Feature Transformer + Layer Stacks)
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
@@ -265,32 +259,31 @@ class NNUEReader:
         self.feature_name = feature_name
 
         header_hash = self.read_header()
-        if config.ls_compact:
-            self.read_int32(STACK_TABLE_HASH)
-            raw_count = self.read_int32()
-            stored_count = self.read_int32()
-            remap = list(struct.unpack(f"<{raw_count}H", self.f.read(2 * raw_count)))
-            assert all(f < raw_count and remap[f] == f for f in remap), (
-                "invalid layer-stack table"
-            )
-            assert sum(s == f for s, f in enumerate(remap)) == stored_count, (
-                "layer-stack table count mismatch"
-            )
-            config = replace(config, ls_remap_table=table_to_str(remap))
+        self.read_int32(STACK_TABLE_HASH)
+        raw_count = self.read_int32()
+        stored_count = self.read_int32()
+        remap = list(struct.unpack(f"<{raw_count}H", self.f.read(2 * raw_count)))
+        assert all(f < raw_count and remap[f] == f for f in remap), (
+            "invalid layer-stack table"
+        )
+        assert sum(s == f for s, f in enumerate(remap)) == stored_count, (
+            "layer-stack table count mismatch"
+        )
+        config = replace(config, ls_remap_table=table_to_str(remap))
 
         self.model = NNUEModel(feature_name, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
         ls = self.model.layer_stacks
-        expected = fc_hash ^ self.model.feature_hash ^ (config.L1 * 2)
-        expected ^= STACK_TABLE_HASH if ls.compact else 0
+        expected = (
+            fc_hash ^ self.model.feature_hash ^ (config.L1 * 2) ^ STACK_TABLE_HASH
+        )
         if header_hash != expected:
             raise ValueError(f"Expected: {expected:x}, got: {header_hash:x}")
-        if ls.compact:
-            assert ls.count == stored_count and ls.raw_count == raw_count, (
-                ls.count,
-                stored_count,
-            )
+        assert ls.count == stored_count and ls.raw_count == raw_count, (
+            ls.count,
+            stored_count,
+        )
         self.read_int32(
             self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash

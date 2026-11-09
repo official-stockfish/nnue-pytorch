@@ -44,20 +44,12 @@ class LayerStacks(nn.Module):
             )
         else:
             remap = torch.arange(raw_count)
-        assert not config.ls_compact or config.ls_remap_table, (
-            "--ls-compact needs a layer-stack table: --ls-remap-data at the start of training (later steps take "
-            "it from the checkpoint or the net)"
-        )
-        if config.ls_compact:
-            live = torch.nonzero(remap == torch.arange(raw_count)).flatten()
-        else:
-            live = torch.arange(raw_count)
+        live = torch.nonzero(remap == torch.arange(raw_count)).flatten()
         stored = torch.full((raw_count,), -1, dtype=torch.long)
         stored[live] = torch.arange(len(live))
         count = len(live)
 
         self.raw_count = raw_count
-        self.compact = config.ls_compact
         self.count = count
         self.L1 = config.L1
         self.L2 = config.L2
@@ -89,10 +81,7 @@ class LayerStacks(nn.Module):
             self.set_group_factors([m[live] for m in maps])
 
         self.register_buffer("stack_remap", stored[remap], persistent=False)
-        self.register_buffer("stack_fallback", remap.clone(), persistent=self.compact)
-        self.export_slots = (
-            list(range(count)) if self.compact else [int(s) for s in stored[remap]]
-        )
+        self.register_buffer("stack_fallback", remap.clone())
 
     def forward(
         self,
@@ -194,7 +183,7 @@ class LayerStacks(nn.Module):
         # During training the buckets are represented by a single, wider, layer.
         # This representation needs to be transformed into individual layers
         # for the serializer, because the buckets are interpreted as separate layers.
-        for j in self.export_slots:
+        for j in range(self.count):
             yield self.l1.at_index(j), self.l2.at_index(j), self.output.at_index(j)
 
     @torch.no_grad()
