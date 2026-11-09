@@ -126,7 +126,7 @@ What this document DOES NOT contain:
     + [HalfKAv2_hm feature set.](#halfkav2_hm-feature-set)
     + [Full_Threats feature set.](#full_threats-feature-set)
         - [Deduplicating features](#deduplicating-features)
-        - [I8 quantization for threat feature weights](#i8-quantization-for-threat-feature-weights)
+        - [I8 quantization for feature transformer weights](#i8-quantization-for-feature-transformer-weights)
     + [PP_3Wide feature set.](#pp_3wide-feature-set)
         - [Indexing and perspectives](#indexing-and-perspectives)
     + [Multiple subnetworks](#multiple-subnetworks)
@@ -2858,13 +2858,9 @@ Let's consider an example where the white king is on a1 and the black king on g1
 
 ### Full_Threats feature set.
 
-Full threat inputs models a subset of "AA" (i.e. pairs of "A" features), specifically the ones where the first piece attacks the second. For example, "white queen on d1 attacks black knight on h5" is encoded as "stm queen on d1 attacks nstm knight on h5" for white's perspective and "nstm queen on d8 attacks stm knight on h4" for black's perspective.
-
-Threat input features are also mirrored horizontally by perspective (the mirroring currently is to a..d files, a legacy of an initial design choice for ease of debugging). In practice, refreshes are uncommon, so their cost is negligible.
+Full threat inputs models a subset of "AA" (i.e. pairs of "A" features), specifically the ones where the first piece attacks the second. For example, "white queen on d1 attacks black knight on h5" is encoded as "stm queen on d1 attacks nstm knight on h5" for white's perspective and "nstm queen on d8 attacks stm knight on h4" for black's perspective. Threat input features are also mirrored horizontally for each perspective.
 
 Threat features alone are not sufficient for evaluation (how can you distinguish positions where there are no threats, for instance?) and hence function as an add-on to a feature set such as HalfKAv2_hm. One can think of "piece" features like HalfKAv2_hm as providing the foundation, while the "threat" features add many minor corrections.
-
-Since threat features have different refresh patterns (for instance, they do not need to be refreshed every king move, but only when one crosses the d-e files), they are accumulated separately. The two accumulators are combined at evaluation time.
 
 #### Deduplicating features
 
@@ -2874,9 +2870,11 @@ If the two pieces are identical type, then one feature of the pair will also be 
 
 Since evaluation is not called in check, attacks to a king are also redundant, though accounting for this has not gained in practice.
 
-#### I8 quantization for threat feature weights
+#### I8 quantization for feature transformer weights
 
-The number of active and changing threat features depends on the position, but is typically higher when more pieces (especially the queens) are on the board. In a typical midgame position, there might be 3-4x as many changing threat features as piece features, and memory bandwidth becomes a bottleneck for accumulation speed. We thus store threat features as i8 and convert them to i16 on the fly during accumulation. This process seems to increase speed much more on ARM architectures (+10%) compared to x86 (+5%). Because threat feature weights are typically not high in absolute value (see our earlier comment regarding the separation between threat and piece features), we can clip them during training with negligible loss in evaluation quality.
+Since adding threat features and especially with recent architectures adding larger and more fancy input features, memory bandwidth has become a bigger bottleneck for accumulation, while precision loss due to stricter weight clipping has decreased. Thus, all feature transformer weights are now quantized to i8.
+
+ARM CPUs benefit more relatively due to having more efficient i8 to i16 SIMD instructions.
 
 ### PP_3Wide feature set.
 
