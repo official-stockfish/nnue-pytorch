@@ -27,12 +27,10 @@ def _unpack_kernel(
     )
     destination = (perspective * batch + row).to(tl.int64) * active
     tl.store(output + destination + k, values, k < active)
-    # Each perspective also copies one of the per-position metadata arrays.
-    metadata = 2 * (batch + 1) + nw + nb + perspective * batch + row
-    value = tl.load(packed + metadata)
-    tl.store(
-        output + 2 * batch.to(tl.int64) * active + perspective * batch + row, value
-    )
+    # The white perspective also copies the layer-stack index.
+    if perspective == 0:
+        value = tl.load(packed + 2 * (batch + 1) + nw + nb + row)
+        tl.store(output + 2 * batch.to(tl.int64) * active + row, value)
 
 
 @torch.compiler.disable
@@ -43,15 +41,15 @@ def unpack_sparse_indices(
     num_white: int,
     num_black: int,
 ) -> torch.Tensor:
-    """Restore padded rows and copy batch metadata on the current CUDA stream."""
+    """Restore padded rows and copy layer-stack indices on the current CUDA stream."""
     if packed.dtype != torch.int32 or packed.ndim != 1 or not packed.is_contiguous():
         raise ValueError("packed must be a contiguous one-dimensional int32 tensor")
     if min(batch_size, max_active, num_white, num_black) < 0:
         raise ValueError("transport dimensions must be nonnegative")
-    if packed.numel() != 4 * batch_size + 2 + num_white + num_black:
+    if packed.numel() != 3 * batch_size + 2 + num_white + num_black:
         raise ValueError("packed size does not match transport dimensions")
     output = torch.empty(
-        batch_size * (2 * max_active + 2), dtype=torch.int32, device=packed.device
+        batch_size * (2 * max_active + 1), dtype=torch.int32, device=packed.device
     )
     if batch_size:
         with torch.cuda.device(packed.device):

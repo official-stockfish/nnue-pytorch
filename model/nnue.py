@@ -208,6 +208,42 @@ class NNUE(nn.Module):
             },
         ]
 
+        # Layer-stack group factors (--ls-factors): weights decayed like the l1 factorizer, biases without decay.
+        gfw = self.model.layer_stacks.group_factor_params(biases=False)
+        gfb = self.model.layer_stacks.group_factor_params(biases=True)
+        if gfw:
+            train_params.append(
+                {"params": gfw, "lr": LRs[2], "weight_decay": factorized_wd}
+            )
+            train_params.append({"params": gfb, "lr": LRs[3], "weight_decay": 0.0})
+
+        bucket_mult = optimizer_config.ft_bucket_lr_mult
+        threat_mult = optimizer_config.threat_lr_mult
+        if (bucket_mult, threat_mult) != (1.0, 1.0):
+            features = self.model.input.features
+            bucketed = {id(f.weight) for f in features if hasattr(f, "virtual_weight")}
+            threats = {
+                id(f.weight) for f in features if type(f).__name__ == "FullThreats"
+            }
+            rows = train_params[0]["params"]
+            train_params[0]["params"] = [
+                p for p in rows if id(p) not in bucketed | threats
+            ]
+            train_params.append(
+                {
+                    "params": [p for p in rows if id(p) in bucketed],
+                    "lr": LRs[0] * bucket_mult,
+                    "weight_decay": ft_wd,
+                }
+            )
+            train_params.append(
+                {
+                    "params": [p for p in rows if id(p) in threats],
+                    "lr": LRs[0] * threat_mult,
+                    "weight_decay": ft_wd,
+                }
+            )
+
         train_params = [group for group in train_params if len(group["params"]) > 0]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
@@ -350,6 +386,7 @@ class NNUE(nn.Module):
         return {"test_loss": loss}
 
     def compute_loss(self, batch: tuple[Tensor, ...], current_step: int):
+        quantize = current_step >= self.config.fake_quant_warmup_steps
         (
             us,
             them,
@@ -357,18 +394,16 @@ class NNUE(nn.Module):
             black_indices,
             _outcome,
             _score,
-            piece_count,
-            queen_bucket,
+            layer_stack_indices,
         ) = batch
         scorenet = self.model(
             us,
             them,
             white_indices,
             black_indices,
-            piece_count,
-            queen_bucket,
-            self.config.use_fake_act_quantization,
-            self.config.use_fake_weight_quantization,
+            layer_stack_indices,
+            self.config.use_fake_act_quantization and quantize,
+            self.config.use_fake_weight_quantization and quantize,
         )
         return self.compute_loss_with_scorenet(scorenet, batch, current_step)
 

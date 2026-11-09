@@ -13,3 +13,30 @@ class LayerStacksConfig:
     """Size of second hidden layer."""
     L3: Annotated[int, tyro.conf.arg(name="l3")] = 32
     """Size of third hidden layer."""
+    ls_factors: Annotated[str, tyro.conf.arg(name="ls-factors")] = (
+        "piececount+queen:pawnhalf:manyoffi"
+    )
+    """Factorized layer stacks: ':'-separated factors, each a --ls-keys key or keys joined by '+' (e.g.
+    "piececount+queen"), shared by the stacks with the same values of those keys, added to every stack layer during
+    training and folded into the stacks at export (the exported net is unchanged in format). Empty = off."""
+    ls_keys: Annotated[str, tyro.conf.arg(name="ls-keys")] = (
+        "piececount:queen:pawnhalf:manyoffi"
+    )
+    """Layer-stack keys, ':'-separated, in mixed radix with the last key varying fastest: "piececount" (piece-count
+    band, (pieces - 1) / 4: 8), "queen" (2 if the side to move has a queen, plus 1 if the opponent has one: 4),
+    "pawnhalf" (pawns on both board halves a-d / e-h, on one half only, or none: 3), "manyoffi" (1 if some side has
+    two or more officers N, B, R, Q: 2). Stacks = the product of the key sizes. The data loader computes the stack
+    index."""
+    ls_compact: Annotated[bool, tyro.conf.arg(name="ls-compact")] = False
+    """Store and export only the layer stacks with enough data: stacks seen fewer than --ls-remap-min times in
+    --ls-remap-data use the nearest well-seen stack. The net then has fewer layer stacks and carries the table, with
+    which the engine maps raw stacks to stored ones."""
+    ls_remap_data: Annotated[str, tyro.conf.arg(name="ls-remap-data")] = ""
+    """--ls-compact: binpack to build the layer-stack table from at the start of training: every stack is counted
+    over it (no position filtering). A relative path is also looked up under the data root of the training binpacks.
+    The table is kept in the checkpoint and the net, so later steps (resume, conversion, crosscheck) reuse it."""
+    ls_remap_min: Annotated[int, tyro.conf.arg(name="ls-remap-min")] = 50
+    """--ls-compact: minimum count for a stack of its own."""
+    ls_remap_table: Annotated[str, tyro.conf.arg(name="ls-remap-table")] = ""
+    """--ls-compact: the layer-stack table itself, as "stack:fallback" pairs (normally filled in from --ls-remap-data,
+    a checkpoint or a net)."""

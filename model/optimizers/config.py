@@ -36,6 +36,13 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig, AdamWConfig):
     lr: float = 8.75e-4
     """Initial learning rate."""
 
+    ft_bucket_lr_mult: float = 1.0
+    """Learning-rate multiplier for the bucketed rows of factorized feature transformer inputs
+    (e.g. K32H3's king-bucket rows); their shared virtual rows keep the FT rate."""
+
+    threat_lr_mult: float = 1.0
+    """Learning-rate multiplier for the Full_Threats rows."""
+
     def get_optimizer_wrapper(self):
         optimizer_name = self.optimizer_name.lower().strip()
         wrapper_factory = OPTIMIZER_WRAPPERS.get(optimizer_name)

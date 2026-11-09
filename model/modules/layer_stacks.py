@@ -5,7 +5,29 @@ from torch import nn
 
 from ..quantize import QuantizationManager
 from .config import LayerStacksConfig
+from .stack_table import table_from_str
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
+
+# Number of states of each layer-stack key (see LayerStacksConfig.ls_keys)
+STACK_KEY_STATES = {"piececount": 8, "queen": 4, "pawnhalf": 3, "manyoffi": 2}
+
+
+def stack_keys(ls_keys: str) -> list[str]:
+    """The layer-stack keys (--ls-keys) in index order."""
+    keys = [k for k in ls_keys.split(":") if k]
+    for k in keys:
+        assert k in STACK_KEY_STATES, (
+            f"unknown layer-stack key {k!r} (known: {sorted(STACK_KEY_STATES)})"
+        )
+    assert len(set(keys)) == len(keys), f"repeated layer-stack key in {keys}"
+    return keys
+
+
+def stack_count(keys: list[str]) -> int:
+    count = 1
+    for k in keys:
+        count *= STACK_KEY_STATES[k]
+    return count
 
 
 class LayerStacks(nn.Module):
@@ -14,6 +36,28 @@ class LayerStacks(nn.Module):
     ):
         super().__init__()
 
+        raw_count = count
+        if config.ls_remap_table:
+            remap = torch.tensor(table_from_str(config.ls_remap_table, raw_count))
+            assert bool((remap[remap] == remap).all()), (
+                "a fallback stack must not be remapped itself"
+            )
+        else:
+            remap = torch.arange(raw_count)
+        assert not config.ls_compact or config.ls_remap_table, (
+            "--ls-compact needs a layer-stack table: --ls-remap-data at the start of training (later steps take "
+            "it from the checkpoint or the net)"
+        )
+        if config.ls_compact:
+            live = torch.nonzero(remap == torch.arange(raw_count)).flatten()
+        else:
+            live = torch.arange(raw_count)
+        stored = torch.full((raw_count,), -1, dtype=torch.long)
+        stored[live] = torch.arange(len(live))
+        count = len(live)
+
+        self.raw_count = raw_count
+        self.compact = config.ls_compact
         self.count = count
         self.L1 = config.L1
         self.L2 = config.L2
@@ -25,16 +69,30 @@ class LayerStacks(nn.Module):
         # This is by design. The weights in the further layers should be
         # able to diverge a lot.
         self.l1 = FactorizedStackedLinear(
-            2 * self.L1 // 2, self.L2, count, quantization, "ls_l1"
+            2 * self.L1 // 2, self.L2, raw_count, quantization, "ls_l1"
         )
-        self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
+        self.l2 = StackedLinear(self.L2 * 2, self.L3, raw_count, quantization, "ls_l2")
 
         self.output = StackedLinear(
-            self.L2 * 2 + self.L3 * 2, 1, count, quantization, "ls_output"
+            self.L2 * 2 + self.L3 * 2, 1, raw_count, quantization, "ls_output"
         )
+        if count != raw_count:
+            for layer in (self.l1, self.l2, self.output):
+                layer.keep_first_stacks(count)
 
         with torch.no_grad():
             self.output.linear.bias.zero_()
+
+        factors = [f for f in config.ls_factors.split(":") if f]
+        if factors:
+            maps = self.factor_maps(raw_count, factors, stack_keys(config.ls_keys))
+            self.set_group_factors([m[live] for m in maps])
+
+        self.register_buffer("stack_remap", stored[remap], persistent=False)
+        self.register_buffer("stack_fallback", remap.clone(), persistent=self.compact)
+        self.export_slots = (
+            list(range(count)) if self.compact else [int(s) for s in stored[remap]]
+        )
 
     def forward(
         self,
@@ -92,6 +150,39 @@ class LayerStacks(nn.Module):
         )
         return l3x_
 
+    @staticmethod
+    def factor_maps(
+        count: int, names: list[str], keys: list[str]
+    ) -> list[torch.Tensor]:
+        """Group id of every stack under each named factor: a key, or keys joined by '+' (e.g.
+        "piececount+queen"). The stack index is the mixed-radix index of the keys."""
+        assert count == stack_count(keys), (count, keys)
+        rest = torch.arange(count)
+        values = {}
+        for k in reversed(keys):
+            values[k] = rest % STACK_KEY_STATES[k]
+            rest = rest // STACK_KEY_STATES[k]
+        maps = []
+        for name in names:
+            group = torch.zeros(count, dtype=torch.long)
+            for k in name.split("+"):
+                assert k in values, (
+                    f"layer-stack factor {name!r} uses {k!r}, not in --ls-keys {keys}"
+                )
+                group = group * STACK_KEY_STATES[k] + values[k]
+            maps.append(group)
+        return maps
+
+    def set_group_factors(self, maps: list[torch.Tensor]) -> None:
+        for layer in (self.l1, self.l2, self.output):
+            layer.set_group_factors(maps)
+
+    def group_factor_params(self, biases: bool) -> list:
+        out = []
+        for layer in (self.l1, self.l2, self.output):
+            out += list(layer.group_factor_b if biases else layer.group_factor_w)
+        return out
+
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
         self.l1.zero_virtual_weights()
@@ -103,9 +194,11 @@ class LayerStacks(nn.Module):
         # During training the buckets are represented by a single, wider, layer.
         # This representation needs to be transformed into individual layers
         # for the serializer, because the buckets are interpreted as separate layers.
-        for i in range(self.count):
-            yield self.l1.at_index(i), self.l2.at_index(i), self.output.at_index(i)
+        for j in self.export_slots:
+            yield self.l1.at_index(j), self.l2.at_index(j), self.output.at_index(j)
 
     @torch.no_grad()
     def coalesce_layer_stacks_inplace(self) -> None:
         self.l1.coalesce_weights()
+        self.l2.coalesce_group_factors()
+        self.output.coalesce_group_factors()

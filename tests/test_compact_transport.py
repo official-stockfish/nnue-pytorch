@@ -30,7 +30,7 @@ def test_native_packing(batch_size: int) -> None:
         native = batch.contents
         expected = native.get_tensors("cpu")
         nw, nb = native.num_active_white_features, native.num_active_black_features
-        size = 4 * batch_size + 2 + nw + nb
+        size = 3 * batch_size + 2 + nw + nb
         packed = torch.full((size + 2,), -123, dtype=torch.int32)
         pack = _native.c_lib.pack_sparse_batch
         assert not pack(batch, packed.data_ptr(), size - 1)
@@ -46,9 +46,6 @@ def test_native_packing(batch_size: int) -> None:
         for offsets, ids, dense in ((wo, wi, expected[2]), (bo, bi, expected[3])):
             torch.testing.assert_close(offsets.diff().long(), (dense >= 0).sum(1))
             torch.testing.assert_close(ids, dense[dense >= 0])
-        torch.testing.assert_close(
-            packed[size - 2 * batch_size : size - batch_size].long(), expected[-2]
-        )
         torch.testing.assert_close(
             packed[size - batch_size : size].long(), expected[-1]
         )
@@ -79,9 +76,9 @@ def test_unpack_exact_padding(active: int, separate_stream: bool) -> None:
         for dense in (white, black)
     ]
     ids = [dense[dense >= 0] for dense in (white, black)]
-    pieces = torch.arange(batch, dtype=torch.int32)
-    packed = torch.cat((*offsets, *ids, pieces, pieces + 10)).pin_memory()
-    expected = torch.cat((white.flatten(), black.flatten(), pieces, pieces + 10))
+    stacks = torch.arange(batch, dtype=torch.int32)
+    packed = torch.cat((*offsets, *ids, stacks)).pin_memory()
+    expected = torch.cat((white.flatten(), black.flatten(), stacks))
     cuda_stream = (
         torch.cuda.Stream() if separate_stream else torch.cuda.current_stream()
     )
@@ -163,7 +160,7 @@ def test_python_batch_dense_transport(
     monkeypatch.setattr(_native.c_lib, "pack_sparse_batch", unexpected_pack)
     size, active = (16384 if device == "cuda" else 2), 288
     floats = np.arange(size * 3, dtype=np.float32)
-    ints = np.arange(size * (2 * active + 2), dtype=np.int32)
+    ints = np.arange(size * (2 * active + 1), dtype=np.int32)
     batch = _native.SparseBatch()
     batch.size, batch.max_active_features = size, active
     batch.is_white = floats.ctypes.data_as(
