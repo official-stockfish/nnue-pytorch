@@ -14,6 +14,7 @@ struct SparseBatchStream;
 
 // batches
 NNUE_API SparseBatch* NNUE_CDECL get_sparse_batch_from_fens(const char*        feature_set_c,
+                                                            const char*        ls_keys_c,
                                                             int                num_fens,
                                                             const char* const* fens,
                                                             int*               scores,
@@ -43,6 +44,7 @@ NNUE_API FenBatch* NNUE_CDECL fetch_next_fen_batch(FenBatchStream* stream);
 
 // sparse stream
 NNUE_API SparseBatchStream* NNUE_CDECL create_sparse_batch_stream(const char*        feature_set_c,
+                                                                  const char*        ls_keys_c,
                                                                   int                concurrency,
                                                                   int                num_files,
                                                                   const char* const* filenames,

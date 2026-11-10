@@ -29,7 +29,60 @@ class StackedLinear(nn.Module):
         self.quantization = quantization
         self.layer_key = layer_key
 
+        self.group_factor_w = nn.ParameterList()
+        self.group_factor_b = nn.ParameterList()
+        self.group_maps: list[torch.Tensor] = []
+
         self._init_uniformly()
+
+    def set_group_factors(self, maps: list[torch.Tensor]) -> None:
+        """maps[f][stack] = group id of the stack under factor f (zero-initialised tables)."""
+        for m in maps:
+            g = int(m.max()) + 1
+            self.group_factor_w.append(
+                nn.Parameter(torch.zeros(g * self.out_features, self.in_features))
+            )
+            self.group_factor_b.append(nn.Parameter(torch.zeros(g * self.out_features)))
+            self.register_buffer(
+                f"group_map_{len(self.group_maps)}", m.clone().long(), persistent=False
+            )
+            self.group_maps.append(m.clone().long())
+
+    @torch.no_grad()
+    def keep_first_stacks(self, count: int) -> None:
+        """Drop all but the first `count` stacks (before any group factors are set)."""
+        rows = count * self.out_features
+        self.linear.weight = nn.Parameter(self.linear.weight[:rows].clone())
+        self.linear.bias = nn.Parameter(self.linear.bias[:rows].clone())
+        self.linear.out_features = rows
+        self.count = count
+
+    @torch.no_grad()
+    def coalesce_group_factors(self) -> None:
+        ge = self.group_expansion()
+        if ge is None:
+            return
+        self.linear.weight.add_(ge[0])
+        self.linear.bias.add_(ge[1])
+        for fw, fb in zip(self.group_factor_w, self.group_factor_b):
+            fw.zero_()
+            fb.zero_()
+
+    def group_expansion(self) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """(count*out, in) weight and (count*out,) bias contributions of the group factors, or None."""
+        if len(self.group_maps) == 0:
+            return None
+        w = 0
+        b = 0
+        for f, (fw, fb) in enumerate(zip(self.group_factor_w, self.group_factor_b)):
+            m = getattr(self, f"group_map_{f}").to(fw.device)
+            w = w + fw.view(-1, self.out_features, self.in_features)[m].reshape(
+                self.count * self.out_features, self.in_features
+            )
+            b = b + fb.view(-1, self.out_features)[m].reshape(
+                self.count * self.out_features
+            )
+        return w, b
 
     @torch.no_grad()
     def _init_uniformly(self) -> None:
@@ -47,6 +100,10 @@ class StackedLinear(nn.Module):
     ) -> torch.Tensor:
         weight = self.linear.weight
         bias = self.linear.bias
+        ge = self.group_expansion()
+        if ge is not None:
+            weight = weight + ge[0]
+            bias = bias + ge[1]
         if fake_quantize_weights:
             if self.quantization is None or self.layer_key is None:
                 raise RuntimeError(
@@ -89,6 +146,10 @@ class StackedLinear(nn.Module):
 
         layer.weight.copy_(self.linear.weight[begin:end, :])
         layer.bias.copy_(self.linear.bias[begin:end])
+        ge = self.group_expansion()
+        if ge is not None:
+            layer.weight.add_(ge[0][begin:end, :])
+            layer.bias.add_(ge[1][begin:end])
 
         return layer
 
@@ -117,6 +178,10 @@ class FactorizedStackedLinear(StackedLinear):
             self.count, 1
         )
         merged_bias = self.linear.bias + self.factorized_linear.bias.repeat(self.count)
+        ge = self.group_expansion()
+        if ge is not None:
+            merged_weight = merged_weight + ge[0]
+            merged_bias = merged_bias + ge[1]
 
         if fake_quantize_weights:
             if self.quantization is None or self.layer_key is None:
@@ -179,5 +244,12 @@ class FactorizedStackedLinear(StackedLinear):
 
             self.linear.weight[begin:end, :].add_(self.factorized_linear.weight)
             self.linear.bias[begin:end].add_(self.factorized_linear.bias)
+        ge = self.group_expansion()
+        if ge is not None:
+            self.linear.weight.add_(ge[0])
+            self.linear.bias.add_(ge[1])
+            for fw, fb in zip(self.group_factor_w, self.group_factor_b):
+                fw.zero_()
+                fb.zero_()
 
         self.zero_virtual_weights()

@@ -132,6 +132,7 @@ def main():
         checkpoint = torch.load(
             args.source, map_location=torch.device("cpu"), weights_only=False
         )
+        M.use_checkpoint_stack_table(nnue_config, checkpoint)
         nnue = M.NNUE(config=nnue_config)
         nnue.load_state_dict(checkpoint["state_dict"])
         nnue.eval()
@@ -139,13 +140,14 @@ def main():
         nnue = torch.load(args.source, weights_only=False)
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
-            nnue = M.NNUE(
-                config=nnue_config,
-            )
             reader = M.NNUEReader(
                 f,
                 feature_name,
                 config=nnue_config.model_config,
+            )
+            nnue_config.model_config.ls_remap_table = reader.config.ls_remap_table
+            nnue = M.NNUE(
+                config=nnue_config,
             )
             nnue.model = reader.model
             if serialize_config.description is None:

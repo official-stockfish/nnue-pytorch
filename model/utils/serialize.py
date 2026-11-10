@@ -1,6 +1,7 @@
 import operator
 import struct
 from collections.abc import Sequence
+from dataclasses import replace
 from functools import reduce
 from typing import BinaryIO
 
@@ -11,6 +12,7 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
+from ..modules.stack_table import table_to_str
 
 
 def ascii_hist(name, x, bins=7):
@@ -65,6 +67,8 @@ def get_histogram_callback(hist_title: str, verbose: bool):
 
 # hardcoded for now
 VERSION = 0x6A448AFA
+
+STACK_TABLE_HASH = 0x5A7AB1E5
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
 
 
@@ -110,14 +114,23 @@ class NNUEWriter:
         self.exporter = exporter
 
         fc_hash = self.fc_hash(model)
+        layer_stacks = model.layer_stacks
 
         # 1. Plaintext header
-        self.write_header(model, fc_hash, description)
+        self.write_header(model, fc_hash ^ STACK_TABLE_HASH, description)
+
+        self.int32(STACK_TABLE_HASH)
+        self.int32(layer_stacks.raw_count)
+        self.int32(layer_stacks.count)
+        self.exporter.extend(
+            struct.pack(
+                f"<{layer_stacks.raw_count}H", *layer_stacks.stack_fallback.tolist()
+            )
+        )
 
         # 2. Payload (Feature Transformer + Layer Stacks)
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model)
-        layer_stacks = model.layer_stacks
         for bucket, (l1, l2, output) in enumerate(
             layer_stacks.get_coalesced_layer_stacks()
         ):
@@ -244,11 +257,33 @@ class NNUEReader:
     ):
         self.f = f
         self.feature_name = feature_name
+
+        header_hash = self.read_header()
+        self.read_int32(STACK_TABLE_HASH)
+        raw_count = self.read_int32()
+        stored_count = self.read_int32()
+        remap = list(struct.unpack(f"<{raw_count}H", self.f.read(2 * raw_count)))
+        assert all(f < raw_count and remap[f] == f for f in remap), (
+            "invalid layer-stack table"
+        )
+        assert sum(s == f for s, f in enumerate(remap)) == stored_count, (
+            "layer-stack table count mismatch"
+        )
+        config = replace(config, ls_remap_table=table_to_str(remap))
+
         self.model = NNUEModel(feature_name, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
-
-        self.read_header(self.model.feature_hash, fc_hash)
+        ls = self.model.layer_stacks
+        expected = (
+            fc_hash ^ self.model.feature_hash ^ (config.L1 * 2) ^ STACK_TABLE_HASH
+        )
+        if header_hash != expected:
+            raise ValueError(f"Expected: {expected:x}, got: {header_hash:x}")
+        assert ls.count == stored_count and ls.raw_count == raw_count, (
+            ls.count,
+            stored_count,
+        )
         self.read_int32(
             self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
@@ -280,11 +315,12 @@ class NNUEReader:
                     layers[layer_idx].layer_key,
                 )
 
-    def read_header(self, feature_hash: int, fc_hash: int) -> None:
+    def read_header(self) -> int:
         self.read_int32(VERSION)  # version
-        self.read_int32(fc_hash ^ feature_hash ^ (self.config.L1 * 2))
+        header_hash = self.read_int32()
         desc_len = self.read_int32()
         self.description = self.f.read(desc_len).decode("utf-8")
+        return header_hash
 
     def tensor(self, dtype: npt.DTypeLike, shape: Sequence[int]) -> torch.Tensor:
         count = reduce(operator.mul, shape, 1)

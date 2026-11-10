@@ -7,6 +7,7 @@
 #include <functional>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <condition_variable>
 #include <atomic>
 #include <thread>
@@ -28,6 +29,21 @@ struct IFeatureExtractor {
 };
 
 std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name);
+
+// Layer-stack index of a position from the keys named in --ls-keys (mixed radix, the last key
+// varying fastest), as in Network::layer_stack().
+struct LayerStackKeys {
+    struct Key {
+        int states;
+        int (*value)(const chess::Position& pos);
+    };
+    std::vector<Key> keys;
+
+    int index(const chess::Position& pos) const;
+};
+
+std::optional<LayerStackKeys> get_layer_stack_keys(std::string_view names);
+
 std::function<bool(const struct binpack::TrainingDataEntry&)>
 make_skip_predicate(DataloaderSkipConfig config);
 
@@ -54,13 +70,14 @@ struct SparseBatch final {
     static constexpr bool IS_BATCH = true;
 
     SparseBatch(const IFeatureExtractor&                              feature_set,
+                const LayerStackKeys&                                 ls_keys,
                 const std::vector<struct binpack::TrainingDataEntry>& entries,
                 std::shared_ptr<SparseBatchBufferPool>                buffer_pool = nullptr);
     ~SparseBatch();
 
     // Packed int32 layout: white offsets [size + 1], black offsets [size + 1],
     // white IDs [num_active_white_features], black IDs [num_active_black_features],
-    // piece counts [size], queen buckets [size]. Offsets begin at zero and end
+    // layer-stack indices [size]. Offsets begin at zero and end
     // at the total ID count.
     // capacity is in elements; insufficient capacity leaves output untouched.
     bool pack_indices(int* output, std::size_t capacity) const;
@@ -76,8 +93,7 @@ struct SparseBatch final {
     int    max_active_features;
     int*   white;
     int*   black;
-    int*   piece_count;
-    int*   queen_bucket;
+    int*   layer_stack_index;
 
 #ifdef NNUE_LOADER_STATISTICS
     std::vector<struct binpack::TrainingDataEntry> entries_copy;
@@ -153,6 +169,7 @@ struct FeaturedBatchStream final: Stream<SparseBatch> {
     static constexpr double worker_thread_ratio = 0.25;
 
     FeaturedBatchStream(std::shared_ptr<IFeatureExtractor>                            feature_set,
+                        LayerStackKeys                                                ls_keys,
                         int                                                           concurrency,
                         const std::vector<std::string>&                               filenames,
                         int                                                           batch_size,
@@ -168,6 +185,7 @@ struct FeaturedBatchStream final: Stream<SparseBatch> {
 
    private:
     std::shared_ptr<IFeatureExtractor> m_feature_set;
+    LayerStackKeys                     m_ls_keys;
     int                                m_batch_size;
     int                                m_concurrency;
     std::deque<SparseBatch*>           m_batches;

@@ -15,6 +15,14 @@ import data_loader
 import model as M
 from config import TrainingConfig
 from data_loader.config import DataloaderDDPConfig
+from model.modules.layer_stacks import STACK_KEY_STATES, stack_count, stack_keys
+from model.modules.stack_table import (
+    count_stacks,
+    fallback_table,
+    resolve_data_path,
+    table_from_state_dict,
+    table_to_str,
+)
 from trainer.callbacks import (
     CheckpointManager,
     ExplicitSWA,
@@ -35,6 +43,7 @@ def make_data_loaders(
     train_filenames,
     val_filenames,
     feature_name: str,
+    ls_keys: str,
     num_workers,
     batch_size,
     config: data_loader.DataloaderSkipConfig,
@@ -59,6 +68,7 @@ def make_data_loaders(
         config=config,
         ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
         io_config=io_config,
+        ls_keys=ls_keys,
     )
     # num_workers has to be 0 for sparse, and 1 for dense
     # it currently cannot work in parallel mode but it shouldn't need to
@@ -98,6 +108,7 @@ def make_data_loaders(
             config=config,
             ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
             io_config=io_config,
+            ls_keys=ls_keys,
         )
         val = DataLoader(
             data_loader.FixedNumBatchesDataset(
@@ -146,6 +157,46 @@ def _normalize_optimizer_and_schedulers(optimizer_and_schedulers):
         normalized_schedulers.append(sch)
 
     return optimizer, normalized_schedulers
+
+
+def prepare_stack_table(args) -> None:
+    """Take the layer-stack table from the checkpoint being resumed, or build it from --ls-remap-data."""
+    mc = args.nnue_config.model_config
+    if mc.ls_remap_table:
+        return
+    if args.resume_from_checkpoint:
+        ckpt = torch.load(
+            args.resume_from_checkpoint, map_location="cpu", weights_only=False
+        )
+        table = table_from_state_dict(ckpt["state_dict"])
+        if table is not None:
+            mc.ls_remap_table = table
+            print(
+                f"Layer-stack table from {args.resume_from_checkpoint}: {table.count(':')} stacks remapped"
+            )
+            return
+    if mc.ls_remap_data:
+        path = resolve_data_path(mc.ls_remap_data, args.datasets)
+        keys = stack_keys(mc.ls_keys)
+        threads = max(args.threads, args.num_workers, 1)
+        counts = count_stacks(path, mc.ls_keys, stack_count(keys), threads)
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            device = (
+                torch.device("cuda", torch.cuda.current_device())
+                if dist.get_backend() == "nccl"
+                else "cpu"
+            )
+            total = torch.from_numpy(counts).to(device)
+            dist.all_reduce(total)
+            counts = total.cpu().numpy()
+        remap = fallback_table(counts, keys, STACK_KEY_STATES, mc.ls_remap_min)
+        mc.ls_remap_table = table_to_str(remap)
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            print(
+                f"Layer-stack table from {path}: {int(counts.sum())} positions, {len(remap)} raw stacks, "
+                f"{int((counts == 0).sum())} never seen, {sum(s != f for s, f in enumerate(remap))} remapped "
+                f"(fewer than {mc.ls_remap_min}), {sum(s == f for s, f in enumerate(remap))} stored"
+            )
 
 
 def main():
@@ -234,7 +285,10 @@ def main():
     feature_name = args.nnue_config.features
 
     max_epoch = args.max_epochs or 800
+    prepare_stack_table(args)
     if args.resume_from_model is None:
+        if args.nnue_config.init_seed >= 0:
+            torch.manual_seed(args.nnue_config.init_seed)
         nnue = M.NNUE(
             config=args.nnue_config,
             max_epoch=max_epoch,
@@ -260,6 +314,7 @@ def main():
         nnue.param_index = args.dataloader_config.param_index
 
     input_feature_name = nnue.model.input_feature_name
+    ls_keys = nnue.model.ls_keys
 
     torch.manual_seed(args.seed)
     random.seed(args.seed)
@@ -334,6 +389,7 @@ def main():
         train_datasets,
         val_datasets,
         input_feature_name,
+        ls_keys,
         actual_workers,
         per_gpu_batch_size,
         args.dataloader_config,

@@ -37,7 +37,7 @@ def _make_layer_stacks(count):
     torch.manual_seed(1234)
     layer = LayerStacks(
         count,
-        LayerStacksConfig(L1=1024, L2=32, L3=32),
+        LayerStacksConfig(L1=1024, L2=32, L3=32, ls_factors=""),
         QuantizationManager(QuantizationConfig()),
     ).cuda()
     with torch.no_grad():

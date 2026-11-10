@@ -90,8 +90,7 @@ def eval_model_batch(
         black_indices,
         _outcome,
         _score,
-        piece_count,
-        queen_bucket,
+        layer_stack_indices,
     ) = batch.contents.get_tensors(device)
 
     evals = [
@@ -101,8 +100,7 @@ def eval_model_batch(
             them,
             white_indices,
             black_indices,
-            piece_count,
-            queen_bucket,
+            layer_stack_indices,
             fake_quantize_acts=fake_quantize,
             fake_quantize_weights=fake_quantize,
         )
@@ -341,6 +339,10 @@ def init_random_weights(model: M.NNUEModel) -> None:
             if "virtual_params" in group:
                 group["virtual_params"].data.uniform_(min_w * 1.2, max_w * 1.2)
                 touched.add(id(group["virtual_params"]))
+            if "stacked_layer" in group:
+                for p in group["stacked_layer"].group_factor_w:
+                    p.data.uniform_(min_w * 1.2, max_w * 1.2)
+                    touched.add(id(p))
 
         for ls in [
             model.layer_stacks.l1,
@@ -361,6 +363,9 @@ def init_random_weights(model: M.NNUEModel) -> None:
             ):
                 ls.factorized_linear.bias.data.uniform_(-0.5, 0.5)
                 touched.add(id(ls.factorized_linear.bias))
+            for b in ls.group_factor_b:
+                b.data.uniform_(-0.5, 0.5)
+                touched.add(id(b))
 
         all_param_ids = {id(p) for p in model.parameters()}
         untouched = all_param_ids - touched
@@ -385,7 +390,7 @@ def run_smoke_test(
     fen = chess.STARTING_FEN
     fens = [fen]
     b = data_loader.get_sparse_batch_from_fens(
-        nnue_model.input_feature_name, fens, [0], [1], [0]
+        nnue_model.input_feature_name, fens, [0], [1], [0], nnue_model.ls_keys
     )
     nnue_eval = eval_model_batch(nnue_model, b, device, False)[0]
     nnue_quant = eval_model_batch(nnue_model, b, device, True)[0]
@@ -450,6 +455,7 @@ def main():
         checkpoint = torch.load(
             cross_check_config.checkpoint, map_location="cpu", weights_only=False
         )
+        M.use_checkpoint_stack_table(nnue_config, checkpoint)
         ckpt = M.NNUE(config=nnue_config)
         ckpt.load_state_dict(checkpoint["state_dict"])
         ckpt.to(cross_check_config.device)
@@ -518,6 +524,7 @@ def main():
                 [0] * len(fens),
                 [1] * len(fens),
                 [0] * len(fens),
+                nnue_model.ls_keys,
             )
             if ckpt_model:
                 ckpt_evals += eval_model_batch(

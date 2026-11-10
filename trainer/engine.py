@@ -205,18 +205,17 @@ class SimpleTrainer:
                 black_indices,
                 _outcome,
                 _score,
-                piece_count,
-                queen_bucket,
+                layer_stack_indices,
             ) = batch
+            quantize = self.global_step >= self.model.config.fake_quant_warmup_steps
             scorenet = self._ddp_model(
                 us,
                 them,
                 white_indices,
                 black_indices,
-                piece_count,
-                queen_bucket,
-                self.model.config.use_fake_act_quantization,
-                self.model.config.use_fake_weight_quantization,
+                layer_stack_indices,
+                self.model.config.use_fake_act_quantization and quantize,
+                self.model.config.use_fake_weight_quantization and quantize,
             )
             loss = _unwrap_module(self.model).compute_loss_with_scorenet(
                 scorenet, batch, self.global_step

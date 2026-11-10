@@ -126,6 +126,10 @@ class NNUEConfig(FeatureConfig):
     """Whether to use fake quantization with STE for activations during training."""
     use_fake_weight_quantization: bool = True
     """Whether to use fake quantization with STE for weights during training."""
+    fake_quant_warmup_steps: int = 0
+    """Train without fake quantization (activations and weights) for the first N steps."""
+    init_seed: int = -1
+    """Seed torch right before the model is built, so the initialization is reproducible; -1 leaves it unseeded."""
 
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
     loss_params: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)

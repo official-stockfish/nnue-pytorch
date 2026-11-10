@@ -68,7 +68,7 @@ def _data_loader_built() -> bool:
     return any(glob.glob(p, recursive=True) for p in patterns)
 
 
-def _synthetic_batches(seed, num_batches, batch_size, num_inputs, max_active):
+def _synthetic_batches(seed, num_batches, batch_size, num_inputs, max_active, stacks):
     """Batches in the layout of the native data loader, with random contents."""
     gen = torch.Generator().manual_seed(seed)
     num_active = min(max_active, 24)
@@ -88,11 +88,8 @@ def _synthetic_batches(seed, num_batches, batch_size, num_inputs, max_active):
             indices.append(idx)
         outcome = torch.randint(0, 3, (batch_size, 1), generator=gen).float() / 2
         score = torch.randn(batch_size, 1, generator=gen) * 300
-        piece_count = torch.randint(2, 33, (batch_size,), generator=gen)
-        queen_bucket = torch.randint(0, 4, (batch_size,), generator=gen)
-        batches.append(
-            (us, 1.0 - us, *indices, outcome, score, piece_count, queen_bucket)
-        )
+        layer_stack_index = torch.randint(0, stacks, (batch_size,), generator=gen)
+        batches.append((us, 1.0 - us, *indices, outcome, score, layer_stack_index))
     return batches
 
 
@@ -160,7 +157,12 @@ def _sync_worker(rank, world_size, port, root_dir, num_batches):
         ft = nnue.model.input
         # Every rank trains on its own data, as with the sharded data loader
         batches = _synthetic_batches(
-            1000 + rank, num_batches, 64, ft.NUM_INPUTS, ft.MAX_ACTIVE_FEATURES
+            1000 + rank,
+            num_batches,
+            64,
+            ft.NUM_INPUTS,
+            ft.MAX_ACTIVE_FEATURES,
+            nnue.model.num_ls_buckets,
         )
         scores = _gather(torch.cat([b[5] for b in batches]))
         assert not torch.equal(scores[0], scores[1]), "ranks got the same data"

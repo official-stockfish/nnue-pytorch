@@ -638,6 +638,12 @@ def command_gather(args: FeaturePermutationConfig) -> None:
             model_config=args.model_config,
             features=args.subcommand.feature_config.features,
         )
+        M.use_checkpoint_stack_table(
+            config,
+            torch.load(
+                args.subcommand.checkpoint, map_location="cpu", weights_only=False
+            ),
+        )
         nnue = NNUE.load_from_checkpoint(
             args.subcommand.checkpoint,
             config=config,

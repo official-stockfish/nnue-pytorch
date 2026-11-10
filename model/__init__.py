@@ -7,6 +7,7 @@ from .modules import (
     get_available_features,
     get_feature_cls,
 )
+from .modules.stack_table import use_checkpoint_stack_table
 from .nnue import NNUE
 from .optimizers import (
     AdamWConfig,
@@ -50,4 +51,5 @@ __all__ = [
     "get_available_features",
     "get_feature_cls",
     "load_model",
+    "use_checkpoint_stack_table",
 ]

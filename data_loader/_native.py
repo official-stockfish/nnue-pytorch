@@ -27,8 +27,7 @@ class SparseBatch(ctypes.Structure):
         ("max_active_features", ctypes.c_int),
         ("white", ctypes.POINTER(ctypes.c_int)),
         ("black", ctypes.POINTER(ctypes.c_int)),
-        ("piece_count", ctypes.POINTER(ctypes.c_int)),
-        ("queen_bucket", ctypes.POINTER(ctypes.c_int)),
+        ("layer_stack_index", ctypes.POINTER(ctypes.c_int)),
     ]
 
     def get_tensors(
@@ -38,7 +37,6 @@ class SparseBatch(ctypes.Structure):
         *,
         transport_policy: CompactTransportPolicy | None = None,
     ) -> tuple[
-        torch.Tensor,
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
@@ -74,32 +72,23 @@ class SparseBatch(ctypes.Structure):
         black_indices = int_block_gpu[size * max_active : 2 * size * max_active].view(
             size, max_active
         )
-        piece_count_i32 = int_block_gpu[
+        layer_stack_index_i32 = int_block_gpu[
             2 * size * max_active : 2 * size * max_active + size
         ].view(size)
-        queen_bucket_i32 = int_block_gpu[
-            2 * size * max_active + size : 2 * size * max_active + 2 * size
-        ].view(size)
 
-        # Keep piece counts and queen buckets as int64 so callers can derive buckets on the target device.
+        # Keep layer-stack indices as int64 for indexing on the target device.
         if not us.is_cuda and use_pinned_memory:
             them = torch.empty_like(us, pin_memory=True)
             them.fill_(1.0)
             them.sub_(us)
 
-            piece_count = torch.empty(
+            layer_stack_index = torch.empty(
                 size, dtype=torch.int64, device="cpu", pin_memory=True
             )
-            piece_count.copy_(piece_count_i32)
-
-            queen_bucket = torch.empty(
-                size, dtype=torch.int64, device="cpu", pin_memory=True
-            )
-            queen_bucket.copy_(queen_bucket_i32)
+            layer_stack_index.copy_(layer_stack_index_i32)
         else:
             them = 1.0 - us
-            piece_count = piece_count_i32.to(dtype=torch.int64)
-            queen_bucket = queen_bucket_i32.to(dtype=torch.int64)
+            layer_stack_index = layer_stack_index_i32.to(dtype=torch.int64)
 
         return (
             us,
@@ -108,8 +97,7 @@ class SparseBatch(ctypes.Structure):
             black_indices,
             outcome,
             score,
-            piece_count,
-            queen_bucket,
+            layer_stack_index,
         )
 
 
@@ -212,6 +200,7 @@ class CDataLoaderAPI:
 
         # EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(
         #     const char* feature_set_c,
+        #     const char* ls_keys_c,
         #     int concurrency,
         #     int num_files,
         #     const char* const* filenames,
@@ -224,6 +213,7 @@ class CDataLoaderAPI:
         # )
         self.dll.create_sparse_batch_stream.restype = ctypes.c_void_p
         self.dll.create_sparse_batch_stream.argtypes = [
+            ctypes.c_char_p,
             ctypes.c_char_p,
             ctypes.c_int,
             ctypes.c_int,
@@ -245,6 +235,7 @@ class CDataLoaderAPI:
 
         # EXPORT SparseBatch* get_sparse_batch_from_fens(
         #    const char* feature_set_c,
+        #    const char* ls_keys_c,
         #    int num_fens,
         #    const char* const* fens,
         #    int* scores,
@@ -253,6 +244,7 @@ class CDataLoaderAPI:
         # )
         self.dll.get_sparse_batch_from_fens.restype = NativeSparseBatchPointer
         self.dll.get_sparse_batch_from_fens.argtypes = [
+            ctypes.c_char_p,
             ctypes.c_char_p,
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_char_p),
