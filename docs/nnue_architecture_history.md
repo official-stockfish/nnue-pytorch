@@ -4,6 +4,9 @@ This document records the complete history of Stockfish's NNUE evaluation networ
 
 ## Table of contents
 
+* ["SFNNv20" architecture](#sfnnv20-architecture)
+* ["SFNNv19" architecture](#sfnnv19-architecture)
+* ["SFNNv18" architecture](#sfnnv18-architecture)
 * ["SFNNv17" architecture](#sfnnv17-architecture)
 * ["SFNNv16" architecture](#sfnnv16-architecture)
 * ["SFNNv15" architecture](#sfnnv15-architecture)
@@ -23,11 +26,41 @@ This document records the complete history of Stockfish's NNUE evaluation networ
 * ["SFNNv2" architecture](#sfnnv2-architecture)
 * ["SFNNv1" architecture](#sfnnv1-architecture)
 
+## "SFNNv20" architecture
+
+Expanded layer stack selection by adding pawn layout and whether either side has at least two non-pawn, non-king pieces. Some configurations are rerouted due to being too rare on their own.
+
+2026-11-09 - *
+
+[Commit 26647279081cdc39d72ef9f10c33289a7da4a5e9](https://github.com/official-stockfish/Stockfish/commit/26647279081cdc39d72ef9f10c33289a7da4a5e9)
+
+![](img/SFNNv20_architecture_detailed_v2.svg)
+
+## "SFNNv19" architecture
+
+Replaced K32Q2 with K32H3, adding a third feature block for positions with no rooks or queens. Aligned the horizontal mirroring of Full_Threats and PP_3Wide with the piece-square features.
+
+2026-10-28 - 2026-11-09
+
+[Commit ff7cee4244ec96ea488c402669e3674c0574dce6](https://github.com/official-stockfish/Stockfish/commit/ff7cee4244ec96ea488c402669e3674c0574dce6)
+
+![](img/SFNNv19_architecture_detailed_v2.svg)
+
+## "SFNNv18" architecture
+
+Replaced HalfKAv2_hm with K32Q2, adding opponent queen presence to the piece-square features. Expanded the layer stacks from 8 to 32, adding queen presence from both sides. K32Q2 weights are quantized to i8.
+
+2026-10-13 - 2026-10-28
+
+[Commit 5c4cef0bfe61fb3249178b2bcf21f5673557efe7](https://github.com/official-stockfish/Stockfish/commit/5c4cef0bfe61fb3249178b2bcf21f5673557efe7)
+
+![](img/SFNNv18_architecture_detailed_v2.svg)
+
 ## "SFNNv17" architecture
 
 Removed the direct PSQT-like connection.
 
-2026-09-30 - *
+2026-09-30 - 2026-10-13
 
 [Commit a17c0ce28d5a4cc40e3f2d0e8892cb1cb4234730](https://github.com/official-stockfish/Stockfish/commit/a17c0ce28d5a4cc40e3f2d0e8892cb1cb4234730)
 
