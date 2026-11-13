@@ -16,9 +16,11 @@ import triton as tr
 import triton.language as tl
 
 _route_kernels = {}
+_DENSE_FORWARD = True
 _sparse_forward_kernels = {}
 
 
+@torch.compiler.disable
 def _sparse_forward(x, weight, bias, indices, count):
     """Compact NNZ in shared memory and coalesce loads over adjacent outputs.
 
@@ -275,6 +277,68 @@ def _sum_gradient_partials(
         tl.store(B + b * N + i, tl.sum(q, 0), i < N)
 
 
+@tr.jit
+def _bucketed_forward(
+    X,
+    W,
+    BIAS,
+    R,
+    C,
+    OUT,
+    BATCH,
+    K: tl.constexpr,
+    N: tl.constexpr,
+    BM: tl.constexpr,
+    BK: tl.constexpr,
+    BN: tl.constexpr,
+):
+    p = tl.program_id(0)
+    bucket = tl.program_id(1)
+    count = tl.load(C + bucket)
+    if p * BM < count:
+        m = p * BM + tl.arange(0, BM)
+        rows = tl.load(R + bucket * BATCH + m, m < count, 0)
+        n = tl.arange(0, BN)
+        acc = tl.full((BM, BN), 0, tl.float32)
+        for k0 in range(0, K, BK):
+            k = k0 + tl.arange(0, BK)
+            x = tl.load(
+                X + rows[:, None] * K + k[None, :],
+                (m[:, None] < count) & (k[None, :] < K),
+                0,
+            )
+            w = tl.load(
+                W + (bucket * N + n[None, :]) * K + k[:, None],
+                (n[None, :] < N) & (k[:, None] < K),
+                0,
+            )
+            part = tl.dot(x, w, input_precision="ieee")
+            # identity asm keeps the per-chunk sum separate (no fusion into one 1024-long chain)
+            part = tl.inline_asm_elementwise("mov.b32 $0, $1;", "=r,r", [part], dtype=tl.float32, is_pure=True, pack=1)
+            acc += part
+        b = tl.load(BIAS + bucket * N + n, n < N, 0)
+        tl.store(
+            OUT + rows[:, None] * N + n[None, :],
+            acc + b[None, :],
+            (m[:, None] < count) & (n[None, :] < N),
+        )
+
+
+def _dense_forward(x, weight, bias, rows, counts, bm=128, bk=16, num_warps=2):
+    """Per-bucket fp32 (IEEE) matmul over the routed rows: each output is a fixed-order dot product
+    plus the bias. Zero activations add exact zeros, so this is the NNZ-compacted kernel's sum in
+    another (deterministic) order."""
+    batch, k = x.shape
+    count = counts.numel()  # Tensor metadata; no GPU-to-CPU synchronization.
+    n = weight.shape[0] // count
+    out = torch.empty((batch, n), device=x.device, dtype=x.dtype)
+    _bucketed_forward[(tr.cdiv(batch, bm), count)](
+        x, weight, bias, rows, counts, out, batch, k, n, bm, bk,
+        max(16, tr.next_power_of_2(n)), num_warps=num_warps,
+    )
+    return out
+
+
 def _input_gradient(g, w, rows, counts, k, bm=32, bk=64):
     out = torch.empty((len(g), k), device=g.device, dtype=g.dtype)
     _bucketed_input_gradient[(tr.cdiv(len(g), bm), tr.cdiv(k, bk), counts.numel())](
@@ -334,6 +398,8 @@ class _GroupedLinear(torch.autograd.Function):
         indices = indices.flatten().to(torch.int64).contiguous()
         rows, counts = _route_rows(indices, count)
         ctx.save_for_backward(x, weight, rows, counts)
+        if _DENSE_FORWARD:
+            return _dense_forward(x, weight, bias.contiguous(), rows, counts)
         return _sparse_forward(x, weight, bias.contiguous(), indices, count)
 
     @staticmethod
@@ -342,7 +408,7 @@ class _GroupedLinear(torch.autograd.Function):
         grad_output = grad_output.contiguous()
         # Quantized zero activations still need dense STE input gradients.
         grad_input = _input_gradient(
-            grad_output, weight, rows, counts, x.shape[1], 64, 64
+            grad_output, weight, rows, counts, x.shape[1], 128, 64
         )
         grad_weight, grad_bias = _weight_and_bias_gradient(
             x, grad_output, rows, counts, 16, 32, 32
@@ -358,15 +424,7 @@ _GROUPED_L1_MIN_COUNT = 32
 
 
 def grouped_l1_preferred(count: int) -> bool:
-    """Whether the bucketed kernels should replace the dense path at this count.
-
-    NNUE_GROUPED_L1=1|0 forces the bucketed or dense path regardless of count.
-    """
-    override = os.environ.get("NNUE_GROUPED_L1", "")
-    if override == "1":
-        return True
-    if override == "0":
-        return False
+    """Whether the bucketed kernels should replace the dense path at this count."""
     return count >= _GROUPED_L1_MIN_COUNT
 
 
