@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <algorithm>
+#include <cmath>
 #include <vector>
 #include <string>
 #include <memory>
@@ -163,10 +165,18 @@ struct Stream: AnyStream {
 // see lib/parallel_dataloader.h (top) for the full pipeline map.
 struct FeaturedBatchStream final: Stream<SparseBatch> {
     using BaseType = Stream<SparseBatch>;
-    // Builders set the pipeline's throughput (measured 8.05 batches/s per
-    // builder at batch_size 131072); decode keeps up with ~3 workers per
-    // builder. 1/4 of the worker budget balances the two stages.
-    static constexpr double worker_thread_ratio = 0.25;
+    // Builders set the pipeline's throughput. With the default feature set
+    // (Full_Threats+PP_3Wide+K32H3^, B = 65536, 16 workers) the loader
+    // delivered 36 batches/s with 1/4 of the workers as builders, 46 with
+    // 3/8, 49 with 1/2 and 48 with 5/8. Larger batches need proportionally
+    // more decode workers to keep the pipeline fed (B = 131072, 32 workers:
+    // 42 batches/s with 1/4 of the workers as builders vs 28 with 1/2), so
+    // the default ratio scales down with the batch size: 1/2 at B <= 65536
+    // down to 1/4 at B >= 131072. NNUE_LOADER_BUILDER_RATIO overrides.
+    static double worker_thread_ratio(int batch_size) {
+        const double t = std::min(std::max(std::log2(double(batch_size)) - 16.0, 0.0), 1.0);
+        return 0.5 - 0.25 * t;
+    }
 
     FeaturedBatchStream(std::shared_ptr<IFeatureExtractor>                            feature_set,
                         LayerStackKeys                                                ls_keys,
@@ -202,8 +212,8 @@ struct FeaturedBatchStream final: Stream<SparseBatch> {
     std::shared_ptr<SparseBatchBufferPool> m_buffer_pool;
     std::vector<std::thread>               m_workers;
 
-    static int calculate_num_reader_threads(int concurrency);
-    static int calculate_num_worker_threads(int concurrency);
+    static int calculate_num_reader_threads(int concurrency, int batch_size);
+    static int calculate_num_worker_threads(int concurrency, int batch_size);
 };
 
 struct Fen final {

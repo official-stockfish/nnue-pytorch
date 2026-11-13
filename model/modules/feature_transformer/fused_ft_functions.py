@@ -122,22 +122,36 @@ class FusedDoubleFtFunction(autograd.Function):
         keep_acc = _tiled_ft is not None and _tiled_ft.backward_will_run(l1_size)
         tiled = (
             _tiled_ft.forward(
-                us, them, white_indices, black_indices, weight, bias,
-                max_ft_activation, l1_size, keep_acc=keep_acc, act_quant=act_quant,
+                us,
+                them,
+                white_indices,
+                black_indices,
+                weight,
+                bias,
+                max_ft_activation,
+                l1_size,
+                keep_acc=keep_acc,
+                act_quant=act_quant,
             )
             if _tiled_ft is not None
             else None
         )
         ctx.tiled_bwd_prep = (
-            _tiled_ft.lookup_backward_prep(white_indices) if _tiled_ft is not None else None
+            _tiled_ft.lookup_backward_prep(white_indices)
+            if _tiled_ft is not None
+            else None
         )
         acc_b = None
         if tiled is not None:
             l0_, clamped_out = tiled
-            if keep_acc:  # (acc_w, acc_b): the tiled backward recomputes the clamped values
+            if (
+                keep_acc
+            ):  # (acc_w, acc_b): the tiled backward recomputes the clamped values
                 clamped_out, acc_b = clamped_out
         else:
-            l0_ = torch.empty(batch_size, l1_size, dtype=torch.float32, device=us.device)
+            l0_ = torch.empty(
+                batch_size, l1_size, dtype=torch.float32, device=us.device
+            )
             clamped_out = torch.empty(
                 batch_size, 4, l1_half, dtype=torch.float32, device=us.device
             )
@@ -161,11 +175,18 @@ class FusedDoubleFtFunction(autograd.Function):
             )
         ctx.has_acc = acc_b is not None
         ctx.save_for_backward(
-            us, them, white_indices, black_indices, weight, bias, clamped_out,
+            us,
+            them,
+            white_indices,
+            black_indices,
+            weight,
+            bias,
+            clamped_out,
             *((acc_b,) if acc_b is not None else ()),
         )
         if act_quant is not None and not (tiled is not None and _tiled_ft.ACT_FUSED):
             from . import fused_weight_quant as _fwq
+
             with torch.no_grad():
                 l0_ = _fwq._ActFakeQuant.forward(_NoCtx(), l0_, *act_quant)
         return l0_
@@ -179,13 +200,23 @@ class FusedDoubleFtFunction(autograd.Function):
         l1_size = ctx.l1_size
 
         if ctx.act_c is not None and ctx.act_c != 1.0:
-            grad_l0 = grad_l0 * ctx.act_c   # STE of the fused activation fake quantization (as _ActFakeQuant)
+            grad_l0 = (
+                grad_l0 * ctx.act_c
+            )  # STE of the fused activation fake quantization (as _ActFakeQuant)
         grad_l0 = grad_l0.contiguous()
         if _tiled_ft is not None:
             prep, ctx.tiled_bwd_prep = ctx.tiled_bwd_prep, None
             tiled = _tiled_ft.backward(
-                us, them, white_indices, black_indices, grad_l0, clamped_out,
-                weight.shape[0], max_ft_activation, l1_size, prep=prep,
+                us,
+                them,
+                white_indices,
+                black_indices,
+                grad_l0,
+                clamped_out,
+                weight.shape[0],
+                max_ft_activation,
+                l1_size,
+                prep=prep,
                 acc=(clamped_out, acc_b[0]) if ctx.has_acc else None,
             )
             if tiled is not None:

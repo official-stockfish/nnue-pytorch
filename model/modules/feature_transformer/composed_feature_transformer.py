@@ -131,9 +131,20 @@ class ComposedFeatureTransformer(nn.Module):
         if fake_quantize_acts and _fwq.act_usable(merged):
             # fake_quantize_ft_act + the correction factor, fused into the FT epilogue (bit-identical)
             return double_feature_transform(
-                us, them, white_indices, black_indices, merged, bias, ft_max_act, self.l1_size, backend,
-                act_quant=(self.quantization.config.hidden_quantized_one, FAKE_QUANTIZE_EPS,
-                           self.quantization.l0_correction_factor),
+                us,
+                them,
+                white_indices,
+                black_indices,
+                merged,
+                bias,
+                ft_max_act,
+                self.l1_size,
+                backend,
+                act_quant=(
+                    self.quantization.config.hidden_quantized_one,
+                    FAKE_QUANTIZE_EPS,
+                    self.quantization.l0_correction_factor,
+                ),
             )
         l0_ = double_feature_transform(
             us,

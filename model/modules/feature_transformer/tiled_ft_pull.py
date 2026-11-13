@@ -7,6 +7,7 @@ Bit-identical to the 16-list tiled gather (the sum of every output is
 bias + rows in ascending order). The tile's row items are read from
 shared memory once per warp, not once per list.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,23 +17,26 @@ import torch
 
 from . import tiled_ft_backward as _tb
 
-import os
 TL = 64  # lists per tile (divides the backward's tile)
-NS = 2   # cp.async pipeline stages
-MINB = 3   # min resident blocks per SM (register cap)
-R = 32            # staged rows per chunk (entries store the row inside the chunk as uint8)
+NS = 2  # cp.async pipeline stages
+MINB = 3  # min resident blocks per SM (register cap)
+R = 32  # staged rows per chunk (entries store the row inside the chunk as uint8)
 LPW = 8  # lists per warp
-NW = TL // LPW    # warps per block
+NW = TL // LPW  # warps per block
 VEC = 4  # columns per lane
 SLICE = 32 * VEC  # columns per block
-EPI_FUSED = True   # the gather also writes l0_ (tiled_ft_fused)
-BUILD_KERNEL = True   # 0: torch index glue + pull_items / pull_lists
-ITEMS_KERNEL = True   # 0: the per-tile list kernel builds the items
-MAX_CHUNKS = 16384 // TL   # shared counters of the list kernel (max distinct rows per tile = R * MAX_CHUNKS)
+EPI_FUSED = True  # the gather also writes l0_ (tiled_ft_fused)
+BUILD_KERNEL = True  # 0: torch index glue + pull_items / pull_lists
+ITEMS_KERNEL = True  # 0: the per-tile list kernel builds the items
+MAX_CHUNKS = (
+    16384 // TL
+)  # shared counters of the list kernel (max distinct rows per tile = R * MAX_CHUNKS)
 
 _HDR = "typedef int int32_t; typedef long long int64_t; typedef unsigned int uint32_t; typedef unsigned char uint8_t; typedef unsigned short uint16_t;\n"
 
-_LISTS_SRC = _HDR + r"""
+_LISTS_SRC = (
+    _HDR
+    + r"""
 // One block per tile. Entries arrive row-sorted (the backward's keys); seg_incl[e] - 1 - drow_start[t]
 // is the entry's rank among the tile's distinct rows. Counting sort by (chunk, list), then every
 // (chunk, list) bucket is sorted by row (deterministic; buckets hold ~1-2 entries).
@@ -128,8 +132,11 @@ extern "C" __global__ void pull_lists(
     }
 }
 """
+)
 
-_ITEMS_SRC = _HDR + r"""
+_ITEMS_SRC = (
+    _HDR
+    + r"""
 // One warp per (tile, chunk) (global chunk index = warp; warps past the last chunk exit). Entries
 // arrive row-sorted (the backward's keys), so a chunk's entries (distinct-row ranks c*R .. c*R+R-1)
 // are one contiguous range, found by binary search on seg_incl. The warp ORs every entry's row bit
@@ -194,8 +201,11 @@ extern "C" __global__ void __launch_bounds__(256) pull_items(
     }
 }
 """
+)
 
-_BUILD_SRC = _HDR + r"""
+_BUILD_SRC = (
+    _HDR
+    + r"""
 // Fused pull preparation from the row-sorted tile keys (no per-entry global intermediates).
 // sub_distinct: number of distinct rows of every tile.
 extern "C" __global__ void __launch_bounds__(256) sub_distinct(const uint32_t* __restrict__ e_key,
@@ -330,8 +340,11 @@ extern "C" __global__ void __launch_bounds__(256) pull_build(
     }
 }
 """
+)
 
-_PULL_SRC = _HDR + r"""
+_PULL_SRC = (
+    _HDR
+    + r"""
 __device__ __forceinline__ void cp_async16(void* smem, const void* gmem, int src_bytes) {
     const unsigned s = (unsigned)__cvta_generic_to_shared(smem);
     asm volatile("cp.async.cg.shared.global [%0], [%1], 16, %2;\n" :: "r"(s), "l"(gmem), "r"(src_bytes));
@@ -493,10 +506,19 @@ extern "C" __global__ void __launch_bounds__(@NW@ * 32, @MINB@) pull_gather(
     }
 }
 """
+)
 
 
 def _lists_kernel():
-    src = _tb._render(_LISTS_SRC, TL=TL, R=R, LPW=LPW, NW=NW, MAXC=MAX_CHUNKS, LOCAL_BITS=_tb.LOCAL_BITS)
+    src = _tb._render(
+        _LISTS_SRC,
+        TL=TL,
+        R=R,
+        LPW=LPW,
+        NW=NW,
+        MAXC=MAX_CHUNKS,
+        LOCAL_BITS=_tb.LOCAL_BITS,
+    )
     return _tb._get_kernel(("pull_lists", TL, R, LPW), src, "pull_lists")
 
 
@@ -508,17 +530,42 @@ def _items_kernel():
 def _build_kernels(cap: int):
     src = _tb._render(_BUILD_SRC, TL=TL, R=R, LPW=LPW, NW=NW, LOCAL_BITS=_tb.LOCAL_BITS)
     key = ("pull_build", TL, R, LPW)
-    return (_tb._get_kernel(key + ("d",), src, "sub_distinct"), _tb._get_kernel(key + ("o",), src, "sub_offsets"),
-            _tb._get_kernel(key + ("b", cap), src, "pull_build", dynamic_shared=cap * 2))
+    return (
+        _tb._get_kernel(key + ("d",), src, "sub_distinct"),
+        _tb._get_kernel(key + ("o",), src, "sub_offsets"),
+        _tb._get_kernel(key + ("b", cap), src, "pull_build", dynamic_shared=cap * 2),
+    )
 
 
 def _pull_kernel(out_size: int, epi_h: int = 0):
-    src = _tb._render(_PULL_SRC, TL=TL, R=R, LPW=LPW, NW=NW, SLICE=SLICE, OUT=out_size, NS=NS, VT={2: "float2", 4: "float4"}[VEC], MINB=MINB, UNROLL=int(4),
-                      EPI=1 if epi_h else 0, H=max(epi_h, 1))
+    src = _tb._render(
+        _PULL_SRC,
+        TL=TL,
+        R=R,
+        LPW=LPW,
+        NW=NW,
+        SLICE=SLICE,
+        OUT=out_size,
+        NS=NS,
+        VT={2: "float2", 4: "float4"}[VEC],
+        MINB=MINB,
+        UNROLL=4,
+        EPI=1 if epi_h else 0,
+        H=max(epi_h, 1),
+    )
     shm = NS * R * SLICE * 4
-    assert (R * SLICE // 4) % (NW * 32) == 0, "R * SLICE / 4 must be a multiple of the block size"
-    assert R <= 32 and LPW <= 8, "items: one bit per staged row in a 32-bit mask, list masks in 8 bits"
-    return _tb._get_kernel(("pull_gather", TL, R, LPW, SLICE, out_size, NS, VEC, MINB, 4, epi_h), src, "pull_gather", dynamic_shared=max(shm, 1))
+    assert (R * SLICE // 4) % (NW * 32) == 0, (
+        "R * SLICE / 4 must be a multiple of the block size"
+    )
+    assert R <= 32 and LPW <= 8, (
+        "items: one bit per staged row in a 32-bit mask, list masks in 8 bits"
+    )
+    return _tb._get_kernel(
+        ("pull_gather", TL, R, LPW, SLICE, out_size, NS, VEC, MINB, 4, epi_h),
+        src,
+        "pull_gather",
+        dynamic_shared=max(shm, 1),
+    )
 
 
 @dataclass
@@ -536,37 +583,60 @@ class PullPrep:
     items: torch.Tensor
 
     def record_stream(self, stream):
-        for t in (self.order, self.tile_rows, self.drow_start, self.chunk_start, self.cnt, self.wstart, self.ent,
-                  self.wn, self.items):
+        for t in (
+            self.order,
+            self.tile_rows,
+            self.drow_start,
+            self.chunk_start,
+            self.cnt,
+            self.wstart,
+            self.ent,
+            self.wn,
+            self.items,
+        ):
             if t is not None:
                 t.record_stream(stream)
 
 
 @torch.compiler.disable
-def prepare(white_indices: torch.Tensor, black_indices: torch.Tensor, bp) -> PullPrep | None:
+def prepare(
+    white_indices: torch.Tensor, black_indices: torch.Tensor, bp
+) -> PullPrep | None:
     """From the backward's preparation ``bp`` (tiles of TL lists, row-sorted keys). None when a tile
     has more than R * MAX_CHUNKS distinct rows (the caller then uses the 16-list gather)."""
     dev = white_indices.device
     ss = getattr(bp, "sub_sorted", None)
     if bp.T != TL and ss is not None and ss[0] == TL:
         # the backward's row-sorted 64-list sub-tiles (local list index still relative to the 256-list tile)
-        sub = _tb.TiledPrep(TL, bp.n_lists, bp.order, ss[1], ss[2], int(ss[1].shape[0]) - 1, bp.tile_map)
+        sub = _tb.TiledPrep(
+            TL, bp.n_lists, bp.order, ss[1], ss[2], int(ss[1].shape[0]) - 1, bp.tile_map
+        )
         sub.max_tile = ss[3]
         bp = sub
     elif bp.T != TL:
         if bp.T % TL:
             return None
         from . import tiled_ft_forward as _tf
+
         bp = _tf._derive_from_backward(bp, TL, dev, None)
-    if getattr(bp, "max_tile", 65536) >= 65536:   # 16-bit prefix counters of the list kernel
+    if (
+        getattr(bp, "max_tile", 65536) >= 65536
+    ):  # 16-bit prefix counters of the list kernel
         return None
-    B, maxa = white_indices.shape
+    _B, _maxa = white_indices.shape
     E = int(bp.e_key.shape[0])
-    if bp.max_tile > R * MAX_CHUNKS:      # distinct rows of a tile <= its entries (max_tile: no extra host sync)
+    if (
+        bp.max_tile > R * MAX_CHUNKS
+    ):  # distinct rows of a tile <= its entries (max_tile: no extra host sync)
         return None
-    if BUILD_KERNEL and NW <= 8 and R <= 32 and bp.max_tile * 2 <= _tb.MAX_SHARED_BYTES - 16384:
+    if (
+        BUILD_KERNEL
+        and NW <= 8
+        and R <= 32
+        and bp.max_tile * 2 <= _tb.MAX_SHARED_BYTES - 16384
+    ):
         # fused: distinct rows per tile -> offsets (one block) -> ranks, distinct rows and items per tile
-        n_chunks = E // R + bp.n_tiles                                    # upper bound of sum(ceil(nd / R))
+        n_chunks = E // R + bp.n_tiles  # upper bound of sum(ceil(nd / R))
         cap = 4096
         while cap < bp.max_tile:
             cap += 4096
@@ -577,51 +647,146 @@ def prepare(white_indices: torch.Tensor, black_indices: torch.Tensor, bp) -> Pul
         tile_rows = torch.empty(max(E, 1), dtype=torch.int32, device=dev)
         wstart = torch.empty(max(n_chunks, 1) * NW, dtype=torch.int32, device=dev)
         wn = torch.empty(max(n_chunks, 1) * NW, dtype=torch.uint8, device=dev)
-        items = torch.zeros(E + 64, dtype=torch.int16, device=dev)        # padded: the gather reads 32 items past a warp start
+        items = torch.zeros(
+            E + 64, dtype=torch.int16, device=dev
+        )  # padded: the gather reads 32 items past a warp start
         with _tb._cupy_stream(dev):
-            k_d(grid=(bp.n_tiles,), block=(256,), args=(bp.e_key.data_ptr(), bp.tile_start.data_ptr(), nd.data_ptr()))
-            k_o(grid=(1,), block=(1024,), args=(nd.data_ptr(), np.int32(bp.n_tiles), drow_start.data_ptr(), chunk_start.data_ptr()))
-            k_b(grid=(bp.n_tiles,), block=(256,), shared_mem=bp.max_tile * 2, args=(
-                bp.e_key.data_ptr(), bp.tile_start.data_ptr(), drow_start.data_ptr(), chunk_start.data_ptr(),
-                tile_rows.data_ptr(), wstart.data_ptr(), wn.data_ptr(), items.data_ptr()))
-        return PullPrep(bp.n_lists, bp.n_tiles, bp.order, tile_rows, drow_start, chunk_start, None, wstart, None, wn, items)
+            k_d(
+                grid=(bp.n_tiles,),
+                block=(256,),
+                args=(bp.e_key.data_ptr(), bp.tile_start.data_ptr(), nd.data_ptr()),
+            )
+            k_o(
+                grid=(1,),
+                block=(1024,),
+                args=(
+                    nd.data_ptr(),
+                    np.int32(bp.n_tiles),
+                    drow_start.data_ptr(),
+                    chunk_start.data_ptr(),
+                ),
+            )
+            k_b(
+                grid=(bp.n_tiles,),
+                block=(256,),
+                shared_mem=bp.max_tile * 2,
+                args=(
+                    bp.e_key.data_ptr(),
+                    bp.tile_start.data_ptr(),
+                    drow_start.data_ptr(),
+                    chunk_start.data_ptr(),
+                    tile_rows.data_ptr(),
+                    wstart.data_ptr(),
+                    wn.data_ptr(),
+                    items.data_ptr(),
+                ),
+            )
+        return PullPrep(
+            bp.n_lists,
+            bp.n_tiles,
+            bp.order,
+            tile_rows,
+            drow_start,
+            chunk_start,
+            None,
+            wstart,
+            None,
+            wn,
+            items,
+        )
     # no host syncs below: sizes use upper bounds, masks are replaced by scatters
     rows = bp.e_key >> _tb.LOCAL_BITS
     starts = torch.zeros(E + 1, dtype=torch.bool, device=dev)
     starts[1:E] = rows[1:] != rows[:-1]
-    starts[bp.tile_start[:-1].long()] = True                       # index E (empty last tiles) lands in the pad slot
+    starts[bp.tile_start[:-1].long()] = (
+        True  # index E (empty last tiles) lands in the pad slot
+    )
     starts = starts[:E]
-    seg_before = torch.cumsum(starts, 0, dtype=torch.int32)          # inclusive
+    seg_before = torch.cumsum(starts, 0, dtype=torch.int32)  # inclusive
     tile_rows = torch.empty(max(E, 1), dtype=torch.int32, device=dev)
-    tile_rows[(seg_before - 1).long()] = rows                          # every entry of a segment writes the same row
+    tile_rows[(seg_before - 1).long()] = (
+        rows  # every entry of a segment writes the same row
+    )
     drow_start = torch.zeros(bp.n_tiles + 1, dtype=torch.int32, device=dev)
     ends = bp.tile_start[1:].long()
-    drow_start[1:] = torch.where(ends > 0, seg_before[(ends - 1).clamp(min=0)], torch.zeros_like(ends, dtype=torch.int32))
+    drow_start[1:] = torch.where(
+        ends > 0,
+        seg_before[(ends - 1).clamp(min=0)],
+        torch.zeros_like(ends, dtype=torch.int32),
+    )
     nd = drow_start[1:] - drow_start[:-1]
     nch = (nd + R - 1) // R
     chunk_start = torch.zeros(bp.n_tiles + 1, dtype=torch.int32, device=dev)
     chunk_start[1:] = torch.cumsum(nch, 0)
-    n_chunks = E // R + bp.n_tiles                                    # upper bound of sum(ceil(nd / R))
+    n_chunks = E // R + bp.n_tiles  # upper bound of sum(ceil(nd / R))
     use_items = ITEMS_KERNEL and NW <= 8 and R <= 32
-    cnt = None if use_items else torch.empty(max(n_chunks, 1) * TL, dtype=torch.uint8, device=dev)
+    cnt = (
+        None
+        if use_items
+        else torch.empty(max(n_chunks, 1) * TL, dtype=torch.uint8, device=dev)
+    )
     wstart = torch.empty(max(n_chunks, 1) * NW, dtype=torch.int32, device=dev)
     ent = None if use_items else torch.zeros(E + 64, dtype=torch.uint8, device=dev)
     wn = torch.empty(max(n_chunks, 1) * NW, dtype=torch.uint8, device=dev)
-    items = torch.zeros(E + 64, dtype=torch.int16, device=dev)        # padded: the gather reads 32 items past a warp start
+    items = torch.zeros(
+        E + 64, dtype=torch.int16, device=dev
+    )  # padded: the gather reads 32 items past a warp start
     with _tb._cupy_stream(dev):
-        if use_items:      # cnt / ent are only intermediates of the list kernel; the gather reads wstart / wn / items
-            _items_kernel()(grid=((max(n_chunks, 1) + 7) // 8,), block=(256,), args=(
-                bp.e_key.data_ptr(), seg_before.data_ptr(), bp.tile_start.data_ptr(), drow_start.data_ptr(),
-                chunk_start.data_ptr(), np.int32(bp.n_tiles), wstart.data_ptr(), wn.data_ptr(), items.data_ptr()))
+        if use_items:  # cnt / ent are only intermediates of the list kernel; the gather reads wstart / wn / items
+            _items_kernel()(
+                grid=((max(n_chunks, 1) + 7) // 8,),
+                block=(256,),
+                args=(
+                    bp.e_key.data_ptr(),
+                    seg_before.data_ptr(),
+                    bp.tile_start.data_ptr(),
+                    drow_start.data_ptr(),
+                    chunk_start.data_ptr(),
+                    np.int32(bp.n_tiles),
+                    wstart.data_ptr(),
+                    wn.data_ptr(),
+                    items.data_ptr(),
+                ),
+            )
         else:
-            _lists_kernel()(grid=(bp.n_tiles,), block=(TL,), args=(
-                bp.e_key.data_ptr(), seg_before.data_ptr(), bp.tile_start.data_ptr(), drow_start.data_ptr(),
-                chunk_start.data_ptr(), cnt.data_ptr(), wstart.data_ptr(), ent.data_ptr(), wn.data_ptr(), items.data_ptr()))
-    return PullPrep(bp.n_lists, bp.n_tiles, bp.order, tile_rows, drow_start, chunk_start, cnt, wstart, ent, wn, items)
+            _lists_kernel()(
+                grid=(bp.n_tiles,),
+                block=(TL,),
+                args=(
+                    bp.e_key.data_ptr(),
+                    seg_before.data_ptr(),
+                    bp.tile_start.data_ptr(),
+                    drow_start.data_ptr(),
+                    chunk_start.data_ptr(),
+                    cnt.data_ptr(),
+                    wstart.data_ptr(),
+                    ent.data_ptr(),
+                    wn.data_ptr(),
+                    items.data_ptr(),
+                ),
+            )
+    return PullPrep(
+        bp.n_lists,
+        bp.n_tiles,
+        bp.order,
+        tile_rows,
+        drow_start,
+        chunk_start,
+        cnt,
+        wstart,
+        ent,
+        wn,
+        items,
+    )
 
 
 def epi_applicable(l1_size: int) -> bool:
-    return EPI_FUSED and VEC == 4 and l1_size % 2 == 0 and (l1_size // 2) % (SLICE // 2) == 0
+    return (
+        EPI_FUSED
+        and VEC == 4
+        and l1_size % 2 == 0
+        and (l1_size // 2) % (SLICE // 2) == 0
+    )
 
 
 @torch.compiler.disable
@@ -631,12 +796,46 @@ def gather(weight, bias, l1_size, prep: PullPrep, out_w, out_b, epi=None):
     OUT = bias.shape[0]
     B = out_w.shape[0]
     if epi is None:
-        extra = (0, 0, 0, 0, np.float32(0), np.int32(0), np.float32(0), np.float32(0), np.float32(0), np.float32(0))
+        extra = (
+            0,
+            0,
+            0,
+            0,
+            np.float32(0),
+            np.int32(0),
+            np.float32(0),
+            np.float32(0),
+            np.float32(0),
+            np.float32(0),
+        )
     else:
         us, them, l0_out, mark = epi[:4]
-        extra = (us.data_ptr(), them.data_ptr(), l0_out.data_ptr(), mark.data_ptr(), *epi[4:])
+        extra = (
+            us.data_ptr(),
+            them.data_ptr(),
+            l0_out.data_ptr(),
+            mark.data_ptr(),
+            *epi[4:],
+        )
     with _tb._cupy_stream(weight.device):
-        _pull_kernel(OUT, l1_size // 2 if epi is not None else 0)(grid=(prep.n_tiles, l1_size // SLICE), block=(NW * 32,), shared_mem=NS * R * SLICE * 4, args=(
-            weight.data_ptr(), bias.data_ptr(), prep.order.data_ptr(), prep.tile_rows.data_ptr(), prep.drow_start.data_ptr(),
-            prep.chunk_start.data_ptr(), prep.wn.data_ptr(), prep.wstart.data_ptr(), prep.items.data_ptr(),
-            out_w.data_ptr(), out_b.data_ptr(), np.int32(prep.n_lists), np.int32(B), *extra))
+        _pull_kernel(OUT, l1_size // 2 if epi is not None else 0)(
+            grid=(prep.n_tiles, l1_size // SLICE),
+            block=(NW * 32,),
+            shared_mem=NS * R * SLICE * 4,
+            args=(
+                weight.data_ptr(),
+                bias.data_ptr(),
+                prep.order.data_ptr(),
+                prep.tile_rows.data_ptr(),
+                prep.drow_start.data_ptr(),
+                prep.chunk_start.data_ptr(),
+                prep.wn.data_ptr(),
+                prep.wstart.data_ptr(),
+                prep.items.data_ptr(),
+                out_w.data_ptr(),
+                out_b.data_ptr(),
+                np.int32(prep.n_lists),
+                np.int32(B),
+                *extra,
+            ),
+        )
