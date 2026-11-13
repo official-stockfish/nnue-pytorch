@@ -3,8 +3,9 @@ from collections.abc import Callable
 import torch
 from torch import nn
 
-from ...quantize import QuantizationManager
+from ...quantize import FAKE_QUANTIZE_EPS, QuantizationManager
 from ..features.input_feature import InputFeature
+from . import fused_weight_quant as _fwq
 from .double_ft_functions import double_feature_transform
 
 
@@ -66,8 +67,17 @@ class ComposedFeatureTransformer(nn.Module):
         self,
         fake_quantize_weights: bool = False,
     ):
-        merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
         b = self.bias
+        if fake_quantize_weights and _fwq.ENABLED:
+            segs = _fwq.segments_of(self.features)
+            if _fwq.usable(segs):
+                # one pass instead of cat + virtual add + STE chain; bit-identical (fused_weight_quant.py)
+                merged = _fwq.merge_and_fake_quantize(
+                    segs, self.quantization.weight_scales_dict["ft_weight"]
+                )
+                b = self.quantization.fake_quantize_weights(b, "ft_bias")
+                return merged, b
+        merged = torch.cat([f.merged_weight() for f in self.features], dim=0)
         if fake_quantize_weights:
             merged = self.quantization.fake_quantize_weights(merged, "ft_weight")
             b = self.quantization.fake_quantize_weights(b, "ft_bias")
@@ -118,6 +128,13 @@ class ComposedFeatureTransformer(nn.Module):
         merged, bias = self.merged_weight_and_bias(fake_quantize_weights)
         ft_max_act = self.quantization.max_ft_activation
 
+        if fake_quantize_acts and _fwq.act_usable(merged):
+            # fake_quantize_ft_act + the correction factor, fused into the FT epilogue (bit-identical)
+            return double_feature_transform(
+                us, them, white_indices, black_indices, merged, bias, ft_max_act, self.l1_size, backend,
+                act_quant=(self.quantization.config.hidden_quantized_one, FAKE_QUANTIZE_EPS,
+                           self.quantization.l0_correction_factor),
+            )
         l0_ = double_feature_transform(
             us,
             them,
@@ -130,6 +147,14 @@ class ComposedFeatureTransformer(nn.Module):
             backend,
         )
 
+        if fake_quantize_acts and _fwq.act_usable(l0_):
+            # fake_quantize_ft_act + the correction factor below in one bit-identical pass
+            return _fwq.fake_quantize_act_and_scale(
+                l0_,
+                self.quantization.config.hidden_quantized_one,
+                FAKE_QUANTIZE_EPS,
+                self.quantization.l0_correction_factor,
+            )
         if fake_quantize_acts:
             l0_ = self.quantization.fake_quantize_ft_act(l0_)
         # We multiply by a correction factor,
