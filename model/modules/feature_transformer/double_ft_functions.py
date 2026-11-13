@@ -14,7 +14,15 @@ def double_feature_transform(
     max_ft_activation: float,
     l1_size: int,
     backend: str = "auto",
+    act_quant: tuple | None = None,
 ) -> torch.Tensor:
+    """``act_quant`` = (scale, eps, correction): return ``fused_weight_quant.fake_quantize_act_and_scale``
+    of the result (fused into the tiled epilogue when it runs; bit-identical either way)."""
+    if act_quant is not None and backend not in ("auto", "fused"):
+        from . import fused_weight_quant as _fwq
+        return _fwq.fake_quantize_act_and_scale(
+            double_feature_transform(us, them, white_indices, black_indices, weight, bias,
+                                     max_ft_activation, l1_size, backend), *act_quant)
     # Resolve backend
     cupy_available = _HAS_CUPY_KERNELS
     all_cuda = (
@@ -50,7 +58,13 @@ def double_feature_transform(
             bias,
             max_ft_activation,
             l1_size,
+            act_quant,
         )
+    elif act_quant is not None:
+        from . import fused_weight_quant as _fwq
+        return _fwq.fake_quantize_act_and_scale(
+            double_feature_transform(us, them, white_indices, black_indices, weight, bias,
+                                     max_ft_activation, l1_size, impl), *act_quant)
     elif impl in ("sparse", "torch"):
         if impl == "sparse":
             if not cupy_available:

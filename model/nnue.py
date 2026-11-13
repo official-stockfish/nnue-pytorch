@@ -432,7 +432,11 @@ class NNUE(nn.Module):
         if not torch.is_tensor(actual_lambda):
             # A stable tensor input keeps the compiled loss from respecializing
             # on every schedule value when jitter is disabled.
-            actual_lambda = scorenet.new_tensor(actual_lambda)
+            # torch.full fills on the device; new_tensor would copy from pageable host memory,
+            # which synchronizes the host with the GPU every step.
+            actual_lambda = torch.full(
+                (), actual_lambda, dtype=scorenet.dtype, device=scorenet.device
+            )
 
         self.current_lambda = actual_lambda.detach()
 
