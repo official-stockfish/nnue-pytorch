@@ -8,8 +8,6 @@ gradients remain dense: fake quantization uses STE, so a quantized zero can have
 a nonzero derivative.
 """
 
-import os
-
 import cupy as cp
 import torch
 import triton as tr
@@ -314,7 +312,14 @@ def _bucketed_forward(
             )
             part = tl.dot(x, w, input_precision="ieee")
             # identity asm keeps the per-chunk sum separate (no fusion into one 1024-long chain)
-            part = tl.inline_asm_elementwise("mov.b32 $0, $1;", "=r,r", [part], dtype=tl.float32, is_pure=True, pack=1)
+            part = tl.inline_asm_elementwise(
+                "mov.b32 $0, $1;",
+                "=r,r",
+                [part],
+                dtype=tl.float32,
+                is_pure=True,
+                pack=1,
+            )
             acc += part
         b = tl.load(BIAS + bucket * N + n, n < N, 0)
         tl.store(
@@ -333,8 +338,19 @@ def _dense_forward(x, weight, bias, rows, counts, bm=128, bk=16, num_warps=2):
     n = weight.shape[0] // count
     out = torch.empty((batch, n), device=x.device, dtype=x.dtype)
     _bucketed_forward[(tr.cdiv(batch, bm), count)](
-        x, weight, bias, rows, counts, out, batch, k, n, bm, bk,
-        max(16, tr.next_power_of_2(n)), num_warps=num_warps,
+        x,
+        weight,
+        bias,
+        rows,
+        counts,
+        out,
+        batch,
+        k,
+        n,
+        bm,
+        bk,
+        max(16, tr.next_power_of_2(n)),
+        num_warps=num_warps,
     )
     return out
 

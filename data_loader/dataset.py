@@ -324,6 +324,56 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             return self._cached_iter
 
 
+def _register_tiled_prep(item) -> None:
+    """Precompute the tiled forward/backward index preparation of a sparse batch on the prefetch
+    stream and park it in a side table keyed by the white index tensor (see
+    model/modules/feature_transformer/tiled_ft_backward.py). The batch itself is left untouched;
+    a missing or stale preparation only means the training step prepares (or falls back) itself."""
+    if not (
+        isinstance(item, (list, tuple)) and len(item) >= 4
+    ):  # (us, them, white, black, ...)
+        return
+    white, black = item[2], item[3]
+    if not (
+        isinstance(white, torch.Tensor)
+        and white.is_cuda
+        and white.dtype == torch.int32
+        and white.ndim == 2
+        and isinstance(black, torch.Tensor)
+        and black.shape == white.shape
+    ):
+        return
+    try:
+        from model.modules.feature_transformer import tiled_ft_backward as tiled_bwd
+        from model.modules.feature_transformer import tiled_ft_forward as tiled_fwd
+    except Exception:  # noqa: BLE001 - optional
+        return
+    bprep = None
+    if tiled_bwd.TILED_BACKWARD_ENABLED:
+        try:
+            bprep = tiled_bwd.register_prep(white, black)
+        except Exception as e:  # noqa: BLE001 - never break the loader; the backward prepares itself
+            tiled_bwd.STATS["register_failed"] += 1
+            if tiled_bwd.STATS["register_failed"] == 1:
+                print(
+                    f"[tiled backward] prefetch preparation failed, falling back to in-backward prep: {e!r}"
+                )
+    if tiled_fwd.TILED_FORWARD_ENABLED:
+        try:
+            tiled_fwd.register_prep(
+                white,
+                black,
+                order_perm=bprep.order if bprep is not None else None,
+                from_backward=bprep,
+            )
+        except Exception as e:  # noqa: BLE001 - never break the loader; the forward uses the plain kernel
+            tiled_fwd.STATS["register_failed"] += 1
+            if tiled_fwd.STATS["register_failed"] == 1:
+                print(
+                    f"[tiled forward] prefetch preparation failed, using the plain forward: {e!r}"
+                )
+
+
 def _safe_put(stop_event, q, item):
     """Helper to ensure we don't hang on shutdown if queue is full."""
     while not stop_event.is_set():
@@ -379,7 +429,7 @@ class FixedNumBatchesDataset(Dataset):
             prefetch_stream = None
             if prefetch_device is not None:
                 torch.cuda.set_device(prefetch_device)
-                prefetch_stream = torch.cuda.Stream(device=prefetch_device)
+                prefetch_stream = torch.cuda.Stream(device=prefetch_device, priority=-1)
 
             while not stop_event.is_set():
                 try:
@@ -392,6 +442,7 @@ class FixedNumBatchesDataset(Dataset):
                             item = _recursive_to_device(
                                 item, prefetch_device, non_blocking=True
                             )
+                            _register_tiled_prep(item)
                             ready_event = torch.cuda.Event()
                             ready_event.record(prefetch_stream)
                         item = _CudaPrefetchedItem(item=item, ready_event=ready_event)

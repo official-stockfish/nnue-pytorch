@@ -16,8 +16,6 @@ compute in fp32 with ``float(s)`` and ``float(1) / float(s)``, ``round`` is roun
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 import torch
 
@@ -94,7 +92,11 @@ def segments_of(features):
         v = getattr(f, "virtual_weight", None)
         if v is not None:
             nb = getattr(f, "NUM_BUCKETS", None)
-            if nb is None or w.shape[0] != v.shape[0] * nb or w.shape[1:] != v.shape[1:]:
+            if (
+                nb is None
+                or w.shape[0] != v.shape[0] * nb
+                or w.shape[1:] != v.shape[1:]
+            ):
                 return None
             segs.append((w, v, nb))
         else:
@@ -109,8 +111,13 @@ def usable(segs) -> bool:
         _HAS_CUPY
         and segs is not None
         and all(
-            w.is_cuda and w.dtype == torch.float32 and w.is_contiguous()
-            and (v is None or (v.is_cuda and v.dtype == torch.float32 and v.is_contiguous()))
+            w.is_cuda
+            and w.dtype == torch.float32
+            and w.is_contiguous()
+            and (
+                v is None
+                or (v.is_cuda and v.dtype == torch.float32 and v.is_contiguous())
+            )
             for w, v, _ in segs
         )
     )
@@ -135,15 +142,42 @@ class _MergeFakeQuant(torch.autograd.Function):
                     v = params[i + 1] if has_v else None
                     o = out[r0:]
                     vn = n // _nb if v is not None else n
-                    if n % 4 == 0 and vn % 4 == 0 and vn // 4 < 2**31 and _aligned16(o, w, v):
+                    if (
+                        n % 4 == 0
+                        and vn % 4 == 0
+                        and vn // 4 < 2**31
+                        and _aligned16(o, w, v)
+                    ):
                         vn4 = vn // 4
                         blocks = min((vn4 + 255) // 256, 82 * 16)
-                        _get_kernel4()((blocks,), (256,), (o.data_ptr(), w.data_ptr(), 0 if v is None else v.data_ptr(),
-                                                          np.int32(vn4), np.int32(_nb if v is not None else 1), s, inv))
+                        _get_kernel4()(
+                            (blocks,),
+                            (256,),
+                            (
+                                o.data_ptr(),
+                                w.data_ptr(),
+                                0 if v is None else v.data_ptr(),
+                                np.int32(vn4),
+                                np.int32(_nb if v is not None else 1),
+                                s,
+                                inv,
+                            ),
+                        )
                     else:
                         blocks = min((n + 255) // 256, 65535 * 8)
-                        k((blocks,), (256,), (o.data_ptr(), w.data_ptr(), 0 if v is None else v.data_ptr(),
-                                              np.int64(n), np.int64(1 if v is None else v.numel()), s, inv))
+                        k(
+                            (blocks,),
+                            (256,),
+                            (
+                                o.data_ptr(),
+                                w.data_ptr(),
+                                0 if v is None else v.data_ptr(),
+                                np.int64(n),
+                                np.int64(1 if v is None else v.numel()),
+                                s,
+                                inv,
+                            ),
+                        )
                 r0 += w.shape[0]
         ctx.layout = layout
         ctx.shapes = [p.shape for p in params]
@@ -151,20 +185,26 @@ class _MergeFakeQuant(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad):
-        flags = _grf.lookup(grad)   # rows of the tiled FT gradient that are not exactly +0
+        flags = _grf.lookup(
+            grad
+        )  # rows of the tiled FT gradient that are not exactly +0
         grad = grad.contiguous()
         grads = [None] * len(ctx.shapes)
         r0 = 0
         for i, (has_v, nb) in _iter_layout(ctx.layout):
             nr = ctx.shapes[i][0]
-            g = grad[r0:r0 + nr]
+            g = grad[r0 : r0 + nr]
             grads[i] = g
             if flags is not None:
-                _grf.register(g, flags[r0:r0 + nr])
+                _grf.register(g, flags[r0 : r0 + nr])
             if has_v:
                 vs = ctx.shapes[i + 1]
-                fl = None if flags is None else flags[r0:r0 + nr]
-                grads[i + 1] = _bucket_sum(g, fl, nb, vs) if fl is not None else g.view(nb, vs[0], *vs[1:]).sum(0)
+                fl = None if flags is None else flags[r0 : r0 + nr]
+                grads[i + 1] = (
+                    _bucket_sum(g, fl, nb, vs)
+                    if fl is not None
+                    else g.view(nb, vs[0], *vs[1:]).sum(0)
+                )
             r0 += nr
         return (None, None, *grads)
 
@@ -206,16 +246,35 @@ def _bucket_sum(g, flags, nb, vs):
     global _bsum_kernel
     cols = int(np.prod(vs[1:])) if len(vs) > 1 else 1
     rows = vs[0]
-    if not (BUCKET_SUM and _HAS_CUPY and g.is_cuda and g.dtype == torch.float32 and g.is_contiguous()
-            and cols % 4 == 0 and g.data_ptr() % 16 == 0 and flags.dtype == torch.uint8 and flags.numel() == nb * rows):
+    if not (
+        BUCKET_SUM
+        and _HAS_CUPY
+        and g.is_cuda
+        and g.dtype == torch.float32
+        and g.is_contiguous()
+        and cols % 4 == 0
+        and g.data_ptr() % 16 == 0
+        and flags.dtype == torch.uint8
+        and flags.numel() == nb * rows
+    ):
         return g.view(nb, *vs).sum(0)
     if _bsum_kernel is None:
         _bsum_kernel = cp.RawKernel(_BSUM_SRC, "bucket_sum")
     out = torch.empty(*vs, dtype=torch.float32, device=g.device)
     n = rows * (cols // 4)
     with _tb._cupy_stream(g.device):
-        _bsum_kernel(((n + 255) // 256,), (256,), (g.data_ptr(), flags.data_ptr(), out.data_ptr(), np.int32(nb),
-                                                   np.int32(rows), np.int32(cols // 4)))
+        _bsum_kernel(
+            ((n + 255) // 256,),
+            (256,),
+            (
+                g.data_ptr(),
+                flags.data_ptr(),
+                out.data_ptr(),
+                np.int32(nb),
+                np.int32(rows),
+                np.int32(cols // 4),
+            ),
+        )
     return out
 
 
@@ -265,9 +324,19 @@ class _ActFakeQuant(torch.autograd.Function):
         s = np.float32(scale)
         if n:
             with _tb._cupy_stream(x.device):
-                _act_kernel((min((n + 255) // 256, 65535 * 8),), (256,),
-                            (out.data_ptr(), x.data_ptr(), np.int64(n), s, np.float32(eps),
-                             np.float32(1.0) / s, np.float32(corr)))
+                _act_kernel(
+                    (min((n + 255) // 256, 65535 * 8),),
+                    (256,),
+                    (
+                        out.data_ptr(),
+                        x.data_ptr(),
+                        np.int64(n),
+                        s,
+                        np.float32(eps),
+                        np.float32(1.0) / s,
+                        np.float32(corr),
+                    ),
+                )
         ctx.corr = corr
         return out
 

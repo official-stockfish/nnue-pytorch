@@ -14,6 +14,7 @@ memory cannot be freed and reused by another tensor while registered; any in-pla
 looked-up tensor bumps its version and makes the optimizer read the gradient again. Registrations are
 dropped by the next backward's ``reset`` and by ``clear()`` at the end of the optimizer step.
 """
+
 from __future__ import annotations
 
 import torch
@@ -27,8 +28,21 @@ def register(grad: torch.Tensor, flags: torch.Tensor, reset: bool = False) -> No
     global _entries
     if reset:
         _entries = []
-    if grad.dim() == 2 and grad.dtype == torch.float32 and grad.is_contiguous() and flags.numel() == grad.shape[0]:
-        _entries.append((grad.untyped_storage(), grad.data_ptr(), tuple(grad.shape), grad._version, flags))
+    if (
+        grad.dim() == 2
+        and grad.dtype == torch.float32
+        and grad.is_contiguous()
+        and flags.numel() == grad.shape[0]
+    ):
+        _entries.append(
+            (
+                grad.untyped_storage(),
+                grad.data_ptr(),
+                tuple(grad.shape),
+                grad._version,
+                flags,
+            )
+        )
 
 
 def clear() -> None:
@@ -91,6 +105,7 @@ def total_norm(grads: list[torch.Tensor]) -> torch.Tensor:
     import numpy as np
 
     from model.modules.feature_transformer import tiled_ft_backward as _tb
+
     if _ssq_kernel is None:
         _ssq_kernel = cp.RawKernel(_SSQ_SRC, "flagged_ssq")
     dev = flagged[0][0].device
@@ -98,7 +113,17 @@ def total_norm(grads: list[torch.Tensor]) -> torch.Tensor:
     with _tb._cupy_stream(dev):
         for g, f in flagged:
             rows, cols = g.shape
-            _ssq_kernel((min(rows, 82 * 8),), (256,), (g.data_ptr(), f.data_ptr(), np.int64(rows), np.int32(cols), acc.data_ptr()))
+            _ssq_kernel(
+                (min(rows, 82 * 8),),
+                (256,),
+                (
+                    g.data_ptr(),
+                    f.data_ptr(),
+                    np.int64(rows),
+                    np.int32(cols),
+                    acc.data_ptr(),
+                ),
+            )
     norms = [acc.to(torch.float32).sqrt()]
     if rest:
         norms += list(torch._foreach_norm([g for g, _ in rest], 2.0))
