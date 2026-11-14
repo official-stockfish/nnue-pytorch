@@ -13,7 +13,7 @@
 using namespace binpack;
 using namespace chess;
 
-// Entries stored with this ply are search-tree samples: standalone positions with a teacher's score, without a game.
+// Ply that marks search-tree samples: standalone positions without a game.
 static constexpr int TREE_SAMPLE_PLY = 9999;
 
 // ---------------------------------------------------------
@@ -638,7 +638,7 @@ SparseBatch::~SparseBatch() {
 
 void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
     is_white[i] = static_cast<float>(e.pos.sideToMove() == Color::White);
-    // Search-tree samples have no game result: an outcome above 1 tells the loss to use the score alone.
+    // Search-tree samples have no result: outcome 2 makes the loss use the score alone.
     outcome[i]  = e.ply == TREE_SAMPLE_PLY ? 2.0f : (e.result + 1.0f) / 2.0f;
     score[i]    = e.score;
     fill_features(fs, i, e);
@@ -1048,7 +1048,6 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             early_ply_accept_prob = std::move(early_ply_accept_prob)](const TrainingDataEntry& e) {
         static constexpr int    VALUE_NONE = 32002;
 
-        // Search-tree samples are standalone positions, not part of a game: none of the filters below apply.
         if (e.ply == TREE_SAMPLE_PLY)
             return e.score == VALUE_NONE
                 || rng::get_thread_local_rng()() < tree_sample_skip_threshold;
