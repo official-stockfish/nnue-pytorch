@@ -21,8 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from model.optimizers import grad_row_flags as _grf
-
+from . import grad_row_flags as _grf
 from .cupy_utils import HAS_CUPY, compile_kernel, cp, cupy_stream
 
 # NNUE_TILED_BACKWARD=0 disables the tiled backward (the fused FT then uses its plain scatter).
@@ -834,7 +833,7 @@ def tiled_backward(
     grad_weight = torch.zeros(num_inputs, OUT, dtype=torch.float32, device=dev)
     grad_bias = torch.zeros(OUT, dtype=torch.float32, device=dev)
     # row_touched[r] != 0 for every row the kernels below add to; the other rows of grad_weight stay
-    # exactly +0 (registered for the optimizer, see grad_row_flags)
+    # exactly +0 (registered for the merged-weight backward, see grad_row_flags)
     row_touched = torch.zeros(num_inputs, dtype=torch.uint8, device=dev)
     if OUT > l1_size:
         grad_bias[l1_size:] = grad_w[:, l1_size:].sum(0) + grad_b[:, l1_size:].sum(0)
@@ -871,5 +870,5 @@ def tiled_backward(
                     row_touched.data_ptr(),
                 ),
             )
-    _grf.register(grad_weight, row_touched, reset=True)
+    _grf.register(grad_weight, row_touched)
     return grad_weight, grad_bias

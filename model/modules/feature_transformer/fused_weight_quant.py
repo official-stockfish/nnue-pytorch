@@ -19,8 +19,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from model.optimizers import grad_row_flags as _grf
-
+from . import grad_row_flags as _grf
 from .cupy_utils import HAS_CUPY as _HAS_CUPY
 from .cupy_utils import cp, cupy_stream
 
@@ -189,8 +188,6 @@ class _MergeFakeQuant(torch.autograd.Function):
             nr = ctx.shapes[i][0]
             g = grad[r0 : r0 + nr]
             grads[i] = g
-            if flags is not None:
-                _grf.register(g, flags[r0 : r0 + nr])
             if has_v:
                 vs = ctx.shapes[i + 1]
                 fl = None if flags is None else flags[r0 : r0 + nr]
