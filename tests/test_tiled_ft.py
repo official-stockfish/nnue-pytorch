@@ -7,7 +7,6 @@ import torch
 
 from model.modules.feature_transformer import fused_ft_functions as FF
 from model.modules.feature_transformer import tiled_ft_backward as TB
-from model.modules.feature_transformer.cupy_utils import cupy_stream
 
 pytestmark = pytest.mark.skipif(
     not (
@@ -170,62 +169,3 @@ def test_block_sort_matches_global_sort():
     p2 = TB.prepare(w, b, sort="global")
     assert p1.max_tile > TB.SORT_CAP_MAX
     assert torch.equal(p1.e_key, p2.e_key) and torch.equal(p1.tile_start, p2.tile_start)
-
-
-@pytest.mark.parametrize("cols", [1032, 520, 6])
-def test_merge_quant_vectorized_bit_identical(cols):
-    """The vectorized merge (merge_quant4) == the scalar merge_quant kernel == the torch chain."""
-    from model.modules.feature_transformer import fused_weight_quant as FWQ
-
-    dev = torch.device("cuda")
-    gen = torch.Generator(device=dev).manual_seed(cols)
-    s = 254.0
-    nb, nv = 32, 37
-    w0 = torch.randn(301, cols, generator=gen, device=dev) * 0.3
-    w1 = torch.randn(nb * nv, cols, generator=gen, device=dev) * 0.3
-    v = torch.randn(nv, cols, generator=gen, device=dev) * 0.3
-    # exact rounding ties
-    w0[:7] = (
-        torch.randint(-300, 300, (7, cols), generator=gen, device=dev).float() + 0.5
-    ) / s
-    w1[:5] = (
-        torch.randint(-300, 300, (5, cols), generator=gen, device=dev).float() + 0.5
-    ) / s
-    v[:2] = 0.0
-    out = FWQ.merge_and_fake_quantize([(w0, None, 1), (w1, v, nb)], s)
-    x = torch.cat([w0, w1 + v.repeat(nb, 1)])
-    ref = torch.round(x * s) * (np.float32(1.0) / np.float32(s)).item()
-    assert torch.equal(out, ref)
-    # the scalar kernel on the same segments
-    k = FWQ._get_kernel()
-    sc = torch.empty_like(out)
-    with cupy_stream(dev):
-        for r0, (ww, vv) in ((0, (w0, None)), (301, (w1, v))):
-            k(
-                ((ww.numel() + 255) // 256,),
-                (256,),
-                (
-                    sc[r0:].data_ptr(),
-                    ww.data_ptr(),
-                    0 if vv is None else vv.data_ptr(),
-                    np.int64(ww.numel()),
-                    np.int64(1 if vv is None else vv.numel()),
-                    np.float32(s),
-                    np.float32(1.0) / np.float32(s),
-                ),
-            )
-    assert torch.equal(out, sc)
-
-
-@pytest.mark.parametrize("p", [0.02, 0.6, 1.0])
-def test_bucket_sum_matches_torch(p):
-    from model.modules.feature_transformer import fused_weight_quant as FWQ
-
-    gen = torch.Generator(device="cuda").manual_seed(6)
-    nb, vs, cols = 32, 768, 1024
-    fl = (torch.rand(nb * vs, generator=gen, device="cuda") < p).to(torch.uint8)
-    g = torch.randn(nb * vs, cols, generator=gen, device="cuda") * fl[:, None].float()
-    g[g == 0] = 0.0
-    assert torch.equal(
-        FWQ._bucket_sum(g, fl, nb, (vs, cols)), g.view(nb, vs, cols).sum(0)
-    )

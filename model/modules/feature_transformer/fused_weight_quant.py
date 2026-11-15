@@ -21,7 +21,7 @@ import torch
 
 from . import grad_row_flags as _grf
 from .cupy_utils import HAS_CUPY as _HAS_CUPY
-from .cupy_utils import cp, cupy_stream
+from .cupy_utils import compile_kernel, cupy_stream
 
 _SRC = r"""
 extern "C" __global__ void merge_quant(float* __restrict__ out, const float* __restrict__ w,
@@ -51,25 +51,14 @@ extern "C" __global__ void merge_quant4(float4* __restrict__ out, const float4* 
     }
 }
 """
-_kernel = None
-_kernel4 = None
-ENABLED = True
 
 
 def _get_kernel():
-    global _kernel
-    if _kernel is None:
-        _kernel = cp.RawKernel(_SRC, "merge_quant")
-        _kernel.compile()
-    return _kernel
+    return compile_kernel(("merge_quant",), _SRC, "merge_quant")
 
 
 def _get_kernel4():
-    global _kernel4
-    if _kernel4 is None:
-        _kernel4 = cp.RawKernel(_SRC, "merge_quant4")
-        _kernel4.compile()
-    return _kernel4
+    return compile_kernel(("merge_quant4",), _SRC, "merge_quant4")
 
 
 def _aligned16(*ts):
@@ -77,25 +66,22 @@ def _aligned16(*ts):
 
 
 def segments_of(features):
-    """[(weight, virtual_weight or None, num_buckets)] for the feature set, or None when some feature
-    merges its weight in another way (then the caller uses the reference path)."""
+    """[(weight, virtual_weight or None, num_buckets)] for the feature set, from the layout each feature
+    declares (InputFeature.virtual_layout), or None when some feature merges its weight another way
+    (then the caller uses merged_weight())."""
     segs = []
     for f in features:
         w = f.weight
-        v = getattr(f, "virtual_weight", None)
-        if v is not None:
-            nb = getattr(f, "NUM_BUCKETS", None)
-            if (
-                nb is None
-                or w.shape[0] != v.shape[0] * nb
-                or w.shape[1:] != v.shape[1:]
-            ):
+        layout = f.virtual_layout()
+        if layout is not None:
+            v, nb = layout
+            if w.shape[0] != v.shape[0] * nb or w.shape[1:] != v.shape[1:]:
                 return None
             segs.append((w, v, nb))
-        else:
-            if f.merged_weight() is not w:
-                return None
+        elif f.merged_weight() is w:
             segs.append((w, None, 1))
+        else:
+            return None
     return segs
 
 
@@ -227,19 +213,15 @@ extern "C" __global__ void bucket_sum(const float4* __restrict__ g, const unsign
     out[t] = s;
 }
 """
-_bsum_kernel = None
-BUCKET_SUM = True
 
 
 @torch.compiler.disable
 def _bucket_sum(g, flags, nb, vs):
     """g.view(nb, *vs).sum(0) for a contiguous fp32 g whose unflagged rows are +0 (bit-identical)."""
-    global _bsum_kernel
     cols = int(np.prod(vs[1:])) if len(vs) > 1 else 1
     rows = vs[0]
     if not (
-        BUCKET_SUM
-        and _HAS_CUPY
+        _HAS_CUPY
         and g.is_cuda
         and g.dtype == torch.float32
         and g.is_contiguous()
@@ -249,12 +231,10 @@ def _bucket_sum(g, flags, nb, vs):
         and flags.numel() == nb * rows
     ):
         return g.view(nb, *vs).sum(0)
-    if _bsum_kernel is None:
-        _bsum_kernel = cp.RawKernel(_BSUM_SRC, "bucket_sum")
     out = torch.empty(*vs, dtype=torch.float32, device=g.device)
     n = rows * (cols // 4)
     with cupy_stream(g.device):
-        _bsum_kernel(
+        compile_kernel(("bucket_sum",), _BSUM_SRC, "bucket_sum")(
             ((n + 255) // 256,),
             (256,),
             (
@@ -298,24 +278,19 @@ extern "C" __global__ void act_quant(float* __restrict__ out, const float* __res
     }
 }
 """
-_act_kernel = None
 
 
 class _ActFakeQuant(torch.autograd.Function):
     @staticmethod
     @torch.compiler.disable
     def forward(ctx, x, scale, eps, corr):
-        global _act_kernel
-        if _act_kernel is None:
-            _act_kernel = cp.RawKernel(_ACT_SRC, "act_quant")
-            _act_kernel.compile()
         x = x.contiguous()
         out = torch.empty_like(x)
         n = x.numel()
         s = np.float32(scale)
         if n:
             with cupy_stream(x.device):
-                _act_kernel(
+                compile_kernel(("act_quant",), _ACT_SRC, "act_quant")(
                     (min((n + 255) // 256, 65535 * 8),),
                     (256,),
                     (
@@ -337,7 +312,7 @@ class _ActFakeQuant(torch.autograd.Function):
 
 
 def act_usable(x: torch.Tensor) -> bool:
-    return ENABLED and _HAS_CUPY and x.is_cuda and x.dtype == torch.float32
+    return _HAS_CUPY and x.is_cuda and x.dtype == torch.float32
 
 
 def fake_quantize_act_and_scale(x, scale, eps, corr):

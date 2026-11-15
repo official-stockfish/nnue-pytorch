@@ -135,6 +135,21 @@ class QuantizationManager:
         act_scale = self.config.hidden_quantized_one
         return _fake_quantize_acts(preact, act_scale)
 
+    def fake_quantize_ft_act_and_correct(self, preact):
+        """``fake_quantize_ft_act(preact) * l0_correction_factor``. On CUDA tensors one CuPy pass
+        computes it with the same fp32 roundings (bit-identical; tests/test_fused_weight_quant.py)."""
+        # Imported here: model.modules imports this module.
+        from .modules.feature_transformer import fused_weight_quant as _fwq
+
+        if _fwq.act_usable(preact):
+            return _fwq.fake_quantize_act_and_scale(
+                preact,
+                self.config.hidden_quantized_one,
+                FAKE_QUANTIZE_EPS,
+                self.l0_correction_factor,
+            )
+        return self.fake_quantize_ft_act(preact) * self.l0_correction_factor
+
     def fake_quantize_ls_act(self, preact):
         act_scale = self.config.hidden_quantized_one
         return _fake_quantize_acts(preact, act_scale)

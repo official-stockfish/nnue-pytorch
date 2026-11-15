@@ -4,7 +4,7 @@ from collections.abc import Callable
 import torch
 from torch import nn
 
-from ...quantize import FAKE_QUANTIZE_EPS, QuantizationManager
+from ...quantize import QuantizationManager
 from ..features.input_feature import InputFeature
 from . import fused_weight_quant as _fwq
 from . import tiled_ft_backward as _tiled_bwd
@@ -70,7 +70,7 @@ class ComposedFeatureTransformer(nn.Module):
         fake_quantize_weights: bool = False,
     ):
         b = self.bias
-        if fake_quantize_weights and _fwq.ENABLED:
+        if fake_quantize_weights:
             segs = _fwq.segments_of(self.features)
             if _fwq.usable(segs):
                 # one pass instead of cat + virtual add + STE chain; bit-identical (fused_weight_quant.py)
@@ -164,20 +164,10 @@ class ComposedFeatureTransformer(nn.Module):
             backend,
         )
 
-        if fake_quantize_acts and _fwq.act_usable(l0_):
-            # fake_quantize_ft_act + the correction factor below in one bit-identical pass
-            return _fwq.fake_quantize_act_and_scale(
-                l0_,
-                self.quantization.config.hidden_quantized_one,
-                FAKE_QUANTIZE_EPS,
-                self.quantization.l0_correction_factor,
-            )
-        if fake_quantize_acts:
-            l0_ = self.quantization.fake_quantize_ft_act(l0_)
         # We multiply by a correction factor,
         # so we can use only bitshift and multiplication at inference.
         # When using fake quantization any correction factor
         # not equal 1.0 will lead to diverging discrete grids
-        l0_ = l0_ * self.quantization.l0_correction_factor
-
-        return l0_
+        if fake_quantize_acts:
+            return self.quantization.fake_quantize_ft_act_and_correct(l0_)
+        return l0_ * self.quantization.l0_correction_factor
