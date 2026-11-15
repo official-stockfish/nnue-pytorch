@@ -198,7 +198,7 @@ class FactorizedStackedLinear(StackedLinear):
         # The custom kernels specialize FP32 K->N, N <= 128. The router uses
         # one of its 256 threads per bucket for initialization/reservation.
         # They only outperform the dense path with enough stacks (measured
-        # crossover: 32; NNUE_GROUPED_L1=1|0 overrides). Keep the standard
+        # crossover: 32). Keep the standard
         # path for missing dependencies and other workloads.
         if (
             grouped_l1 is not None
