@@ -325,7 +325,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
 
 
 def _register_tiled_prep(item) -> None:
-    """Precompute the tiled forward/backward index preparation of a sparse batch on the prefetch
+    """Precompute the tiled backward's index preparation of a sparse batch on the prefetch
     stream and park it in a side table keyed by the white index tensor (see
     model/modules/feature_transformer/tiled_ft_backward.py). The batch itself is left untouched;
     a missing or stale preparation only means the training step prepares (or falls back) itself."""
@@ -345,32 +345,16 @@ def _register_tiled_prep(item) -> None:
         return
     try:
         from model.modules.feature_transformer import tiled_ft_backward as tiled_bwd
-        from model.modules.feature_transformer import tiled_ft_forward as tiled_fwd
     except Exception:  # noqa: BLE001 - optional
         return
-    bprep = None
     if tiled_bwd.TILED_BACKWARD_ENABLED:
         try:
-            bprep = tiled_bwd.register_prep(white, black)
+            tiled_bwd.register_prep(white, black)
         except Exception as e:  # noqa: BLE001 - never break the loader; the backward prepares itself
             tiled_bwd.STATS["register_failed"] += 1
             if tiled_bwd.STATS["register_failed"] == 1:
                 print(
                     f"[tiled backward] prefetch preparation failed, falling back to in-backward prep: {e!r}"
-                )
-    if tiled_fwd.TILED_FORWARD_ENABLED:
-        try:
-            tiled_fwd.register_prep(
-                white,
-                black,
-                order_perm=bprep.order if bprep is not None else None,
-                from_backward=bprep,
-            )
-        except Exception as e:  # noqa: BLE001 - never break the loader; the forward uses the plain kernel
-            tiled_fwd.STATS["register_failed"] += 1
-            if tiled_fwd.STATS["register_failed"] == 1:
-                print(
-                    f"[tiled forward] prefetch preparation failed, using the plain forward: {e!r}"
                 )
 
 

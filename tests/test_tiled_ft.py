@@ -1,4 +1,4 @@
-"""Tiled forward/backward of the fused double feature transformer vs an fp64 reference and vs the
+"""Tiled backward of the fused double feature transformer vs an fp64 reference and vs the
 upstream fused kernels."""
 
 import numpy as np
@@ -7,7 +7,6 @@ import torch
 
 from model.modules.feature_transformer import fused_ft_functions as FF
 from model.modules.feature_transformer import tiled_ft_backward as TB
-from model.modules.feature_transformer import tiled_ft_forward as TF
 from model.modules.feature_transformer import tiled_ft_fused as TFF
 
 pytestmark = pytest.mark.skipif(
@@ -33,23 +32,17 @@ def _indices(B, maxa, num_inputs, gen, dev):
 
 
 def _run(tiled, us, them, w, b, W, bias, l1, g, prefetch):
-    old = TFF.USE_TILED_FORWARD, TFF.USE_TILED_BACKWARD
-    old_enabled = TF.TILED_FORWARD_ENABLED
-    TFF.USE_TILED_FORWARD = TFF.USE_TILED_BACKWARD = tiled
-    TF.TILED_FORWARD_ENABLED = (
-        tiled or prefetch
-    )  # registration gate (default off on GH200)
+    old = TFF.USE_TILED_BACKWARD
+    TFF.USE_TILED_BACKWARD = tiled
     try:
         if tiled and prefetch:
-            bp = TB.register_prep(w, b)
-            TF.register_prep(w, b, order_perm=bp.order, from_backward=bp)
+            TB.register_prep(w, b)
         Wp = W.clone().requires_grad_()
         bp_ = bias.clone().requires_grad_()
         out = FF.FusedDoubleFtFunction.apply(us, them, w, b, Wp, bp_, MAX_ACT, l1)
         out.backward(g)
     finally:
-        TFF.USE_TILED_FORWARD, TFF.USE_TILED_BACKWARD = old
-        TF.TILED_FORWARD_ENABLED = old_enabled
+        TFF.USE_TILED_BACKWARD = old
     return out, Wp.grad, bp_.grad
 
 
@@ -139,12 +132,12 @@ def test_tiled_matches_reference(B, l1, prefetch):
     lin = ((c32 != 0) & (c32 != MAX_ACT)).double()
     ref_l0, ref_gW, ref_gb = _reference(us, them, w, b, W, bias, l1, g, lin)
 
-    fwd_fb, hits = TF.STATS["fallback"], TF.STATS["prep_hit"]
+    fallbacks, hits = TB.STATS["fallback"], TB.STATS["prep_hit"]
     t_out, t_gW, t_gb = _run(True, us, them, w, b, W, bias, l1, g, prefetch)
     if prefetch:
-        assert TF.STATS["prep_hit"] == hits + 1
+        assert TB.STATS["prep_hit"] == hits + 1
     else:
-        assert TF.STATS["fallback"] == fwd_fb + 1
+        assert TB.STATS["fallback"] == fallbacks + 1
     u_out, u_gW, u_gb = _run(False, us, them, w, b, W, bias, l1, g, prefetch)
 
     # The tiled and upstream paths are bit-identical to each other (rel == 0
@@ -163,27 +156,6 @@ def test_tiled_matches_reference(B, l1, prefetch):
     )
 
 
-@pytest.mark.parametrize("B", [1000, 4096])
-def test_pull_forward_bit_identical(B):
-    """The pull gather sums bias + rows in ascending row order, exactly like the 16-list gather."""
-    from model.modules.feature_transformer import tiled_ft_pull as TP
-
-    dev = torch.device("cuda")
-    gen = torch.Generator(device=dev).manual_seed(B)
-    maxa, num_inputs, l1 = 64, 3000, 512
-    w = _indices(B, maxa, num_inputs, gen, dev)
-    b = _indices(B, maxa, num_inputs, gen, dev)
-    W = torch.randn(num_inputs, l1 + 8, generator=gen, device=dev)
-    bias = torch.randn(l1 + 8, generator=gen, device=dev)
-    bp = TB.prepare(w, b)
-    pp = TP.prepare(w, b, bp)
-    assert pp is not None
-    fp = TF.prepare(w, b, T=16, order_perm=bp.order, from_backward=bp)
-    ref = TF.tiled_forward(w, b, W, bias, l1, fp)
-    out = TF.tiled_forward(w, b, W, bias, l1, pp)
-    assert torch.equal(ref[0], out[0]) and torch.equal(ref[1], out[1])
-
-
 def test_block_sort_matches_global_sort():
     """256-list tiles too large for one shared-memory sort: sub-tile sorts + rank merge == global sort."""
     dev = torch.device("cuda")
@@ -192,40 +164,8 @@ def test_block_sort_matches_global_sort():
     b = _indices(4096, 128, 20000, gen, dev)
     p1 = TB.prepare(w, b, sort="block")
     p2 = TB.prepare(w, b, sort="global")
-    assert p1.max_tile > TB.SORT_CAP_MAX and p1.sub_sorted is not None
+    assert p1.max_tile > TB.SORT_CAP_MAX
     assert torch.equal(p1.e_key, p2.e_key) and torch.equal(p1.tile_start, p2.tile_start)
-
-
-@pytest.mark.parametrize("corr", [1.0, 0.75])
-def test_fused_act_quant_bit_identical(corr):
-    """act_quant fused into the tiled epilogue == FT output followed by fake_quantize_act_and_scale."""
-    from model.modules.feature_transformer import fused_weight_quant as FWQ
-
-    dev = torch.device("cuda")
-    gen = torch.Generator(device=dev).manual_seed(3)
-    B, maxa, num_inputs, l1 = 2048, 64, 3000, 512
-    w = _indices(B, maxa, num_inputs, gen, dev)
-    b = _indices(B, maxa, num_inputs, gen, dev)
-    W = torch.randn(num_inputs, l1 + 8, generator=gen, device=dev) * 0.05
-    bias = torch.rand(l1 + 8, generator=gen, device=dev) * 0.5
-    us = (torch.rand(B, 1, generator=gen, device=dev) < 0.5).float()
-    them = 1.0 - us
-    aq = (128.0, 1e-5, corr)
-    outs = []
-    for fused in (False, True):
-        bp = TB.register_prep(w, b)
-        TF.register_prep(w, b, order_perm=bp.order, from_backward=bp)
-        if fused:
-            out = FF.FusedDoubleFtFunction.apply(
-                us, them, w, b, W, bias, MAX_ACT, l1, aq
-            )
-        else:
-            out = FWQ.fake_quantize_act_and_scale(
-                FF.FusedDoubleFtFunction.apply(us, them, w, b, W, bias, MAX_ACT, l1),
-                *aq,
-            )
-        outs.append(out)
-    assert torch.equal(outs[0], outs[1])
 
 
 @pytest.mark.parametrize("cols", [1032, 520, 6])
@@ -271,105 +211,6 @@ def test_merge_quant_vectorized_bit_identical(cols):
                 ),
             )
     assert torch.equal(out, sc)
-
-
-def _fused_inputs(B, seed, L1=1024, N=4096, maxa=64):
-    dev = torch.device("cuda")
-    gen = torch.Generator(device=dev).manual_seed(seed)
-    w = _indices(B, maxa, N, gen, dev)
-    b = _indices(B, maxa, N, gen, dev)
-    us = (torch.rand(B, 1, generator=gen, device=dev) < 0.5).float()
-    them = 1.0 - us
-    us[3] = 0.5
-    them[3] = 0.5
-    us[5] = 1.0
-    them[5] = 1.0  # non-binary positions
-    W = (torch.randn(N, L1, generator=gen, device=dev) * 0.02 * 64).round() / 64
-    W[W == 0] = 0.0
-    W[
-        torch.rand(N, L1, generator=gen, device=dev) < 0.3
-    ] = -0.0  # -0 weights: -0 accumulators
-    bias = (torch.randn(L1, generator=gen, device=dev) * 0.3 * 64).round() / 64
-    bias[:64] = -0.0
-    return us, them, w, b, W, bias
-
-
-@pytest.mark.parametrize("aq", [None, (127.0, 0.25, 1.0), (127.0, 0.0, 0.5)])
-def test_fused_epilogue_bit_identical(aq):
-    # The tiled forward is off by default on GH200; this test exercises its
-    # epilogue, so enable it for the duration of of the call.
-    import model.modules.feature_transformer.tiled_ft_fused as _TFF
-    from model.modules.feature_transformer import tiled_ft_pull as TP
-
-    _fwd_default = TF.TILED_FORWARD_ENABLED
-    _fused_default = _TFF.USE_TILED_FORWARD
-    TF.TILED_FORWARD_ENABLED = True  # enables register_prep in the forward module
-    _TFF.USE_TILED_FORWARD = True  # enables the fused forward call
-    try:
-        us, them, w, b, W, bias = _fused_inputs(2048, 3)
-        outs = []
-        old = TP.EPI_FUSED
-        try:
-            for fused in (False, True):
-                TP.EPI_FUSED = fused
-                bp = TB.register_prep(w, b)
-                TF.register_prep(w, b, order_perm=bp.order, from_backward=bp)
-                outs.append(
-                    TFF.forward(
-                        us,
-                        them,
-                        w,
-                        b,
-                        W,
-                        bias,
-                        MAX_ACT,
-                        1024,
-                        keep_acc=True,
-                        act_quant=aq,
-                    )
-                )
-        finally:
-            TP.EPI_FUSED = old
-        (l0a, (aw, ab)), (l0b, (bw, bb)) = outs
-        assert torch.equal(l0a.view(torch.int32), l0b.view(torch.int32))
-        assert torch.equal(aw, bw) and torch.equal(ab, bb)
-    finally:
-        TF.TILED_FORWARD_ENABLED = _fwd_default
-        _TFF.USE_TILED_FORWARD = _fused_default
-
-
-def test_fused_prologue_single_tile_bit_identical():
-    # one tile (2B <= 256 lists): every (row, column) gets one atomic, so the result is deterministic
-    us, them, w, b, W, _bias = _fused_inputs(128, 4)
-    gen = torch.Generator(device="cuda").manual_seed(5)
-    aw = torch.randn(128, 1024, generator=gen, device="cuda") * 0.6 + 0.3
-    ab = torch.randn(128, 1024, generator=gen, device="cuda") * 0.6 + 0.3
-    aw[aw.abs() < 0.05] = -0.0
-    gl0 = torch.randn(128, 1024, generator=gen, device="cuda") * 1e-3
-    prep = TB.prepare(w, b)
-    old = TFF.PRO_FUSED
-    try:
-        res = []
-        for pro in (False, True):
-            TFF.PRO_FUSED = pro
-            res.append(
-                TFF.backward(
-                    us,
-                    them,
-                    w,
-                    b,
-                    gl0,
-                    None,
-                    W.shape[0],
-                    MAX_ACT,
-                    1024,
-                    prep=prep,
-                    acc=(aw, ab),
-                )
-            )
-    finally:
-        TFF.PRO_FUSED = old
-    assert torch.equal(res[0][0], res[1][0]) and torch.equal(res[0][1], res[1][1])
 
 
 @pytest.mark.parametrize("p", [0.02, 0.6, 1.0])

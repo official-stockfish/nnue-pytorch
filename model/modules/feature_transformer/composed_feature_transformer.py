@@ -128,24 +128,6 @@ class ComposedFeatureTransformer(nn.Module):
         merged, bias = self.merged_weight_and_bias(fake_quantize_weights)
         ft_max_act = self.quantization.max_ft_activation
 
-        if fake_quantize_acts and _fwq.act_usable(merged):
-            # fake_quantize_ft_act + the correction factor, fused into the FT epilogue (bit-identical)
-            return double_feature_transform(
-                us,
-                them,
-                white_indices,
-                black_indices,
-                merged,
-                bias,
-                ft_max_act,
-                self.l1_size,
-                backend,
-                act_quant=(
-                    self.quantization.config.hidden_quantized_one,
-                    FAKE_QUANTIZE_EPS,
-                    self.quantization.l0_correction_factor,
-                ),
-            )
         l0_ = double_feature_transform(
             us,
             them,

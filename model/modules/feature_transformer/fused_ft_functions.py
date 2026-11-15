@@ -15,7 +15,7 @@ try:
 except (ImportError, OSError, RuntimeError):
     BACKWARD_TILE_SIZE = 1
 
-# Tiled forward / backward (docs/TILED_FT.md); NNUE_TILED_FORWARD=0 / NNUE_TILED_BACKWARD=0 disable them.
+# Tiled backward (tiled_ft_backward.py); NNUE_TILED_BACKWARD=0 disables it.
 try:
     from . import tiled_ft_fused as _tiled_ft
 except (ImportError, OSError, RuntimeError):
@@ -65,10 +65,6 @@ def _aggregated_tile_size(l1_size, batch_size, max_active_features, capability):
     return 8
 
 
-class _NoCtx:
-    pass
-
-
 class FusedDoubleFtFunction(autograd.Function):
     @staticmethod
     def forward(
@@ -81,10 +77,8 @@ class FusedDoubleFtFunction(autograd.Function):
         bias,
         max_ft_activation,
         l1_size,
-        act_quant=None,
     ):
         ctx.max_ft_activation = float(max_ft_activation)
-        ctx.act_c = None if act_quant is None else float(act_quant[2])
         ctx.l1_size = int(l1_size)
 
         assert l1_size % 2 == 0
@@ -119,90 +113,49 @@ class FusedDoubleFtFunction(autograd.Function):
         max_active_features = white_indices.shape[1]
         l1_half = l1_size // 2
 
-        keep_acc = _tiled_ft is not None and _tiled_ft.backward_will_run(l1_size)
-        tiled = (
-            _tiled_ft.forward(
-                us,
-                them,
-                white_indices,
-                black_indices,
-                weight,
-                bias,
-                max_ft_activation,
-                l1_size,
-                keep_acc=keep_acc,
-                act_quant=act_quant,
-            )
-            if _tiled_ft is not None
-            else None
+        l0_ = torch.empty(batch_size, l1_size, dtype=torch.float32, device=us.device)
+        clamped_out = torch.empty(
+            batch_size, 4, l1_half, dtype=torch.float32, device=us.device
         )
+
+        output_size = bias.shape[0]
+        kernel = make_fused_double_ft_forward_kernel(max_active_features, l1_size)
+        kernel(
+            grid=(batch_size,),
+            args=(
+                us.data_ptr(),
+                them.data_ptr(),
+                white_indices.data_ptr(),
+                black_indices.data_ptr(),
+                weight.data_ptr(),
+                bias.data_ptr(),
+                np.float32(max_ft_activation),
+                l0_.data_ptr(),
+                clamped_out.data_ptr(),
+                np.int32(output_size),
+            ),
+        )
+
+        # The loader's prefetch thread may have prepared the tiled backward's tile structure for
+        # this batch (registered by its index tensor); claim it now, while the tensor is the batch's.
         ctx.tiled_bwd_prep = (
             _tiled_ft.lookup_backward_prep(white_indices)
             if _tiled_ft is not None
             else None
         )
-        acc_b = None
-        if tiled is not None:
-            l0_, clamped_out = tiled
-            if (
-                keep_acc
-            ):  # (acc_w, acc_b): the tiled backward recomputes the clamped values
-                clamped_out, acc_b = clamped_out
-        else:
-            l0_ = torch.empty(
-                batch_size, l1_size, dtype=torch.float32, device=us.device
-            )
-            clamped_out = torch.empty(
-                batch_size, 4, l1_half, dtype=torch.float32, device=us.device
-            )
-
-            output_size = bias.shape[0]
-            kernel = make_fused_double_ft_forward_kernel(max_active_features, l1_size)
-            kernel(
-                grid=(batch_size,),
-                args=(
-                    us.data_ptr(),
-                    them.data_ptr(),
-                    white_indices.data_ptr(),
-                    black_indices.data_ptr(),
-                    weight.data_ptr(),
-                    bias.data_ptr(),
-                    np.float32(max_ft_activation),
-                    l0_.data_ptr(),
-                    clamped_out.data_ptr(),
-                    np.int32(output_size),
-                ),
-            )
-        ctx.has_acc = acc_b is not None
         ctx.save_for_backward(
-            us,
-            them,
-            white_indices,
-            black_indices,
-            weight,
-            bias,
-            clamped_out,
-            *((acc_b,) if acc_b is not None else ()),
+            us, them, white_indices, black_indices, weight, bias, clamped_out
         )
-        if act_quant is not None and not (tiled is not None and _tiled_ft.ACT_FUSED):
-            from . import fused_weight_quant as _fwq
-
-            with torch.no_grad():
-                l0_ = _fwq._ActFakeQuant.forward(_NoCtx(), l0_, *act_quant)
         return l0_
 
     @staticmethod
     def backward(ctx, grad_l0):
-        us, them, white_indices, black_indices, weight, bias, clamped_out, *acc_b = (
+        us, them, white_indices, black_indices, weight, bias, clamped_out = (
             ctx.saved_tensors
         )
         max_ft_activation = ctx.max_ft_activation
         l1_size = ctx.l1_size
 
-        if ctx.act_c is not None and ctx.act_c != 1.0:
-            grad_l0 = (
-                grad_l0 * ctx.act_c
-            )  # STE of the fused activation fake quantization (as _ActFakeQuant)
         grad_l0 = grad_l0.contiguous()
         if _tiled_ft is not None:
             prep, ctx.tiled_bwd_prep = ctx.tiled_bwd_prep, None
@@ -217,10 +170,9 @@ class FusedDoubleFtFunction(autograd.Function):
                 max_ft_activation,
                 l1_size,
                 prep=prep,
-                acc=(clamped_out, acc_b[0]) if ctx.has_acc else None,
             )
             if tiled is not None:
-                return None, None, None, None, *tiled, None, None, None
+                return None, None, None, None, *tiled, None, None
 
         batch_size = white_indices.shape[0]
         max_active_features = white_indices.shape[1]
@@ -254,7 +206,7 @@ class FusedDoubleFtFunction(autograd.Function):
                 max_ft_activation,
                 tile_size=tile_size,
             )
-            return None, None, None, None, grad_weight, grad_bias, None, None, None
+            return None, None, None, None, grad_weight, grad_bias, None, None
 
         kernel = make_fused_double_ft_backward_kernel(max_active_features, l1_size)
         grid_size = (batch_size + BACKWARD_TILE_SIZE - 1) // BACKWARD_TILE_SIZE
@@ -277,4 +229,4 @@ class FusedDoubleFtFunction(autograd.Function):
             ),
         )
 
-        return None, None, None, None, grad_weight, grad_bias, None, None, None
+        return None, None, None, None, grad_weight, grad_bias, None, None
