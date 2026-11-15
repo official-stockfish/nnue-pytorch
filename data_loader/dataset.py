@@ -324,40 +324,6 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             return self._cached_iter
 
 
-def _register_tiled_prep(item) -> None:
-    """Precompute the tiled backward's index preparation of a sparse batch on the prefetch
-    stream and park it in a side table keyed by the white index tensor (see
-    model/modules/feature_transformer/tiled_ft_backward.py). The batch itself is left untouched;
-    a missing or stale preparation only means the training step prepares (or falls back) itself."""
-    if not (
-        isinstance(item, (list, tuple)) and len(item) >= 4
-    ):  # (us, them, white, black, ...)
-        return
-    white, black = item[2], item[3]
-    if not (
-        isinstance(white, torch.Tensor)
-        and white.is_cuda
-        and white.dtype == torch.int32
-        and white.ndim == 2
-        and isinstance(black, torch.Tensor)
-        and black.shape == white.shape
-    ):
-        return
-    try:
-        from model.modules.feature_transformer import tiled_ft_backward as tiled_bwd
-    except Exception:  # noqa: BLE001 - optional
-        return
-    if tiled_bwd.TILED_BACKWARD_ENABLED:
-        try:
-            tiled_bwd.register_prep(white, black)
-        except Exception as e:  # noqa: BLE001 - never break the loader; the backward prepares itself
-            tiled_bwd.STATS["register_failed"] += 1
-            if tiled_bwd.STATS["register_failed"] == 1:
-                print(
-                    f"[tiled backward] prefetch preparation failed, falling back to in-backward prep: {e!r}"
-                )
-
-
 def _safe_put(stop_event, q, item):
     """Helper to ensure we don't hang on shutdown if queue is full."""
     while not stop_event.is_set():
@@ -376,12 +342,18 @@ class FixedNumBatchesDataset(Dataset):
         pin_memory=False,
         queue_size_limit=None,
         device=None,
+        prefetch_hook=None,
     ):
+        """``prefetch_hook(batch)``, when given, runs on the prefetch thread for every batch copied
+        to a CUDA ``device``, on the prefetch stream, before the batch is handed out: index-only work
+        the model can do ahead of the step (see NNUE.prefetch_hook). It must not modify the batch;
+        if it raises, the error is reported once and the hook is no longer called."""
         super().__init__()
         self.dataset = dataset
         self.iter = None  # Deferred to _start_prefetching
         self.num_batches = num_batches
         self.device = torch.device(device) if device is not None else None
+        self.prefetch_hook = prefetch_hook
         self.prefetch_to_device = self.device is not None and self.device.type == "cuda"
         # Async H2D copies require pinned host memory.
         self.pin_memory = pin_memory or self.prefetch_to_device
@@ -408,6 +380,7 @@ class FixedNumBatchesDataset(Dataset):
         iterator,
         prefetch_queue,
         prefetch_device,
+        prefetch_hook,
     ):
         try:
             prefetch_stream = None
@@ -426,7 +399,14 @@ class FixedNumBatchesDataset(Dataset):
                             item = _recursive_to_device(
                                 item, prefetch_device, non_blocking=True
                             )
-                            _register_tiled_prep(item)
+                            if prefetch_hook is not None:
+                                try:
+                                    prefetch_hook(item)
+                                except Exception as e:  # noqa: BLE001 - the hook is optional work
+                                    print(
+                                        f"[data loader] prefetch hook failed, disabling it: {e!r}"
+                                    )
+                                    prefetch_hook = None
                             ready_event = torch.cuda.Event()
                             ready_event.record(prefetch_stream)
                         item = _CudaPrefetchedItem(item=item, ready_event=ready_event)
@@ -463,6 +443,7 @@ class FixedNumBatchesDataset(Dataset):
                         self.iter,
                         self._prefetch_queue,
                         self._prefetch_device,
+                        self.prefetch_hook,
                     ),
                     daemon=True,
                 )

@@ -1,3 +1,4 @@
+import functools
 from collections.abc import Callable
 
 import torch
@@ -6,6 +7,7 @@ from torch import nn
 from ...quantize import FAKE_QUANTIZE_EPS, QuantizationManager
 from ..features.input_feature import InputFeature
 from . import fused_weight_quant as _fwq
+from . import tiled_ft_backward as _tiled_bwd
 from .double_ft_functions import double_feature_transform
 
 
@@ -83,6 +85,28 @@ class ComposedFeatureTransformer(nn.Module):
             b = self.quantization.fake_quantize_weights(b, "ft_bias")
 
         return merged, b
+
+    def list_buckets(self) -> tuple[int, int] | None:
+        """(first_row, rows_per_bucket) of the last feature when its rows are bucket-major (K32H3),
+        else None. Every perspective has rows in it, so the highest row of a perspective's list
+        names its bucket; the tiled backward groups lists by it."""
+        last = self.features[-1]
+        if last.NUM_BUCKETS <= 1:
+            return None
+        first_row = self.NUM_INPUTS - last.NUM_INPUTS
+        return first_row, last.NUM_INPUTS // last.NUM_BUCKETS
+
+    def prefetch_preparer(self):
+        """``prepare(white_indices, black_indices)`` for the loader to run on training batches once
+        they are on the GPU, or None when the tiled backward does not apply: it builds the backward's
+        tile structure and registers it by the index tensor (tiled_ft_backward.register_prep), and
+        FusedDoubleFtFunction claims it during the step."""
+        if not (
+            _tiled_bwd.TILED_BACKWARD_ENABLED
+            and _tiled_bwd.applicable(self.l1_size, self.NUM_INPUTS)
+        ):
+            return None
+        return functools.partial(_tiled_bwd.register_prep, buckets=self.list_buckets())
 
     @torch.no_grad()
     def coalesce(self) -> None:

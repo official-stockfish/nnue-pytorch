@@ -12,6 +12,9 @@ class InputFeature(nn.Module, ABC):
     MAX_ACTIVE_FEATURES: int
     NUM_REAL_FEATURES: int
     EXPORT_WEIGHT_DTYPE: torch.dtype = torch.int16
+    # The rows form NUM_BUCKETS consecutive blocks of NUM_INPUTS // NUM_BUCKETS rows (K32H3: one per
+    # king bucket and state), and the active rows of one perspective all fall in a single block.
+    NUM_BUCKETS: int = 1
 
     @abstractmethod
     def merged_weight(self) -> torch.Tensor:

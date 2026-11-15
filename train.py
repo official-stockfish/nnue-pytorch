@@ -55,6 +55,7 @@ def make_data_loaders(
     prefetch_device=None,
     rank=0,
     world_size=1,
+    prefetch_hook=None,
 ):
     # Epoch and validation sizes are global; shard across DDP ranks.
     features_name = feature_name
@@ -79,6 +80,8 @@ def make_data_loaders(
             pin_memory=pin_memory,
             queue_size_limit=queue_size_limit,
             device=prefetch_device,
+            # Validation runs no backward, so only training batches need the model's prefetch work.
+            prefetch_hook=prefetch_hook,
         ),
         batch_size=None,
         batch_sampler=None,
@@ -401,6 +404,7 @@ def main():
         prefetch_device=device if accelerator == "cuda" else None,
         rank=rank,
         world_size=world_size,
+        prefetch_hook=nnue.prefetch_hook() if accelerator == "cuda" else None,
     )
 
     optimizer_and_schedulers = nnue.configure_optimizers()
