@@ -13,6 +13,9 @@
 using namespace binpack;
 using namespace chess;
 
+// Ply that marks search-tree samples: standalone positions without a game.
+static constexpr int TREE_SAMPLE_PLY = 9999;
+
 // ---------------------------------------------------------
 // Internal extractors and threat arrays
 // ---------------------------------------------------------
@@ -635,7 +638,8 @@ SparseBatch::~SparseBatch() {
 
 void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
     is_white[i] = static_cast<float>(e.pos.sideToMove() == Color::White);
-    outcome[i]  = (e.result + 1.0f) / 2.0f;
+    // Search-tree samples have no result: outcome 2 makes the loss use the score alone.
+    outcome[i]  = e.ply == TREE_SAMPLE_PLY ? 2.0f : (e.result + 1.0f) / 2.0f;
     score[i]    = e.score;
     fill_features(fs, i, e);
 }
@@ -1036,9 +1040,18 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
         }
     }
 
-    return [config, random_skip_threshold, target_pc_weights_lut, target_pc_weights_total,
+    const uint64_t tree_sample_skip_threshold = static_cast<uint64_t>(
+      (1.0 - std::clamp(config.tree_sample_accept, 0.0, 1.0)) * static_cast<double>(~0ULL));
+
+    return [config, random_skip_threshold, tree_sample_skip_threshold, target_pc_weights_lut,
+            target_pc_weights_total,
             early_ply_accept_prob = std::move(early_ply_accept_prob)](const TrainingDataEntry& e) {
         static constexpr int    VALUE_NONE = 32002;
+
+        if (e.ply == TREE_SAMPLE_PLY)
+            return e.score == VALUE_NONE
+                || rng::get_thread_local_rng()() < tree_sample_skip_threshold;
+
         static thread_local int last_ply   = -1;
         static thread_local int last_score = VALUE_NONE;
 

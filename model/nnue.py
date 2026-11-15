@@ -66,7 +66,8 @@ def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
     pf = 0.5 * (1.0 + s.sigmoid() - sm.sigmoid())
 
     # blend that eval based score with the actual game outcome
-    t = outcome
+    # (search-tree samples, outcome > 1, have none and use the score alone)
+    t = torch.where(outcome > 1.0, pf, outcome)
 
     pt = pf * actual_lambda + t * (1.0 - actual_lambda)
 

@@ -47,6 +47,8 @@ class DataloaderSkipConfig:
     """Ply soft filter control point x4."""
     ply_y4: float = 0.75
     """Ply soft filter control point y4."""
+    tree_sample_accept: float = 1.0
+    """Acceptance probability for search-tree samples (ply 9999), which skip the other filters."""
 
 
 @dataclass
@@ -127,6 +129,7 @@ class CDataloaderSkipConfig(ctypes.Structure):
         ("ply_y3", ctypes.c_double),
         ("ply_x4", ctypes.c_double),
         ("ply_y4", ctypes.c_double),
+        ("tree_sample_accept", ctypes.c_double),
     ]
 
     def __init__(self, config: DataloaderSkipConfig):
@@ -151,6 +154,7 @@ class CDataloaderSkipConfig(ctypes.Structure):
             ply_y3=config.ply_y3,
             ply_x4=config.ply_x4,
             ply_y4=config.ply_y4,
+            tree_sample_accept=config.tree_sample_accept,
         )
 
 
