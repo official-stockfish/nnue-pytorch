@@ -21,14 +21,8 @@ import torch
 
 from model.optimizers import grad_row_flags as _grf
 
-try:
-    import cupy as cp
-
-    from . import tiled_ft_backward as _tb
-
-    _HAS_CUPY = True
-except Exception:  # noqa: BLE001 - optional
-    _HAS_CUPY = False
+from .cupy_utils import HAS_CUPY as _HAS_CUPY
+from .cupy_utils import cp, cupy_stream
 
 _SRC = r"""
 extern "C" __global__ void merge_quant(float* __restrict__ out, const float* __restrict__ w,
@@ -134,7 +128,7 @@ class _MergeFakeQuant(torch.autograd.Function):
         out = torch.empty(rows, cols, device=params[0].device, dtype=torch.float32)
         k = _get_kernel()
         r0 = 0
-        with _tb._cupy_stream(out.device):
+        with cupy_stream(out.device):
             for i, (has_v, _nb) in _iter_layout(layout):
                 w = params[i]
                 n = w.numel()
@@ -262,7 +256,7 @@ def _bucket_sum(g, flags, nb, vs):
         _bsum_kernel = cp.RawKernel(_BSUM_SRC, "bucket_sum")
     out = torch.empty(*vs, dtype=torch.float32, device=g.device)
     n = rows * (cols // 4)
-    with _tb._cupy_stream(g.device):
+    with cupy_stream(g.device):
         _bsum_kernel(
             ((n + 255) // 256,),
             (256,),
@@ -323,7 +317,7 @@ class _ActFakeQuant(torch.autograd.Function):
         n = x.numel()
         s = np.float32(scale)
         if n:
-            with _tb._cupy_stream(x.device):
+            with cupy_stream(x.device):
                 _act_kernel(
                     (min((n + 255) // 256, 65535 * 8),),
                     (256,),

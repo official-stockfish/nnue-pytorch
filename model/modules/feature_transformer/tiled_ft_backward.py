@@ -14,29 +14,22 @@ from __future__ import annotations
 import collections
 import os
 import threading
+import warnings
 import weakref
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 
-try:
-    import cupy as cp
+from model.optimizers import grad_row_flags as _grf
 
-    _HAS_CUPY = True
-except (ImportError, OSError, RuntimeError):  # pragma: no cover - CuPy missing
-    cp = None
-    _HAS_CUPY = False
+from .cupy_utils import HAS_CUPY, compile_kernel, cp, cupy_stream
 
-TILED_BACKWARD_ENABLED = True
+# NNUE_TILED_BACKWARD=0 disables the tiled backward (the fused FT then uses its plain scatter).
+TILED_BACKWARD_ENABLED = os.environ.get("NNUE_TILED_BACKWARD", "1") != "0"
 TILE_SIZE = 256
 COLUMNS_PER_BLOCK = 64
-LIST_ORDER = "kb_minhash"
-TILE_SORT = "block"
-BLOCK_GRID = "tile"
 WARPS_PER_BLOCK = 32
-HALFKA_FIRST_ROW = 64368
-PREFETCH_PREP = True
 
 ROW_BITS = 20  # row index bits in the tile keys (feature sets up to 1M rows)
 LOCAL_BITS = 8  # T <= 256
@@ -51,9 +44,6 @@ SORT_CAP_MAX = (
 STATS = (
     collections.Counter()
 )  # "prep_registered", "prep_hit", "fallback", "global_sort_fallback"
-
-_kernels: dict = {}
-_kernel_lock = threading.Lock()
 
 
 def _render(src: str, **kw) -> str:
@@ -77,47 +67,6 @@ def _cub_options() -> tuple:
     )
 
 
-def _get_kernel(key, src, name, dynamic_shared: int = 0, options: tuple = ()):
-    with _kernel_lock:
-        k = _kernels.get(key)
-        if k is None:
-            k = cp.RawKernel(src, name, options=options)
-            k.compile()
-            if dynamic_shared > 48 * 1024:
-                # raise the kernel's dynamic shared memory ceiling to the device's
-                # opt-in maximum: the launch only allocates what it demands, so the
-                # highest valid ceiling is free and removes the sensitivity of the
-                # cap bookkeeping to the environment (a launch above the ceiling
-                # fails with CUDA_ERROR_INVALID_VALUE, as observed on another host).
-                optin = torch.cuda.get_device_properties(
-                    0
-                ).shared_memory_per_block_optin
-                k.max_dynamic_shared_size_bytes = max(dynamic_shared, optin)
-            _kernels[key] = k
-        return k
-
-
-class _cupy_stream:
-    """Run CuPy kernel launches on the current torch stream of the current device."""
-
-    def __init__(self, device: torch.device):
-        self.dev = cp.cuda.Device(
-            device.index if device.index is not None else torch.cuda.current_device()
-        )
-        self.stream = cp.cuda.ExternalStream(
-            torch.cuda.current_stream(device).cuda_stream
-        )
-
-    def __enter__(self):
-        self.dev.__enter__()
-        self.stream.__enter__()
-        return self
-
-    def __exit__(self, *exc):
-        self.stream.__exit__(*exc)
-        self.dev.__exit__(*exc)
-
-
 _HDR = "typedef int int32_t; typedef long long int64_t; typedef unsigned int uint32_t; typedef unsigned char uint8_t;\n"
 
 # ----------------------------------------------------------------------------- kernels
@@ -129,7 +78,7 @@ _ORDER_KEY_SRC = (
 // warp reduces the per-lane minima / maximum / count (min, max and + are order-independent).
 extern "C" __global__ void order_key(const int32_t* __restrict__ white, const int32_t* __restrict__ black,
     const uint32_t* __restrict__ hash_a, const uint32_t* __restrict__ hash_b, int64_t* __restrict__ keys,
-    int32_t* __restrict__ counts, const int32_t n_lists, const int32_t batch_size, const int32_t hk_off, const int32_t kb_first)
+    int32_t* __restrict__ counts, const int32_t n_lists, const int32_t batch_size, const int32_t bucket_first_row, const int32_t bucket_rows)
 {
     const int32_t MAXA = @MAXA@, NKEYS = @NKEYS@, BITS = @BITS@;
     const int32_t li = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
@@ -162,7 +111,7 @@ extern "C" __global__ void order_key(const int32_t* __restrict__ white, const in
     }
     if (lane != 0) return;
     int64_t key = 0;
-    if (kb_first) { int32_t kb = (mx - hk_off) / 768; kb = kb < 0 ? 0 : (kb > 127 ? 127 : kb); key = kb; }
+    if (bucket_rows > 0) { int32_t kb = (mx - bucket_first_row) / bucket_rows; kb = kb < 0 ? 0 : (kb > 127 ? 127 : kb); key = kb; }
     for (int j = 0; j < NKEYS; ++j) key = (key << BITS) | (int64_t)mn[j];
     keys[li] = key;
     counts[li] = n;
@@ -173,7 +122,7 @@ extern "C" __global__ void order_key(const int32_t* __restrict__ white, const in
 
 def _order_key_kernel(max_active: int, n_keys: int = 4, key_bits: int = 14):
     src = _render(_ORDER_KEY_SRC, MAXA=max_active, NKEYS=n_keys, BITS=key_bits)
-    return _get_kernel(("order_key", max_active, n_keys, key_bits), src, "order_key")
+    return compile_kernel(("order_key", max_active, n_keys, key_bits), src, "order_key")
 
 
 _TILE_KEY_SRC = (
@@ -207,7 +156,7 @@ extern "C" __global__ void tile_key(const int32_t* __restrict__ white, const int
 
 def _tile_key_kernel(max_active: int, T: int):
     src = _render(_TILE_KEY_SRC, MAXA=max_active, T=T, LOCAL_BITS=LOCAL_BITS)
-    return _get_kernel(("tile_key", max_active, T), src, "tile_key")
+    return compile_kernel(("tile_key", max_active, T), src, "tile_key")
 
 
 _TILE_SORT_SRC = (
@@ -295,7 +244,6 @@ extern "C" __global__ void __launch_bounds__(@BS@) tile_rsort(const int* __restr
     }
 }
 """
-MERGE_SHARED = True
 RSORT_BS = 256
 RSORT_IPT = 24
 RSORT_RB = 4
@@ -312,7 +260,7 @@ def _tile_rsort_kernel(sub_bits: int):
         LB=LOCAL_BITS,
         SB=sub_bits,
     )
-    return _get_kernel(
+    return compile_kernel(
         ("tile_rsort", RSORT_BS, RSORT_IPT, RSORT_RB, sub_bits),
         src,
         "tile_rsort",
@@ -354,7 +302,7 @@ extern "C" __global__ void __launch_bounds__(1024) merge_runs_sh(const int32_t* 
 
 
 def _merge_sh_kernel(nsub: int, cap: int):
-    return _get_kernel(
+    return compile_kernel(
         ("merge_runs_sh", nsub, cap),
         _render(_MERGE_SH_SRC, NSUB=nsub),
         "merge_runs_sh",
@@ -363,14 +311,14 @@ def _merge_sh_kernel(nsub: int, cap: int):
 
 
 def _merge_kernel(nsub: int):
-    return _get_kernel(
+    return compile_kernel(
         ("merge_runs", nsub), _render(_MERGE_SRC, NSUB=nsub), "merge_runs"
     )
 
 
 def _tile_sort_kernel(cap: int):
     src = _render(_TILE_SORT_SRC, CAP=cap)
-    return _get_kernel(("tile_sort", cap), src, "tile_sort", dynamic_shared=cap * 4)
+    return compile_kernel(("tile_sort", cap), src, "tile_sort", dynamic_shared=cap * 4)
 
 
 _SCATTER_SRC = (
@@ -379,15 +327,14 @@ _SCATTER_SRC = (
 #define GV @GV@
 // One block per (tile, column slice). NWARPS warps; lane owns columns col0 + lane + 32*c, c < CPL.
 extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
-    const float* __restrict__ Gw, const float* __restrict__ Gb, const int32_t* __restrict__ order, const int32_t* __restrict__ tile_map,
+    const float* __restrict__ Gw, const float* __restrict__ Gb, const int32_t* __restrict__ order,
     const int32_t* __restrict__ tile_start, const uint32_t* __restrict__ e_key,
     float* __restrict__ grad_weight, float* __restrict__ grad_bias, const int32_t n_lists, const int32_t batch_size,
     uint8_t* __restrict__ row_touched)
 {
     const int32_t T = @T@, SLICE = @SLICE@, OUT = @OUT@, CPL = @CPL@, LOCAL_BITS = @LOCAL_BITS@;
     extern __shared__ float Gsh[];                          // T * SLICE
-    const int32_t tile = tile_map[@SLICE_FASTEST@ ? blockIdx.y : blockIdx.x];
-    const int32_t slice = @SLICE_FASTEST@ ? blockIdx.x : blockIdx.y;
+    const int32_t tile = blockIdx.x, slice = blockIdx.y;
     const int32_t col0 = slice * SLICE;
 
     // 1. the tile's gradient rows for this column slice; every thread issues all its loads (PF list ids,
@@ -501,15 +448,11 @@ extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
 )
 
 
-from model.optimizers import grad_row_flags as _grf
-
-
 def _scatter_kernel(
     T: int,
     slice_cols: int,
     l1_size: int,
     out_size: int,
-    slice_fastest: bool,
     nwarps: int,
 ):
     if (
@@ -534,12 +477,11 @@ def _scatter_kernel(
         OUT=out_size,
         CPL=slice_cols // 32,
         LOCAL_BITS=LOCAL_BITS,
-        SLICE_FASTEST=1 if slice_fastest else 0,
         NWARPS=nwarps,
         GV={1: "float", 2: "float2", 4: "float4"}[slice_cols // 32],
     )
-    key = ("scatter", T, slice_cols, out_size, slice_fastest, nwarps)
-    return _get_kernel(key, src, "tiled_scatter", dynamic_shared=shm)
+    key = ("scatter", T, slice_cols, out_size, nwarps)
+    return compile_kernel(key, src, "tiled_scatter", dynamic_shared=shm)
 
 
 _PSQT_SRC = (
@@ -567,7 +509,7 @@ extern "C" __global__ void psqt_scatter(
 
 def _psqt_scatter_kernel(max_active: int, l1_size: int, out_size: int):
     src = _render(_PSQT_SRC, MAXA=max_active, L1=l1_size, OUT=out_size)
-    return _get_kernel(
+    return compile_kernel(
         ("psqt_scatter", max_active, l1_size, out_size), src, "psqt_scatter"
     )
 
@@ -587,69 +529,37 @@ class TiledPrep:
     tile_start: torch.Tensor  # (n_tiles + 1,) int32
     e_key: torch.Tensor  # (E,) uint32 (stored as int32): row << LOCAL_BITS | local, sorted within each tile
     n_tiles: int
-    tile_map: (
-        torch.Tensor
-    )  # (n_tiles,) int32: block index -> tile (identity unless grid == "shuffle")
     max_tile: int  # largest number of entries in one tile
 
     def record_stream(self, stream):
-        for t in (self.order, self.tile_start, self.e_key, self.tile_map):
+        for t in (self.order, self.tile_start, self.e_key):
             t.record_stream(stream)
-
-
-def _mark(timers, name, dev):
-    if timers is not None:
-        e = torch.cuda.Event(enable_timing=True)
-        e.record(torch.cuda.current_stream(dev))
-        timers.setdefault("_events", []).append((name, e))
-
-
-def finish_timers(timers, dev=None):
-    """Turn the events recorded by prepare()/tiled_backward() into ms per stage (synchronises)."""
-    ev = timers.pop("_events", [])
-    if not ev:
-        return timers
-    torch.cuda.synchronize(dev)
-    from itertools import pairwise
-
-    for (n0, e0), (n1, e1) in pairwise(ev):
-        if n1 == "start":
-            continue
-        timers[n1] = timers.get(n1, 0.0) + e0.elapsed_time(e1)
-    return timers
-
-
-def list_counts(white: torch.Tensor, black: torch.Tensor) -> torch.Tensor:
-    return torch.cat(
-        [(white >= 0).sum(1, dtype=torch.int32), (black >= 0).sum(1, dtype=torch.int32)]
-    )
 
 
 @torch.compiler.disable
 def list_order(
     white: torch.Tensor,
     black: torch.Tensor,
-    order: str = LIST_ORDER,
-    hk_off: int = HALFKA_FIRST_ROW,
+    buckets: tuple[int, int] | None = None,
     seed: int = 0,
-    with_counts: bool = False,
 ):
-    """Permutation of the perspective lists (white 0..B-1, black B..2B-1; int32) used to form the tiles.
-    With ``with_counts`` also returns the number of active rows per list (int32, list order)."""
+    """Permutation of the perspective lists (white 0..B-1, black B..2B-1; int32) that forms the tiles,
+    and the number of active rows per list (int32, list order).
+
+    Lists are sorted by a min-hash of their rows, so lists that share rows tend to share a tile.
+    ``buckets`` = (first_row, rows_per_bucket) groups them by bucket first: the highest row of every
+    list falls in a bucket-major feature that starts at first_row (the last feature of the set; see
+    ComposedFeatureTransformer.prefetch_preparer). Any order gives the same sums up to fp32 rounding."""
     B, maxa = white.shape
     n_lists = 2 * B
     dev = white.device
-    if order == "identity":
-        o = torch.arange(n_lists, device=dev, dtype=torch.int32)
-        return (o, list_counts(white, black)) if with_counts else o
-    if order not in ("kb_minhash", "minhash"):
-        raise ValueError(f"unknown list order {order!r}")
+    first_row, rows_per_bucket = buckets if buckets is not None else (0, 0)
     g = torch.Generator(device=dev).manual_seed(seed)
     a = (torch.randint(1, 2**31 - 1, (4,), generator=g, device=dev) | 1).to(torch.int32)
     b = torch.randint(0, 2**31 - 1, (4,), generator=g, device=dev).to(torch.int32)
     keys = torch.empty(n_lists, dtype=torch.int64, device=dev)
     counts = torch.empty(n_lists, dtype=torch.int32, device=dev)
-    with _cupy_stream(dev):
+    with cupy_stream(dev):
         _order_key_kernel(maxa)(
             grid=((n_lists * 32 + 255) // 256,),
             block=(256,),
@@ -662,19 +572,12 @@ def list_order(
                 counts.data_ptr(),
                 np.int32(n_lists),
                 np.int32(B),
-                np.int32(hk_off),
-                np.int32(1 if order == "kb_minhash" else 0),
+                np.int32(first_row),
+                np.int32(rows_per_bucket),
             ),
         )
     o = torch.sort(keys)[1].to(torch.int32)
-    return (o, counts) if with_counts else o
-
-
-def _sort_cap(T: int) -> int:
-    cap = 1
-    while cap < T * 128:
-        cap <<= 1
-    return cap
+    return o, counts
 
 
 @torch.compiler.disable
@@ -682,26 +585,21 @@ def prepare(
     white_indices: torch.Tensor,
     black_indices: torch.Tensor,
     T: int = TILE_SIZE,
-    order: str = LIST_ORDER,
-    hk_off: int = HALFKA_FIRST_ROW,
-    sort: str = TILE_SORT,
-    grid: str = BLOCK_GRID,
-    timers: dict | None = None,
+    buckets: tuple[int, int] | None = None,
+    sort: str = "block",
 ) -> TiledPrep:
-    """Build the tile structure for a batch (both perspectives; only the indices are read)."""
+    """Build the tile structure for a batch (both perspectives; only the indices are read).
+    ``buckets``: see list_order. ``sort="global"`` forces the fallback used when a tile's entries
+    do not fit the shared-memory sorts (for tests)."""
     assert white_indices.dtype == torch.int32 and white_indices.is_cuda
     assert 1 <= T <= MAX_T
     dev = white_indices.device
-    _mark(timers, "start", dev)
     white_indices = white_indices.contiguous()
     black_indices = black_indices.contiguous()
     B, maxa = white_indices.shape
     n_lists = 2 * B
     n_tiles = (n_lists + T - 1) // T
-    o, counts = list_order(
-        white_indices, black_indices, order, hk_off, with_counts=True
-    )
-    _mark(timers, "order", dev)
+    o, counts = list_order(white_indices, black_indices, buckets)
     counts = counts[o.long()]
     offsets = torch.zeros(n_lists + 1, dtype=torch.int32, device=dev)
     offsets[1:] = torch.cumsum(counts, 0)
@@ -723,7 +621,7 @@ def prepare(
     max_sub = max(max_sub, 1)
     E, max_tile = max(E, 1), max(max_tile, 1)
     keys = torch.empty(E, dtype=torch.int32, device=dev)
-    with _cupy_stream(dev):
+    with cupy_stream(dev):
         _tile_key_kernel(maxa, T)(
             grid=((n_lists * 32 + 255) // 256,),
             block=(256,),
@@ -737,7 +635,6 @@ def prepare(
                 np.int32(B),
             ),
         )
-    _mark(timers, "keys", dev)
     cap = 1024
     while (
         cap < max_tile
@@ -747,7 +644,7 @@ def prepare(
     while cap_sub < max_sub:
         cap_sub <<= 1
     if sort == "block" and cap <= SORT_CAP_MAX:
-        with _cupy_stream(dev):
+        with cupy_stream(dev):
             _tile_sort_kernel(cap)(
                 grid=(n_tiles,),
                 block=(1024,),
@@ -759,10 +656,9 @@ def prepare(
         # then merge every tile's T / SUB sorted runs by rank (keys are unique across runs: the local list
         # index differs). Same keys as the global sort.
         merged = torch.empty_like(keys)
-        with _cupy_stream(dev):
+        with cupy_stream(dev):
             if (
-                RSORT_BS > 0
-                and max_sub <= RSORT_BS * RSORT_IPT
+                max_sub <= RSORT_BS * RSORT_IPT
                 and SUB & (SUB - 1) == 0
                 and T % SUB == 0
             ):
@@ -779,9 +675,8 @@ def prepare(
                     shared_mem=cap_sub * 4,  # BS
                     args=(sub_start.data_ptr(), keys.data_ptr()),
                 )
-        _mark(timers, "subsort", dev)
-        with _cupy_stream(dev):
-            if max_tile * 4 <= MAX_SHARED_BYTES and MERGE_SHARED:
+        with cupy_stream(dev):
+            if max_tile * 4 <= MAX_SHARED_BYTES:
                 mcap = 4096
                 while mcap < max_tile:
                     mcap += 4096
@@ -822,14 +717,7 @@ def prepare(
         )  # size known: no host sync
         full = (tile_of << 32) | (keys.to(torch.int64) & 0xFFFFFFFF)
         keys = (torch.sort(full)[0] & 0xFFFFFFFF).to(torch.int32)
-    _mark(timers, "sort", dev)
-    if grid == "shuffle":
-        tile_map = torch.randperm(
-            n_tiles, device=dev, generator=torch.Generator(device=dev).manual_seed(1)
-        ).to(torch.int32)
-    else:
-        tile_map = torch.arange(n_tiles, device=dev, dtype=torch.int32)
-    return TiledPrep(T, n_lists, o, tile_start, keys, n_tiles, tile_map, max_tile)
+    return TiledPrep(T, n_lists, o, tile_start, keys, n_tiles, max_tile)
 
 
 # side table: data_ptr(white_indices) -> (weakref to the registered tensor, shape, prep)
@@ -839,16 +727,16 @@ _prep_lock = threading.Lock()
 
 
 def register_prep(
-    white_indices: torch.Tensor, black_indices: torch.Tensor, **kw
+    white_indices: torch.Tensor,
+    black_indices: torch.Tensor,
+    buckets: tuple[int, int] | None = None,
 ) -> TiledPrep | None:
-    """Compute and store the preparation for a batch (called by the loader's prefetch worker on
-    its own CUDA stream). Never raises into the loader: failures only mean a fallback later.
-    Returns the preparation, or None when disabled."""
-    if not (
-        TILED_BACKWARD_ENABLED and PREFETCH_PREP and _HAS_CUPY and white_indices.is_cuda
-    ):
+    """Compute and store the preparation for a batch, keyed by its white index tensor, for
+    FusedDoubleFtFunction to pick up (lookup_prep). Called on the loader's prefetch thread, on its
+    CUDA stream. Returns the preparation, or None when the tiled backward is off."""
+    if not (TILED_BACKWARD_ENABLED and HAS_CUPY and white_indices.is_cuda):
         return None
-    prep = prepare(white_indices, black_indices, **kw)
+    prep = prepare(white_indices, black_indices, buckets=buckets)
     with _prep_lock:
         _prep_cache[white_indices.data_ptr()] = (
             weakref.ref(white_indices),
@@ -885,9 +773,22 @@ def lookup_prep(white_indices: torch.Tensor) -> TiledPrep | None:
 # ----------------------------------------------------------------------------- backward
 
 
-def applicable(l1_size: int, slice_cols: int = COLUMNS_PER_BLOCK) -> bool:
-    """Whether the tiled backward can run for this layer width (else the plain kernel is used)."""
-    return _HAS_CUPY and l1_size % slice_cols == 0 and l1_size >= slice_cols
+def applicable(
+    l1_size: int, num_inputs: int, slice_cols: int = COLUMNS_PER_BLOCK
+) -> bool:
+    """Whether the tiled backward can run for this layer (else the plain kernel is used): CUDA (the
+    kernels assume 32-lane warps and CUB), a width the column slices divide, and rows that fit the
+    ROW_BITS of the tile keys."""
+    return (
+        HAS_CUPY
+        and torch.version.hip is None
+        and l1_size % slice_cols == 0
+        and l1_size >= slice_cols
+        and num_inputs <= 1 << ROW_BITS
+    )
+
+
+_warned_fallback = False
 
 
 @torch.compiler.disable
@@ -900,23 +801,28 @@ def tiled_backward(
     l1_size,
     prep: TiledPrep | None = None,
     slice_cols: int = COLUMNS_PER_BLOCK,
-    grid: str = BLOCK_GRID,
     nwarps: int = WARPS_PER_BLOCK,
-    timers: dict | None = None,
 ):
     """Weight/bias gradient of the double sparse linear layer (white and black lists share weight
     and bias); ``grad_w`` / ``grad_b`` (B, OUT) are the output gradients. Columns l1_size.. (the
     PSQT columns) use plain atomics. Returns (grad_weight, grad_bias)."""
+    global _warned_fallback
     dev = grad_w.device
     B, maxa = white_indices.shape
     OUT = grad_w.shape[1]
-    _mark(timers, "start", dev)
     if prep is None:
         STATS["fallback"] += 1
+        if not _warned_fallback:
+            _warned_fallback = True
+            warnings.warn(
+                "tiled FT backward: no preparation was prefetched for this batch, so it is built "
+                "in the backward (one host sync per step). Training batches get it from the "
+                "loader's prefetch hook (NNUE.prefetch_hook).",
+                stacklevel=2,
+            )
         # the fallback tile size must fit the caller's column slice into shared memory
         T_fb = min(TILE_SIZE, MAX_T, (MAX_SHARED_BYTES // (slice_cols * 4)) // 32 * 32)
-        prep = prepare(white_indices, black_indices, T=T_fb, grid=grid)
-        _mark(timers, "prep_fallback", dev)
+        prep = prepare(white_indices, black_indices, T=T_fb)
     n_lists = 2 * B
     if prep.n_lists != n_lists:
         raise RuntimeError("tiled backward: preparation does not match the batch")
@@ -932,22 +838,15 @@ def tiled_backward(
     row_touched = torch.zeros(num_inputs, dtype=torch.uint8, device=dev)
     if OUT > l1_size:
         grad_bias[l1_size:] = grad_w[:, l1_size:].sum(0) + grad_b[:, l1_size:].sum(0)
-    _mark(timers, "alloc", dev)
-    with _cupy_stream(dev):
-        n_slices = l1_size // slice_cols
-        slice_fastest = grid == "slice"
-        launch_grid = (
-            (n_slices, prep.n_tiles) if slice_fastest else (prep.n_tiles, n_slices)
-        )
-        _scatter_kernel(prep.T, slice_cols, l1_size, OUT, slice_fastest, nwarps)(
-            grid=launch_grid,
+    with cupy_stream(dev):
+        _scatter_kernel(prep.T, slice_cols, l1_size, OUT, nwarps)(
+            grid=(prep.n_tiles, l1_size // slice_cols),
             block=(32 * nwarps,),
             shared_mem=prep.T * slice_cols * 4 + nwarps * 128,
             args=(
                 grad_w.data_ptr(),
                 grad_b.data_ptr(),
                 prep.order.data_ptr(),
-                prep.tile_map.data_ptr(),
                 prep.tile_start.data_ptr(),
                 prep.e_key.data_ptr(),
                 grad_weight.data_ptr(),
@@ -957,7 +856,6 @@ def tiled_backward(
                 row_touched.data_ptr(),
             ),
         )
-        _mark(timers, "scatter", dev)
         if OUT > l1_size:
             _psqt_scatter_kernel(maxa, l1_size, OUT)(
                 grid=((n_lists * maxa + 255) // 256,),
@@ -973,6 +871,5 @@ def tiled_backward(
                     row_touched.data_ptr(),
                 ),
             )
-        _mark(timers, "psqt", dev)
     _grf.register(grad_weight, row_touched, reset=True)
     return grad_weight, grad_bias

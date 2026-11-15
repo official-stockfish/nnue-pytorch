@@ -7,10 +7,14 @@ import torch
 
 from model.modules.feature_transformer import fused_ft_functions as FF
 from model.modules.feature_transformer import tiled_ft_backward as TB
-from model.modules.feature_transformer import tiled_ft_fused as TFF
+from model.modules.feature_transformer.cupy_utils import cupy_stream
 
 pytestmark = pytest.mark.skipif(
-    not (torch.cuda.is_available() and FF._HAS_CUPY_KERNELS and TB._HAS_CUPY),
+    not (
+        torch.cuda.is_available()
+        and FF._HAS_CUPY_KERNELS
+        and TB.applicable(1024, 1 << 16)
+    ),
     reason="needs CUDA + CuPy",
 )
 
@@ -32,8 +36,8 @@ def _indices(B, maxa, num_inputs, gen, dev):
 
 
 def _run(tiled, us, them, w, b, W, bias, l1, g, prefetch):
-    old = TFF.USE_TILED_BACKWARD
-    TFF.USE_TILED_BACKWARD = tiled
+    old = TB.TILED_BACKWARD_ENABLED
+    TB.TILED_BACKWARD_ENABLED = tiled
     try:
         if tiled and prefetch:
             TB.register_prep(w, b)
@@ -42,7 +46,7 @@ def _run(tiled, us, them, w, b, W, bias, l1, g, prefetch):
         out = FF.FusedDoubleFtFunction.apply(us, them, w, b, Wp, bp_, MAX_ACT, l1)
         out.backward(g)
     finally:
-        TFF.USE_TILED_BACKWARD = old
+        TB.TILED_BACKWARD_ENABLED = old
     return out, Wp.grad, bp_.grad
 
 
@@ -195,7 +199,7 @@ def test_merge_quant_vectorized_bit_identical(cols):
     # the scalar kernel on the same segments
     k = FWQ._get_kernel()
     sc = torch.empty_like(out)
-    with TB._cupy_stream(dev):
+    with cupy_stream(dev):
         for r0, (ww, vv) in ((0, (w0, None)), (301, (w1, v))):
             k(
                 ((ww.numel() + 255) // 256,),

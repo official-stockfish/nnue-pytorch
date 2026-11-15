@@ -12,8 +12,7 @@ import numpy as np
 import torch
 
 from . import tiled_ft_backward as _tb
-
-USE_TILED_BACKWARD = _tb._HAS_CUPY and _tb.TILED_BACKWARD_ENABLED
+from .cupy_utils import compile_kernel, cupy_stream
 
 _PROLOGUE_SRC = r"""
 extern "C" __global__ void tiled_ft_prologue(
@@ -43,7 +42,7 @@ extern "C" __global__ void tiled_ft_prologue(
 
 def _kernel(name: str, src: str, l1_size: int):
     h = l1_size // 2
-    return _tb._get_kernel(
+    return compile_kernel(
         (name, l1_size), src.replace("$H", str(h)).replace("$L1", str(l1_size)), name
     )
 
@@ -54,7 +53,7 @@ def _launch(kernel, batch_size: int, l1_size: int, args):
 
 
 def lookup_backward_prep(white_indices):
-    return _tb.lookup_prep(white_indices) if USE_TILED_BACKWARD else None
+    return _tb.lookup_prep(white_indices) if _tb.TILED_BACKWARD_ENABLED else None
 
 
 @torch.compiler.disable(recursive=True)
@@ -71,12 +70,12 @@ def backward(
     prep=None,
 ):
     """(grad_weight, grad_bias) of the fused double FT, or None when the tiled backward does not apply."""
-    if not USE_TILED_BACKWARD or not _tb.applicable(l1_size):
+    if not _tb.TILED_BACKWARD_ENABLED or not _tb.applicable(l1_size, num_inputs):
         return None
     batch_size = white_indices.shape[0]
     grad_w = torch.empty(batch_size, l1_size, dtype=torch.float32, device=us.device)
     grad_b = torch.empty_like(grad_w)
-    with _tb._cupy_stream(us.device):
+    with cupy_stream(us.device):
         _launch(
             _kernel("tiled_ft_prologue", _PROLOGUE_SRC, l1_size),
             batch_size,

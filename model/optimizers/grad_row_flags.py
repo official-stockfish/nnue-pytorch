@@ -104,13 +104,13 @@ def total_norm(grads: list[torch.Tensor]) -> torch.Tensor:
     import cupy as cp
     import numpy as np
 
-    from model.modules.feature_transformer import tiled_ft_backward as _tb
+    from model.modules.feature_transformer.cupy_utils import cupy_stream
 
     if _ssq_kernel is None:
         _ssq_kernel = cp.RawKernel(_SSQ_SRC, "flagged_ssq")
     dev = flagged[0][0].device
     acc = torch.zeros((), dtype=torch.float64, device=dev)
-    with _tb._cupy_stream(dev):
+    with cupy_stream(dev):
         for g, f in flagged:
             rows, cols = g.shape
             _ssq_kernel(
