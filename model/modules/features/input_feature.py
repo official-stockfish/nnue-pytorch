@@ -16,15 +16,19 @@ class InputFeature(nn.Module, ABC):
     # king bucket and state), and the active rows of one perspective all fall in a single block.
     NUM_BUCKETS: int = 1
 
-    @abstractmethod
+    def virtual_layout(self) -> tuple[torch.Tensor, int] | None:
+        """(virtual_weight, num_buckets) for a feature whose effective weight is
+        ``weight + virtual_weight.repeat(num_buckets, 1)``, else None. merged_weight() and the
+        fused merge kernel (fused_weight_quant) both build the weight from it."""
+        return None
+
     def merged_weight(self) -> torch.Tensor:
         """Return effective weight matrix (with virtual weights merged if applicable)."""
-
-    def virtual_layout(self) -> tuple[torch.Tensor, int] | None:
-        """(virtual_weight, num_buckets) when merged_weight() is
-        ``weight + virtual_weight.repeat(num_buckets, 1)``, else None. Fused kernels use it to build
-        the merged weight without merged_weight(); keep the two in sync."""
-        return None
+        layout = self.virtual_layout()
+        if layout is None:
+            return self.weight
+        virtual_weight, num_buckets = layout
+        return self.weight + virtual_weight.repeat(num_buckets, 1)
 
     @abstractmethod
     def coalesce(self) -> None: ...

@@ -40,6 +40,14 @@ def test_segments_follow_declared_layouts():
         (True, False, 96),
     ]
 
+    # merged_weight() is built from the same declaration
+    threats, k32h3 = ft.features[0], ft.features[-1]
+    assert threats.merged_weight() is threats.weight
+    assert torch.equal(
+        k32h3.merged_weight(),
+        k32h3.weight + k32h3.virtual_weight.repeat(k32h3.NUM_BUCKETS, 1),
+    )
+
     class OtherMerge(torch.nn.Module):
         weight = torch.zeros(2, 2)
 
