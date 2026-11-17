@@ -19,14 +19,13 @@ The kernels are in tiled_ft_kernel.py.
 from __future__ import annotations
 
 import os
-import warnings
 
 import numpy as np
 import torch
 
 from ...cupy_utils import HAS_CUPY, cupy_stream, shared_memory_limit
 from . import tiled_ft_kernel as kernel
-from .tiled_ft_prep import STATS, TiledPrep, prepare
+from .tiled_ft_prep import STATS, TiledPrep, prepare, warn_once
 
 # NNUE_TILED_BACKWARD=0 disables the tiled backward (the fused FT then uses its other kernels).
 TILED_BACKWARD_ENABLED = os.environ.get("NNUE_TILED_BACKWARD", "1") != "0"
@@ -53,9 +52,6 @@ def enabled(l1_size: int, num_inputs: int, device: torch.device | None = None) -
     )
 
 
-_warned_fallback = False
-
-
 @torch.compiler.disable(recursive=True)
 def backward(
     us,
@@ -71,19 +67,16 @@ def backward(
     """(grad_weight, grad_bias) of the fused double FT, whose white and black lists share weight
     and bias, from the gradient of its output and the clamped values its forward saved. ``prep``
     is the batch's preparation; without one it is built here."""
-    global _warned_fallback
     dev = grad_l0.device
     batch_size, l1_size = grad_l0.shape
     if prep is None:
         STATS["fallback"] += 1
-        if not _warned_fallback:
-            _warned_fallback = True
-            warnings.warn(
-                "tiled FT backward: no preparation was prefetched for this batch, so it is built "
-                "in the backward (one host sync per step). Training batches get it from the "
-                "loader's prefetch hook (NNUE.prefetch_hook).",
-                stacklevel=2,
-            )
+        warn_once(
+            "no_prefetch",
+            "tiled FT backward: no preparation was prefetched for this batch, so it is built "
+            "in the backward (one host sync per step). Training batches get it from the "
+            "loader's prefetch hook (NNUE.prefetch_hook).",
+        )
         prep = prepare(white_indices, black_indices)
     if prep.n_lists != 2 * batch_size:
         raise RuntimeError("tiled backward: preparation does not match the batch")

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import collections
 import threading
+import warnings
 import weakref
 from dataclasses import dataclass
 
@@ -19,9 +20,17 @@ import torch
 from ...cupy_utils import cupy_stream, shared_memory_limit
 from . import tiled_ft_kernel as kernel
 
-STATS = (
-    collections.Counter()
-)  # "prep_registered", "prep_hit", "fallback", "global_sort_fallback"
+# "prep_registered", "prep_hit", "fallback", "global_sort_fallback"
+STATS = collections.Counter()
+
+_warned: set[str] = set()
+
+
+def warn_once(key: str, message: str) -> None:
+    """Warn about a slow path the first time it is taken; STATS counts every time."""
+    if key not in _warned:
+        _warned.add(key)
+        warnings.warn(message, stacklevel=3)
 
 
 @dataclass
@@ -191,15 +200,22 @@ def prepare(
     else:
         if sort == "tile":
             STATS["global_sort_fallback"] += 1
+            warn_once(
+                "global_sort",
+                f"tiled FT backward: a batch does not fit the tile-local sort (largest sub-tile "
+                f"{max_sub} keys, largest tile {max_tile} entries, {shared_memory_limit(dev)} B "
+                "of shared memory per block); such batches use a slower global sort.",
+            )
         entries = _sort_global(keys, tile_start, n_entries)
     return TiledPrep(n_lists, tile_start.numel() - 1, order, tile_start, entries)
 
 
 # Preparations parked for the training step:
 # data_ptr(white_indices) -> (weak reference to that tensor, preparation)
-_PREP_CACHE_MAX = 16
-_prep_cache: collections.OrderedDict[int, tuple] = collections.OrderedDict()
-_prep_lock = threading.Lock()
+# An entry stays until the step claims it or its batch is freed, so the table holds at most one
+# entry per live batch, however long the loader's queue is.
+_parked: dict[int, tuple] = {}
+_parked_lock = threading.Lock()
 
 
 def register_prep(
@@ -210,24 +226,22 @@ def register_prep(
     """Build the preparation of a batch and park it under its white index tensor for the training
     step (claim_prep). Called on the loader's prefetch thread, on its CUDA stream."""
     prep = prepare(white_indices, black_indices, buckets)
-    key = white_indices.data_ptr()
-    with _prep_lock:
-        _prep_cache[key] = (weakref.ref(white_indices), prep)
-        _prep_cache.move_to_end(key)
-        while len(_prep_cache) > _PREP_CACHE_MAX:
-            _prep_cache.popitem(last=False)
+    with _parked_lock:
+        for key in [key for key, (batch, _) in _parked.items() if batch() is None]:
+            del _parked[key]
+        _parked[white_indices.data_ptr()] = (weakref.ref(white_indices), prep)
     STATS["prep_registered"] += 1
 
 
 def claim_prep(white_indices: torch.Tensor) -> TiledPrep | None:
     """Take the preparation parked for this index tensor, if there is one and the tensor it was
     built from is still alive with this shape."""
-    with _prep_lock:
-        entry = _prep_cache.pop(white_indices.data_ptr(), None)
+    with _parked_lock:
+        entry = _parked.pop(white_indices.data_ptr(), None)
     if entry is None:
         return None
-    registered, prep = entry[0](), entry[1]
-    if registered is None or registered.shape != white_indices.shape:
+    batch, prep = entry[0](), entry[1]
+    if batch is None or batch.shape != white_indices.shape:
         return None
     # built on the prefetch stream; the consumer stream already waited on the batch's ready event
     prep.record_stream(torch.cuda.current_stream(white_indices.device))

@@ -9,6 +9,7 @@ import torch
 from data_loader.dataset import FixedNumBatchesDataset
 from model import NNUE
 from model.modules import ComposedFeatureTransformer, get_feature_cls
+from model.modules.feature_transformer import tiled_ft_prep
 from model.quantize import QuantizationConfig, QuantizationManager
 
 
@@ -68,7 +69,39 @@ def test_hook_runs_on_device_batches_and_survives_errors():
     ds = FixedNumBatchesDataset(
         _Batches(4), num_batches=4, device="cuda", prefetch_hook=hook
     )
-    out = [ds[i] for i in range(4)]
+    with pytest.warns(RuntimeWarning, match="prefetch hook failed"):
+        out = [ds[i] for i in range(4)]
     # every batch arrives; the hook saw device tensors and was dropped after its first error
     assert [b[0][0].item() for b in out] == [0.0, 1.0, 2.0, 3.0]
     assert calls == [True, True]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+def test_parked_preparations_follow_their_batches(monkeypatch):
+    """Every queued batch finds its preparation, however many are queued, and a batch that is
+    freed unclaimed takes its entry with it."""
+
+    def fake_prepare(white_indices, black_indices, buckets=None):
+        t = torch.zeros(1, dtype=torch.int32, device=white_indices.device)
+        return tiled_ft_prep.TiledPrep(2 * white_indices.shape[0], 1, t, t, t)
+
+    monkeypatch.setattr(tiled_ft_prep, "prepare", fake_prepare)
+    monkeypatch.setattr(tiled_ft_prep, "_parked", {})
+
+    def batch():
+        return torch.zeros(4, 8, dtype=torch.int32, device="cuda")
+
+    queued = [batch() for _ in range(40)]
+    for white in queued:
+        tiled_ft_prep.register_prep(white, white)
+    # claimed oldest first, as the trainer does, and only once
+    assert all(tiled_ft_prep.claim_prep(white) is not None for white in queued)
+    assert tiled_ft_prep.claim_prep(queued[0]) is None
+
+    dropped = batch()
+    tiled_ft_prep.register_prep(dropped, dropped)
+    del dropped
+    kept = batch()
+    tiled_ft_prep.register_prep(kept, kept)
+    assert len(tiled_ft_prep._parked) == 1
+    assert tiled_ft_prep.claim_prep(kept) is not None

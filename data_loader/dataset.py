@@ -1,5 +1,6 @@
 import queue
 import threading
+import warnings
 from dataclasses import dataclass
 
 import torch
@@ -347,7 +348,7 @@ class FixedNumBatchesDataset(Dataset):
         """``prefetch_hook(batch)``, when given, runs on the prefetch thread for every batch copied
         to a CUDA ``device``, on the prefetch stream, before the batch is handed out: index-only work
         the model can do ahead of the step (see NNUE.prefetch_hook). It must not modify the batch;
-        if it raises, the error is reported once and the hook is no longer called."""
+        if it raises, a warning reports the error and the hook is no longer called."""
         super().__init__()
         self.dataset = dataset
         self.iter = None  # Deferred to _start_prefetching
@@ -403,8 +404,11 @@ class FixedNumBatchesDataset(Dataset):
                                 try:
                                     prefetch_hook(item)
                                 except Exception as e:  # noqa: BLE001 - the hook is optional work
-                                    print(
-                                        f"[data loader] prefetch hook failed, disabling it: {e!r}"
+                                    warnings.warn(
+                                        "data loader: the prefetch hook failed and is disabled "
+                                        f"for the rest of the run: {e!r}",
+                                        RuntimeWarning,
+                                        stacklevel=1,
                                     )
                                     prefetch_hook = None
                             ready_event = torch.cuda.Event()
