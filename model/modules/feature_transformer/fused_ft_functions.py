@@ -2,6 +2,9 @@ import numpy as np
 import torch
 from torch import autograd
 
+from . import tiled_ft_backward
+from .tiled_ft_prep import claim_prep
+
 _HAS_CUPY_KERNELS = False
 try:
     from .aggregated_ft_kernel import aggregated_ft_backward
@@ -130,6 +133,9 @@ class FusedDoubleFtFunction(autograd.Function):
             ),
         )
 
+        # The loader's prefetch thread may have prepared the tiled backward's tile structure for
+        # this batch (registered by its index tensor); claim it now, while the tensor is the batch's.
+        ctx.tiled_prep = claim_prep(white_indices)
         ctx.save_for_backward(
             us, them, white_indices, black_indices, weight, bias, clamped_out
         )
@@ -144,6 +150,20 @@ class FusedDoubleFtFunction(autograd.Function):
         l1_size = ctx.l1_size
 
         grad_l0 = grad_l0.contiguous()
+        prep, ctx.tiled_prep = ctx.tiled_prep, None
+        if tiled_ft_backward.enabled(l1_size, weight.shape[0], us.device):
+            grad_weight, grad_bias = tiled_ft_backward.backward(
+                us,
+                them,
+                white_indices,
+                black_indices,
+                grad_l0,
+                clamped_out,
+                weight.shape[0],
+                max_ft_activation,
+                prep,
+            )
+            return None, None, None, None, grad_weight, grad_bias, None, None
 
         batch_size = white_indices.shape[0]
         max_active_features = white_indices.shape[1]
