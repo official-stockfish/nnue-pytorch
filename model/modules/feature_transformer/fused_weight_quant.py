@@ -19,9 +19,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from . import grad_row_flags as _grf
-from .cupy_utils import HAS_CUPY as _HAS_CUPY
-from .cupy_utils import compile_kernel, cupy_stream
+from ...cupy_utils import HAS_CUPY, compile_kernel, cupy_stream
 
 _SRC = r"""
 extern "C" __global__ void merge_quant(float* __restrict__ out, const float* __restrict__ w,
@@ -53,11 +51,11 @@ extern "C" __global__ void merge_quant4(float4* __restrict__ out, const float4* 
 """
 
 
-def _get_kernel():
+def _merge_quant_kernel():
     return compile_kernel(("merge_quant",), _SRC, "merge_quant")
 
 
-def _get_kernel4():
+def _merge_quant4_kernel():
     return compile_kernel(("merge_quant4",), _SRC, "merge_quant4")
 
 
@@ -87,7 +85,7 @@ def segments_of(features):
 
 def usable(segs) -> bool:
     return (
-        _HAS_CUPY
+        HAS_CUPY
         and segs is not None
         and all(
             w.is_cuda
@@ -111,7 +109,6 @@ class _MergeFakeQuant(torch.autograd.Function):
         rows = sum(params[i].shape[0] for i, (has_v, _) in _iter_layout(layout))
         cols = params[0].shape[1]
         out = torch.empty(rows, cols, device=params[0].device, dtype=torch.float32)
-        k = _get_kernel()
         r0 = 0
         with cupy_stream(out.device):
             for i, (has_v, _nb) in _iter_layout(layout):
@@ -129,7 +126,7 @@ class _MergeFakeQuant(torch.autograd.Function):
                     ):
                         vn4 = vn // 4
                         blocks = min((vn4 + 255) // 256, 82 * 16)
-                        _get_kernel4()(
+                        _merge_quant4_kernel()(
                             (blocks,),
                             (256,),
                             (
@@ -144,7 +141,7 @@ class _MergeFakeQuant(torch.autograd.Function):
                         )
                     else:
                         blocks = min((n + 255) // 256, 65535 * 8)
-                        k(
+                        _merge_quant_kernel()(
                             (blocks,),
                             (256,),
                             (
@@ -164,9 +161,6 @@ class _MergeFakeQuant(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad):
-        flags = _grf.lookup(
-            grad
-        )  # rows of the tiled FT gradient that are not exactly +0
         grad = grad.contiguous()
         grads = [None] * len(ctx.shapes)
         r0 = 0
@@ -175,78 +169,10 @@ class _MergeFakeQuant(torch.autograd.Function):
             g = grad[r0 : r0 + nr]
             grads[i] = g
             if has_v:
-                vs = ctx.shapes[i + 1]
-                fl = None if flags is None else flags[r0 : r0 + nr]
-                grads[i + 1] = (
-                    _bucket_sum(g, fl, nb, vs)
-                    if fl is not None
-                    else g.view(nb, vs[0], *vs[1:]).sum(0)
-                )
+                # the virtual weight is repeated over the buckets: sum its gradient over them
+                grads[i + 1] = g.view(nb, *ctx.shapes[i + 1]).sum(0)
             r0 += nr
         return (None, None, *grads)
-
-
-# Virtual-weight gradient: the sum over the buckets, in the order of PyTorch's reduction (4 accumulators,
-# bucket b into accumulator b % 4, then ((a0 + a1) + a2) + a3), reading only the flagged rows: an unflagged
-# row is exactly +0, and adding +0 changes no sum (no partial sum is -0: the gradient has no -0 entries).
-_BSUM_SRC = r"""
-extern "C" __global__ void bucket_sum(const float4* __restrict__ g, const unsigned char* __restrict__ flags,
-                                      float4* __restrict__ out, const int nb, const int rows, const int cols4)
-{
-    const long long t = (long long)blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= (long long)rows * cols4) return;
-    const int r = (int)(t / cols4), c = (int)(t - (long long)r * cols4);
-    float4 a[4];
-    bool has[4] = {false, false, false, false};
-    for (int b = 0; b < nb; ++b) {
-        if (!flags[(long long)b * rows + r]) continue;
-        const float4 v = g[((long long)b * rows + r) * cols4 + c];
-        const int k = b & 3;
-        if (has[k]) { a[k].x += v.x; a[k].y += v.y; a[k].z += v.z; a[k].w += v.w; } else { a[k] = v; has[k] = true; }
-    }
-    float4 s = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-    bool any = false;
-    for (int k = 0; k < 4; ++k) {
-        if (!has[k]) continue;
-        if (any) { s.x += a[k].x; s.y += a[k].y; s.z += a[k].z; s.w += a[k].w; } else { s = a[k]; any = true; }
-    }
-    out[t] = s;
-}
-"""
-
-
-@torch.compiler.disable
-def _bucket_sum(g, flags, nb, vs):
-    """g.view(nb, *vs).sum(0) for a contiguous fp32 g whose unflagged rows are +0 (bit-identical)."""
-    cols = int(np.prod(vs[1:])) if len(vs) > 1 else 1
-    rows = vs[0]
-    if not (
-        _HAS_CUPY
-        and g.is_cuda
-        and g.dtype == torch.float32
-        and g.is_contiguous()
-        and cols % 4 == 0
-        and g.data_ptr() % 16 == 0
-        and flags.dtype == torch.uint8
-        and flags.numel() == nb * rows
-    ):
-        return g.view(nb, *vs).sum(0)
-    out = torch.empty(*vs, dtype=torch.float32, device=g.device)
-    n = rows * (cols // 4)
-    with cupy_stream(g.device):
-        compile_kernel(("bucket_sum",), _BSUM_SRC, "bucket_sum")(
-            ((n + 255) // 256,),
-            (256,),
-            (
-                g.data_ptr(),
-                flags.data_ptr(),
-                out.data_ptr(),
-                np.int32(nb),
-                np.int32(rows),
-                np.int32(cols // 4),
-            ),
-        )
-    return out
 
 
 def _iter_layout(layout):
@@ -261,59 +187,3 @@ def merge_and_fake_quantize(segs, scale):
     layout = tuple((v is not None, nb) for _, v, nb in segs)
     params = [p for w, v, _ in segs for p in ((w, v) if v is not None else (w,))]
     return _MergeFakeQuant.apply(scale, layout, *params)
-
-
-# ---- FT activation: fake_quantize_ft_act(l0_) * l0_correction_factor in one pass --------------------
-# Reference: hard = x.mul(s).add(eps).floor().div(s); out = (hard + (x - x.detach())) * c. PyTorch's CUDA
-# scalar mul/add/div run in fp32 with float(s), float(eps) and float(1) / float(s) (a scalar divisor is
-# applied as a reciprocal multiply), so the kernel uses the same roundings with no FMA contraction.
-# The STE gradient is grad * c (identity when c == 1).
-_ACT_SRC = r"""
-extern "C" __global__ void act_quant(float* __restrict__ out, const float* __restrict__ x, long long n,
-                                     float s, float eps, float inv, float c) {
-    long long stride = (long long)blockDim.x * gridDim.x;
-    for (long long i = (long long)blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride) {
-        float h = __fmul_rn(floorf(__fadd_rn(__fmul_rn(x[i], s), eps)), inv);
-        out[i] = __fmul_rn(h, c);
-    }
-}
-"""
-
-
-class _ActFakeQuant(torch.autograd.Function):
-    @staticmethod
-    @torch.compiler.disable
-    def forward(ctx, x, scale, eps, corr):
-        x = x.contiguous()
-        out = torch.empty_like(x)
-        n = x.numel()
-        s = np.float32(scale)
-        if n:
-            with cupy_stream(x.device):
-                compile_kernel(("act_quant",), _ACT_SRC, "act_quant")(
-                    (min((n + 255) // 256, 65535 * 8),),
-                    (256,),
-                    (
-                        out.data_ptr(),
-                        x.data_ptr(),
-                        np.int64(n),
-                        s,
-                        np.float32(eps),
-                        np.float32(1.0) / s,
-                        np.float32(corr),
-                    ),
-                )
-        ctx.corr = corr
-        return out
-
-    @staticmethod
-    def backward(ctx, grad):
-        return (grad if ctx.corr == 1.0 else grad * ctx.corr), None, None, None
-
-
-def act_usable(x: torch.Tensor) -> bool:
-    return _HAS_CUPY and x.is_cuda and x.dtype == torch.float32
-
-
-def fake_quantize_act_and_scale(x, scale, eps, corr):
-    return _ActFakeQuant.apply(x, scale, eps, corr)

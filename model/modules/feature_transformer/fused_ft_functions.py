@@ -2,6 +2,9 @@ import numpy as np
 import torch
 from torch import autograd
 
+from . import tiled_ft_backward
+from .tiled_ft_prep import claim_prep
+
 _HAS_CUPY_KERNELS = False
 try:
     from .aggregated_ft_kernel import aggregated_ft_backward
@@ -14,12 +17,6 @@ try:
     _HAS_CUPY_KERNELS = True
 except (ImportError, OSError, RuntimeError):
     BACKWARD_TILE_SIZE = 1
-
-# Tiled backward (tiled_ft_backward.py); NNUE_TILED_BACKWARD=0 disables it.
-try:
-    from . import tiled_ft_fused as _tiled_ft
-except (ImportError, OSError, RuntimeError):
-    _tiled_ft = None
 
 
 def _use_aggregated_backward(
@@ -138,11 +135,7 @@ class FusedDoubleFtFunction(autograd.Function):
 
         # The loader's prefetch thread may have prepared the tiled backward's tile structure for
         # this batch (registered by its index tensor); claim it now, while the tensor is the batch's.
-        ctx.tiled_bwd_prep = (
-            _tiled_ft.lookup_backward_prep(white_indices)
-            if _tiled_ft is not None
-            else None
-        )
+        ctx.tiled_prep = claim_prep(white_indices)
         ctx.save_for_backward(
             us, them, white_indices, black_indices, weight, bias, clamped_out
         )
@@ -157,9 +150,9 @@ class FusedDoubleFtFunction(autograd.Function):
         l1_size = ctx.l1_size
 
         grad_l0 = grad_l0.contiguous()
-        if _tiled_ft is not None:
-            prep, ctx.tiled_bwd_prep = ctx.tiled_bwd_prep, None
-            tiled = _tiled_ft.backward(
+        prep, ctx.tiled_prep = ctx.tiled_prep, None
+        if tiled_ft_backward.enabled(l1_size, weight.shape[0], us.device):
+            grad_weight, grad_bias = tiled_ft_backward.backward(
                 us,
                 them,
                 white_indices,
@@ -168,11 +161,9 @@ class FusedDoubleFtFunction(autograd.Function):
                 clamped_out,
                 weight.shape[0],
                 max_ft_activation,
-                l1_size,
-                prep=prep,
+                prep,
             )
-            if tiled is not None:
-                return None, None, None, None, *tiled, None, None
+            return None, None, None, None, grad_weight, grad_bias, None, None
 
         batch_size = white_indices.shape[0]
         max_active_features = white_indices.shape[1]

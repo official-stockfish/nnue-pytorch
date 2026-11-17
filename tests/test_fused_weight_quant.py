@@ -1,17 +1,17 @@
-"""Fused merge + fake quantization of the FT weight and the fused FT activation fake quantization,
-against the QuantizationManager reference they replace (bit-identical, gradients included)."""
+"""Fused merge + fake quantization of the FT weight against the QuantizationManager reference it
+replaces (bit-identical, gradients included)."""
 
 import numpy as np
 import pytest
 import torch
 
+from model.cupy_utils import HAS_CUPY, cupy_stream
 from model.modules import ComposedFeatureTransformer, get_feature_cls
 from model.modules.feature_transformer import fused_weight_quant as FWQ
-from model.modules.feature_transformer.cupy_utils import cupy_stream
 from model.quantize import QuantizationConfig, QuantizationManager
 
 needs_cuda = pytest.mark.skipif(
-    not (torch.cuda.is_available() and FWQ._HAS_CUPY), reason="needs CUDA + CuPy"
+    not (torch.cuda.is_available() and HAS_CUPY), reason="needs CUDA + CuPy"
 )
 
 
@@ -71,22 +71,6 @@ def test_fused_weight_path_matches_quantization_manager():
 
 
 @needs_cuda
-@pytest.mark.parametrize("correction", [None, 0.75])
-def test_fused_act_path_matches_quantization_manager(correction):
-    qm = QuantizationManager(QuantizationConfig())
-    if correction is not None:
-        qm.l0_correction_factor = correction
-    x = (torch.rand(257, 1024, device="cuda") * 1.1).requires_grad_()
-    out = qm.fake_quantize_ft_act_and_correct(x)
-    ref = qm.fake_quantize_ft_act(x) * qm.l0_correction_factor
-    assert torch.equal(out, ref)
-    g = torch.randn_like(out)
-    assert torch.equal(
-        torch.autograd.grad(out, x, g)[0], torch.autograd.grad(ref, x, g)[0]
-    )
-
-
-@needs_cuda
 @pytest.mark.parametrize("cols", [1032, 520, 6])
 def test_merge_quant_vectorized_bit_identical(cols):
     """The vectorized merge (merge_quant4) == the scalar merge_quant kernel == the torch chain."""
@@ -111,11 +95,10 @@ def test_merge_quant_vectorized_bit_identical(cols):
     ref = torch.round(x * s) * (np.float32(1.0) / np.float32(s)).item()
     assert torch.equal(out, ref)
     # the scalar kernel on the same segments
-    k = FWQ._get_kernel()
     sc = torch.empty_like(out)
     with cupy_stream(dev):
         for r0, (ww, vv) in ((0, (w0, None)), (301, (w1, v))):
-            k(
+            FWQ._merge_quant_kernel()(
                 ((ww.numel() + 255) // 256,),
                 (256,),
                 (
@@ -129,17 +112,3 @@ def test_merge_quant_vectorized_bit_identical(cols):
                 ),
             )
     assert torch.equal(out, sc)
-
-
-@needs_cuda
-@pytest.mark.parametrize("p", [0.02, 0.6, 1.0])
-def test_bucket_sum_matches_torch(p):
-
-    gen = torch.Generator(device="cuda").manual_seed(6)
-    nb, vs, cols = 32, 768, 1024
-    fl = (torch.rand(nb * vs, generator=gen, device="cuda") < p).to(torch.uint8)
-    g = torch.randn(nb * vs, cols, generator=gen, device="cuda") * fl[:, None].float()
-    g[g == 0] = 0.0
-    assert torch.equal(
-        FWQ._bucket_sum(g, fl, nb, (vs, cols)), g.view(nb, vs, cols).sum(0)
-    )

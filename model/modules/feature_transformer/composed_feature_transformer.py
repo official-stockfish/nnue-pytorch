@@ -1,4 +1,3 @@
-import functools
 from collections.abc import Callable
 
 import torch
@@ -7,8 +6,9 @@ from torch import nn
 from ...quantize import QuantizationManager
 from ..features.input_feature import InputFeature
 from . import fused_weight_quant as _fwq
-from . import tiled_ft_backward as _tiled_bwd
+from . import tiled_ft_backward
 from .double_ft_functions import double_feature_transform
+from .tiled_ft_prep import register_prep
 
 
 class ComposedFeatureTransformer(nn.Module):
@@ -98,15 +98,19 @@ class ComposedFeatureTransformer(nn.Module):
 
     def prefetch_preparer(self):
         """``prepare(white_indices, black_indices)`` for the loader to run on training batches once
-        they are on the GPU, or None when the tiled backward does not apply: it builds the backward's
-        tile structure and registers it by the index tensor (tiled_ft_backward.register_prep), and
-        FusedDoubleFtFunction claims it during the step."""
-        if not (
-            _tiled_bwd.TILED_BACKWARD_ENABLED
-            and _tiled_bwd.applicable(self.l1_size, self.NUM_INPUTS)
-        ):
+        they are on the GPU, or None when the tiled backward does not handle this layer: it builds
+        the backward's tile structure and registers it by the index tensor
+        (tiled_ft_prep.register_prep), and FusedDoubleFtFunction claims it during the step."""
+        l1_size, num_inputs = self.l1_size, self.NUM_INPUTS
+        if not tiled_ft_backward.enabled(l1_size, num_inputs):
             return None
-        return functools.partial(_tiled_bwd.register_prep, buckets=self.list_buckets())
+        buckets = self.list_buckets()
+
+        def prepare(white_indices, black_indices):
+            if tiled_ft_backward.enabled(l1_size, num_inputs, white_indices.device):
+                register_prep(white_indices, black_indices, buckets)
+
+        return prepare
 
     @torch.no_grad()
     def coalesce(self) -> None:

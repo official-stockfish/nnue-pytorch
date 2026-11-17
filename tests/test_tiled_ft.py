@@ -1,28 +1,36 @@
 """Tiled backward of the fused double feature transformer vs an fp64 reference and vs the
 upstream fused kernels."""
 
+from unittest.mock import Mock
+
 import numpy as np
 import pytest
 import torch
 
+from model.cupy_utils import cupy_stream, shared_memory_limit
 from model.modules.feature_transformer import fused_ft_functions as FF
 from model.modules.feature_transformer import tiled_ft_backward as TB
+from model.modules.feature_transformer import tiled_ft_kernel as TK
+from model.modules.feature_transformer import tiled_ft_prep as TP
 
 pytestmark = pytest.mark.skipif(
     not (
         torch.cuda.is_available()
         and FF._HAS_CUPY_KERNELS
-        and TB.applicable(1024, 1 << 16)
+        and TB.enabled(1024, 1 << 16, torch.device("cuda"))
     ),
-    reason="needs CUDA + CuPy",
+    reason="needs CUDA + CuPy and a GPU that the tiled backward supports",
 )
 
 MAX_ACT = 1.0
 
 
-def _indices(B, maxa, num_inputs, gen, dev):
-    # left-packed lists of distinct rows with -1 padding
-    n = torch.randint(maxa // 2, maxa + 1, (B,), generator=gen, device=dev)
+def _indices(B, maxa, num_inputs, gen, dev, active=None):
+    # left-packed lists of distinct rows with -1 padding; ``active`` rows per list, else random
+    if active is None:
+        n = torch.randint(maxa // 2, maxa + 1, (B,), generator=gen, device=dev)
+    else:
+        n = torch.full((B,), active, device=dev)
     rows = torch.sort(
         torch.rand(B, num_inputs, generator=gen, device=dev).argsort(1)[:, :maxa], dim=1
     )[0]
@@ -39,7 +47,7 @@ def _run(tiled, us, them, w, b, W, bias, l1, g, prefetch):
     TB.TILED_BACKWARD_ENABLED = tiled
     try:
         if tiled and prefetch:
-            TB.register_prep(w, b)
+            TP.register_prep(w, b)
         Wp = W.clone().requires_grad_()
         bp_ = bias.clone().requires_grad_()
         out = FF.FusedDoubleFtFunction.apply(us, them, w, b, Wp, bp_, MAX_ACT, l1)
@@ -135,12 +143,12 @@ def test_tiled_matches_reference(B, l1, prefetch):
     lin = ((c32 != 0) & (c32 != MAX_ACT)).double()
     ref_l0, ref_gW, ref_gb = _reference(us, them, w, b, W, bias, l1, g, lin)
 
-    fallbacks, hits = TB.STATS["fallback"], TB.STATS["prep_hit"]
+    fallbacks, hits = TP.STATS["fallback"], TP.STATS["prep_hit"]
     t_out, t_gW, t_gb = _run(True, us, them, w, b, W, bias, l1, g, prefetch)
     if prefetch:
-        assert TB.STATS["prep_hit"] == hits + 1
+        assert TP.STATS["prep_hit"] == hits + 1
     else:
-        assert TB.STATS["fallback"] == fallbacks + 1
+        assert TP.STATS["fallback"] == fallbacks + 1
     u_out, u_gW, u_gb = _run(False, us, them, w, b, W, bias, l1, g, prefetch)
 
     # The tiled and upstream paths are bit-identical to each other (rel == 0
@@ -159,13 +167,104 @@ def test_tiled_matches_reference(B, l1, prefetch):
     )
 
 
-def test_block_sort_matches_global_sort():
-    """256-list tiles too large for one shared-memory sort: sub-tile sorts + rank merge == global sort."""
+# Lists of a fixed length pick the sort path. A sub-tile of 64 lists with 96 rows each fills the
+# default sort (256 threads x 24 keys) exactly, and 97 rows need 32 keys per thread. 99 rows make a
+# tile of 101,376 B, the shared memory of an sm_86 / sm_89 block. 300 rows are more than the sort's
+# largest size holds, on any GPU; a tile that the GPU's shared memory cannot hold falls back too.
+@pytest.mark.parametrize(
+    "active,keys_per_thread", [(48, 24), (96, 24), (97, 32), (99, 32), (300, None)]
+)
+def test_tile_sort_matches_global_sort(active, keys_per_thread, monkeypatch):
+    """Sub-tile sorts + rank merge == one global sort, for the sort sizes and the fallback."""
     dev = torch.device("cuda")
     gen = torch.Generator(device=dev).manual_seed(7)
-    w = _indices(4096, 128, 20000, gen, dev)
-    b = _indices(4096, 128, 20000, gen, dev)
-    p1 = TB.prepare(w, b, sort="block")
-    p2 = TB.prepare(w, b, sort="global")
-    assert p1.max_tile > TB.SORT_CAP_MAX
-    assert torch.equal(p1.e_key, p2.e_key) and torch.equal(p1.tile_start, p2.tile_start)
+    w = _indices(1024, 300, 20000, gen, dev, active)
+    b = _indices(1024, 300, 20000, gen, dev, active)
+    sort_kernel = Mock(wraps=TK.subtile_sort_kernel)
+    monkeypatch.setattr(TK, "subtile_sort_kernel", sort_kernel)
+    fallbacks = TP.STATS["global_sort_fallback"]
+    if TK.TILE_LISTS * active * 4 > shared_memory_limit(dev):
+        keys_per_thread = None
+
+    tiled = TP.prepare(w, b)
+    if keys_per_thread is None:
+        sort_kernel.assert_not_called()
+        assert TP.STATS["global_sort_fallback"] == fallbacks + 1
+    else:
+        sort_kernel.assert_called_once_with(keys_per_thread)
+        assert TP.STATS["global_sort_fallback"] == fallbacks
+
+    reference = TP.prepare(w, b, sort="global")
+    assert torch.equal(tiled.entries, reference.entries)
+    assert torch.equal(tiled.tile_start, reference.tile_start)
+    assert torch.equal(tiled.order, reference.order)
+
+    # The entries are exactly the batch's (list, row) pairs.
+    tile = torch.repeat_interleave(
+        torch.arange(tiled.n_tiles, device=dev),
+        (tiled.tile_start[1:] - tiled.tile_start[:-1]).long(),
+    )
+    local = tiled.entries & ((1 << TK.LOCAL_BITS) - 1)
+    lists = tiled.order[tile * TK.TILE_LISTS + local].long()
+    pairs = (lists << TK.ROW_BITS) | (tiled.entries >> TK.LOCAL_BITS)
+    rows = torch.cat([w, b]).long()
+    list_ids = torch.arange(rows.shape[0], device=dev)[:, None].expand_as(rows)
+    expected = ((list_ids << TK.ROW_BITS) | rows)[rows >= 0]
+    assert torch.equal(torch.sort(pairs)[0], torch.sort(expected)[0])
+
+
+@pytest.mark.parametrize(
+    "keys_per_thread",
+    range(TK.SORT_MIN_KEYS_PER_THREAD, TK.SORT_MAX_KEYS_PER_THREAD + 1, 8),
+)
+def test_subtile_sort_sizes(keys_per_thread):
+    """Every size of the sub-tile sort kernel, on full and on partly filled sub-tiles."""
+    dev = torch.device("cuda")
+    gen = torch.Generator(device=dev).manual_seed(keys_per_thread)
+    capacity = TK.SORT_THREADS * keys_per_thread
+    sizes = torch.tensor([capacity, 0, 1, capacity - 1, capacity // 3, 2], device=dev)
+    sub_start = torch.zeros(sizes.numel() + 1, dtype=torch.int32, device=dev)
+    sub_start[1:] = torch.cumsum(sizes, 0)
+    # unique keys per sub-tile: distinct (row, list in sub-tile) pairs, with the sub-tile's high
+    # list-in-tile bits (here those of the third sub-tile of a tile)
+    keys = torch.empty(int(sub_start[-1]), dtype=torch.int32, device=dev)
+    for i, n in enumerate(sizes.tolist()):
+        pair = torch.randperm(TK.SUBTILE_LISTS << 14, generator=gen, device=dev)[:n]
+        row, local = pair >> 6, (pair & 63) | 128
+        keys[sub_start[i] : sub_start[i + 1]] = (row << TK.LOCAL_BITS) | local
+    expected = torch.cat(
+        [
+            torch.sort(keys[sub_start[i] : sub_start[i + 1]])[0]
+            for i in range(sizes.numel())
+        ]
+    )
+    with cupy_stream(dev):
+        TK.subtile_sort_kernel(keys_per_thread)(
+            grid=(sizes.numel(),),
+            block=(TK.SORT_THREADS,),
+            args=(sub_start.data_ptr(), keys.data_ptr()),
+        )
+    assert torch.equal(keys, expected)
+
+
+def test_small_shared_memory_keeps_the_plain_backward(monkeypatch):
+    """A GPU whose blocks cannot hold a tile's gradient slice (sm_75: 64 KB) is left to the other
+    backward kernels instead of failing in the scatter launch."""
+    dev = torch.device("cuda")
+    monkeypatch.setattr(TB, "shared_memory_limit", lambda device: 64 * 1024)
+    assert not TB.enabled(1024, 1 << 16, dev)
+    assert TB.enabled(1024, 1 << 16)  # the layer itself is supported
+
+    gen = torch.Generator(device=dev).manual_seed(1)
+    B, l1, num_inputs, maxa = 256, 128, 500, 32
+    w = _indices(B, maxa, num_inputs, gen, dev)
+    b = _indices(B, maxa, num_inputs, gen, dev)
+    W = torch.randn(num_inputs, l1, generator=gen, device=dev) * 0.05
+    bias = torch.rand(l1, generator=gen, device=dev)
+    us = (torch.rand(B, 1, generator=gen, device=dev) < 0.5).float()
+    g = torch.randn(B, l1, generator=gen, device=dev)
+    fallbacks = TP.STATS["fallback"]
+    _, gW, gb = _run(True, us, 1.0 - us, w, b, W, bias, l1, g, prefetch=False)
+    assert TP.STATS["fallback"] == fallbacks  # the tiled backward did not run
+    _, ref_gW, ref_gb = _run(False, us, 1.0 - us, w, b, W, bias, l1, g, prefetch=False)
+    assert rel(gW, ref_gW) < 2e-6 and rel(gb, ref_gb) < 2e-6
