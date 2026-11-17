@@ -81,7 +81,8 @@ def _check_forward_and_all_gradients(
     parameters = tuple(layer.parameters())
     optimized = Mock(wraps=grouped_l1)
     monkeypatch.setattr(stacked_linear, "grouped_l1", optimized)
-    monkeypatch.setenv("NNUE_GROUPED_L1", "1")
+    # Force the grouped path below the dispatch crossover too.
+    monkeypatch.setattr(stacked_linear, "grouped_l1_preferred", lambda count: True)
 
     # Both the CuPy router and Triton matmuls must respect the caller's stream.
     stream = torch.cuda.Stream()
@@ -138,7 +139,6 @@ def test_grouped_variable_stack_count(count, concentrated, quantize, monkeypatch
     ],
 )
 def test_grouped_dispatch_gate(count, expected, monkeypatch):
-    monkeypatch.delenv("NNUE_GROUPED_L1", raising=False)
     torch.manual_seed(123)
     layer = FactorizedStackedLinear(
         1024, 32, count, QuantizationManager(QuantizationConfig()), "ls_l1"
@@ -163,27 +163,6 @@ def test_grouped_dispatch_gate(count, expected, monkeypatch):
         torch.testing.assert_close(
             actual, _reference(layer, x, indices), atol=2e-3, rtol=2e-4
         )
-
-
-@pytest.mark.skipif(
-    not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required"
-)
-def test_grouped_dispatch_env_override(monkeypatch):
-    layer = FactorizedStackedLinear(
-        1024, 32, 64, QuantizationManager(QuantizationConfig()), "ls_l1"
-    ).cuda()
-    x = torch.randn(17, 1024, device="cuda")
-    indices = torch.randint(0, 64, (17, 1), device="cuda", dtype=torch.int32)
-    optimized = Mock(wraps=grouped_l1)
-    monkeypatch.setattr(stacked_linear, "grouped_l1", optimized)
-
-    monkeypatch.setenv("NNUE_GROUPED_L1", "0")
-    layer(x, indices, False)
-    optimized.assert_not_called()
-
-    monkeypatch.setenv("NNUE_GROUPED_L1", "1")
-    layer(x, indices, False)
-    optimized.assert_called_once()
 
 
 @pytest.mark.skipif(

@@ -1,14 +1,13 @@
 """Selected-bucket L1 matmul for the H100 master-net workload.
 
-Only the requested K→N layer is evaluated, with NNZ-compacted
-forward. A GPU row map allows tiled FP32 backward matmuls without sorting/copying
-the large activation tensor or reading bucket sizes on the host. Split reductions
+Only the requested K→N layer is evaluated: a per-bucket FP32 (IEEE) Triton matmul over
+the rows routed to each bucket. A GPU row map allows tiled FP32 forward and backward
+matmuls without sorting/copying the large activation tensor or reading bucket sizes on
+the host. Split reductions
 keep weight gradients parallel even when bucket populations differ. Input
 gradients remain dense: fake quantization uses STE, so a quantized zero can have
 a nonzero derivative.
 """
-
-import os
 
 import cupy as cp
 import torch
@@ -16,87 +15,6 @@ import triton as tr
 import triton.language as tl
 
 _route_kernels = {}
-_sparse_forward_kernels = {}
-
-
-def _sparse_forward(x, weight, bias, indices, count):
-    """Compact NNZ in shared memory and coalesce loads over adjacent outputs.
-
-    Four warps split each row's nonzeros. The transpose is included in the
-    measured cost; parameter storage and dense STE input gradients stay intact.
-    """
-    width = x.shape[1]
-    outputs = bias.numel() // count
-    key = (width, outputs)
-    kernel = _sparse_forward_kernels.get(key)
-    if kernel is None:
-        kernel = cp.RawKernel(
-            f"#define K {width}\n#define N {outputs}\n"
-            + r"""
-extern "C" __global__ void sparse_l1_forward(
-    const float* x, const float* weight, const float* bias,
-    const long long* buckets, float* output
-) {
-    const int row = blockIdx.x;
-    const int lane = threadIdx.x % 32;
-    const int warp = threadIdx.x / 32;
-    const int bucket = buckets[row];
-    const int column = (N <= 32 ? 0 : blockIdx.y * 32) + lane;
-    __shared__ int nnz, indices[K];
-    __shared__ float values[K], partial[4][32];
-    if (threadIdx.x == 0) nnz = 0;
-    __syncthreads();
-
-    for (int k = threadIdx.x; k < K; k += 128) {
-        const float value = x[row * K + k];
-        const unsigned mask = __ballot_sync(0xffffffff, value != 0.0f);
-        int base = 0;
-        if (lane == 0) base = atomicAdd(&nnz, __popc(mask));
-        base = __shfl_sync(0xffffffff, base, 0);
-        if (value != 0.0f) {
-            const int slot = base + __popc(mask & ((1u << lane) - 1));
-            indices[slot] = k;
-            values[slot] = value;
-        }
-    }
-    __syncthreads();
-
-    float acc = 0.0f;
-    if (column < N) {
-        for (int i = warp; i < nnz; i += 4) {
-            const int k = indices[i];
-            acc = fmaf(values[i], weight[(bucket * K + k) * N + column], acc);
-        }
-    }
-    partial[warp][lane] = acc;
-    __syncthreads();
-    if (warp == 0 && column < N) {
-        float total = bias[bucket * N + column];
-        #pragma unroll
-        for (int i = 0; i < 4; ++i) total += partial[i][lane];
-        output[row * N + column] = total;
-    }
-}
-""",
-            "sparse_l1_forward",
-        )
-        _sparse_forward_kernels[key] = kernel
-    transposed = weight.reshape(count, outputs, width).transpose(1, 2).contiguous()
-    output = torch.empty((len(x), outputs), device=x.device, dtype=x.dtype)
-    stream = cp.cuda.ExternalStream(torch.cuda.current_stream(x.device).cuda_stream)
-    kernel(
-        (len(x), tr.cdiv(outputs, 32)),
-        (128,),
-        (
-            x.data_ptr(),
-            transposed.data_ptr(),
-            bias.data_ptr(),
-            indices.data_ptr(),
-            output.data_ptr(),
-        ),
-        stream=stream,
-    )
-    return output
 
 
 @torch.compiler.disable(recursive=False)
@@ -275,6 +193,85 @@ def _sum_gradient_partials(
         tl.store(B + b * N + i, tl.sum(q, 0), i < N)
 
 
+@tr.jit
+def _bucketed_forward(
+    X,
+    W,
+    BIAS,
+    R,
+    C,
+    OUT,
+    BATCH,
+    K: tl.constexpr,
+    N: tl.constexpr,
+    BM: tl.constexpr,
+    BK: tl.constexpr,
+    BN: tl.constexpr,
+):
+    p = tl.program_id(0)
+    bucket = tl.program_id(1)
+    count = tl.load(C + bucket)
+    if p * BM < count:
+        m = p * BM + tl.arange(0, BM)
+        rows = tl.load(R + bucket * BATCH + m, m < count, 0)
+        n = tl.arange(0, BN)
+        acc = tl.full((BM, BN), 0, tl.float32)
+        for k0 in range(0, K, BK):
+            k = k0 + tl.arange(0, BK)
+            x = tl.load(
+                X + rows[:, None] * K + k[None, :],
+                (m[:, None] < count) & (k[None, :] < K),
+                0,
+            )
+            w = tl.load(
+                W + (bucket * N + n[None, :]) * K + k[:, None],
+                (n[None, :] < N) & (k[:, None] < K),
+                0,
+            )
+            part = tl.dot(x, w, input_precision="ieee")
+            # identity asm keeps the per-chunk sum separate (no fusion into one 1024-long chain)
+            part = tl.inline_asm_elementwise(
+                "mov.b32 $0, $1;",
+                "=r,r",
+                [part],
+                dtype=tl.float32,
+                is_pure=True,
+                pack=1,
+            )
+            acc += part
+        b = tl.load(BIAS + bucket * N + n, n < N, 0)
+        tl.store(
+            OUT + rows[:, None] * N + n[None, :],
+            acc + b[None, :],
+            (m[:, None] < count) & (n[None, :] < N),
+        )
+
+
+def _forward(x, weight, bias, rows, counts, bm=128, bk=16, num_warps=2):
+    """Per-bucket fp32 (IEEE) matmul over the routed rows: each output is a fixed-order sum of
+    16-wide dot products plus the bias, independent of the ambient TF32 setting."""
+    batch, k = x.shape
+    count = counts.numel()  # Tensor metadata; no GPU-to-CPU synchronization.
+    n = weight.shape[0] // count
+    out = torch.empty((batch, n), device=x.device, dtype=x.dtype)
+    _bucketed_forward[(tr.cdiv(batch, bm), count)](
+        x,
+        weight,
+        bias,
+        rows,
+        counts,
+        out,
+        batch,
+        k,
+        n,
+        bm,
+        bk,
+        max(16, tr.next_power_of_2(n)),
+        num_warps=num_warps,
+    )
+    return out
+
+
 def _input_gradient(g, w, rows, counts, k, bm=32, bk=64):
     out = torch.empty((len(g), k), device=g.device, dtype=g.dtype)
     _bucketed_input_gradient[(tr.cdiv(len(g), bm), tr.cdiv(k, bk), counts.numel())](
@@ -334,7 +331,7 @@ class _GroupedLinear(torch.autograd.Function):
         indices = indices.flatten().to(torch.int64).contiguous()
         rows, counts = _route_rows(indices, count)
         ctx.save_for_backward(x, weight, rows, counts)
-        return _sparse_forward(x, weight, bias.contiguous(), indices, count)
+        return _forward(x, weight, bias.contiguous(), rows, counts)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -342,7 +339,7 @@ class _GroupedLinear(torch.autograd.Function):
         grad_output = grad_output.contiguous()
         # Quantized zero activations still need dense STE input gradients.
         grad_input = _input_gradient(
-            grad_output, weight, rows, counts, x.shape[1], 64, 64
+            grad_output, weight, rows, counts, x.shape[1], 128, 64
         )
         grad_weight, grad_bias = _weight_and_bias_gradient(
             x, grad_output, rows, counts, 16, 32, 32
@@ -358,15 +355,7 @@ _GROUPED_L1_MIN_COUNT = 32
 
 
 def grouped_l1_preferred(count: int) -> bool:
-    """Whether the bucketed kernels should replace the dense path at this count.
-
-    NNUE_GROUPED_L1=1|0 forces the bucketed or dense path regardless of count.
-    """
-    override = os.environ.get("NNUE_GROUPED_L1", "")
-    if override == "1":
-        return True
-    if override == "0":
-        return False
+    """Whether the bucketed kernels should replace the dense path at this count."""
     return count >= _GROUPED_L1_MIN_COUNT
 
 
