@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from model.cupy_utils import HAS_CUPY, cupy_stream
+from model.cupy_utils import HAS_CUPY
 from model.modules import ComposedFeatureTransformer, get_feature_cls
 from model.modules.feature_transformer import fused_weight_quant as FWQ
 from model.quantize import QuantizationConfig, QuantizationManager
@@ -79,10 +79,8 @@ def test_fused_weight_path_matches_quantization_manager():
 
 
 @needs_cuda
-@pytest.mark.parametrize("cols", [1032, 520, 6])
-def test_merge_quant_vectorized_bit_identical(cols):
-    """The vectorized merge (merge_quant4) == the scalar merge_quant kernel == the torch chain."""
-
+@pytest.mark.parametrize("cols", [1032, 520])
+def test_merge_quant_matches_the_torch_chain(cols):
     dev = torch.device("cuda")
     gen = torch.Generator(device=dev).manual_seed(cols)
     s = 254.0
@@ -98,25 +96,20 @@ def test_merge_quant_vectorized_bit_identical(cols):
         torch.randint(-300, 300, (5, cols), generator=gen, device=dev).float() + 0.5
     ) / s
     v[:2] = 0.0
-    out = FWQ.merge_and_fake_quantize([(w0, None, 1), (w1, v, nb)], s)
+    segs = [(w0, None, 1), (w1, v, nb)]
+    assert FWQ.usable(segs)
+    out = FWQ.merge_and_fake_quantize(segs, s)
     x = torch.cat([w0, w1 + v.repeat(nb, 1)])
     ref = torch.round(x * s) * (np.float32(1.0) / np.float32(s)).item()
     assert torch.equal(out, ref)
-    # the scalar kernel on the same segments
-    sc = torch.empty_like(out)
-    with cupy_stream(dev):
-        for r0, (ww, vv) in ((0, (w0, None)), (301, (w1, v))):
-            FWQ._merge_quant_kernel()(
-                ((ww.numel() + 255) // 256,),
-                (256,),
-                (
-                    sc[r0:].data_ptr(),
-                    ww.data_ptr(),
-                    0 if vv is None else vv.data_ptr(),
-                    np.int64(ww.numel()),
-                    np.int64(1 if vv is None else vv.numel()),
-                    np.float32(s),
-                    np.float32(1.0) / np.float32(s),
-                ),
-            )
-    assert torch.equal(out, sc)
+
+
+@needs_cuda
+def test_weights_the_kernel_cannot_address_use_the_reference():
+    """The kernel reads 16-byte-aligned float4s; anything else is left to the reference chain."""
+    aligned = torch.zeros(10, 8, device="cuda")
+    assert FWQ.usable([(aligned, None, 1)])
+    assert not FWQ.usable([(torch.zeros(10, 6, device="cuda"), None, 1)])
+    offset = torch.zeros(81, device="cuda")[1:].view(10, 8)
+    assert not FWQ.usable([(offset, None, 1)])
+    assert not FWQ.usable([(aligned, offset, 1)])

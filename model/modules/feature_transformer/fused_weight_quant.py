@@ -22,22 +22,12 @@ import torch
 from ...cupy_utils import HAS_CUPY, compile_kernel, cupy_stream
 
 _SRC = r"""
-extern "C" __global__ void merge_quant(float* __restrict__ out, const float* __restrict__ w,
-                                       const float* __restrict__ v, long long n, long long vn,
+// out = rint((w + v) * s) * inv, 16 B per access. Thread j owns float4 j of the virtual weight (or of
+// the whole segment when there is none) and walks the nb buckets, so each virtual element is read
+// once.
+extern "C" __global__ void merge_quant(float4* __restrict__ out, const float4* __restrict__ w,
+                                       const float4* __restrict__ v, int vn4, int nb,
                                        float s, float inv) {
-    long long stride = (long long)blockDim.x * gridDim.x;
-    for (long long i = (long long)blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride) {
-        float x = w[i];
-        if (v != nullptr) x = x + v[i % vn];
-        out[i] = rintf(x * s) * inv;
-    }
-}
-
-// Same per-element math, 16 B per access. Thread j owns float4 j of the virtual weight (or of the
-// whole segment when there is none) and walks the nb buckets, so each virtual element is read once.
-extern "C" __global__ void merge_quant4(float4* __restrict__ out, const float4* __restrict__ w,
-                                        const float4* __restrict__ v, int vn4, int nb,
-                                        float s, float inv) {
     for (int j = blockIdx.x * blockDim.x + threadIdx.x; j < vn4; j += blockDim.x * gridDim.x) {
         const float4 a = v != nullptr ? v[j] : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
         for (int b = 0; b < nb; ++b) {
@@ -51,16 +41,8 @@ extern "C" __global__ void merge_quant4(float4* __restrict__ out, const float4* 
 """
 
 
-def _merge_quant_kernel():
-    return compile_kernel(("merge_quant",), _SRC, "merge_quant")
-
-
-def _merge_quant4_kernel():
-    return compile_kernel(("merge_quant4",), _SRC, "merge_quant4")
-
-
-def _aligned16(*ts):
-    return all(t is None or t.data_ptr() % 16 == 0 for t in ts)
+# Grid of the kernel's grid-stride loop: enough blocks to occupy the GPU; the loop covers the rest.
+_MAX_BLOCKS = 82 * 16
 
 
 def segments_of(features):
@@ -83,18 +65,26 @@ def segments_of(features):
     return segs
 
 
+def _float4_addressable(t: torch.Tensor) -> bool:
+    """A contiguous fp32 CUDA matrix that the kernel can read as 16-byte-aligned float4 rows."""
+    return (
+        t.is_cuda
+        and t.dtype == torch.float32
+        and t.is_contiguous()
+        and t.dim() == 2
+        and t.shape[1] % 4 == 0
+        and t.data_ptr() % 16 == 0
+        and t.numel() // 4 < 2**31
+    )
+
+
 def usable(segs) -> bool:
+    """Whether the kernel can merge these segments; otherwise the caller uses the reference chain."""
     return (
         HAS_CUPY
         and segs is not None
         and all(
-            w.is_cuda
-            and w.dtype == torch.float32
-            and w.is_contiguous()
-            and (
-                v is None
-                or (v.is_cuda and v.dtype == torch.float32 and v.is_contiguous())
-            )
+            _float4_addressable(w) and (v is None or _float4_addressable(v))
             for w, v, _ in segs
         )
     )
@@ -111,49 +101,26 @@ class _MergeFakeQuant(torch.autograd.Function):
         out = torch.empty(rows, cols, device=params[0].device, dtype=torch.float32)
         r0 = 0
         with cupy_stream(out.device):
-            for i, (has_v, _nb) in _iter_layout(layout):
+            kernel = compile_kernel(("merge_quant",), _SRC, "merge_quant")
+            for i, (has_v, nb) in _iter_layout(layout):
                 w = params[i]
-                n = w.numel()
-                if n:
+                if w.numel():
                     v = params[i + 1] if has_v else None
-                    o = out[r0:]
-                    vn = n // _nb if v is not None else n
-                    if (
-                        n % 4 == 0
-                        and vn % 4 == 0
-                        and vn // 4 < 2**31
-                        and _aligned16(o, w, v)
-                    ):
-                        vn4 = vn // 4
-                        blocks = min((vn4 + 255) // 256, 82 * 16)
-                        _merge_quant4_kernel()(
-                            (blocks,),
-                            (256,),
-                            (
-                                o.data_ptr(),
-                                w.data_ptr(),
-                                0 if v is None else v.data_ptr(),
-                                np.int32(vn4),
-                                np.int32(_nb if v is not None else 1),
-                                s,
-                                inv,
-                            ),
-                        )
-                    else:
-                        blocks = min((n + 255) // 256, 65535 * 8)
-                        _merge_quant_kernel()(
-                            (blocks,),
-                            (256,),
-                            (
-                                o.data_ptr(),
-                                w.data_ptr(),
-                                0 if v is None else v.data_ptr(),
-                                np.int64(n),
-                                np.int64(1 if v is None else v.numel()),
-                                s,
-                                inv,
-                            ),
-                        )
+                    # float4s of the virtual weight, or of the whole weight when there is none
+                    n4 = (w if v is None else v).numel() // 4
+                    kernel(
+                        (min((n4 + 255) // 256, _MAX_BLOCKS),),
+                        (256,),
+                        (
+                            out[r0:].data_ptr(),
+                            w.data_ptr(),
+                            0 if v is None else v.data_ptr(),
+                            np.int32(n4),
+                            np.int32(1 if v is None else nb),
+                            s,
+                            inv,
+                        ),
+                    )
                 r0 += w.shape[0]
         ctx.layout = layout
         ctx.shapes = [p.shape for p in params]
