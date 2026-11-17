@@ -291,6 +291,42 @@ typedef float2 GV;   // a lane's CPL columns of one list, loaded at once
 #if CPL != 2
 #error "GV must hold CPL floats"
 #endif
+#define NO_ROW 0xFFFFFFFFu
+
+// A lane's columns of the gradient row of an entry's list, from the tile's rows in shared memory.
+static __device__ __forceinline__ GV lane_gradient(const float* Gsh, const uint32_t key, const int lane)
+{
+    const int l = (int)(key & ((1u << LOCAL_BITS) - 1));
+    return *(const GV*)(Gsh + l * SLICE + lane * CPL);
+}
+
+// Add the sums of a finished row segment to the lane's columns (col, col + 32, ...) of the row's
+// weight gradient, and clear them.
+static __device__ __forceinline__ void flush_row(float* __restrict__ grad_weight, const uint32_t row,
+                                                 const int32_t col, float* acc)
+{
+    float* gw = grad_weight + (int64_t)row * L1 + col;
+#pragma unroll
+    for (int c = 0; c < CPL; ++c) { atomicAdd(gw + 32 * c, acc[c]); acc[c] = 0.0f; }
+}
+
+// Move a lane's walk to the row of its next entry: a new row flushes the one before it.
+static __device__ __forceinline__ void enter_row(const uint32_t row, uint32_t& cur, float* acc,
+                                                 float* __restrict__ grad_weight, const int32_t col)
+{
+    if (row != cur) {
+        if (cur != NO_ROW) flush_row(grad_weight, cur, col, acc);
+        cur = row;
+    }
+}
+
+// Add an entry's gradient to the sums of the current row.
+static __device__ __forceinline__ void accumulate(float* acc, const GV gv)
+{
+    const float* g = (const float*)&gv;
+#pragma unroll
+    for (int c = 0; c < CPL; ++c) acc[c] += g[c];
+}
 
 // One block per (tile, column slice). NWARPS warps; lane owns columns col0 + lane + 32*c, c < CPL.
 // Gw / Gb are the gradients of the white / black accumulators.
@@ -345,7 +381,7 @@ extern "C" __global__ void __launch_bounds__(NWARPS * 32) tiled_scatter(
     float acc[CPL];
 #pragma unroll
     for (int c = 0; c < CPL; ++c) acc[c] = 0.0f;
-    uint32_t cur = 0xFFFFFFFFu;
+    uint32_t cur = NO_ROW;
     // Same entry order, sums and flushes as a one-entry-at-a-time walk; the shared-memory loads of U
     // entries are issued before their adds, and the next 32 keys are fetched one batch ahead.
     const int U = 8;
@@ -364,48 +400,21 @@ extern "C" __global__ void __launch_bounds__(NWARPS * 32) tiled_scatter(
 #pragma unroll
             for (int u = 0; u < U; ++u) {
                 key[u] = ksh[j + u];
-                const int l = (int)(key[u] & ((1u << LOCAL_BITS) - 1));
-                gv[u] = *(const GV*)(Gsh + l * SLICE + lane * CPL);
+                gv[u] = lane_gradient(Gsh, key[u], lane);
             }
 #pragma unroll
             for (int u = 0; u < U; ++u) {
-                const uint32_t r = key[u] >> LOCAL_BITS;
-                if (r != cur) {
-                    if (cur != 0xFFFFFFFFu) {
-                        float* gw = grad_weight + (int64_t)cur * L1 + col0 + lane;
-#pragma unroll
-                        for (int c = 0; c < CPL; ++c) { atomicAdd(gw + 32 * c, acc[c]); acc[c] = 0.0f; }
-                    }
-                    cur = r;
-                }
-                const float* g = (const float*)&gv[u];
-#pragma unroll
-                for (int c = 0; c < CPL; ++c) acc[c] += g[c];
+                enter_row(key[u] >> LOCAL_BITS, cur, acc, grad_weight, col0 + lane);
+                accumulate(acc, gv[u]);
             }
         }
         for (; j < nk; ++j) {
             const uint32_t key = ksh[j];
-            const uint32_t r = key >> LOCAL_BITS;
-            const int l = (int)(key & ((1u << LOCAL_BITS) - 1));
-            if (r != cur) {
-                if (cur != 0xFFFFFFFFu) {
-                    float* gw = grad_weight + (int64_t)cur * L1 + col0 + lane;
-#pragma unroll
-                    for (int c = 0; c < CPL; ++c) { atomicAdd(gw + 32 * c, acc[c]); acc[c] = 0.0f; }
-                }
-                cur = r;
-            }
-            const GV gv = *(const GV*)(Gsh + l * SLICE + lane * CPL);   // this lane's CPL columns in one load
-            const float* g = (const float*)&gv;
-#pragma unroll
-            for (int c = 0; c < CPL; ++c) acc[c] += g[c];
+            enter_row(key >> LOCAL_BITS, cur, acc, grad_weight, col0 + lane);
+            accumulate(acc, lane_gradient(Gsh, key, lane));
         }
     }
-    if (cur != 0xFFFFFFFFu) {
-        float* gw = grad_weight + (int64_t)cur * L1 + col0 + lane;
-#pragma unroll
-        for (int c = 0; c < CPL; ++c) atomicAdd(gw + 32 * c, acc[c]);
-    }
+    if (cur != NO_ROW) flush_row(grad_weight, cur, col0 + lane, acc);
 }
 """
 
