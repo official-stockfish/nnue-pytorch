@@ -387,7 +387,14 @@ class FixedNumBatchesDataset(Dataset):
             prefetch_stream = None
             if prefetch_device is not None:
                 torch.cuda.set_device(prefetch_device)
-                prefetch_stream = torch.cuda.Stream(device=prefetch_device, priority=-1)
+                # A hook puts GPU work of its own on the prefetch stream. At the higher priority
+                # (-1; the training stream has 0) that work is scheduled ahead of the step's
+                # kernels, so the batch and what the hook prepared for it are ready when the
+                # step asks for them.
+                prefetch_stream = torch.cuda.Stream(
+                    device=prefetch_device,
+                    priority=-1 if prefetch_hook is not None else 0,
+                )
 
             while not stop_event.is_set():
                 try:
