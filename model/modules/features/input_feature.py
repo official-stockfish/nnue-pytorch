@@ -17,6 +17,12 @@ class InputFeature(nn.Module, ABC):
     def merged_weight(self) -> torch.Tensor:
         """Return effective weight matrix (with virtual weights merged if applicable)."""
 
+    def virtual_layout(self) -> tuple[torch.Tensor, int] | None:
+        """(virtual_weight, num_buckets) when merged_weight() is
+        ``weight + virtual_weight.repeat(num_buckets, 1)``, else None. Fused kernels use it to build
+        the merged weight without merged_weight(); keep the two in sync."""
+        return None
+
     @abstractmethod
     def coalesce(self) -> None: ...
 
