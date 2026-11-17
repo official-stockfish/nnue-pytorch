@@ -43,17 +43,16 @@ def _indices(B, maxa, num_inputs, gen, dev, active=None):
 
 
 def _run(tiled, us, them, w, b, W, bias, l1, g, prefetch):
-    old = TB.TILED_BACKWARD_ENABLED
-    TB.TILED_BACKWARD_ENABLED = tiled
-    try:
-        if tiled and prefetch:
+    """Forward and backward of the fused FT, with the tiled backward or the direct scatter."""
+    with pytest.MonkeyPatch.context() as patch:
+        if not tiled:
+            patch.setattr(TB, "enabled", lambda *args: False)
+        elif prefetch:
             TP.register_prep(w, b)
         Wp = W.clone().requires_grad_()
         bp_ = bias.clone().requires_grad_()
         out = FF.FusedDoubleFtFunction.apply(us, them, w, b, Wp, bp_, MAX_ACT, l1)
         out.backward(g)
-    finally:
-        TB.TILED_BACKWARD_ENABLED = old
     return out, Wp.grad, bp_.grad
 
 

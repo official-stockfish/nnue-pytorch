@@ -18,8 +18,6 @@ The kernels are in tiled_ft_kernel.py.
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 import torch
 
@@ -27,18 +25,15 @@ from ...cupy_utils import HAS_CUPY, cupy_stream, shared_memory_limit
 from . import tiled_ft_kernel as kernel
 from .tiled_ft_prep import STATS, TiledPrep, prepare, warn_once
 
-# NNUE_TILED_BACKWARD=0 disables the tiled backward (the fused FT then uses its other kernels).
-TILED_BACKWARD_ENABLED = os.environ.get("NNUE_TILED_BACKWARD", "1") != "0"
-
 
 def enabled(l1_size: int, num_inputs: int, device: torch.device | None = None) -> bool:
     """Whether the tiled backward handles this layer, on ``device`` when one is given; otherwise
-    the fused FT uses its other backward kernels.
+    the fused FT uses its direct scatter.
 
     It needs CUDA (the kernels assume 32-lane warps and CUB, which ROCm's compiler rejects), a
     width that the column slices divide, rows that fit the ROW_BITS of an entry key, and a GPU
     whose blocks can hold a tile's gradient slice in shared memory."""
-    if not (TILED_BACKWARD_ENABLED and HAS_CUPY and torch.version.hip is None):
+    if not (HAS_CUPY and torch.version.hip is None):
         return False
     if (
         l1_size < kernel.COLUMNS_PER_BLOCK

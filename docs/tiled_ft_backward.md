@@ -49,12 +49,12 @@ The CUDA sources are in `tiled_ft_kernel.py`.
 
 `tiled_ft_backward.enabled(l1_size, num_inputs, device)` decides, and everything else asks it:
 
-- `NNUE_TILED_BACKWARD=0` turns it off;
 - CuPy on CUDA: the kernels use 32-lane warp intrinsics and CUB, which ROCm's compiler rejects;
 - `l1_size` is a multiple of 64, and the feature set has at most 2**20 rows;
 - a block of the GPU can opt in to 69,632 B of shared memory (sm_75, with 64 KB, cannot).
 
-Otherwise the fused FT uses its other backward kernels (`fused_ft_functions.py`).
+Otherwise the fused FT uses its direct scatter (`fused_ft_kernel.py`), one `atomicAdd` per
+(active feature, column).
 
 ## Slow paths
 

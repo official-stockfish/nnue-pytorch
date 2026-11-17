@@ -7,7 +7,6 @@ from .tiled_ft_prep import claim_prep
 
 _HAS_CUPY_KERNELS = False
 try:
-    from .aggregated_ft_kernel import aggregated_ft_backward
     from .fused_ft_kernel import (
         BACKWARD_TILE_SIZE,
         make_fused_double_ft_backward_kernel,
@@ -17,49 +16,6 @@ try:
     _HAS_CUPY_KERNELS = True
 except (ImportError, OSError, RuntimeError):
     BACKWARD_TILE_SIZE = 1
-
-
-def _use_aggregated_backward(
-    l1_size, batch_size, max_active_features, device, *, mode="auto"
-):
-    """Select measured defaults; allow other NVIDIA GPUs to be benchmarked."""
-    if mode not in ("auto", "scatter", "aggregated"):
-        raise ValueError(f"mode must be auto, scatter, or aggregated, got {mode!r}")
-    if mode == "scatter" or torch.version.hip is not None:
-        return False
-    if not (
-        512 <= l1_size <= 4096 and l1_size % 128 == 0 and 0 < max_active_features <= 288
-    ):
-        return False
-    capability = torch.cuda.get_device_capability(device)
-    if capability[0] < 8:
-        return False
-    if mode == "aggregated":
-        return True
-    # H100 retains its existing threshold. RTX 4090 and A100 measurements show
-    # a benefit from 4096 positions; smaller batches keep direct scatter.
-    return (
-        (capability == (9, 0) and batch_size >= 1024)
-        or (capability == (8, 9) and batch_size >= 4096)
-        or (capability == (8, 0) and batch_size >= 4096)
-    )
-
-
-def _aggregated_tile_size(l1_size, batch_size, max_active_features, capability):
-    """Position-tile size for the aggregation kernel, per measured device.
-
-    A larger tile removes more repeated feature atomics on the production net.
-    The tile must stay at or below 16 positions: rows are tracked in a 32-bit
-    mask (two rows per position, one per perspective).
-    """
-    if l1_size == 1024 and max_active_features == 288:
-        if capability == (8, 9) and batch_size >= 32768:
-            return 14
-        if capability == (8, 0) and batch_size >= 8192:
-            return 12
-        if capability == (9, 0) and batch_size >= 8192:
-            return 14
-    return 8
 
 
 class FusedDoubleFtFunction(autograd.Function):
@@ -174,31 +130,7 @@ class FusedDoubleFtFunction(autograd.Function):
         )
         grad_bias = torch.zeros(output_size, dtype=torch.float32, device=us.device)
 
-        # Feature extractors guarantee unique IDs within each perspective.
-        # Keep direct scatter for unsupported shapes/devices and small batches.
-        if _use_aggregated_backward(
-            l1_size, batch_size, max_active_features, us.device
-        ):
-            tile_size = _aggregated_tile_size(
-                l1_size,
-                batch_size,
-                max_active_features,
-                torch.cuda.get_device_capability(us.device),
-            )
-            aggregated_ft_backward(
-                us,
-                them,
-                white_indices,
-                black_indices,
-                grad_l0,
-                clamped_out,
-                grad_weight,
-                grad_bias,
-                max_ft_activation,
-                tile_size=tile_size,
-            )
-            return None, None, None, None, grad_weight, grad_bias, None, None
-
+        # The direct scatter, for the layers and devices the tiled backward does not handle.
         kernel = make_fused_double_ft_backward_kernel(max_active_features, l1_size)
         grid_size = (batch_size + BACKWARD_TILE_SIZE - 1) // BACKWARD_TILE_SIZE
         kernel(
