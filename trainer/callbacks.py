@@ -470,10 +470,11 @@ class UniquePositionLogger(Callback):
         registers = bytearray(hll_bytes[self.HLL_HEADER_SIZE : self.HLL_STATE_SIZE])
 
         if self._ddp:
+            device = "cuda" if dist.get_backend() == "nccl" else "cpu"
             reg_tensor = torch.frombuffer(
                 bytearray(registers), dtype=torch.uint8
             ).clone()
-            reg_tensor = reg_tensor.cuda() if torch.cuda.is_available() else reg_tensor
+            reg_tensor = reg_tensor.to(device)
             dist.all_reduce(reg_tensor, op=dist.ReduceOp.MAX)
             merged_regs = _tensor_to_bytes(reg_tensor)
 
@@ -484,7 +485,7 @@ class UniquePositionLogger(Callback):
             val_tensor = torch.tensor(
                 [local_total],
                 dtype=torch.int64,
-                device="cuda" if torch.cuda.is_available() else "cpu",
+                device=device,
             )
             gathered = [torch.zeros_like(val_tensor) for _ in range(self.world_size)]
             dist.all_gather(gathered, val_tensor)
@@ -494,7 +495,7 @@ class UniquePositionLogger(Callback):
             preskip_tensor = torch.tensor(
                 [local_preskip],
                 dtype=torch.int64,
-                device="cuda" if torch.cuda.is_available() else "cpu",
+                device=device,
             )
             gathered_preskip = [
                 torch.zeros_like(preskip_tensor) for _ in range(self.world_size)
