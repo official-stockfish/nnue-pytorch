@@ -1,15 +1,11 @@
 psutil
-asciimatics
-GPUtil
 python-chess==0.31.4
 matplotlib
 tensorboard
 numpy
-requests
 tyro
 ruff==0.16.0
 pytest
 schedulefree
 torchmetrics>=1.8.2
-tqdm
 scipy
