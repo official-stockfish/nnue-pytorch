@@ -2,13 +2,10 @@ import concurrent.futures
 import hashlib
 import os
 import subprocess
-import sys
 import tempfile
 import threading
 import time
 import unittest
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data_loader import stream
 from data_loader.config import (
