@@ -253,6 +253,26 @@ class CDataLoaderAPI:
             ctypes.POINTER(ctypes.c_int),
         ]
 
+        # EXPORT bool CDECL count_layer_stacks(
+        #     const char* ls_keys_c,
+        #     int concurrency,
+        #     int num_files,
+        #     const char* const* filenames,
+        #     DataloaderDDPConfig ddp_config,
+        #     uint64_t* out_counts,
+        #     int out_size
+        # )
+        self.dll.count_layer_stacks.restype = ctypes.c_bool
+        self.dll.count_layer_stacks.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_char_p),
+            CDataloaderDDPConfig,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_int,
+        ]
+
         # EXPORT void CDECL get_unique_position_stats(SparseBatchStream*, uint64_t*, uint64_t*, uint64_t*)
         self.dll.get_unique_position_stats.restype = None
         self.dll.get_unique_position_stats.argtypes = [

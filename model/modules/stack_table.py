@@ -94,35 +94,9 @@ def resolve_data_path(path: str, datasets: list[str]) -> str:
 def count_stacks(
     binpack: str, ls_keys: str, raw_count: int, threads: int
 ) -> np.ndarray:
-    """Raw layer-stack counts over a binpack (no position filtering), from the data loader's stack index."""
-    from data_loader.config import DataloaderSkipConfig
-    from data_loader.stream import (
-        create_sparse_batch_stream,
-        destroy_sparse_batch,
-        destroy_sparse_batch_stream,
-        fetch_next_sparse_batch,
-    )
+    """Raw layer-stack counts over a binpack (no position filtering), from the data loader's stack index.
+    Under DDP each rank counts its own chunks; the caller sums them."""
+    from data_loader.stream import count_layer_stacks
 
-    skip = DataloaderSkipConfig(
-        filtered=False,
-        wld_filtered=False,
-        random_fen_skipping=0,
-        early_fen_skipping=-1,
-        soft_early_fen_skipping=0,
-        pc_y0=1.0,
-        pc_y1=1.0,
-        pc_y2=1.0,
-        pc_y3=1.0,
-        pc_y4=1.0,
-    )
-    stream = create_sparse_batch_stream(
-        b"K32H3", max(1, threads), [binpack], 65536, False, skip, ls_keys=ls_keys
-    )
-    counts = np.zeros(raw_count, np.int64)
-    while b := fetch_next_sparse_batch(stream):
-        counts += np.bincount(
-            b.contents.get_tensors("cpu")[-1].numpy(), minlength=raw_count
-        )
-        destroy_sparse_batch(b)
-    destroy_sparse_batch_stream(stream)
-    return counts
+    counts = count_layer_stacks(ls_keys, max(1, threads), [binpack], raw_count)
+    return np.array(counts, np.int64)
