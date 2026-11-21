@@ -103,7 +103,7 @@ def gather_statistics_from_data(filename: str, count: int, bucket_size: int):
     # it doesn't actually matter, all we care about are the scores and outcomes
     # this is just the easiest way to do it
     dataset = data_loader.SparseBatchDataset(
-        "HalfKP",
+        "Full_Threats",
         [filename],
         batch_size,
         cyclic,
