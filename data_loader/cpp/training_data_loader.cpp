@@ -572,10 +572,36 @@ void SparseBatchBufferPool::release(Buffers buffers, std::size_t floats, std::si
     // never retains storage with a different layout or beyond its capacity.
 }
 
+SparseBatchBufferPool::Packed SparseBatchBufferPool::acquire_packed(std::size_t ints) {
+    {
+        std::lock_guard lock(m_mutex);
+        for (auto it = m_free_packed.begin(); it != m_free_packed.end(); ++it)
+        {
+            if (it->capacity >= ints)
+            {
+                Packed packed = std::move(*it);
+                m_free_packed.erase(it);
+                return packed;
+            }
+        }
+    }
+    // Uninitialized: only the part a batch fills is ever touched (and resident).
+    return {std::unique_ptr<int[]>(new int[ints]), ints};
+}
+
+void SparseBatchBufferPool::release_packed(Packed packed) {
+    if (!packed.data)
+        return;
+    std::lock_guard lock(m_mutex);
+    if (m_free_packed.size() < m_capacity)
+        m_free_packed.push_back(std::move(packed));
+}
+
 SparseBatch::SparseBatch(const IFeatureExtractor&               feature_set,
                          const LayerStackKeys&                  ls_keys,
                          const std::vector<TrainingDataEntry>&  entries,
-                         std::shared_ptr<SparseBatchBufferPool> buffer_pool) :
+                         std::shared_ptr<SparseBatchBufferPool> buffer_pool,
+                         bool                                   prepack) :
 #ifdef NNUE_LOADER_STATISTICS
     entries_copy(entries),
 #endif
@@ -612,6 +638,12 @@ SparseBatch::SparseBatch(const IFeatureExtractor&               feature_set,
     num_active_black_features = 0;
     m_feature_counts.resize(std::size_t(size) * 2);
 
+    if (prepack)
+    {
+        fill_packed(feature_set, ls_keys, entries);
+        return;
+    }
+
     for (int i = 0; i < size * max_active_features; ++i)
         white[i] = -1;
     for (int i = 0; i < size * max_active_features; ++i)
@@ -624,11 +656,62 @@ SparseBatch::SparseBatch(const IFeatureExtractor&               feature_set,
     }
 }
 
+void SparseBatch::fill_packed(const IFeatureExtractor&              fs,
+                              const LayerStackKeys&                 ls_keys,
+                              const std::vector<TrainingDataEntry>& entries) {
+    // Build the pack_indices layout directly, on the worker thread, instead of
+    // the padded dense rows: the consumer then only has to copy it, and the
+    // dense rows are never filled with -1 or gathered back out of memory.
+    // The buffer is sized for the worst case, every row at max_active_features.
+    const std::size_t dense_ids = std::size_t(size) * max_active_features;
+    const std::size_t capacity  = std::size_t(size) * 3 + 2 + 2 * dense_ids;
+    if (m_buffer_pool)
+        m_packed = m_buffer_pool->acquire_packed(capacity);
+    else
+        m_packed = {std::unique_ptr<int[]>(new int[capacity]), capacity};
+
+    int* white_offsets = m_packed.data.get();
+    int* black_offsets = white_offsets + size + 1;
+    int* white_ids     = black_offsets + size + 1;
+    // Black IDs are appended compactly to the (otherwise unused) dense black
+    // rows and moved behind the white IDs once their total is known.
+    int* black_ids     = black;
+    white_offsets[0] = black_offsets[0] = 0;
+    for (int i = 0; i < size; ++i)
+    {
+        const TrainingDataEntry& e = entries[i];
+        fill_targets(i, e);
+        const int nw = fs.fill_features_sparse(e, white_ids + num_active_white_features,
+                                               Color::White)
+                         .first;
+        const int nb = fs.fill_features_sparse(e, black_ids + num_active_black_features,
+                                               Color::Black)
+                         .first;
+        m_feature_counts[i]        = nw;
+        m_feature_counts[size + i] = nb;
+        num_active_white_features += nw;
+        num_active_black_features += nb;
+        white_offsets[i + 1]  = num_active_white_features;
+        black_offsets[i + 1]  = num_active_black_features;
+        layer_stack_index[i] = ls_keys.index(e.pos);
+    }
+    int* packed_black = white_ids + num_active_white_features;
+    std::memcpy(packed_black, black_ids, std::size_t(num_active_black_features) * sizeof(int));
+    std::memcpy(packed_black + num_active_black_features, layer_stack_index,
+                std::size_t(size) * sizeof(int));
+    // The dense rows hold no valid layout now; nothing may read them.
+    white = nullptr;
+    black = nullptr;
+}
+
 SparseBatch::~SparseBatch() {
     if (m_buffer_pool)
+    {
+        m_buffer_pool->release_packed(std::move(m_packed));
         m_buffer_pool->release(
           {std::unique_ptr<float[]>(m_float_block), std::unique_ptr<int[]>(m_int_block)},
           std::size_t(size) * 3, std::size_t(size) * (2 * max_active_features + 1));
+    }
     else
     {
         delete[] m_float_block;
@@ -636,11 +719,15 @@ SparseBatch::~SparseBatch() {
     }
 }
 
-void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
+void SparseBatch::fill_targets(int i, const TrainingDataEntry& e) {
     is_white[i] = static_cast<float>(e.pos.sideToMove() == Color::White);
     // Search-tree samples have no result: outcome 2 makes the loss use the score alone.
     outcome[i]  = e.ply == TREE_SAMPLE_PLY ? 2.0f : (e.result + 1.0f) / 2.0f;
     score[i]    = e.score;
+}
+
+void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
+    fill_targets(i, e);
     fill_features(fs, i, e);
 }
 
@@ -654,11 +741,18 @@ void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const Traini
     num_active_black_features += nb;
 }
 
+std::size_t SparseBatch::packed_size() const {
+    return std::size_t(size) * 3 + 2 + num_active_white_features + num_active_black_features;
+}
+
 bool SparseBatch::pack_indices(int* output, std::size_t capacity) const {
-    const std::size_t required =
-      std::size_t(size) * 3 + 2 + num_active_white_features + num_active_black_features;
-    if (!output || capacity < required)
+    if (!output || capacity < packed_size())
         return false;
+    if (m_packed.data)
+    {
+        std::memcpy(output, m_packed.data.get(), packed_size() * sizeof(int));
+        return true;
+    }
     int* white_offsets = output;
     int* black_offsets = white_offsets + size + 1;
     int* white_ids     = black_offsets + size + 1;
@@ -706,7 +800,8 @@ FeaturedBatchStream::FeaturedBatchStream(
   int                                           rank,
   int                                           world_size,
   nnue::UniquePositionCounter*                  counter,
-  DataloaderIOConfig                            io_config) :
+  DataloaderIOConfig                            io_config,
+  bool                                          prepack_indices) :
     BaseType(calculate_num_reader_threads(concurrency, batch_size),
              filenames,
              cyclic,
@@ -720,6 +815,7 @@ FeaturedBatchStream::FeaturedBatchStream(
     m_ls_keys(std::move(ls_keys)),
     m_batch_size(batch_size),
     m_concurrency(concurrency),
+    m_prepack_indices(prepack_indices),
     m_num_workers(calculate_num_worker_threads(concurrency, batch_size)),
     m_batch_queue_capacity(calculate_num_worker_threads(concurrency, batch_size) + 4) {
 
@@ -745,7 +841,8 @@ FeaturedBatchStream::FeaturedBatchStream(
                     break;
             }
 
-            auto batch = new SparseBatch(*m_feature_set, m_ls_keys, entries, m_buffer_pool);
+            auto batch = new SparseBatch(*m_feature_set, m_ls_keys, entries, m_buffer_pool,
+                                         m_prepack_indices);
 
             {
                 std::unique_lock lock(m_batch_mutex);

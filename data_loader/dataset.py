@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset
 
 from . import stream
+from ._transport import compact_transport_available
 from .config import (
     DEFAULT_LS_KEYS,
     DataloaderDDPConfig,
@@ -172,6 +173,9 @@ class TrainingDataProvider:
                 hll_config,
                 io_config,
                 ls_keys=ls_keys,
+                # Let the C++ workers build the packed transport layout when
+                # batches will take that path, instead of this thread.
+                prepack_indices=compact_transport_available(device, use_pinned_memory),
             )
         else:
             self.stream = self.create_stream(

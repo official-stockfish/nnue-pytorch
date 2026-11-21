@@ -19,10 +19,13 @@ NNUE_API SparseBatch* NNUE_CDECL get_sparse_batch_from_fens(const char*        f
                                                             const char* const* fens,
                                                             int*               scores,
                                                             int*               plies,
-                                                            int*               results);
+                                                            int*               results,
+                                                            bool               prepack);
 
 NNUE_API void NNUE_CDECL destroy_sparse_batch(SparseBatch* e);
 // capacity is in int32 elements. Returns false without writing if too small.
+// A prepacked batch (stream created with prepack_indices) has white == black == nullptr;
+// its packed layout was built by the loader worker and this just copies it.
 NNUE_API bool NNUE_CDECL pack_sparse_batch(const SparseBatch* batch,
                                          int*               output,
                                          std::size_t        capacity);
@@ -64,7 +67,8 @@ NNUE_API SparseBatchStream* NNUE_CDECL create_sparse_batch_stream(const char*   
                                                                   DataloaderSkipConfig config,
                                                                   DataloaderDDPConfig  ddp_config,
                                                                   DataloaderHllConfig  hll_config,
-                                                                  DataloaderIOConfig   io_config);
+                                                                  DataloaderIOConfig   io_config,
+                                                                  bool prepack_indices);
 
 NNUE_API void NNUE_CDECL         destroy_sparse_batch_stream(SparseBatchStream* stream);
 NNUE_API SparseBatch* NNUE_CDECL fetch_next_sparse_batch(SparseBatchStream* stream);
