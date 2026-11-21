@@ -209,7 +209,8 @@ class CDataLoaderAPI:
         #     DataloaderSkipConfig config,
         #     DataloaderDDPConfig ddp_config,
         #     DataloaderHllConfig hll_config,
-        #     DataloaderIOConfig io_config
+        #     DataloaderIOConfig io_config,
+        #     bool prepack_indices
         # )
         self.dll.create_sparse_batch_stream.restype = ctypes.c_void_p
         self.dll.create_sparse_batch_stream.argtypes = [
@@ -224,6 +225,7 @@ class CDataLoaderAPI:
             CDataloaderDDPConfig,
             CDataloaderHllConfig,
             CDataloaderIOConfig,
+            ctypes.c_bool,  # prepack_indices
         ]
 
         # EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream)
@@ -240,7 +242,8 @@ class CDataLoaderAPI:
         #    const char* const* fens,
         #    int* scores,
         #    int* plies,
-        #    int* results
+        #    int* results,
+        #    bool prepack
         # )
         self.dll.get_sparse_batch_from_fens.restype = NativeSparseBatchPointer
         self.dll.get_sparse_batch_from_fens.argtypes = [
@@ -251,6 +254,7 @@ class CDataLoaderAPI:
             ctypes.POINTER(ctypes.c_int),
             ctypes.POINTER(ctypes.c_int),
             ctypes.POINTER(ctypes.c_int),
+            ctypes.c_bool,
         ]
 
         # EXPORT bool CDECL count_layer_stacks(

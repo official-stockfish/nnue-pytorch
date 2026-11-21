@@ -94,6 +94,7 @@ def create_sparse_batch_stream(
     hll_config: DataloaderHllConfig | None = None,
     io_config: DataloaderIOConfig | None = None,
     ls_keys: str = DEFAULT_LS_KEYS,
+    prepack_indices: bool = False,
 ) -> ctypes.c_void_p:
     if ddp_config is None:
         rank, world_size = _get_ddp_rank_and_world_size()
@@ -115,6 +116,7 @@ def create_sparse_batch_stream(
         CDataloaderDDPConfig(ddp_config),
         CDataloaderHllConfig(hll_config),
         CDataloaderIOConfig(io_config),
+        prepack_indices,
     )
     if not handle:
         raise RuntimeError("data loader stream creation failed — stale .so?")
@@ -126,7 +128,13 @@ def destroy_sparse_batch_stream(stream: ctypes.c_void_p):
 
 
 def get_sparse_batch_from_fens(
-    feature_set: str, fens, scores, plies, results, ls_keys: str = DEFAULT_LS_KEYS
+    feature_set: str,
+    fens,
+    scores,
+    plies,
+    results,
+    ls_keys: str = DEFAULT_LS_KEYS,
+    prepack: bool = False,
 ) -> SparseBatchPtr:
     assert len(fens) == len(scores) == len(plies) == len(results)
 
@@ -141,6 +149,7 @@ def get_sparse_batch_from_fens(
         to_c_int_array(scores),
         to_c_int_array(plies),
         to_c_int_array(results),
+        prepack,
     )
 
 

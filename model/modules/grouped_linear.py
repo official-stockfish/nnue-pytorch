@@ -359,6 +359,32 @@ def grouped_l1_preferred(count: int) -> bool:
     return count >= _GROUPED_L1_MIN_COUNT
 
 
+def grouped_l1_applicable(x, weight, bias, count: int) -> bool:
+    """Whether the bucketed kernels can replace ``F.linear(x, weight, bias)`` followed by
+    ``select_output``: FP32 K->N, N <= 128, K a multiple of 64 (the kernels' K blocks are
+    16/32/64 wide), and a bucket count the router supports (one thread per bucket). The
+    caller decides whether the bucketed path wins at this count (grouped_l1_preferred)."""
+    if grouped_l1 is None or count < 1:
+        return False
+    k = weight.shape[1]
+    n = weight.shape[0] // count
+    return (
+        x.is_cuda
+        and torch.version.hip is None
+        and x.dtype == weight.dtype == bias.dtype == torch.float32
+        and not torch.is_autocast_enabled()
+        and weight.shape[0] == n * count
+        and 64 <= k <= 4096
+        and k % 64 == 0
+        and 1 <= n <= 128
+        and count <= 256
+        and x.ndim == 2
+        and x.shape[0] > 0
+        and x.shape[1] == k
+        and torch.cuda.get_device_capability(x.device)[0] >= 8
+    )
+
+
 @torch.compiler.disable
 def grouped_l1(x, weight, bias, indices, count=8):
     """FP32 K→N linear, 1 <= N <= 128, 1 <= count <= 256; indices in [0, count).

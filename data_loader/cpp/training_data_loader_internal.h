@@ -56,9 +56,18 @@ class SparseBatchBufferPool final {
    public:
     using Buffers = std::pair<std::unique_ptr<float[]>, std::unique_ptr<int[]>>;
 
+    // Packed index buffers vary in size from batch to batch: a buffer is reused
+    // by any batch that fits in its capacity.
+    struct Packed {
+        std::unique_ptr<int[]> data;
+        std::size_t            capacity = 0;
+    };
+
     SparseBatchBufferPool(std::size_t floats, std::size_t ints, std::size_t capacity);
     Buffers acquire(std::size_t floats, std::size_t ints);
     void    release(Buffers buffers, std::size_t floats, std::size_t ints);
+    Packed  acquire_packed(std::size_t ints);
+    void    release_packed(Packed packed);
 
    private:
     const std::size_t    m_floats;
@@ -66,6 +75,7 @@ class SparseBatchBufferPool final {
     const std::size_t    m_capacity;
     std::mutex           m_mutex;
     std::vector<Buffers> m_free;
+    std::vector<Packed>  m_free_packed;
 };
 
 struct SparseBatch final {
@@ -74,7 +84,8 @@ struct SparseBatch final {
     SparseBatch(const IFeatureExtractor&                              feature_set,
                 const LayerStackKeys&                                 ls_keys,
                 const std::vector<struct binpack::TrainingDataEntry>& entries,
-                std::shared_ptr<SparseBatchBufferPool>                buffer_pool = nullptr);
+                std::shared_ptr<SparseBatchBufferPool>                buffer_pool = nullptr,
+                bool                                                  prepack     = false);
     ~SparseBatch();
 
     // Packed int32 layout: white offsets [size + 1], black offsets [size + 1],
@@ -82,7 +93,10 @@ struct SparseBatch final {
     // layer-stack indices [size]. Offsets begin at zero and end
     // at the total ID count.
     // capacity is in elements; insufficient capacity leaves output untouched.
+    // A prepacked batch has white == black == nullptr; the worker built the
+    // layout and this only copies it.
     bool pack_indices(int* output, std::size_t capacity) const;
+    std::size_t packed_size() const;
 
     int num_inputs;
     int size;
@@ -105,8 +119,13 @@ struct SparseBatch final {
     float*                                 m_float_block = nullptr;
     int*                                   m_int_block   = nullptr;
     std::shared_ptr<SparseBatchBufferPool> m_buffer_pool;
+    SparseBatchBufferPool::Packed          m_packed;
     std::vector<int>                       m_feature_counts;
+    void fill_targets(int i, const struct binpack::TrainingDataEntry& e);
     void fill_entry(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
+    void fill_packed(const IFeatureExtractor&                              fs,
+                     const LayerStackKeys&                                 ls_keys,
+                     const std::vector<struct binpack::TrainingDataEntry>& entries);
     void
     fill_features(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
 };
@@ -187,8 +206,9 @@ struct FeaturedBatchStream final: Stream<SparseBatch> {
                         std::function<bool(const struct binpack::TrainingDataEntry&)> skipPredicate,
                         int                                                           rank = 0,
                         int                          world_size                            = 1,
-                        nnue::UniquePositionCounter* counter   = nullptr,
-                        DataloaderIOConfig           io_config = {});
+                        nnue::UniquePositionCounter* counter         = nullptr,
+                        DataloaderIOConfig           io_config       = {},
+                        bool                         prepack_indices = false);
     ~FeaturedBatchStream() final;
 
     SparseBatch* next() override;
@@ -198,6 +218,7 @@ struct FeaturedBatchStream final: Stream<SparseBatch> {
     LayerStackKeys                     m_ls_keys;
     int                                m_batch_size;
     int                                m_concurrency;
+    bool                               m_prepack_indices;
     std::deque<SparseBatch*>           m_batches;
     std::mutex                         m_batch_mutex;
     std::condition_variable            m_batches_not_full;

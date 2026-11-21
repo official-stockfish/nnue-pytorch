@@ -81,6 +81,51 @@ def _pin_and_move(
     return out.to(device=device)
 
 
+def unpack_sparse_indices_host(
+    packed: torch.Tensor,
+    batch_size: int,
+    max_active: int,
+    num_white: int,
+    num_black: int,
+) -> torch.Tensor:
+    """CPU counterpart of unpack_sparse_indices: the dense int32 block (white
+    rows, black rows padded with -1, then layer-stack indices) from the packed
+    layout. Returns a new tensor, independent of ``packed``."""
+    out = torch.full((batch_size * (2 * max_active + 1),), -1, dtype=torch.int32)
+    ids_start = 2 * (batch_size + 1)
+    rows = torch.arange(batch_size)
+    for perspective, (start, count) in enumerate(
+        ((ids_start, num_white), (ids_start + num_white, num_black))
+    ):
+        offsets = packed[
+            perspective * (batch_size + 1) : (perspective + 1) * (batch_size + 1)
+        ].long()
+        per_row = offsets[1:] - offsets[:-1]
+        row = torch.repeat_interleave(rows, per_row)
+        col = torch.arange(count) - torch.repeat_interleave(offsets[:-1], per_row)
+        out[perspective * batch_size * max_active + row * max_active + col] = packed[
+            start : start + count
+        ]
+    stacks_start = ids_start + num_white + num_black
+    out[2 * batch_size * max_active :] = packed[
+        stacks_start : stacks_start + batch_size
+    ]
+    return out
+
+
+def compact_transport_available(
+    device: str | torch.device, use_pinned_memory: bool
+) -> bool:
+    """Whether batches for this device can take the packed transport at all
+    (the per-batch size check of CompactTransportPolicy comes on top)."""
+    return (
+        use_pinned_memory
+        and torch.device(device).type == "cuda"
+        and torch.version.hip is None
+        and unpack_sparse_indices is not None
+    )
+
+
 def move_indices(
     batch: SparseBatch,
     device: str | torch.device,
@@ -95,6 +140,8 @@ def move_indices(
     Packed int32 ABI: white/black offsets, white/black IDs, layer-stack
     indices. Each offsets array contains size + 1 elements.
     Native provenance is required because packing reads private C++ row counts.
+    A batch the loader worker prepacked (white is NULL) always takes the packed
+    path; packing it is a plain copy of the layout the worker built.
     """
     num_positions = batch.size
     max_features_per_position = batch.max_active_features
@@ -115,14 +162,15 @@ def move_indices(
         + batch.num_active_black_features
         + layer_stack_elements
     )
+    # The loader worker built only the packed layout: there are no dense rows.
+    # pack() then just copies that layout (GIL released).
+    prepacked = native_owned and not batch.white
     if (
         native_owned
-        and use_pinned_memory
-        and torch.device(device).type == "cuda"
-        and torch.version.hip is None
-        and unpack_sparse_indices is not None
-        and policy.should_pack(dense_elements, packed_elements)
+        and compact_transport_available(device, use_pinned_memory)
+        and (prepacked or policy.should_pack(dense_elements, packed_elements))
     ):
+        assert unpack_sparse_indices is not None
         packed = torch.empty(packed_elements, dtype=torch.int32, pin_memory=True)
         if not pack(ctypes.byref(batch), packed.data_ptr(), packed_elements):
             raise RuntimeError("Native sparse batch packing failed")
@@ -133,6 +181,18 @@ def move_indices(
             batch.num_active_white_features,
             batch.num_active_black_features,
         )
+    if prepacked:  # No dense rows to fall back on.
+        packed = torch.empty(packed_elements, dtype=torch.int32)
+        if not pack(ctypes.byref(batch), packed.data_ptr(), packed_elements):
+            raise RuntimeError("Native sparse batch packing failed")
+        dense = unpack_sparse_indices_host(
+            packed,
+            num_positions,
+            max_features_per_position,
+            batch.num_active_white_features,
+            batch.num_active_black_features,
+        )
+        return _pin_and_move(dense, device, use_pinned_memory)
 
     dense = torch.from_numpy(
         np.ctypeslib.as_array(batch.white, shape=(dense_elements,))

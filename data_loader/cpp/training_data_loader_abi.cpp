@@ -17,7 +17,8 @@ NNUE_API SparseBatch* NNUE_CDECL get_sparse_batch_from_fens(const char*        f
                                                             const char* const* fens,
                                                             int*               scores,
                                                             int*               plies,
-                                                            int*               results) {
+                                                            int*               results,
+                                                            bool               prepack) {
     std::vector<TrainingDataEntry> entries;
     entries.reserve(num_fens);
     for (int i = 0; i < num_fens; ++i)
@@ -34,7 +35,7 @@ NNUE_API SparseBatch* NNUE_CDECL get_sparse_batch_from_fens(const char*        f
     auto ls_keys = get_layer_stack_keys(ls_keys_c);
     if (!feature || !ls_keys)
         return nullptr;
-    return new SparseBatch(*feature, *ls_keys, entries);
+    return new SparseBatch(*feature, *ls_keys, entries, nullptr, prepack);
 }
 
 NNUE_API FenBatchStream* NNUE_CDECL create_fen_batch_stream(int                  concurrency,
@@ -68,7 +69,8 @@ NNUE_API SparseBatchStream* NNUE_CDECL create_sparse_batch_stream(const char*   
                                                                   DataloaderSkipConfig config,
                                                                   DataloaderDDPConfig  ddp_config,
                                                                   DataloaderHllConfig  hll_config,
-                                                                  DataloaderIOConfig   io_config) {
+                                                                  DataloaderIOConfig   io_config,
+                                                                  bool prepack_indices) {
     auto skipPredicate = make_skip_predicate(config);
     auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
@@ -83,7 +85,8 @@ NNUE_API SparseBatchStream* NNUE_CDECL create_sparse_batch_stream(const char*   
 
     auto stream = new FeaturedBatchStream(
       std::move(feature), std::move(*ls_keys), concurrency, filenames_vec, batch_size, cyclic,
-      skipPredicate, ddp_config.rank, ddp_config.world_size, counter.release(), io_config);
+      skipPredicate, ddp_config.rank, ddp_config.world_size, counter.release(), io_config,
+      prepack_indices);
     return reinterpret_cast<SparseBatchStream*>(stream);
 }
 
