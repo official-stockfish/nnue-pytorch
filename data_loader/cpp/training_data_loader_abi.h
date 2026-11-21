@@ -28,6 +28,17 @@ NNUE_API bool NNUE_CDECL pack_sparse_batch(const SparseBatch* batch,
                                          std::size_t        capacity);
 NNUE_API void NNUE_CDECL destroy_fen_batch(FenBatch* e);
 
+// Raw layer-stack counts (--ls-keys index) over the binpacks, all positions, no filtering. Decodes
+// positions only: no shuffling, feature extraction or batching. Each DDP rank counts its own
+// chunks. out_size must be the number of raw stacks. Returns false on bad keys or out_size.
+NNUE_API bool NNUE_CDECL count_layer_stacks(const char*         ls_keys_c,
+                                            int                 concurrency,
+                                            int                 num_files,
+                                            const char* const*  filenames,
+                                            DataloaderDDPConfig ddp_config,
+                                            std::uint64_t*      out_counts,
+                                            int                 out_size);
+
 // fen stream
 NNUE_API FenBatchStream* NNUE_CDECL create_fen_batch_stream(int                  concurrency,
                                                             int                  num_files,

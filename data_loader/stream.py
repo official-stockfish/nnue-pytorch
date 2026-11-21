@@ -152,6 +152,33 @@ def destroy_sparse_batch(batch: SparseBatchPtr):
     c_lib.dll.destroy_sparse_batch(batch)
 
 
+def count_layer_stacks(
+    ls_keys: str,
+    concurrency: int,
+    filenames: list[str],
+    raw_count: int,
+    ddp_config: DataloaderDDPConfig | None = None,
+) -> list[int]:
+    """Raw layer-stack counts over the binpacks (this rank's chunks, no filtering), decoding
+    positions only."""
+    if ddp_config is None:
+        rank, world_size = _get_ddp_rank_and_world_size()
+        ddp_config = DataloaderDDPConfig(rank=rank, world_size=world_size)
+    counts = (ctypes.c_uint64 * raw_count)()
+    ok = c_lib.dll.count_layer_stacks(
+        ls_keys.encode("utf-8"),
+        concurrency,
+        len(filenames),
+        _to_c_str_array(filenames),
+        CDataloaderDDPConfig(ddp_config),
+        counts,
+        raw_count,
+    )
+    if not ok:
+        raise RuntimeError(f"count_layer_stacks failed for --ls-keys {ls_keys!r}")
+    return list(counts)
+
+
 # --- Unique position counting (HLL) ---
 
 

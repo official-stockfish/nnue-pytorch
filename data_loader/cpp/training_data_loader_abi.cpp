@@ -101,6 +101,69 @@ NNUE_API FenBatch* NNUE_CDECL fetch_next_fen_batch(FenBatchStream* stream) {
 
 NNUE_API void NNUE_CDECL destroy_sparse_batch(SparseBatch* e) { delete e; }
 
+NNUE_API bool NNUE_CDECL count_layer_stacks(const char*         ls_keys_c,
+                                            int                 concurrency,
+                                            int                 num_files,
+                                            const char* const*  filenames,
+                                            DataloaderDDPConfig ddp_config,
+                                            std::uint64_t*      out_counts,
+                                            int                 out_size) {
+    auto ls_keys = get_layer_stack_keys(ls_keys_c);
+    if (!ls_keys)
+        return false;
+    int raw_count = 1;
+    for (const auto& key : ls_keys->keys)
+        raw_count *= key.states;
+    if (out_size != raw_count)
+        return false;
+
+    // Every decoded position passes through the skip predicate on a decode worker. Count it in
+    // that worker's own histogram and skip it, so nothing reaches the shuffle windows or the
+    // feature builders.
+    // The thread-local slot is tagged with this call's id: a thread can outlive a call (the .bin
+    // reader runs the predicate on the calling thread).
+    static std::atomic<std::uint64_t>                        next_call_id{1};
+    const std::uint64_t                                      call_id = next_call_id++;
+    std::mutex                                               histograms_mutex;
+    std::vector<std::unique_ptr<std::vector<std::uint64_t>>> histograms;
+    auto count_and_skip = [&](const TrainingDataEntry& e) {
+        struct Local {
+            std::uint64_t               call_id = 0;
+            std::vector<std::uint64_t>* bins    = nullptr;
+        };
+        thread_local Local local;
+        if (local.call_id != call_id)
+        {
+            std::lock_guard lock(histograms_mutex);
+            local.bins = histograms
+                           .emplace_back(std::make_unique<std::vector<std::uint64_t>>(raw_count, 0))
+                           .get();
+            local.call_id = call_id;
+        }
+        ++(*local.bins)[ls_keys->index(e.pos)];
+        return true;
+    };
+
+    {
+        DataloaderIOConfig io_config{};
+        io_config.shuffle_buffer_entries = 1024;
+        auto stream = training_data::open_sfen_input_file_parallel(
+          std::max(1, concurrency), std::vector<std::string>(filenames, filenames + num_files),
+          false, count_and_skip, nullptr, ddp_config.rank, ddp_config.world_size, io_config, 1);
+        if (!stream)
+            return false;
+        // Returns once every decode worker has finished.
+        std::vector<TrainingDataEntry> none;
+        stream->fill_threadsafe(none, 1);
+    }  // joins the decode workers
+
+    std::fill(out_counts, out_counts + raw_count, 0);
+    for (const auto& h : histograms)
+        for (int i = 0; i < raw_count; ++i)
+            out_counts[i] += (*h)[i];
+    return true;
+}
+
 NNUE_API bool NNUE_CDECL pack_sparse_batch(const SparseBatch* batch,
                                          int*               output,
                                          std::size_t        capacity) {
