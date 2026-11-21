@@ -56,9 +56,6 @@ class AdamWWrapper:
     def on_validation_epoch_start(self, pl_module: Any):
         pass
 
-    def on_test_epoch_start(self, pl_module: Any):
-        pass
-
     def on_train_epoch_end(self, pl_module: Any):
         pass
 

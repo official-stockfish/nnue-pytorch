@@ -125,7 +125,6 @@ class NNUE(nn.Module):
                 # losses still propagate into the epoch metric.
                 "train_loss_epoch": MeanMetric(nan_strategy="disable"),
                 "val_loss_epoch": MeanMetric(nan_strategy="disable"),
-                "test_loss_epoch": MeanMetric(nan_strategy="disable"),
             }
         )
 
@@ -290,12 +289,6 @@ class NNUE(nn.Module):
     def on_validation_epoch_end(self):
         self.loss_metrics["val_loss_epoch"].reset()
 
-    def on_test_epoch_start(self):
-        self.optimizer_wrapper.on_test_epoch_start(self)
-
-    def on_test_epoch_end(self):
-        self.loss_metrics["test_loss_epoch"].reset()
-
     def on_save_checkpoint(self, checkpoint):
         self.optimizer_wrapper.on_save_checkpoint(self, checkpoint)
         self.lambda_scheduler.on_save_checkpoint(checkpoint)
@@ -378,13 +371,6 @@ class NNUE(nn.Module):
         loss = self.compute_loss(batch, global_step)
         self.loss_metrics["val_loss_epoch"].update(loss)
         return {"val_loss": loss}
-
-    @torch.no_grad()
-    def test_step(self, batch, current_epoch, global_step):
-        _ = current_epoch
-        loss = self.compute_loss(batch, global_step)
-        self.loss_metrics["test_loss_epoch"].update(loss)
-        return {"test_loss": loss}
 
     def prefetch_hook(self):
         """``hook(batch)`` for the loader's prefetch thread (FixedNumBatchesDataset), or None: the
