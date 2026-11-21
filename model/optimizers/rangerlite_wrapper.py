@@ -74,9 +74,6 @@ class RangerLiteWrapper:
     def on_validation_epoch_start(self, pl_module: torch.nn.Module):
         self.switch_to_eval()
 
-    def on_test_epoch_start(self, pl_module: torch.nn.Module):
-        self.switch_to_eval()
-
     def on_train_epoch_end(self, pl_module: torch.nn.Module):
         self.switch_to_eval()
 

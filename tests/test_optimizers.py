@@ -85,7 +85,6 @@ def test_wrapper_hooks_and_state_flips(optimizer_name):
     wrapper.on_train_epoch_start(pl_module)
     wrapper.on_train_batch_start(pl_module, batch=None, batch_idx=0)
     wrapper.on_validation_epoch_start(pl_module)
-    wrapper.on_test_epoch_start(pl_module)
     wrapper.on_train_epoch_end(pl_module)
     checkpoint = {}
     wrapper.on_save_checkpoint(pl_module, checkpoint)
@@ -108,7 +107,6 @@ def test_nnue_integration_all_optimizers(optimizer_name):
     model.on_train_epoch_start()
     model.on_train_batch_start(batch=None, batch_idx=0)
     model.on_validation_epoch_start()
-    model.on_test_epoch_start()
     model.on_train_epoch_end()
     model.on_validation_epoch_end()
 
