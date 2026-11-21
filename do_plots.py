@@ -79,10 +79,6 @@ def parse_ordo_file(filename, label):
         return rows
 
 
-def transpose_list_of_tuples(input_list):
-    return list(map(list, zip(*input_list)))
-
-
 def do_plots(out_filename, root_dirs, elo_range, loss_range, split):
     """
     1. Find tfevents files for each root directory

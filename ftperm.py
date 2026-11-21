@@ -68,7 +68,6 @@ Algorithm by Daniel Monroe. Github @daniel-monroe.
 
 ZERO_BLOCK_SIZE = 4
 VERBOSE = False
-_DEVICE_OVERRIDE = None
 
 
 @dataclass
@@ -154,10 +153,7 @@ class FeaturePermutationConfig:
 def resolve_device(use_cupy: bool, device: int | Literal["cpu", "mps"]) -> str:
     if not use_cupy:
         return "cpu"
-    if _DEVICE_OVERRIDE is not None:
-        d = str(_DEVICE_OVERRIDE)
-    else:
-        d = str(device)
+    d = str(device)
     if d.isdigit():
         return f"cuda:{d}"
     return d
@@ -176,13 +172,6 @@ def batched(arr: T, batch_size: int) -> Generator[T, None, None]:
     while idx < n_samples:
         yield arr[idx : min(idx + batch_size, n_samples)]
         idx += batch_size
-
-
-def apply_swap(perm: npt.NDArray, i: int, j: int) -> None:
-    """
-    Swap `i`-th and `j`-th elements in the array `perm`.
-    """
-    perm[i], perm[j] = perm[j], perm[i]
 
 
 def apply_rotate_right(perm: npt.NDArray, indices: tuple[int, ...]) -> None:
@@ -753,12 +742,6 @@ def ft_optimize(
 
     print("Applying permutation...")
     ft_permute_impl(model, perm)
-
-
-def set_cupy_device(device: int | None = None) -> None:
-    # kept for legacy reasons.
-    global _DEVICE_OVERRIDE
-    _DEVICE_OVERRIDE = device
 
 
 def main() -> None:
