@@ -152,7 +152,7 @@ def main():
         return
 
     root_dir = sys.argv[1]
-    num_best_to_keep = sys.argv[2] if len(sys.argv) >= 3 else 16
+    num_best_to_keep = int(sys.argv[2]) if len(sys.argv) >= 3 else 16
     delete_bad_nets(root_dir, num_best_to_keep)
 
 
