@@ -1,10 +1,5 @@
-import os
-import sys
-
 import pytest
 import torch
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.modules.feature_transformer.sparse_linear_functions import (
     _torch_sparse_linear,

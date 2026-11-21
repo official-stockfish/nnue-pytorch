@@ -8,13 +8,8 @@ grid and TF32 rounds them, which is why train.py only enables TF32 for
 quantized runs.
 """
 
-import os
-import sys
-
 import pytest
 import torch
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.modules.config import LayerStacksConfig
 from model.modules.layer_stacks import LayerStacks

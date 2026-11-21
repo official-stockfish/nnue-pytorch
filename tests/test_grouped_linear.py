@@ -1,11 +1,7 @@
-import os
-import sys
 from unittest.mock import Mock
 
 import pytest
 import torch
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.modules import stacked_linear
 from model.modules.stacked_linear import FactorizedStackedLinear, grouped_l1

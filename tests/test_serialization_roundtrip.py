@@ -1,10 +1,6 @@
 import io
-import os
-import sys
 
 import torch
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cross_check_eval import init_random_weights
 from model.config import ModelConfig

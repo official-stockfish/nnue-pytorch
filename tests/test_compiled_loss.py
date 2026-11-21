@@ -1,12 +1,7 @@
 """The compiled loss must reproduce the eager pointwise chain."""
 
-import os
-import sys
-
 import pytest
 import torch
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.config import LossParams
 from model.nnue import NNUE, calculate_sf_loss
