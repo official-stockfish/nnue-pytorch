@@ -751,3 +751,181 @@ class SimpleLineLogger(Callback):
             f"[{self.val_metric}={val_loss:.7f}]",
             flush=True,
         )
+
+
+def _available_cpus_per_rank() -> int:
+    try:
+        cpus = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        cpus = os.cpu_count() or 1
+    local_world_size = int(os.environ.get("LOCAL_WORLD_SIZE", "1"))
+    return max(1, cpus // max(1, local_world_size))
+
+
+class DataLoaderBottleneckMonitor(Callback):
+    """Reports, once per training epoch, whether the data loader limits
+    training speed and whether more loader workers would help.
+
+    Reads the timing counters of the training FixedNumBatchesDataset:
+
+    - wait: fraction of the epoch the training step was blocked waiting
+      for a batch. GPU work already queued can still run during the wait,
+      so this bounds, rather than equals, the GPU idle time.
+    - idle: fraction of the epoch the prefetch thread had a batch ready but
+      the queue was full, i.e. spare loader capacity.
+    - C++ fetch / transport: fraction of the epoch the prefetch thread spent
+      waiting for the C++ decoder workers vs. moving the decoded batch to the
+      device itself. Only the first gets faster with more workers.
+
+    Verdicts (``wait`` above ``wait_threshold`` counts as starved):
+
+    - starved, little spare capacity, mostly transport: the prefetch thread's
+      own transport work is the bottleneck; more workers will not help.
+    - starved, little spare capacity, mostly C++ fetch: decoder throughput is
+      the bottleneck, raise ``--num-workers`` (if CPUs are left to use).
+    - starved, but plenty of spare capacity: production is bursty and the
+      prefetch queue is too shallow to smooth it, raise
+      ``--data-loader-queue-size``.
+    - not starved, but almost no spare capacity: the loader is just keeping
+      up; a few more workers buy headroom.
+    - otherwise: not loader bound (the GPU step is the limit).
+
+    In DDP every rank's loader is measured and the worst rank decides (one
+    slow rank stalls all of them at the gradient all-reduce).
+    """
+
+    def __init__(
+        self,
+        train_dataset,
+        num_workers: int,
+        wait_threshold: float = 0.05,
+        idle_threshold: float = 0.10,
+    ):
+        super().__init__()
+        self.dataset = train_dataset
+        self.num_workers = num_workers
+        self.wait_threshold = wait_threshold
+        self.idle_threshold = idle_threshold
+        self.cpus = _available_cpus_per_rank()
+        self._start_stats = None
+        self._start_time = None
+        self.last_report: dict | None = None
+
+    def _stats(self):
+        get = getattr(self.dataset, "get_loader_stats", None)
+        return get() if get is not None else None
+
+    @torch.compiler.disable
+    def on_train_epoch_start(self, trainer):
+        self._start_stats = self._stats()
+        self._start_time = time.perf_counter()
+
+    def _verdict(
+        self, wait: float, idle: float, native: float, transport: float
+    ) -> str:
+        """Classify one epoch. ``native`` and ``transport`` split the prefetch
+        thread's busy time: waiting for the C++ decoder workers (scales with
+        --num-workers) vs. moving the finished batch to the device on the
+        prefetch thread itself (does not)."""
+        transport_bound = transport > native
+        if wait >= self.wait_threshold:
+            if idle >= self.idle_threshold:
+                return (
+                    "BURSTY: the loader has spare capacity overall but the queue still ran dry; "
+                    "raise --data-loader-queue-size"
+                )
+            if transport_bound:
+                return (
+                    "TRANSPORT BOUND: the single prefetch thread's batch transport to the device "
+                    "is the limit, not the C++ decoders; more --num-workers will not help"
+                )
+            if self.num_workers < self.cpus:
+                return (
+                    f"DATA-LOADER BOUND: raise --num-workers (now {self.num_workers}, "
+                    f"{self.cpus} CPUs available)"
+                )
+            return (
+                f"DATA-LOADER BOUND with all {self.cpus} CPUs in use ({self.num_workers} workers): "
+                "loader is CPU or I/O limited; more workers will not help"
+            )
+        if idle < self.idle_threshold:
+            if transport_bound:
+                return "NEAR CAPACITY: batch transport on the prefetch thread is only just keeping up"
+            return (
+                "NEAR CAPACITY: the loader is only just keeping up; "
+                "a few more --num-workers would add headroom"
+            )
+        return "not loader bound (GPU step is the limit)"
+
+    @torch.compiler.disable
+    def on_train_epoch_end(self, trainer):
+        end = self._stats()
+        if end is None or self._start_stats is None:
+            return
+        wall = time.perf_counter() - self._start_time
+        start = self._start_stats
+        delta = {k: end[k] - start[k] for k in end}
+        batches = delta["consumer_batches"]
+        if wall <= 0 or batches <= 0:
+            return
+
+        native = min(1.0, delta["native_fetch_s"] / wall)
+        transport = min(
+            1.0, max(0.0, delta["producer_fetch_s"] - delta["native_fetch_s"]) / wall
+        )
+        wait = min(1.0, delta["consumer_wait_s"] / wall)
+        idle = min(1.0, delta["producer_put_wait_s"] / wall)
+        empty = delta["consumer_empty_gets"] / batches
+
+        if dist.is_available() and dist.is_initialized() and trainer.world_size > 1:
+            device = (
+                trainer.device if dist.get_backend() == "nccl" else torch.device("cpu")
+            )
+            # MAX over every "worse" direction: the worst rank decides.
+            t = torch.tensor(
+                [wait, -idle, empty, native, transport],
+                dtype=torch.float64,
+                device=device,
+            )
+            dist.all_reduce(t, op=dist.ReduceOp.MAX)
+            wait, idle, empty, native, transport = t.tolist()
+            idle = -idle
+
+        capacity = getattr(self.dataset, "queue_capacity", 0) or 0
+        fill = delta["consumer_fill_sum"] / batches
+        verdict = self._verdict(wait, idle, native, transport)
+        self.last_report = {
+            "wait": wait,
+            "idle": idle,
+            "native": native,
+            "transport": transport,
+            "empty": empty,
+            "fill": fill,
+            "verdict": verdict,
+        }
+
+        trainer.callback_metrics["loader_wait_frac"] = wait
+        trainer.callback_metrics["loader_idle_frac"] = idle
+        trainer._log_metrics(
+            {
+                "loader_wait_frac": wait,
+                "loader_idle_frac": idle,
+                "loader_native_frac": native,
+                "loader_transport_frac": transport,
+            },
+            step=trainer.global_step,
+        )
+
+        if trainer.rank == 0:
+            startup = ""
+            if start["startup_wait_s"] == 0 and end["startup_wait_s"] > 0:
+                startup = f", first batch after {end['startup_wait_s']:.1f}s"
+            print(
+                f"Epoch {trainer.current_epoch:>2} (Loader): "
+                f"step waited for data {wait:.1%} of the epoch, "
+                f"loader idle (queue full) {idle:.1%}, "
+                f"in C++ fetch {native:.1%}, in transport {transport:.1%}, "
+                f"queue empty at {empty:.0%} of fetches, "
+                f"avg fill {fill:.1f}/{capacity}{startup} -> {verdict}",
+                flush=True,
+            )
