@@ -127,9 +127,6 @@ class QuantizationManager:
         info = torch.iinfo(dtype)
         return -info.max / self.ft_quantized_one, info.max / self.ft_quantized_one
 
-    def clip_ft_act(self, preact):
-        return torch.clamp(preact, 0.0, self.max_ft_activation)
-
     def clip_ls_act(self, preact):
         return torch.clamp(preact, 0, self.max_hidden_activation)
 
