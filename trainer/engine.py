@@ -278,7 +278,7 @@ class SimpleTrainer:
 
         unwrapped = _unwrap_module(self.model)
         unwrapped.load_state_dict(checkpoint["state_dict"])
-        self.current_epoch = checkpoint.get("epoch", 0)
+        self.current_epoch = checkpoint.get("epoch", -1) + 1
         self.global_step = checkpoint.get("global_step", 0)
 
         # Restore scheduler states if they were saved.
