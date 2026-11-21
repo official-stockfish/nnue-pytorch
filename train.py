@@ -25,6 +25,7 @@ from model.modules.stack_table import (
 )
 from trainer.callbacks import (
     CheckpointManager,
+    DataLoaderBottleneckMonitor,
     ExplicitSWA,
     SimpleLineLogger,
     TerminateOnNaN,
@@ -429,6 +430,7 @@ def main():
         WeightClipper(input_clipping_interval=args.input_clipping_interval),
         checkpoint_manager,
         SimpleLineLogger(refresh_rate=refresh_rate),
+        DataLoaderBottleneckMonitor(train.dataset, num_workers=actual_workers),
         TimeLimit(args.max_time),
         nan_callback,
     ]

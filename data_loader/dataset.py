@@ -1,5 +1,6 @@
 import queue
 import threading
+import time
 import warnings
 from dataclasses import dataclass
 
@@ -157,6 +158,7 @@ class TrainingDataProvider:
         self.io_config = io_config
         self.use_pinned_memory = use_pinned_memory
         self.device = device
+        self.native_fetch_s = 0.0
 
         if batch_size:
             self.stream = self.create_stream(
@@ -187,7 +189,11 @@ class TrainingDataProvider:
         return self
 
     def __next__(self):
+        t0 = time.perf_counter()
         v = self.fetch_next(self.stream)
+        # Time spent waiting for the C++ decoder workers, as opposed to moving
+        # the batch to the device afterwards.
+        self.native_fetch_s += time.perf_counter() - t0
 
         if v:
             tensors = v.contents.get_tensors(
@@ -335,6 +341,44 @@ def _safe_put(stop_event, q, item):
             continue
 
 
+class LoaderStats:
+    """Cumulative timing counters of a FixedNumBatchesDataset pipeline.
+
+    Each side writes only its own fields (the prefetch thread the producer
+    fields, the training thread the consumer fields), so no lock is needed;
+    readers take a ``snapshot()`` and diff two of them over an interval.
+
+    - ``consumer_wait_s``: time the training step spent blocked waiting for a
+      batch. Time here is time the step could not run, i.e. the loader is
+      what limits training speed.
+    - ``producer_put_wait_s``: time the prefetch thread spent blocked on a
+      full queue: the loader had a batch ready but training was not yet
+      asking for it (spare loader capacity).
+    - ``producer_fetch_s``: time the prefetch thread spent getting the next
+      batch from the C++ loader (waiting for decoder workers included).
+    - ``startup_wait_s``: the consumer wait for the very first batch, kept out
+      of ``consumer_wait_s`` because it is pipeline startup, not throughput.
+    """
+
+    __slots__ = (
+        "consumer_batches",
+        "consumer_empty_gets",
+        "consumer_fill_sum",
+        "consumer_wait_s",
+        "producer_batches",
+        "producer_fetch_s",
+        "producer_put_wait_s",
+        "startup_wait_s",
+    )
+
+    def __init__(self):
+        for name in self.__slots__:
+            setattr(self, name, 0)
+
+    def snapshot(self) -> dict:
+        return {name: getattr(self, name) for name in self.__slots__}
+
+
 class FixedNumBatchesDataset(Dataset):
     def __init__(
         self,
@@ -367,6 +411,8 @@ class FixedNumBatchesDataset(Dataset):
         self._stop_prefetching = threading.Event()
         self._prefetch_started = False
         self._lock = threading.Lock()
+        self._stats = LoaderStats()
+        self._first_get_done = False
 
     def _resolve_prefetch_device(self):
         if not self.prefetch_to_device:
@@ -382,7 +428,16 @@ class FixedNumBatchesDataset(Dataset):
         prefetch_queue,
         prefetch_device,
         prefetch_hook,
+        stats=None,
     ):
+        if stats is None:
+            stats = LoaderStats()
+
+        def put(item):
+            t0 = time.perf_counter()
+            _safe_put(stop_event, prefetch_queue, item)
+            stats.producer_put_wait_s += time.perf_counter() - t0
+
         try:
             prefetch_stream = None
             if prefetch_device is not None:
@@ -400,7 +455,9 @@ class FixedNumBatchesDataset(Dataset):
                 try:
                     if prefetch_stream is not None:
                         with torch.cuda.stream(prefetch_stream):
+                            t0 = time.perf_counter()
                             item = next(iterator)
+                            stats.producer_fetch_s += time.perf_counter() - t0
                             if item is None:
                                 _safe_put(stop_event, prefetch_queue, None)
                                 break
@@ -422,11 +479,14 @@ class FixedNumBatchesDataset(Dataset):
                             ready_event.record(prefetch_stream)
                         item = _CudaPrefetchedItem(item=item, ready_event=ready_event)
                     else:
+                        t0 = time.perf_counter()
                         item = next(iterator)
+                        stats.producer_fetch_s += time.perf_counter() - t0
                         if item is None:
                             _safe_put(stop_event, prefetch_queue, None)
                             break
-                    _safe_put(stop_event, prefetch_queue, item)
+                    put(item)
+                    stats.producer_batches += 1
                 except StopIteration:
                     _safe_put(stop_event, prefetch_queue, None)
                     break
@@ -455,6 +515,7 @@ class FixedNumBatchesDataset(Dataset):
                         self._prefetch_queue,
                         self._prefetch_device,
                         self.prefetch_hook,
+                        self._stats,
                     ),
                     daemon=True,
                 )
@@ -468,7 +529,19 @@ class FixedNumBatchesDataset(Dataset):
         self._start_prefetching()
 
         try:
+            stats = self._stats
+            fill = self._prefetch_queue.qsize()
+            t0 = time.perf_counter()
             item = self._prefetch_queue.get(timeout=300.0)  # 300 second timeout
+            waited = time.perf_counter() - t0
+            if self._first_get_done:
+                stats.consumer_wait_s += waited
+                stats.consumer_batches += 1
+                stats.consumer_fill_sum += fill
+                stats.consumer_empty_gets += fill == 0
+            else:
+                stats.startup_wait_s += waited
+                self._first_get_done = True
 
             if item is None:
                 raise StopIteration("End of dataset reached")
@@ -485,6 +558,19 @@ class FixedNumBatchesDataset(Dataset):
 
         except queue.Empty:
             raise RuntimeError("Prefetch timeout - no data available")
+
+    @property
+    def queue_capacity(self) -> int:
+        return self._prefetch_queue.maxsize
+
+    def get_loader_stats(self) -> dict:
+        """Cumulative pipeline timing counters (see LoaderStats); diff two
+        snapshots to get the numbers for an interval."""
+        snap = self._stats.snapshot()
+        # Part of producer_fetch_s spent inside the C++ loader (the rest is
+        # host-to-device transport); only this part scales with workers.
+        snap["native_fetch_s"] = getattr(self.iter, "native_fetch_s", 0.0)
+        return snap
 
     def get_unique_stats(self) -> tuple[int, int, int]:
         """Return (preskip, total, unique) from the underlying data provider.
