@@ -12,10 +12,23 @@ class InputFeature(nn.Module, ABC):
     MAX_ACTIVE_FEATURES: int
     NUM_REAL_FEATURES: int
     EXPORT_WEIGHT_DTYPE: torch.dtype = torch.int16
+    # The rows form NUM_BUCKETS consecutive blocks of NUM_INPUTS // NUM_BUCKETS rows (K32H3: one per
+    # king bucket and state), and the active rows of one perspective all fall in a single block.
+    NUM_BUCKETS: int = 1
 
-    @abstractmethod
+    def virtual_layout(self) -> tuple[torch.Tensor, int] | None:
+        """(virtual_weight, num_buckets) for a feature whose effective weight is
+        ``weight + virtual_weight.repeat(num_buckets, 1)``, else None. merged_weight() and the
+        fused merge kernel (fused_weight_quant) both build the weight from it."""
+        return None
+
     def merged_weight(self) -> torch.Tensor:
         """Return effective weight matrix (with virtual weights merged if applicable)."""
+        layout = self.virtual_layout()
+        if layout is None:
+            return self.weight
+        virtual_weight, num_buckets = layout
+        return self.weight + virtual_weight.repeat(num_buckets, 1)
 
     @abstractmethod
     def coalesce(self) -> None: ...

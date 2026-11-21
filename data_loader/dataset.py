@@ -1,5 +1,6 @@
 import queue
 import threading
+import warnings
 from dataclasses import dataclass
 
 import torch
@@ -342,12 +343,18 @@ class FixedNumBatchesDataset(Dataset):
         pin_memory=False,
         queue_size_limit=None,
         device=None,
+        prefetch_hook=None,
     ):
+        """``prefetch_hook(batch)``, when given, runs on the prefetch thread for every batch copied
+        to a CUDA ``device``, on the prefetch stream, before the batch is handed out: index-only work
+        the model can do ahead of the step (see NNUE.prefetch_hook). It must not modify the batch;
+        if it raises, a warning reports the error and the hook is no longer called."""
         super().__init__()
         self.dataset = dataset
         self.iter = None  # Deferred to _start_prefetching
         self.num_batches = num_batches
         self.device = torch.device(device) if device is not None else None
+        self.prefetch_hook = prefetch_hook
         self.prefetch_to_device = self.device is not None and self.device.type == "cuda"
         # Async H2D copies require pinned host memory.
         self.pin_memory = pin_memory or self.prefetch_to_device
@@ -374,12 +381,20 @@ class FixedNumBatchesDataset(Dataset):
         iterator,
         prefetch_queue,
         prefetch_device,
+        prefetch_hook,
     ):
         try:
             prefetch_stream = None
             if prefetch_device is not None:
                 torch.cuda.set_device(prefetch_device)
-                prefetch_stream = torch.cuda.Stream(device=prefetch_device)
+                # A hook puts GPU work of its own on the prefetch stream. At the higher priority
+                # (-1; the training stream has 0) that work is scheduled ahead of the step's
+                # kernels, so the batch and what the hook prepared for it are ready when the
+                # step asks for them.
+                prefetch_stream = torch.cuda.Stream(
+                    device=prefetch_device,
+                    priority=-1 if prefetch_hook is not None else 0,
+                )
 
             while not stop_event.is_set():
                 try:
@@ -392,6 +407,17 @@ class FixedNumBatchesDataset(Dataset):
                             item = _recursive_to_device(
                                 item, prefetch_device, non_blocking=True
                             )
+                            if prefetch_hook is not None:
+                                try:
+                                    prefetch_hook(item)
+                                except Exception as e:  # noqa: BLE001 - the hook is optional work
+                                    warnings.warn(
+                                        "data loader: the prefetch hook failed and is disabled "
+                                        f"for the rest of the run: {e!r}",
+                                        RuntimeWarning,
+                                        stacklevel=1,
+                                    )
+                                    prefetch_hook = None
                             ready_event = torch.cuda.Event()
                             ready_event.record(prefetch_stream)
                         item = _CudaPrefetchedItem(item=item, ready_event=ready_event)
@@ -428,6 +454,7 @@ class FixedNumBatchesDataset(Dataset):
                         self.iter,
                         self._prefetch_queue,
                         self._prefetch_device,
+                        self.prefetch_hook,
                     ),
                     daemon=True,
                 )
