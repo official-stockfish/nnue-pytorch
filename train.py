@@ -9,7 +9,6 @@ import torch
 import torch.distributed as dist
 import tyro
 from torch import set_num_threads as t_set_num_threads
-from torch.utils.data import DataLoader
 
 import data_loader
 import model as M
@@ -58,74 +57,47 @@ def make_data_loaders(
     world_size=1,
     prefetch_hook=None,
 ):
-    # Epoch and validation sizes are global; shard across DDP ranks.
-    features_name = feature_name
+    """Training and validation DevicePrefetchers. Epoch and validation sizes are global, sharded
+    across DDP ranks. Validation without its own files shares the training provider."""
     effective_batch_size = batch_size * world_size
-    train_num_batches = max(1, epoch_size // effective_batch_size)
-    train_infinite = data_loader.SparseBatchDataset(
-        features_name,
-        train_filenames,
-        batch_size,
-        num_workers=num_workers,
-        config=config,
-        ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
-        io_config=io_config,
-        ls_keys=ls_keys,
+    # Copies to a CUDA device need pinned host memory to be asynchronous.
+    use_pinned_memory = pin_memory or (
+        prefetch_device is not None and torch.device(prefetch_device).type == "cuda"
     )
-    # num_workers has to be 0 for sparse, and 1 for dense
-    # it currently cannot work in parallel mode but it shouldn't need to
-    train = DataLoader(
-        data_loader.FixedNumBatchesDataset(
-            train_infinite,
-            train_num_batches,
-            pin_memory=pin_memory,
-            queue_size_limit=queue_size_limit,
-            device=prefetch_device,
-            # Validation runs no backward, so only training batches need the model's prefetch work.
-            prefetch_hook=prefetch_hook,
-        ),
-        batch_size=None,
-        batch_sampler=None,
-        num_workers=0,
-    )
-    if val_size <= 0:
-        val = None
-    elif val_filenames is None:
-        val = DataLoader(
-            data_loader.FixedNumBatchesDataset(
-                train_infinite,
-                max(1, val_size // effective_batch_size),
-                pin_memory=pin_memory,
-                queue_size_limit=queue_size_limit,
-                device=prefetch_device,
-            ),
-            batch_size=None,
-            batch_sampler=None,
-            num_workers=0,
-        )
-    else:
-        val_infinite = data_loader.SparseBatchDataset(
-            features_name,
-            val_filenames,
+
+    def provider(filenames):
+        return data_loader.SparseBatchProvider(
+            feature_name,
+            filenames,
             batch_size,
             num_workers=num_workers,
             config=config,
             ddp_config=DataloaderDDPConfig(rank=rank, world_size=world_size),
             io_config=io_config,
+            use_pinned_memory=use_pinned_memory,
+            device=prefetch_device or "cpu",
             ls_keys=ls_keys,
         )
-        val = DataLoader(
-            data_loader.FixedNumBatchesDataset(
-                val_infinite,
-                max(1, val_size // effective_batch_size),
-                pin_memory=pin_memory,
-                queue_size_limit=queue_size_limit,
-                device=prefetch_device,
-            ),
-            batch_size=None,
-            batch_sampler=None,
-            num_workers=0,
+
+    def prefetcher(source, num_positions, hook=None):
+        return data_loader.DevicePrefetcher(
+            source,
+            max(1, num_positions // effective_batch_size),
+            queue_size_limit=queue_size_limit,
+            device=prefetch_device,
+            prefetch_hook=hook,
         )
+
+    train_batches = provider(train_filenames)
+    # Validation runs no backward, so only training batches need the model's prefetch work.
+    train = prefetcher(train_batches, epoch_size, prefetch_hook)
+    if val_size <= 0:
+        val = None
+    else:
+        val_batches = (
+            train_batches if val_filenames is None else provider(val_filenames)
+        )
+        val = prefetcher(val_batches, val_size)
     return train, val
 
 
@@ -423,14 +395,14 @@ def main():
     )
     trainer_callbacks = [
         UniquePositionLogger(
-            train_dataset=train.dataset,
+            train_dataset=train.source,
             rank=rank,
             world_size=world_size,
         ),
         WeightClipper(input_clipping_interval=args.input_clipping_interval),
         checkpoint_manager,
         SimpleLineLogger(refresh_rate=refresh_rate),
-        DataLoaderBottleneckMonitor(train.dataset, num_workers=actual_workers),
+        DataLoaderBottleneckMonitor(train, num_workers=actual_workers),
         TimeLimit(args.max_time),
         nan_callback,
     ]

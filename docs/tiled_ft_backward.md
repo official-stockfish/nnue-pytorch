@@ -30,7 +30,7 @@ trainer it/s over the kernels it replaces there.
      for the densest sub-tile of the batch (24, 32 or 40 keys per thread).
    - The result is a `TiledPrep`: the tile order, each tile's first entry, and the sorted entries.
 2. **Hand-off.** The preparation needs no gradients, so the loader builds it ahead of the step.
-   `FixedNumBatchesDataset` takes a `prefetch_hook(batch)` that runs on the prefetch thread and
+   `DevicePrefetcher` takes a `prefetch_hook(batch)` that runs on the prefetch thread and
    stream for every device batch; `NNUE.prefetch_hook()` supplies one that calls `register_prep`.
    The preparation is parked under the address of the batch's white index tensor, and
    `FusedDoubleFtFunction.forward` claims it with `claim_prep`. An entry lives until it is claimed

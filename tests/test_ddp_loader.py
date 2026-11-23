@@ -1,33 +1,31 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from data_loader.dataset import (
-    FixedNumBatchesDataset,
-)
+from data_loader.dataset import DevicePrefetcher
 from data_loader.stream import _get_ddp_rank_and_world_size
 
 
-class TestFixedNumBatchesDeferral(unittest.TestCase):
-    """Verify that FixedNumBatchesDataset defers iter() until first __getitem__."""
+class TestDevicePrefetcherDeferral(unittest.TestCase):
+    """Verify that DevicePrefetcher defers iter() until the first batch."""
 
     def test_init_does_not_call_iter(self):
         mock_dataset = MagicMock()
-        ds = FixedNumBatchesDataset(mock_dataset, num_batches=10)
+        ds = DevicePrefetcher(mock_dataset, num_batches=10)
 
         mock_dataset.__iter__.assert_not_called()
         self.assertIsNone(ds.iter)
 
-    def test_getitem_triggers_iter(self):
+    def test_first_batch_triggers_iter(self):
         mock_dataset = MagicMock()
         mock_iter = MagicMock()
         mock_iter.__next__ = MagicMock(return_value="batch_data")
         mock_dataset.__iter__ = MagicMock(return_value=mock_iter)
 
-        ds = FixedNumBatchesDataset(mock_dataset, num_batches=10)
+        ds = DevicePrefetcher(mock_dataset, num_batches=10)
         mock_dataset.__iter__.assert_not_called()
 
-        # First __getitem__ should trigger iter() and prefetching
-        item = ds[0]
+        # The first batch should trigger iter() and prefetching
+        item = ds.next_batch()
         mock_dataset.__iter__.assert_called_once()
         self.assertEqual(item, "batch_data")
 
@@ -36,10 +34,8 @@ class TestFixedNumBatchesDeferral(unittest.TestCase):
         mock_dataset = MagicMock()
         mock_dataset.__iter__ = MagicMock(return_value=items)
 
-        ds = FixedNumBatchesDataset(mock_dataset, num_batches=3)
-        _ = ds[0]
-        _ = ds[1]
-        _ = ds[2]
+        ds = DevicePrefetcher(mock_dataset, num_batches=3)
+        self.assertEqual(list(ds), ["batch1", "batch2", "batch3"])
 
         mock_dataset.__iter__.assert_called_once()
 

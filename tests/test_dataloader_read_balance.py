@@ -323,9 +323,9 @@ class TestReadBalance(unittest.TestCase):
     "libtraining_data_loader.so not built",
 )
 class TestSharedCyclicStream(unittest.TestCase):
-    """Cyclic SparseBatchDataset must serve all consumers from one C++ stream.
+    """Consumers of the same data share one SparseBatchProvider, i.e. one C++ stream.
 
-    Every provider owns a complete decoder pipeline (per-worker shuffle
+    Every stream owns a complete decoder pipeline (per-worker shuffle
     buffers, chunk queue, batch deque), so a second stream for e.g. a
     validation loader over the training data would duplicate the pipeline
     at full memory cost.
@@ -335,10 +335,10 @@ class TestSharedCyclicStream(unittest.TestCase):
     def setUpClass(cls):
         cls.files = _fixtures()
 
-    def _make_dataset(self, cyclic=True):
-        from data_loader.dataset import SparseBatchDataset
+    def _make_provider(self, cyclic=True):
+        from data_loader.dataset import SparseBatchProvider
 
-        return SparseBatchDataset(
+        return SparseBatchProvider(
             "K32H3",
             self.files,
             BATCH_SIZE,
@@ -349,43 +349,24 @@ class TestSharedCyclicStream(unittest.TestCase):
             io_config=DataloaderIOConfig(balance_window_mb=32),
         )
 
-    def test_cyclic_dataset_reuses_provider(self):
-        ds = self._make_dataset(cyclic=True)
-        self.assertIs(iter(ds), iter(ds))
-
-    def test_noncyclic_dataset_creates_fresh_provider(self):
-        ds = self._make_dataset(cyclic=False)
-        self.assertIsNot(iter(ds), iter(ds))
+    def test_stream_starts_with_the_first_batch(self):
+        provider = self._make_provider()
+        self.assertFalse(provider.started)
+        self.assertEqual(provider.get_unique_stats(), (0, 0, 0))
+        next(provider)
+        self.assertTrue(provider.started)
 
     def test_concurrent_consumers_share_stream(self):
-        from torch.utils.data import DataLoader
+        from data_loader.dataset import DevicePrefetcher
 
-        from data_loader.dataset import FixedNumBatchesDataset
-
-        ds = self._make_dataset(cyclic=True)
-        loaders = [
-            DataLoader(
-                FixedNumBatchesDataset(ds, num_batches=4, queue_size_limit=2),
-                batch_size=None,
-                num_workers=0,
-            )
+        provider = self._make_provider(cyclic=True)
+        consumers = [
+            DevicePrefetcher(provider, num_batches=4, queue_size_limit=2)
             for _ in range(2)
         ]
-        got = []
-        for loader in loaders:
-            got.append(sum(1 for _ in loader))
-        self.assertEqual(got, [4, 4])
-
-    def test_shared_stream_is_single_pipeline(self):
-        """The two consumers of one dataset must draw from the same stream."""
-        from data_loader.dataset import FixedNumBatchesDataset
-
-        ds = self._make_dataset(cyclic=True)
-        c1 = FixedNumBatchesDataset(ds, num_batches=1, queue_size_limit=2)
-        c2 = FixedNumBatchesDataset(ds, num_batches=1, queue_size_limit=2)
-        c1.__getitem__(0)  # starts prefetching, creates the shared provider
-        c2.__getitem__(0)
-        self.assertIs(c1.iter, c2.iter)
+        self.assertEqual([sum(1 for _ in c) for c in consumers], [4, 4])
+        self.assertIs(consumers[0].iter, consumers[1].iter)
+        self.assertIs(consumers[0].iter, provider)
 
 
 @unittest.skipUnless(
@@ -414,11 +395,9 @@ class TestSharedShuffleWindow(unittest.TestCase):
 
     def test_tiny_windows_concurrent_consumers(self):
         """Concurrent consumers with minimum-size windows keep flowing."""
-        from torch.utils.data import DataLoader
+        from data_loader.dataset import DevicePrefetcher, SparseBatchProvider
 
-        from data_loader.dataset import FixedNumBatchesDataset, SparseBatchDataset
-
-        ds = SparseBatchDataset(
+        ds = SparseBatchProvider(
             "K32H3",
             self.files,
             4096,
@@ -431,12 +410,7 @@ class TestSharedShuffleWindow(unittest.TestCase):
             ),
         )
         loaders = [
-            DataLoader(
-                FixedNumBatchesDataset(ds, num_batches=16, queue_size_limit=2),
-                batch_size=None,
-                num_workers=0,
-            )
-            for _ in range(2)
+            DevicePrefetcher(ds, num_batches=16, queue_size_limit=2) for _ in range(2)
         ]
         # 16 batches x 4096 entries each span many 1024-entry windows;
         # both consumers must receive all their batches.
