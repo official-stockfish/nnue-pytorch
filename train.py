@@ -53,6 +53,7 @@ def make_data_loaders(
     pin_memory,
     queue_size_limit,
     prefetch_device=None,
+    num_prefetch_threads=1,
     rank=0,
     world_size=1,
     prefetch_hook=None,
@@ -86,6 +87,7 @@ def make_data_loaders(
             queue_size_limit=queue_size_limit,
             device=prefetch_device,
             prefetch_hook=hook,
+            num_threads=num_prefetch_threads,
         )
 
     train_batches = provider(train_filenames)
@@ -374,6 +376,7 @@ def main():
         args.validation_size,
         pin_memory=args.pin_memory and accelerator == "cuda",
         queue_size_limit=args.data_loader_queue_size,
+        num_prefetch_threads=args.data_loader_threads,
         prefetch_device=device if accelerator == "cuda" else None,
         rank=rank,
         world_size=world_size,
