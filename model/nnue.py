@@ -373,7 +373,7 @@ class NNUE(nn.Module):
         return {"val_loss": loss}
 
     def prefetch_hook(self):
-        """``hook(batch)`` for the loader's prefetch thread (FixedNumBatchesDataset), or None: the
+        """``hook(batch)`` for the loader's prefetch thread (DevicePrefetcher), or None: the
         index-only work the model can do on a training batch once it is on the GPU, ahead of the
         step. It unpacks the batch as compute_loss does."""
         prepare = self.model.input.prefetch_preparer()

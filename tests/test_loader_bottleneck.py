@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import torch
 
-from data_loader.dataset import FixedNumBatchesDataset
+from data_loader.dataset import DevicePrefetcher
 from trainer.callbacks import DataLoaderBottleneckMonitor
 
 
@@ -42,16 +42,14 @@ def _fake_trainer():
 
 
 def _run_epoch(produce_delay, step_delay, n=40, num_workers=1, native=True):
-    ds = FixedNumBatchesDataset(
-        _TimedBatches(produce_delay, native), n, queue_size_limit=2
-    )
-    ds[0]  # startup batch; excluded from the epoch numbers
+    ds = DevicePrefetcher(_TimedBatches(produce_delay, native), n, queue_size_limit=2)
+    ds.next_batch()  # startup batch; excluded from the epoch numbers
     monitor = DataLoaderBottleneckMonitor(ds, num_workers=num_workers)
     monitor.cpus = 8
     trainer = _fake_trainer()
     monitor.on_train_epoch_start(trainer)
-    for i in range(n):
-        ds[i]
+    for _ in range(n):
+        ds.next_batch()
         time.sleep(step_delay)
     monitor.on_train_epoch_end(trainer)
     return monitor.last_report, trainer

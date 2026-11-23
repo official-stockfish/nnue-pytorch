@@ -1,4 +1,4 @@
-"""The loader's prefetch hook: FixedNumBatchesDataset runs it on device batches, NNUE builds it from
+"""The loader's prefetch hook: DevicePrefetcher runs it on device batches, NNUE builds it from
 the feature transformer, and the feature set (not a constant) gives the tiled backward's list order."""
 
 from types import SimpleNamespace
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from data_loader.dataset import FixedNumBatchesDataset
+from data_loader.dataset import DevicePrefetcher
 from model import NNUE
 from model.modules import ComposedFeatureTransformer, get_feature_cls
 from model.modules.feature_transformer import tiled_ft_prep
@@ -66,11 +66,9 @@ def test_hook_runs_on_device_batches_and_survives_errors():
         if len(calls) == 2:
             raise RuntimeError("boom")
 
-    ds = FixedNumBatchesDataset(
-        _Batches(4), num_batches=4, device="cuda", prefetch_hook=hook
-    )
+    ds = DevicePrefetcher(_Batches(4), num_batches=4, device="cuda", prefetch_hook=hook)
     with pytest.warns(RuntimeWarning, match="prefetch hook failed"):
-        out = [ds[i] for i in range(4)]
+        out = list(ds)
     # every batch arrives; the hook saw device tensors and was dropped after its first error
     assert [b[0][0].item() for b in out] == [0.0, 1.0, 2.0, 3.0]
     assert calls == [True, True]

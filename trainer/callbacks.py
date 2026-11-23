@@ -766,7 +766,7 @@ class DataLoaderBottleneckMonitor(Callback):
     """Reports, once per training epoch, whether the data loader limits
     training speed and whether more loader workers would help.
 
-    Reads the timing counters of the training FixedNumBatchesDataset:
+    Reads the timing counters of the training DevicePrefetcher:
 
     - wait: fraction of the epoch the training step was blocked waiting
       for a batch. GPU work already queued can still run during the wait,
