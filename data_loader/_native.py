@@ -5,7 +5,7 @@ import os
 import numpy as np
 import torch
 
-from ._transport import CompactTransportPolicy, _pin_and_move, move_indices
+from ._transport import copy_to_device, move_indices
 from .config import (
     CDataloaderDDPConfig,
     CDataloaderFileStats,
@@ -25,17 +25,15 @@ class SparseBatch(ctypes.Structure):
         ("num_active_white_features", ctypes.c_int),
         ("num_active_black_features", ctypes.c_int),
         ("max_active_features", ctypes.c_int),
-        ("white", ctypes.POINTER(ctypes.c_int)),
-        ("black", ctypes.POINTER(ctypes.c_int)),
-        ("layer_stack_index", ctypes.POINTER(ctypes.c_int)),
+        # Feature IDs, packed: white offsets [size + 1], black offsets [size + 1], white IDs,
+        # black IDs, layer-stack indices [size].
+        ("packed", ctypes.POINTER(ctypes.c_int)),
     ]
 
     def get_tensors(
         self,
         device: str | torch.device,
         use_pinned_memory: bool = False,
-        *,
-        transport_policy: CompactTransportPolicy | None = None,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -48,20 +46,13 @@ class SparseBatch(ctypes.Structure):
         size = self.size
         max_active = self.max_active_features
 
-        # is_white, outcome, score(3 * size floats)
-        total_floats = size * 3
-
+        # is_white, outcome, score (3 * size floats)
         float_block_cpu = torch.from_numpy(
-            np.ctypeslib.as_array(self.is_white, shape=(total_floats,))
+            np.ctypeslib.as_array(self.is_white, shape=(size * 3,))
         )
-        float_block_gpu = _pin_and_move(float_block_cpu, device, use_pinned_memory)
+        float_block_gpu = copy_to_device(float_block_cpu, device, use_pinned_memory)
         int_block_gpu = move_indices(
-            self,
-            device,
-            use_pinned_memory,
-            native_owned=isinstance(self._b_base_, NativeSparseBatchPointer),
-            pack=c_lib.pack_sparse_batch,
-            policy=transport_policy or CompactTransportPolicy(),
+            self, device, use_pinned_memory, unpack=c_lib.unpack_sparse_batch
         )
 
         us = float_block_gpu[0:size].view(size, 1)
@@ -99,12 +90,6 @@ class SparseBatch(ctypes.Structure):
             score,
             layer_stack_index,
         )
-
-
-class NativeSparseBatchPointer(ctypes._Pointer):
-    """Distinguish native allocations with private fields from Python-created batches."""
-
-    _type_ = SparseBatch
 
 
 class Fen(ctypes.Structure):
@@ -160,12 +145,12 @@ class CDataLoaderAPI:
         raise FileNotFoundError("Cannot find data_loader shared library.")
 
     def _define_prototypes(self):
-        self.pack_sparse_batch = self.dll.pack_sparse_batch
-        self.pack_sparse_batch.restype = ctypes.c_bool
-        self.pack_sparse_batch.argtypes = [
+        # EXPORT void CDECL unpack_sparse_batch(const SparseBatch* batch, int* dense)
+        self.unpack_sparse_batch = self.dll.unpack_sparse_batch
+        self.unpack_sparse_batch.restype = None
+        self.unpack_sparse_batch.argtypes = [
             ctypes.POINTER(SparseBatch),
             ctypes.c_void_p,
-            ctypes.c_size_t,
         ]
         # EXPORT FenBatchStream* CDECL create_fen_batch_stream(
         #     int concurrency,
@@ -209,8 +194,7 @@ class CDataLoaderAPI:
         #     DataloaderSkipConfig config,
         #     DataloaderDDPConfig ddp_config,
         #     DataloaderHllConfig hll_config,
-        #     DataloaderIOConfig io_config,
-        #     bool prepack_indices
+        #     DataloaderIOConfig io_config
         # )
         self.dll.create_sparse_batch_stream.restype = ctypes.c_void_p
         self.dll.create_sparse_batch_stream.argtypes = [
@@ -225,14 +209,13 @@ class CDataLoaderAPI:
             CDataloaderDDPConfig,
             CDataloaderHllConfig,
             CDataloaderIOConfig,
-            ctypes.c_bool,  # prepack_indices
         ]
 
         # EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream)
         self.dll.destroy_sparse_batch_stream.argtypes = [ctypes.c_void_p]
 
         # EXPORT SparseBatch* CDECL fetch_next_sparse_batch(Stream<SparseBatch>* stream)
-        self.dll.fetch_next_sparse_batch.restype = NativeSparseBatchPointer
+        self.dll.fetch_next_sparse_batch.restype = ctypes.POINTER(SparseBatch)
         self.dll.fetch_next_sparse_batch.argtypes = [ctypes.c_void_p]
 
         # EXPORT SparseBatch* get_sparse_batch_from_fens(
@@ -242,10 +225,9 @@ class CDataLoaderAPI:
         #    const char* const* fens,
         #    int* scores,
         #    int* plies,
-        #    int* results,
-        #    bool prepack
+        #    int* results
         # )
-        self.dll.get_sparse_batch_from_fens.restype = NativeSparseBatchPointer
+        self.dll.get_sparse_batch_from_fens.restype = ctypes.POINTER(SparseBatch)
         self.dll.get_sparse_batch_from_fens.argtypes = [
             ctypes.c_char_p,
             ctypes.c_char_p,
@@ -254,7 +236,6 @@ class CDataLoaderAPI:
             ctypes.POINTER(ctypes.c_int),
             ctypes.POINTER(ctypes.c_int),
             ctypes.POINTER(ctypes.c_int),
-            ctypes.c_bool,
         ]
 
         # EXPORT bool CDECL count_layer_stacks(
@@ -315,7 +296,7 @@ class CDataLoaderAPI:
         ]
 
 
-type SparseBatchPtr = NativeSparseBatchPointer
+type SparseBatchPtr = ctypes._Pointer[SparseBatch]
 type FenBatchPtr = ctypes._Pointer[FenBatch]
 
 try:

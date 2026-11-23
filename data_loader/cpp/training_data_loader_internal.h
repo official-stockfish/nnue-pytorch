@@ -49,25 +49,16 @@ std::optional<LayerStackKeys> get_layer_stack_keys(std::string_view names);
 std::function<bool(const struct binpack::TrainingDataEntry&)>
 make_skip_predicate(DataloaderSkipConfig config);
 
-// Keep large feature buffers resident between batches. Returning ~300 MiB to
+// Keep large batch buffers resident between batches. Returning ~300 MiB to
 // the system allocator on every batch can stall the Python prefetch thread.
 // Each stream owns a bounded cache; outstanding batches share its lifetime.
 class SparseBatchBufferPool final {
    public:
     using Buffers = std::pair<std::unique_ptr<float[]>, std::unique_ptr<int[]>>;
 
-    // Packed index buffers vary in size from batch to batch: a buffer is reused
-    // by any batch that fits in its capacity.
-    struct Packed {
-        std::unique_ptr<int[]> data;
-        std::size_t            capacity = 0;
-    };
-
     SparseBatchBufferPool(std::size_t floats, std::size_t ints, std::size_t capacity);
     Buffers acquire(std::size_t floats, std::size_t ints);
     void    release(Buffers buffers, std::size_t floats, std::size_t ints);
-    Packed  acquire_packed(std::size_t ints);
-    void    release_packed(Packed packed);
 
    private:
     const std::size_t    m_floats;
@@ -75,7 +66,6 @@ class SparseBatchBufferPool final {
     const std::size_t    m_capacity;
     std::mutex           m_mutex;
     std::vector<Buffers> m_free;
-    std::vector<Packed>  m_free_packed;
 };
 
 struct SparseBatch final {
@@ -84,19 +74,11 @@ struct SparseBatch final {
     SparseBatch(const IFeatureExtractor&                              feature_set,
                 const LayerStackKeys&                                 ls_keys,
                 const std::vector<struct binpack::TrainingDataEntry>& entries,
-                std::shared_ptr<SparseBatchBufferPool>                buffer_pool = nullptr,
-                bool                                                  prepack     = false);
+                std::shared_ptr<SparseBatchBufferPool>                buffer_pool = nullptr);
     ~SparseBatch();
 
-    // Packed int32 layout: white offsets [size + 1], black offsets [size + 1],
-    // white IDs [num_active_white_features], black IDs [num_active_black_features],
-    // layer-stack indices [size]. Offsets begin at zero and end
-    // at the total ID count.
-    // capacity is in elements; insufficient capacity leaves output untouched.
-    // A prepacked batch has white == black == nullptr; the worker built the
-    // layout and this only copies it.
-    bool pack_indices(int* output, std::size_t capacity) const;
-    std::size_t packed_size() const;
+    // See unpack_sparse_batch.
+    void unpack_into_padding(int* dense) const;
 
     int num_inputs;
     int size;
@@ -107,9 +89,9 @@ struct SparseBatch final {
     int    num_active_white_features;
     int    num_active_black_features;
     int    max_active_features;
-    int*   white;
-    int*   black;
-    int*   layer_stack_index;
+    // White offsets [size + 1], black offsets [size + 1], white IDs, black IDs,
+    // layer-stack indices [size].
+    int* packed;
 
 #ifdef NNUE_LOADER_STATISTICS
     std::vector<struct binpack::TrainingDataEntry> entries_copy;
@@ -119,15 +101,7 @@ struct SparseBatch final {
     float*                                 m_float_block = nullptr;
     int*                                   m_int_block   = nullptr;
     std::shared_ptr<SparseBatchBufferPool> m_buffer_pool;
-    SparseBatchBufferPool::Packed          m_packed;
-    std::vector<int>                       m_feature_counts;
     void fill_targets(int i, const struct binpack::TrainingDataEntry& e);
-    void fill_entry(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
-    void fill_packed(const IFeatureExtractor&                              fs,
-                     const LayerStackKeys&                                 ls_keys,
-                     const std::vector<struct binpack::TrainingDataEntry>& entries);
-    void
-    fill_features(const IFeatureExtractor& fs, int i, const struct binpack::TrainingDataEntry& e);
 };
 
 struct AnyStream {
@@ -207,8 +181,7 @@ struct FeaturedBatchStream final: Stream<SparseBatch> {
                         int                                                           rank = 0,
                         int                          world_size                            = 1,
                         nnue::UniquePositionCounter* counter         = nullptr,
-                        DataloaderIOConfig           io_config       = {},
-                        bool                         prepack_indices = false);
+                        DataloaderIOConfig           io_config       = {});
     ~FeaturedBatchStream() final;
 
     SparseBatch* next() override;
@@ -218,7 +191,6 @@ struct FeaturedBatchStream final: Stream<SparseBatch> {
     LayerStackKeys                     m_ls_keys;
     int                                m_batch_size;
     int                                m_concurrency;
-    bool                               m_prepack_indices;
     std::deque<SparseBatch*>           m_batches;
     std::mutex                         m_batch_mutex;
     std::condition_variable            m_batches_not_full;
