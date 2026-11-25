@@ -40,6 +40,12 @@ class TrainingConfig:
     """Size of the device-side prefetching queue. Each slot costs ~300 MiB of
     GPU memory at batch size 131072, scaling with batch size."""
 
+    data_loader_threads: int = 2
+    """Number of threads that move batches from the C++ loader to the device,
+    each on its own CUDA stream. Raise this when the epoch report says
+    TRANSPORT BOUND. Each extra thread keeps one more batch on the GPU,
+    ~1.3 GiB at batch size 131072."""
+
     max_epochs: int = 800
     """Maximum number of epochs to train for."""
 

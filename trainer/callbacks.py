@@ -771,16 +771,20 @@ class DataLoaderBottleneckMonitor(Callback):
     - wait: fraction of the epoch the training step was blocked waiting
       for a batch. GPU work already queued can still run during the wait,
       so this bounds, rather than equals, the GPU idle time.
-    - idle: fraction of the epoch the prefetch thread had a batch ready but
+    - idle: fraction of the epoch the prefetch threads had a batch ready but
       the queue was full, i.e. spare loader capacity.
-    - C++ fetch / transport: fraction of the epoch the prefetch thread spent
+    - C++ fetch / transport: fraction of the epoch the prefetch threads spent
       waiting for the C++ decoder workers vs. moving the decoded batch to the
-      device itself. Only the first gets faster with more workers.
+      device themselves. The first gets faster with more --num-workers, the
+      second with more --data-loader-threads.
+
+    idle, C++ fetch and transport are averaged over the prefetch threads.
 
     Verdicts (``wait`` above ``wait_threshold`` counts as starved):
 
-    - starved, little spare capacity, mostly transport: the prefetch thread's
-      own transport work is the bottleneck; more workers will not help.
+    - starved, little spare capacity, mostly transport: the prefetch threads'
+      own transport work is the bottleneck; more workers will not help, more
+      ``--data-loader-threads`` will.
     - starved, little spare capacity, mostly C++ fetch: decoder throughput is
       the bottleneck, raise ``--num-workers`` (if CPUs are left to use).
     - starved, but plenty of spare capacity: production is bursty and the
@@ -807,6 +811,7 @@ class DataLoaderBottleneckMonitor(Callback):
         self.wait_threshold = wait_threshold
         self.idle_threshold = idle_threshold
         self.cpus = _available_cpus_per_rank()
+        self.prefetch_threads = 1
         self._start_stats = None
         self._start_time = None
         self.last_report: dict | None = None
@@ -836,8 +841,9 @@ class DataLoaderBottleneckMonitor(Callback):
                 )
             if transport_bound:
                 return (
-                    "TRANSPORT BOUND: the single prefetch thread's batch transport to the device "
-                    "is the limit, not the C++ decoders; more --num-workers will not help"
+                    "TRANSPORT BOUND: the prefetch threads' batch transport to the device "
+                    "is the limit, not the C++ decoders; more --num-workers will not help, "
+                    f"raise --data-loader-threads (now {self.prefetch_threads})"
                 )
             if self.num_workers < self.cpus:
                 return (
@@ -850,7 +856,10 @@ class DataLoaderBottleneckMonitor(Callback):
             )
         if idle < self.idle_threshold:
             if transport_bound:
-                return "NEAR CAPACITY: batch transport on the prefetch thread is only just keeping up"
+                return (
+                    "NEAR CAPACITY: batch transport on the prefetch threads is only just keeping up; "
+                    f"one more --data-loader-threads (now {self.prefetch_threads}) would add headroom"
+                )
             return (
                 "NEAR CAPACITY: the loader is only just keeping up; "
                 "a few more --num-workers would add headroom"
@@ -864,17 +873,21 @@ class DataLoaderBottleneckMonitor(Callback):
             return
         wall = time.perf_counter() - self._start_time
         start = self._start_stats
-        delta = {k: end[k] - start[k] for k in end}
+        threads = max(1, int(end.get("producer_threads", 1)))
+        self.prefetch_threads = threads
+        delta = {k: end[k] - start[k] for k in end if k != "producer_threads"}
         batches = delta["consumer_batches"]
         if wall <= 0 or batches <= 0:
             return
 
-        native = min(1.0, delta["native_fetch_s"] / wall)
+        thread_wall = wall * threads
+        native = min(1.0, delta["native_fetch_s"] / thread_wall)
         transport = min(
-            1.0, max(0.0, delta["producer_fetch_s"] - delta["native_fetch_s"]) / wall
+            1.0,
+            max(0.0, delta["producer_fetch_s"] - delta["native_fetch_s"]) / thread_wall,
         )
         wait = min(1.0, delta["consumer_wait_s"] / wall)
-        idle = min(1.0, delta["producer_put_wait_s"] / wall)
+        idle = min(1.0, delta["producer_put_wait_s"] / thread_wall)
         empty = delta["consumer_empty_gets"] / batches
 
         if dist.is_available() and dist.is_initialized() and trainer.world_size > 1:
@@ -924,7 +937,8 @@ class DataLoaderBottleneckMonitor(Callback):
                 f"Epoch {trainer.current_epoch:>2} (Loader): "
                 f"step waited for data {wait:.1%} of the epoch, "
                 f"loader idle (queue full) {idle:.1%}, "
-                f"in C++ fetch {native:.1%}, in transport {transport:.1%}, "
+                f"in C++ fetch {native:.1%}, in transport {transport:.1%} "
+                f"(avg over {threads} prefetch threads), "
                 f"queue empty at {empty:.0%} of fetches, "
                 f"avg fill {fill:.1f}/{capacity}{startup} -> {verdict}",
                 flush=True,
