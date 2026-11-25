@@ -244,6 +244,17 @@ class NNUE(nn.Module):
                 }
             )
 
+        # Merge the param groups with the identical (lr, weight_decay).
+        from collections import defaultdict
+
+        _merged = defaultdict(list)
+        for g in train_params:
+            _merged[(g["lr"], g["weight_decay"])].extend(g["params"])
+        train_params = [
+            {"params": params, "lr": lr, "weight_decay": wd}
+            for (lr, wd), params in _merged.items()
+        ]
+
         train_params = [group for group in train_params if len(group["params"]) > 0]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
