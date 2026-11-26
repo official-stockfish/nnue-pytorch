@@ -49,9 +49,9 @@ class DataloaderSkipConfig:
     """Ply soft filter control point y4."""
     tree_sample_accept: float = 1.0
     """Acceptance probability for search-tree samples (ply 9999), which skip the other filters."""
-    decided_score: int = 0
+    decided_score: int = 1000
     """Positions whose |score| is at least this are kept with probability `decided_accept`. 0 = disabled."""
-    decided_accept: float = 1.0
+    decided_accept: float = 0.3
     """Acceptance probability for positions at or above `decided_score`."""
 
 
